@@ -1,0 +1,318 @@
+# ui/lineGraphSystem — the LineGraph chart (ui/ChartComponents, docs/perf-tools-design.md §6): its
+# series (lineAddSeries, lineAddPoint), what of them shows (lineColumns: per series, per pixel
+# column, the lowest and highest point and the first and last), the value range, what is under a
+# point (lineHit), and the system: a linked Timeline's view copied each frame, or the wheel and a
+# drag on its own view, and a click selecting a point. The drawing is
+# ui/renderSystem/RenderLineGraph.
+#
+# A series' points are in order of time, so the first point in view is a binary search away and
+# only the points in view are looked at; each pixel column of them is one vertical stroke from its
+# lowest to its highest, joined to the next column's.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+
+# One pixel column of one series: its lowest and highest value there, and its first and last (for
+# the lines to the columns beside it)
+type LineColumn {
+  series: Int
+  x: Float
+  low: Float
+  high: Float
+  first: Float
+  last: Float
+}
+
+type LineHit {
+  series: Int
+  point: Int
+}
+
+func createLineGraphState() ret LineGraphState {
+  ret LineGraphState { series: {} }
+}
+
+func lineAddSeries(state: mod LineGraphState, name: view String) ret Int {
+  state.series.add(value: LineSeries { name: name, times: {}, values: {} })
+  ret state.series.length - 1
+}
+
+# A point of series `series`; points come in order of time (an earlier one is refused: false)
+func lineAddPoint(
+  state: mod LineGraphState
+  series: view Int
+  time: view Int
+  value: view Float
+) ret Bool {
+  if series < 0 or series >= state.series.length {
+    ret false
+  }
+  let target: mod LineSeries = state.series.modAt(index: series)
+  if target.times.length > 0 and target.times.copyAtDefault(index: target.times.length - 1) > time {
+    ret false
+  }
+  target.times.add(value: time)
+  target.values.add(value: value)
+  ret true
+}
+
+func lineShow(state: mod LineGraphState, start: view Int, end: view Int) {
+  state.viewStart = start
+  state.viewEnd = Math.max(a: end, b: start + 1)
+}
+
+# The first point of `series` at `time` or later
+func lineFirstFrom(series: view LineSeries, time: view Int) ret Int {
+  var low: Int = 0
+  var high: Int = series.times.length
+  loop low < high {
+    let middle: Int = (low + high) / 2
+    if series.times.copyAtDefault(index: middle) < time {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  ret low
+}
+
+func lineX(state: view LineGraphState, box: view TimelineBox, time: view Int) ret Float {
+  let width: Float64 = (state.viewEnd - state.viewStart) as Float64
+  ret box.x + (((time - state.viewStart) as Float64) / width * (box.w as Float64)) as Float
+}
+
+# Every series' points in view as pixel columns (a point just before the view and one just after
+# are counted in, so the line runs to the edges)
+func lineColumns(state: view LineGraphState, box: view TimelineBox) ret List(LineColumn) {
+  var columns: List(LineColumn) = {}
+  loop var s: Int = 0, s < state.series.length, ++s {
+    if let series: view LineSeries = state.series.viewAt(index: s) {
+      var i: Int = Math.max(a: 0, b: lineFirstFrom(series: series, time: state.viewStart) - 1)
+      var open: Bool = false
+      var column: LineColumn = {
+        series: s
+        x: 0.0
+        low: 0.0
+        high: 0.0
+        first: 0.0
+        last: 0.0
+      }
+      loop i < series.times.length {
+        let time: Int = series.times.copyAtDefault(index: i)
+        let value: Float = series.values.copyAtDefault(index: i)
+        let x: Float = Math.floor(x: lineX(state: state, box: box, time: time))
+        if open and x is column.x {
+          column.low = Math.min(a: column.low, b: value)
+          column.high = Math.max(a: column.high, b: value)
+          column.last = value
+        } else {
+          if open {
+            columns.add(value: column)
+          }
+          column = {
+            series: s
+            x: x
+            low: value
+            high: value
+            first: value
+            last: value
+          }
+          open = true
+        }
+        if time > state.viewEnd {
+          break
+        }
+        i = i + 1
+      }
+      if open {
+        columns.add(value: column)
+      }
+    }
+  }
+  ret columns
+}
+
+type LineRange {
+  low: Float
+  high: Float
+}
+
+# The values the graph's height spans: the authored range, or the visible points' (a flat line
+# gets a range around it)
+func lineRange(graph: view LineGraph, columns: view List(LineColumn)) ret LineRange {
+  if graph.minValue is not 0.0 or graph.maxValue is not 0.0 {
+    ret LineRange { low: graph.minValue, high: graph.maxValue }
+  }
+  if columns.length is 0 {
+    ret LineRange { low: 0.0, high: 1.0 }
+  }
+  var low: Float = columns.copyAtDefault(index: 0).low
+  var high: Float = columns.copyAtDefault(index: 0).high
+  loop let column: LineColumn in columns {
+    low = Math.min(a: low, b: column.low)
+    high = Math.max(a: high, b: column.high)
+  }
+  if high - low < 0.000001 {
+    ret LineRange { low: low - 1.0, high: high + 1.0 }
+  }
+  ret LineRange { low: low, high: high }
+}
+
+func lineY(range: view LineRange, box: view TimelineBox, value: view Float) ret Float {
+  ret box.y + box.h - box.h * (value - range.low) / (range.high - range.low)
+}
+
+# The point nearest (x, y): each series' point nearest x in time, and of those the one whose value
+# is drawn nearest y; none outside the box or with no points
+func lineHit(
+  graph: view LineGraph
+  state: view LineGraphState
+  box: view TimelineBox
+  x: view Float
+  y: view Float
+) ret LineHit {
+  if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
+    ret LineHit { series: -1, point: -1 }
+  }
+  let range: LineRange = lineRange(graph: graph, columns: lineColumns(state: state, box: box))
+  let time: Int = state.viewStart + ((((x - box.x) / box.w) as Float64) * ((state.viewEnd - state.viewStart) as Float64)) as Int
+  var best: LineHit = { series: -1, point: -1 }
+  var bestDistance: Float = 1000000000.0
+  loop var s: Int = 0, s < state.series.length, ++s {
+    if let series: view LineSeries = state.series.viewAt(index: s) {
+      if series.times.length > 0 {
+        var near: Int = lineFirstFrom(series: series, time: time)
+        if near >= series.times.length {
+          near = series.times.length - 1
+        }
+        if near > 0 and time - series.times.copyAtDefault(index: near - 1) < series.times.copyAtDefault(
+          index: near
+        ) - time {
+          near = near - 1
+        }
+        var distance: Float = lineY(
+          range: range
+          box: box
+          value: series.values.copyAtDefault(index: near)
+        ) - y
+        if distance < 0.0 {
+          distance = -distance
+        }
+        if distance < bestDistance {
+          bestDistance = distance
+          best = { series: s, point: near }
+        }
+      }
+    }
+  }
+  ret best
+}
+
+# The view of the Timeline node named `link`, when there is one with a state
+func lineLinkedView(world: view UiWorld, link: view String, state: mod LineGraphState) ret Bool {
+  if link.length() is 0 {
+    ret false
+  }
+  if let raw: Int = world.nodeIds.get(k: link) {
+    let target: EntityId = id(v: raw)
+    if componentHas(this: world.timelineStates, entityId: target) {
+      let timeline: view TimelineState = componentView(this: world.timelineStates, entityId: target)
+      if timeline.viewStart is not state.viewStart or timeline.viewEnd is not state.viewEnd {
+        state.viewStart = timeline.viewStart
+        state.viewEnd = timeline.viewEnd
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Once a frame after updateUiInput (and after the timelines, so a linked one's view is this
+# frame's): every LineGraph gets its state, follows its linked Timeline or takes the wheel and a
+# drag itself, and a click selects the nearest point (sending the action). True when a view or a
+# selection changed.
+func lineGraphSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.lineGraphs), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.lineGraphs, i: i)
+    if componentHas(this: world.lineGraphStates, entityId: entityId) is false {
+      componentSet(this: world.lineGraphStates, entityId: entityId, data: createLineGraphState())
+    }
+    let graphView: view LineGraph = componentView(this: world.lineGraphs, entityId: entityId)
+    let graph: LineGraph = graphView
+    var linkedView: LineGraphState = createLineGraphState()
+    linkedView.viewStart = componentView(this: world.lineGraphStates, entityId: entityId).viewStart
+    linkedView.viewEnd = componentView(this: world.lineGraphStates, entityId: entityId).viewEnd
+    let followed: Bool = lineLinkedView(world: world, link: graph.link, state: linkedView)
+    let state: mod LineGraphState = componentMod(this: world.lineGraphStates, entityId: entityId)
+    if followed {
+      state.viewStart = linkedView.viewStart
+      state.viewEnd = linkedView.viewEnd
+      changed = true
+    }
+    if let box: TimelineBox = timelineBoxOf(uiSystems: uiSystems, entityId: entityId) {
+      let inside: Bool = input.pointer.x >= box.x and input.pointer.x < box.x + box.w and input.pointer.y >= box.y and input.pointer.y < box.y + box.h
+      let ownView: Bool = graph.link.length() is 0
+      if ownView and input.wheelTarget is entityId and input.wheel is not 0.0 {
+        let share: Float64 = ((input.pointer.x - box.x) / Math.max(a: 1.0, b: box.w)) as Float64
+        let width: Float64 = (state.viewEnd - state.viewStart) as Float64
+        let anchor: Float64 = (state.viewStart as Float64) + width * share
+        var newWidth: Float64 = width * (Math.pow(base: 0.85, exp: input.wheel) as Float64)
+        if newWidth < 1000.0 {
+          newWidth = 1000.0
+        }
+        let start: Int = (anchor - newWidth * share) as Int
+        lineShow(state: state, start: start, end: start + newWidth as Int)
+        changed = true
+      }
+      if input.pointer.pressed and inside {
+        state.dragging = true
+        state.dragX = input.pointer.x
+        state.dragViewStart = state.viewStart
+        state.dragViewEnd = state.viewEnd
+        state.dragMoved = false
+      }
+      if state.dragging and input.pointer.down and ownView {
+        let moved: Float = input.pointer.x - state.dragX
+        if moved > 3.0 or moved < -3.0 {
+          state.dragMoved = true
+        }
+        if state.dragMoved {
+          let span: Int = state.dragViewEnd - state.dragViewStart
+          let shift: Int = (((moved / Math.max(a: 1.0, b: box.w)) as Float64) * (span as Float64)) as Int
+          lineShow(state: state, start: state.dragViewStart - shift, end: state.dragViewEnd - shift)
+          changed = true
+        }
+      }
+      if state.dragging and input.pointer.released {
+        state.dragging = false
+        if not state.dragMoved {
+          let hit: LineHit = lineHit(
+            graph: graph
+            state: state
+            box: box
+            x: input.pointer.x
+            y: input.pointer.y
+          )
+          state.selectedSeries = hit.series
+          state.selectedPoint = hit.point
+          changed = true
+          if hit.series >= 0 and graph.actionId.length() > 0 {
+            eventSend(
+              this: world.uiActions
+              value: UiAction { entityId: entityId, actionId: "{graph.actionId}" }
+            )
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}

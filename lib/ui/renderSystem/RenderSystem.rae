@@ -28,6 +28,8 @@ open ui/renderSystem/RenderFills
 open ui/renderSystem/RenderTimeline
 open ui/renderSystem/RenderFlameGraph
 open ui/renderSystem/RenderHistogram
+open ui/renderSystem/RenderLineGraph
+open ui/renderSystem/RenderStatTable
 import Gpu2d
 import Gpu2dText
 import SdfText
@@ -524,6 +526,28 @@ func paintEntityG(
   }
   if componentHas(this: world.histograms, entityId: entityId) {
     paintHistogramG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.lineGraphs, entityId: entityId) {
+    paintLineGraphG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.statTables, entityId: entityId) {
+    paintStatTableG(
       world: world
       entityId: entityId
       wt: wt

@@ -1,0 +1,173 @@
+# RenderStatTable — a StatTable (ui/ChartComponents, ui/statTableSystem) drawn into its node's box:
+# the header with each column's title (the sorted one with a chevron for its direction), and the
+# rows
+# that show under it, every other one banded, the selected one highlighted, a numeric column's
+# cells to the right. Each column is clipped to its width; the cost is the rows that show.
+import Gpu2d
+import Gpu2dText
+import SdfText
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/renderSystem/RenderPaintBox
+open ui/statTableSystem/StatTableSystem
+open ui/timelineSystem/TimelineSystem
+
+func paintStatTableG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if componentHas(this: world.statTableStates, entityId: entityId) is false {
+    ret
+  }
+  let table: view StatTable = componentView(this: world.statTables, entityId: entityId)
+  let state: view StatTableState = componentView(this: world.statTableStates, entityId: entityId)
+  let paint: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let box: TimelineBox = { x: paint.x, y: paint.y, w: paint.w, h: paint.h }
+  let textSize: Float = table.rowHeight * 0.6
+  let rows: StatRowRange = statVisibleRows(table: table, state: state, box: box)
+  let bodyTop: Float = box.y + table.headerHeight
+  Gpu2d.pushClipRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+  )
+  # the rows' bands and the selection, across the whole width
+  loop var position: Int = rows.first, position <= rows.last, ++position {
+    let y: Float = bodyTop + (position as Float) * table.rowHeight - state.scroll
+    let row: Int = state.order.copyAtDefault(index: position)
+    if row is state.selected {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: box.x
+        y: y
+        w: box.w
+        h: table.rowHeight
+        color: 0xFF2F5D8A
+      )
+    } else if position % 2 is 1 {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: box.x
+        y: y
+        w: box.w
+        h: table.rowHeight
+        color: 0x18FFFFFF
+      )
+    }
+  }
+  # the header
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: table.headerHeight
+    color: 0xFF1A1F27
+  )
+  var left: Float = box.x
+  loop var c: Int = 0, c < state.columns.length, ++c {
+    let column: StatColumn = state.columns.copyAtDefault(index: c)
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: left
+      y: box.y
+      w: column.width
+      h: box.h
+    )
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: res.textFont
+      text: column.title
+      x: left + 6.0
+      y: box.y + table.headerHeight * 0.68
+      sizePx: textSize
+      color: 0xFFF0F0F0
+    )
+    # the sorted column's direction: a chevron after its title, its point down when descending
+    if c is state.sortColumn {
+      let chevronX: Float = left + 12.0 + Gpu2dText.measureText(
+        font: res.textFont
+        text: column.title
+        sizePx: textSize
+      )
+      let middle: Float = box.y + table.headerHeight * 0.5
+      var tip: Float = middle + 3.0
+      var ends: Float = middle - 3.0
+      if not state.descending {
+        tip = middle - 3.0
+        ends = middle + 3.0
+      }
+      Gpu2d.drawLine(
+        canvas: canvas
+        x0: chevronX
+        y0: ends
+        x1: chevronX + 4.0
+        y1: tip
+        thickness: 1.5
+        color: 0xFFF0F0F0
+      )
+      Gpu2d.drawLine(
+        canvas: canvas
+        x0: chevronX + 4.0
+        y0: tip
+        x1: chevronX + 8.0
+        y1: ends
+        thickness: 1.5
+        color: 0xFFF0F0F0
+      )
+    }
+    # this column's cells in the rows that show (under the header)
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: left
+      y: bodyTop
+      w: column.width
+      h: box.h - table.headerHeight
+    )
+    loop var position: Int = rows.first, position <= rows.last, ++position {
+      let row: Int = state.order.copyAtDefault(index: position)
+      if let cells: view StatRow = state.rows.viewAt(index: row) {
+        let text: String = cells.texts.copyAtDefault(index: c)
+        var x: Float = left + 6.0
+        if column.numeric {
+          x = left + column.width - 6.0 - Gpu2dText.measureText(
+            font: res.textFont
+            text: text
+            sizePx: textSize
+          )
+        }
+        Gpu2dText.drawText(
+          canvas: canvas
+          font: res.textFont
+          text: text
+          x: x
+          y: bodyTop + (position as Float) * table.rowHeight - state.scroll + table.rowHeight * 0.68
+          sizePx: textSize
+          color: 0xFFE0E0E0
+        )
+      }
+    }
+    Gpu2d.popClipRect(canvas: canvas)
+    Gpu2d.popClipRect(canvas: canvas)
+    left = left + column.width
+  }
+  Gpu2d.popClipRect(canvas: canvas)
+}

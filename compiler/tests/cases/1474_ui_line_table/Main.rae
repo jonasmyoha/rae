@@ -1,0 +1,368 @@
+# The LineGraph and StatTable charts (ui/ChartComponents, ui/lineGraphSystem, ui/statTableSystem):
+# the scene keys load; a LineGraph linked to a Timeline shows the timeline's view, one on its own
+# zooms with the wheel; 100 000 points in view are about one column per pixel, quickly, a spike
+# kept in its column's highest value; the hit test finds the nearest point and a click selects it.
+# A StatTable shows the rows that fit, sorts by a header's click (again: the other way, numbers or
+# text), scrolls with the wheel within its rows, and a click on a row selects it. `\{`/`\}` keep
+# the JSON braces literal.
+open ui/Ecs
+open ui/Components
+open ui/ChartComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+open ui/lineGraphSystem/LineGraphSystem
+open ui/statTableSystem/StatTableSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func chartScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":700\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Track\",\"Counters\",\"Free\",\"Stats\"]\},"
+  )
+  s = s.concat(
+    other: "\"Track\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":100\},\"Timeline\":\{\}\},"
+  )
+  s = s.concat(
+    other: "\"Counters\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"LineGraph\":\{\"link\":\"Track\",\"actionId\":\"line.pick\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Free\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"LineGraph\":\{\"minValue\":0,\"maxValue\":100\},\"WheelTarget\":\{\}\},"
+  )
+  s = s.concat(
+    other: "\"Stats\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":200\},\"StatTable\":\{\"rowHeight\":22,\"headerHeight\":26,\"actionId\":\"table.pick\"\},\"WheelTarget\":\{\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+}
+
+func step(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+  pressed: view Bool
+  wheel: view Float
+  wheelTarget: view EntityId
+) {
+  frameAdvance(this: rig.world.uiActions)
+  rig.input.pointer.x = x
+  rig.input.pointer.y = y
+  rig.input.pointer.released = rig.input.pointer.down and down is false
+  rig.input.pointer.pressed = pressed
+  rig.input.pointer.down = down
+  rig.input.wheel = wheel
+  rig.input.wheelTarget = wheelTarget
+  let unusedTimeline: Bool = timelineSystem(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    input: rig.input
+  )
+  let unusedLine: Bool = lineGraphSystem(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    input: rig.input
+  )
+  let unusedTable: Bool = statTableSystem(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    input: rig.input
+  )
+}
+
+func click(rig: mod Rig, x: view Float, y: view Float) {
+  step(
+    rig: rig
+    x: x
+    y: y
+    down: true
+    pressed: true
+    wheel: 0.0
+    wheelTarget: noEntity()
+  )
+  step(
+    rig: rig
+    x: x
+    y: y
+    down: false
+    pressed: false
+    wheel: 0.0
+    wheelTarget: noEntity()
+  )
+}
+
+func actions(world: view UiWorld) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(this: world.uiActions), ++i {
+    text = "{text} {eventAt(this: world.uiActions, i: i).actionId}"
+  }
+  ret text
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func topNames(state: view StatTableState, count: view Int) ret String {
+  var names: String = ""
+  loop var i: Int = 0, i < count, ++i {
+    let row: Int = state.order.copyAtDefault(index: i)
+    names = "{names} {state.rows.copyAtDefault(index: row).texts.copyAtDefault(index: 0)}"
+  }
+  ret names
+}
+
+func main() {
+  var rig: Rig = { world: createUiWorld(), uiSystems: createUiSystems(), input: createUiInput() }
+  rig.world.layoutW = 1000.0
+  rig.world.layoutH = 700.0
+  let unusedRoot: EntityId = loadScene(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    scene: parseScene(source: chartScene())
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  step(
+    rig: rig
+    x: 0.0
+    y: 0.0
+    down: false
+    pressed: false
+    wheel: 0.0
+    wheelTarget: noEntity()
+  )
+  let track: EntityId = entityOf(world: rig.world, nodeId: "Track")
+  let counters: EntityId = entityOf(world: rig.world, nodeId: "Counters")
+  let free: EntityId = entityOf(world: rig.world, nodeId: "Free")
+  let stats: EntityId = entityOf(world: rig.world, nodeId: "Stats")
+  let graphView: view LineGraph = componentView(this: rig.world.lineGraphs, entityId: counters)
+  let graph: LineGraph = graphView
+  let tableView: view StatTable = componentView(this: rig.world.statTables, entityId: stats)
+  let table: StatTable = tableView
+  log(
+    "scene keys: line link {graph.link} action {graph.actionId}; table row {table.rowHeight} header {table.headerHeight}; states made {componentHas(
+      this: rig.world.lineGraphStates
+      entityId: counters
+    )} {componentHas(this: rig.world.statTableStates, entityId: stats)}"
+  )
+
+  # the timeline's view; the linked graph follows it on the next frame
+  timelineShow(
+    state: componentMod(this: rig.world.timelineStates, entityId: track)
+    start: 0
+    end: 1000000
+  )
+  step(
+    rig: rig
+    x: 0.0
+    y: 0.0
+    down: false
+    pressed: false
+    wheel: 0.0
+    wheelTarget: noEntity()
+  )
+  let linked: view LineGraphState = componentView(
+    this: rig.world.lineGraphStates
+    entityId: counters
+  )
+  log("linked view: {linked.viewStart} .. {linked.viewEnd}")
+
+  # 100 000 points of "fps" (10, a spike of 100 at 500 000 ns) and a few of "load"
+  let lines: mod LineGraphState = componentMod(this: rig.world.lineGraphStates, entityId: counters)
+  let fps: Int = lineAddSeries(state: lines, name: "fps")
+  let load: Int = lineAddSeries(state: lines, name: "load")
+  var all: Bool = true
+  loop var i: Int = 0, i < 100000, ++i {
+    var value: Float = 10.0
+    if i is 50000 {
+      value = 100.0
+    }
+    all = all and lineAddPoint(
+      state: lines
+      series: fps
+      time: i * 10
+      value: value
+    )
+  }
+  loop var i: Int = 0, i <= 4, ++i {
+    all = all and lineAddPoint(
+      state: lines
+      series: load
+      time: i * 250000
+      value: 40.0 + (i as Float) * 10.0
+    )
+  }
+  let refused: Bool = lineAddPoint(
+    state: lines
+    series: load
+    time: 5
+    value: 1.0
+  )
+  let box: TimelineBox = { x: 0.0, y: 100.0, w: 1000.0, h: 200.0 }
+  let started: Int = nowNs()
+  let columns: List(LineColumn) = lineColumns(state: lines, box: box)
+  let took: Int = nowNs() - started
+  var fpsColumns: Int = 0
+  var spike: Float = 0.0
+  loop let column: LineColumn in columns {
+    if column.series is fps {
+      fpsColumns = fpsColumns + 1
+      if column.x is 500.0 {
+        spike = column.high
+      }
+    }
+  }
+  let range: LineRange = lineRange(graph: graph, columns: columns)
+  log(
+    "points added {all}, an earlier one refused {not refused}; fps columns {fpsColumns >= 990 and fpsColumns <= 1001}, the spike's column high {spike}, under 20 ms {took < 20000000}; range {range.low} .. {range.high}"
+  )
+  let nearLoad: LineHit = lineHit(
+    graph: graph
+    state: lines
+    box: box
+    x: 251.0
+    y: 100.0 + 200.0 - 200.0 * (50.0 - 10.0) / 90.0
+  )
+  let nearFps: LineHit = lineHit(
+    graph: graph
+    state: lines
+    box: box
+    x: 700.0
+    y: 295.0
+  )
+  log(
+    "hit near load's second point: series {nearLoad.series} point {nearLoad.point}; near fps at 700: series {nearFps.series} point {nearFps.point}"
+  )
+  click(rig: rig, x: 251.0, y: 100.0 + 200.0 - 200.0 * (50.0 - 10.0) / 90.0)
+  let picked: view LineGraphState = componentView(
+    this: rig.world.lineGraphStates
+    entityId: counters
+  )
+  log(
+    "click: selected series {picked.selectedSeries} point {picked.selectedPoint}, actions:{actions(
+      world: rig.world
+    )}"
+  )
+
+  # the free graph zooms about the pointer with the wheel; the linked one does not take it
+  let freeState: mod LineGraphState = componentMod(this: rig.world.lineGraphStates, entityId: free)
+  lineShow(state: freeState, start: 0, end: 1000000)
+  step(
+    rig: rig
+    x: 500.0
+    y: 400.0
+    down: false
+    pressed: false
+    wheel: 4.0
+    wheelTarget: free
+  )
+  let zoomed: view LineGraphState = componentView(this: rig.world.lineGraphStates, entityId: free)
+  log("free graph zoomed: {zoomed.viewStart} .. {zoomed.viewEnd}")
+
+  # a table of 20 systems
+  let tableState: mod StatTableState = componentMod(
+    this: rig.world.statTableStates
+    entityId: stats
+  )
+  let unusedName: Int = statAddColumn(
+    state: tableState
+    title: "system"
+    width: 240.0
+    numeric: false
+  )
+  let unusedCalls: Int = statAddColumn(
+    state: tableState
+    title: "calls"
+    width: 160.0
+    numeric: true
+  )
+  let unusedTotal: Int = statAddColumn(
+    state: tableState
+    title: "total ms"
+    width: 200.0
+    numeric: true
+  )
+  loop var i: Int = 0, i < 20, ++i {
+    let calls: Int = (i * 7) % 13 + 1
+    let total: Float = ((i * 37) % 23) as Float * 0.5
+    let unusedRow: Int = statAddRow(
+      state: tableState
+      texts: List(String) { "system {(i * 11) % 20}", "{calls}", "{total}" }
+      values: List(Float) { 0.0, calls as Float, total }
+    )
+  }
+  let tableBox: TimelineBox = { x: 0.0, y: 500.0, w: 600.0, h: 200.0 }
+  let shown: StatRowRange = statVisibleRows(table: table, state: tableState, box: tableBox)
+  log("rows shown: {shown.first} .. {shown.last}; header hit: column {statHit(
+    table: table
+    state: tableState
+    box: tableBox
+    x: 450.0
+    y: 510.0
+  ).column}")
+  click(rig: rig, x: 450.0, y: 510.0)
+  let ascending: view StatTableState = componentView(
+    this: rig.world.statTableStates
+    entityId: stats
+  )
+  log(
+    "sorted by total, ascending {not ascending.descending}:{topNames(state: ascending, count: 3)}"
+  )
+  click(rig: rig, x: 450.0, y: 510.0)
+  let descending: view StatTableState = componentView(
+    this: rig.world.statTableStates
+    entityId: stats
+  )
+  log("again, descending {descending.descending}:{topNames(state: descending, count: 3)}")
+  click(rig: rig, x: 50.0, y: 510.0)
+  let byName: view StatTableState = componentView(this: rig.world.statTableStates, entityId: stats)
+  log("by name:{topNames(state: byName, count: 3)}")
+  step(
+    rig: rig
+    x: 300.0
+    y: 600.0
+    down: false
+    pressed: false
+    wheel: -1.0
+    wheelTarget: stats
+  )
+  let once: Float = componentView(this: rig.world.statTableStates, entityId: stats).scroll
+  step(
+    rig: rig
+    x: 300.0
+    y: 600.0
+    down: false
+    pressed: false
+    wheel: -10.0
+    wheelTarget: stats
+  )
+  let far: Float = componentView(this: rig.world.statTableStates, entityId: stats).scroll
+  log("scroll one notch {once}, ten more stops at the last row {far}")
+  click(rig: rig, x: 300.0, y: 500.0 + 26.0 + 5.0)
+  let selected: view StatTableState = componentView(
+    this: rig.world.statTableStates
+    entityId: stats
+  )
+  log(
+    "click on the first row that shows: selected {selected.rows.copyAtDefault(
+      index: selected.selected
+    ).texts.copyAtDefault(index: 0)}, actions:{actions(world: rig.world)}"
+  )
+}

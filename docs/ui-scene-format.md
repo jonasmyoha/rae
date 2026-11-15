@@ -1099,3 +1099,37 @@ state and handles a click, and the drawing is over the node's own fill, clipped 
 
 Case 1473 checks both charts' keys, layout, hit tests and clicks; `checks/uiFlameHistogram` paints
 them.
+
+## 35. `LineGraph` and `StatTable`
+
+Two more charts of the kind in sections 33 and 34 (authored keys, an unsaved state the app fills,
+a system once a frame after `updateUiInput`, a clipped drawing over the node's own fill).
+
+```json
+"Track":    { "Rect": { ... }, "Timeline": {}, "WheelTarget": {} },
+"Counters": { "Rect": { ... }, "LineGraph": { "link": "Track", "actionId": "line.pick" } },
+"Stats":    { "Rect": { ... },
+              "StatTable": { "rowHeight": 24, "headerHeight": 28, "actionId": "table.pick" },
+              "WheelTarget": {} }
+```
+
+- `LineGraph` (lib/ui/lineGraphSystem, `lineGraphSystem(world, uiSystems, input)`, run after the
+  timelines): counters over time, a line per series. `link` names a Timeline node whose view it
+  shows, so the two zoom and pan together; with no `link` the wheel zooms it about the pointer
+  (give it a `WheelTarget`) and a drag pans it. Its height spans `minValue` .. `maxValue`, or (both
+  0) the lowest to the highest point in view. A click selects the point nearest the pointer
+  (`selectedSeries`, `selectedPoint`) and sends `actionId`. The app adds series with
+  `lineAddSeries(state:, name:)` and points with `lineAddPoint(state:, series:, time:, value:)` in
+  order of time. Only the points in view are read, each pixel column of a series drawn as one
+  stroke from its lowest to its highest value (a one-sample spike stays), joined to the next.
+- `StatTable` (lib/ui/statTableSystem, `statTableSystem(world, uiSystems, input)`): a header of
+  column titles over rows of cells. A click on a header sorts by that column (the same header
+  again: the other way; a numeric column by its numbers, others by text, ties keeping their
+  order), the wheel scrolls three rows a notch within the rows, and a click on a row selects it
+  (`selected`, an index into the rows) and sends `actionId`. `rowHeight` (default 22) and
+  `headerHeight` (default 26) size it. The app adds columns with `statAddColumn(state:, title:,
+  width:, numeric:)` and rows with `statAddRow(state:, texts:, values:)` (a text per column, a
+  number per column for sorting); `statSort(state:, column:, descending:)` sorts from code. Only the
+  rows that show are drawn; a numeric column's cells are drawn to the right.
+
+Case 1474 checks both; `checks/uiLineTable` paints them.

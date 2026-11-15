@@ -103,3 +103,72 @@ type HistogramState {
   selected: Int = -1
   pressed: Bool = false
 }
+
+# A line graph (ui/lineGraphSystem): counters over time, a line per series. With `link` naming a
+# Timeline node it shows that timeline's view (so the two zoom and pan together); without one the
+# wheel zooms it about the pointer and a drag pans it. The values run from `minValue` to
+# `maxValue`, or (both 0) from the lowest to the highest point in view. A click selects the point
+# nearest the pointer and sends `actionId` (when set).
+type LineGraph {
+  link: String = ""
+  minValue: Float = 0.0
+  maxValue: Float = 0.0
+  actionId: String = ""
+}
+
+# One series: its name, and its points in order of time
+type LineSeries {
+  name: String
+  times: List(Int)
+  values: List(Float)
+}
+
+type LineGraphState {
+  viewStart: Int = 0
+  viewEnd: Int = 1000000000
+  series: List(LineSeries)
+  selectedSeries: Int = -1
+  selectedPoint: Int = -1
+  dragging: Bool = false
+  dragX: Float = 0.0
+  dragViewStart: Int = 0
+  dragViewEnd: Int = 0
+  dragMoved: Bool = false
+}
+
+# A table (ui/statTableSystem): a header row of column titles over rows of cells. A click on a
+# header sorts by that column (again: the other way), the wheel scrolls the rows, a click on a row
+# selects it and sends `actionId` (when set).
+type StatTable {
+  rowHeight: Float = 22.0
+  headerHeight: Float = 26.0
+  actionId: String = ""
+}
+
+# A column: its title, its width, and whether it sorts by the rows' numbers (else by their text);
+# a numeric column's cells are drawn to the right
+type StatColumn {
+  title: String
+  width: Float
+  numeric: Bool
+}
+
+# A row: a text per column, and a number per column for sorting a numeric column
+type StatRow {
+  texts: List(String)
+  values: List(Float)
+}
+
+type StatTableState {
+  columns: List(StatColumn)
+  rows: List(StatRow)
+  # the rows in the order shown (indexes into `rows`)
+  order: List(Int)
+  sortColumn: Int = -1
+  descending: Bool = false
+  # how far the rows are scrolled, in the table's units
+  scroll: Float = 0.0
+  # the selected row (an index into `rows`; -1 none)
+  selected: Int = -1
+  pressed: Bool = false
+}

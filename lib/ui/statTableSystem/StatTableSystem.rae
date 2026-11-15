@@ -1,0 +1,254 @@
+# ui/statTableSystem — the StatTable chart (ui/ChartComponents, docs/perf-tools-design.md §6): its
+# columns and rows (statAddColumn, statAddRow), sorting (statSort, a merge sort of the order the
+# rows show in), scrolling, the rows that show (statVisibleRows), what is under a point (statHit),
+# and the system: a click on a header sorts, the wheel scrolls, a click on a row selects it. The
+# drawing is ui/renderSystem/RenderStatTable. Its cost is the rows that show.
+import Math
+import String
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+
+# What is under a point: a header (`column`, `row` -1), a row (`row` an index into the rows,
+# `column` the column), or nothing (both -1)
+type StatHit {
+  column: Int
+  row: Int
+}
+
+func createStatTableState() ret StatTableState {
+  ret StatTableState { columns: {}, rows: {}, order: {} }
+}
+
+func statAddColumn(
+  state: mod StatTableState
+  title: view String
+  width: view Float
+  numeric: view Bool
+) ret Int {
+  state.columns.add(value: StatColumn { title: title, width: width, numeric: numeric })
+  ret state.columns.length - 1
+}
+
+# A row: its cells' texts and (for numeric columns) numbers; shown last until the table is sorted
+func statAddRow(
+  state: mod StatTableState
+  texts: view List(String)
+  values: view List(Float)
+) ret Int {
+  state.rows.add(value: StatRow { texts: texts, values: values })
+  state.order.add(value: state.rows.length - 1)
+  ret state.rows.length - 1
+}
+
+# How row a compares with row b by `column`: -1 before, 0 a tie, 1 after
+func statLess(
+  state: view StatTableState
+  a: view Int
+  b: view Int
+  column: view Int
+) ret Int {
+  var result: Int = 0
+  if let left: view StatRow = state.rows.viewAt(index: a) {
+    if let right: view StatRow = state.rows.viewAt(index: b) {
+      if state.columns.copyAtDefault(index: column).numeric {
+        let x: Float = left.values.copyAtDefault(index: column)
+        let y: Float = right.values.copyAtDefault(index: column)
+        if x < y {
+          result = -1
+        } else if x > y {
+          result = 1
+        }
+      } else {
+        result = left.texts.copyAtDefault(index: column).compare(
+          other: right.texts.copyAtDefault(index: column)
+        )
+      }
+    }
+  }
+  ret result
+}
+
+# Sort the rows by `column`, the other way round when `descending`; rows that tie keep their order
+func statSort(state: mod StatTableState, column: view Int, descending: view Bool) {
+  if column < 0 or column >= state.columns.length {
+    ret
+  }
+  state.sortColumn = column
+  state.descending = descending
+  let count: Int = state.order.length
+  var from: List(Int) = state.order
+  var to: List(Int) = state.order
+  var width: Int = 1
+  loop width < count {
+    var start: Int = 0
+    loop start < count {
+      let middle: Int = Math.min(a: start + width, b: count)
+      let end: Int = Math.min(a: start + 2 * width, b: count)
+      var left: Int = start
+      var right: Int = middle
+      loop var out: Int = start, out < end, ++out {
+        var takeLeft: Bool = right >= end
+        if left < middle and right < end {
+          var compared: Int = statLess(
+            state: state
+            a: from.copyAtDefault(index: left)
+            b: from.copyAtDefault(index: right)
+            column: column
+          )
+          if descending {
+            compared = -compared
+          }
+          takeLeft = compared <= 0
+        }
+        if takeLeft and left < middle {
+          to.set(index: out, value: from.copyAtDefault(index: left))
+          left = left + 1
+        } else {
+          to.set(index: out, value: from.copyAtDefault(index: right))
+          right = right + 1
+        }
+      }
+      start = start + 2 * width
+    }
+    from = to
+    width = width * 2
+  }
+  state.order = from
+}
+
+func statMaxScroll(
+  table: view StatTable
+  state: view StatTableState
+  box: view TimelineBox
+) ret Float {
+  let content: Float = (state.order.length as Float) * table.rowHeight
+  ret Math.max(a: 0.0, b: content - (box.h - table.headerHeight))
+}
+
+# Scroll by `amount` (positive: further down the rows), kept inside the rows
+func statScroll(
+  table: view StatTable
+  state: mod StatTableState
+  box: view TimelineBox
+  amount: view Float
+) {
+  state.scroll = Math.max(
+    a: 0.0
+    b: Math.min(a: state.scroll + amount, b: statMaxScroll(table: table, state: state, box: box))
+  )
+}
+
+# The positions in the shown order of the first and the last row that show (first > last: none)
+type StatRowRange {
+  first: Int
+  last: Int
+}
+
+func statVisibleRows(
+  table: view StatTable
+  state: view StatTableState
+  box: view TimelineBox
+) ret StatRowRange {
+  let first: Int = (state.scroll / table.rowHeight) as Int
+  let shown: Int = Math.ceil(x: (box.h - table.headerHeight) / table.rowHeight) as Int + 1
+  ret StatRowRange { first: first, last: Math.min(a: first + shown, b: state.order.length) - 1 }
+}
+
+func statColumnAt(state: view StatTableState, box: view TimelineBox, x: view Float) ret Int {
+  var left: Float = box.x
+  loop var c: Int = 0, c < state.columns.length, ++c {
+    let width: Float = state.columns.copyAtDefault(index: c).width
+    if x >= left and x < left + width {
+      ret c
+    }
+    left = left + width
+  }
+  ret -1
+}
+
+func statHit(
+  table: view StatTable
+  state: view StatTableState
+  box: view TimelineBox
+  x: view Float
+  y: view Float
+) ret StatHit {
+  if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
+    ret StatHit { column: -1, row: -1 }
+  }
+  let column: Int = statColumnAt(state: state, box: box, x: x)
+  if y < box.y + table.headerHeight {
+    ret StatHit { column: column, row: -1 }
+  }
+  let position: Int = ((y - box.y - table.headerHeight + state.scroll) / table.rowHeight) as Int
+  if position < 0 or position >= state.order.length {
+    ret StatHit { column: -1, row: -1 }
+  }
+  ret StatHit { column: column, row: state.order.copyAtDefault(index: position) }
+}
+
+# Once a frame after updateUiInput: every StatTable gets its state, the wheel over it scrolls three
+# rows a notch, a click on a header sorts by it (the same header again: the other way), a click on
+# a row selects it (sending the action). True when the order, the scroll or the selection changed.
+func statTableSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.statTables), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.statTables, i: i)
+    if componentHas(this: world.statTableStates, entityId: entityId) is false {
+      componentSet(this: world.statTableStates, entityId: entityId, data: createStatTableState())
+    }
+    if let box: TimelineBox = timelineBoxOf(uiSystems: uiSystems, entityId: entityId) {
+      let tableView: view StatTable = componentView(this: world.statTables, entityId: entityId)
+      let table: StatTable = tableView
+      let state: mod StatTableState = componentMod(this: world.statTableStates, entityId: entityId)
+      let inside: Bool = input.pointer.x >= box.x and input.pointer.x < box.x + box.w and input.pointer.y >= box.y and input.pointer.y < box.y + box.h
+      if input.wheelTarget is entityId and input.wheel is not 0.0 {
+        statScroll(
+          table: table
+          state: state
+          box: box
+          amount: -input.wheel * table.rowHeight * 3.0
+        )
+        changed = true
+      }
+      if input.pointer.pressed and inside {
+        state.pressed = true
+      }
+      if state.pressed and input.pointer.released {
+        state.pressed = false
+        let hit: StatHit = statHit(
+          table: table
+          state: state
+          box: box
+          x: input.pointer.x
+          y: input.pointer.y
+        )
+        if hit.row < 0 and hit.column >= 0 {
+          statSort(
+            state: state
+            column: hit.column
+            descending: hit.column is state.sortColumn and not state.descending
+          )
+          changed = true
+        } else if hit.row >= 0 {
+          state.selected = hit.row
+          changed = true
+          if table.actionId.length() > 0 {
+            eventSend(
+              this: world.uiActions
+              value: UiAction { entityId: entityId, actionId: "{table.actionId}" }
+            )
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}
