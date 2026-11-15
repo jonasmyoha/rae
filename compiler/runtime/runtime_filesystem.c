@@ -466,79 +466,15 @@ rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
-/* JSON number text: the SHORTEST decimal that reads back to the same value (a Float through
- * float, a Float64 through double), laid out as JavaScript's Number.prototype.toString does:
- * a whole number below 1e21 as plain digits ("260", not "2.6e+02"), plain decimals from 1e-6
- * ("0.00001"), an exponent only beyond ("1e-7", "1e+21", "1.7976931348623157e+308"). `%g` (six
- * significant digits) wrote -12.000001 as -12 and 1/3 as 0.333333, so a value did not survive
- * a save and a reload. NaN and the infinities are not JSON numbers: they are written null.
- * `out` holds at least 48 bytes; the length is returned. */
-int rae_json_number_text(double v, int single, char* out) {
-  if (v != v || v > 1.7976931348623157e308 || v < -1.7976931348623157e308) {
-    memcpy(out, "null", 5);
-    return 4;
-  }
-  if (v == 0.0) {
-    if (signbit(v)) { memcpy(out, "-0", 3); return 2; }
-    memcpy(out, "0", 2);
-    return 1;
-  }
-  /* the fewest significant digits that read back to the same value */
-  char sci[48];
-  int max_prec = single ? 9 : 17;
-  for (int prec = 1; prec <= max_prec; prec++) {
-    snprintf(sci, sizeof sci, "%.*e", prec - 1, v);
-    double back = strtod(sci, NULL);
-    if (single ? ((float)back == (float)v) : (back == v)) break;
-  }
-  /* "-d.ddde+XX": the digits (trailing zeros dropped) and the decimal exponent */
-  int negative = sci[0] == '-';
-  const char* p = sci + (negative ? 1 : 0);
-  char digits[24]; int k = 0;
-  while (*p && *p != 'e') {
-    if (*p >= '0' && *p <= '9' && k < 23) digits[k++] = *p;
-    p++;
-  }
-  while (k > 1 && digits[k - 1] == '0') k--;
-  int exponent = (*p == 'e') ? atoi(p + 1) : 0;
-  int n = exponent + 1; /* the value is 0.digits x 10^n */
-  int len = 0;
-  if (negative) out[len++] = '-';
-  if (k <= n && n <= 21) {
-    for (int i = 0; i < k; i++) out[len++] = digits[i];
-    for (int i = k; i < n; i++) out[len++] = '0';
-  } else if (0 < n && n <= 21) {
-    for (int i = 0; i < n; i++) out[len++] = digits[i];
-    out[len++] = '.';
-    for (int i = n; i < k; i++) out[len++] = digits[i];
-  } else if (-6 < n && n <= 0) {
-    out[len++] = '0'; out[len++] = '.';
-    for (int i = 0; i < -n; i++) out[len++] = '0';
-    for (int i = 0; i < k; i++) out[len++] = digits[i];
-  } else {
-    out[len++] = digits[0];
-    if (k > 1) {
-      out[len++] = '.';
-      for (int i = 1; i < k; i++) out[len++] = digits[i];
-    }
-    len += snprintf(out + len, 16, "e%c%d", n - 1 >= 0 ? '+' : '-', n - 1 >= 0 ? n - 1 : 1 - n);
-  }
-  out[len] = 0;
-  return len;
+/* The two C-library conversions lib/core/JsonScan's jsonNumberWrite makes (docs/runtime-c-audit.md
+ * row 19), one call each: `value` with `precision` significant digits in exponent form, and a
+ * text read back as a double. The search for the fewest digits and the layout are Rae's. */
+int64_t rae_ext_json_scientific(double value, int64_t precision, uint8_t* out) {
+  return (int64_t)snprintf((char*)out, 48, "%.*e", (int)(precision - 1), value);
 }
 
-/* lib/Json's number writers (jbNumber, jbNumber64): the .raescene writer and any JSON a program
- * builds, through the one formatter above */
-rae_String rae_ext_json_number(float v) {
-  char text[48];
-  int len = rae_json_number_text((double)v, 1, text);
-  return rae_str_from_buf_impl((uint8_t*)text, len, RAE_SITE_FLOAT_TO_STR);
-}
-
-rae_String rae_ext_json_number64(double v) {
-  char text[48];
-  int len = rae_json_number_text(v, 0, text);
-  return rae_str_from_buf_impl((uint8_t*)text, len, RAE_SITE_FLOAT_TO_STR);
+double rae_ext_json_read_double(uint8_t* text) {
+  return strtod((const char*)text, NULL);
 }
 
 /* Float (f32) views. Formatting promotes to double, so the shared f64

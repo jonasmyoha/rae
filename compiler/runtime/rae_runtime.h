@@ -994,10 +994,8 @@ void    rae_ext_audio_tick(void);
 void    rae_ext_audio_set_muted(int64_t muted);
 
 rae_String rae_ext_rae_str_f64(double v);
-rae_String rae_ext_json_number(float v);
-rae_String rae_ext_json_number64(double v);
-/* The shortest JSON text that reads back to `v` (a Float when `single`); `out` holds 48 bytes */
-int rae_json_number_text(double v, int single, char* out);
+int64_t rae_ext_json_scientific(double value, int64_t precision, uint8_t* out);
+double rae_ext_json_read_double(uint8_t* text);
 rae_String rae_ext_rae_str_f64_ptr(const double* v);
 rae_String rae_ext_rae_str_string(rae_String s);
 rae_String rae_ext_rae_str_string_ptr(const rae_String* s);
@@ -1052,12 +1050,6 @@ static inline void rae_jout_put(rae_JsonOut* out, const char* data, int64_t len)
   memcpy(out->data + out->len, data, (size_t)len);
   out->len += len;
   out->data[out->len] = 0;
-}
-/* A Float (`single`) or Float64 as the shortest text that reads back to it (rae_json_number_text) */
-static inline void rae_jout_number(rae_JsonOut* out, double value, int single) {
-  char text[48];
-  int len = rae_json_number_text(value, single, text);
-  rae_jout_put(out, text, len);
 }
 #define rae_jout_text(out, literal) rae_jout_put((out), (literal), (int64_t)(sizeof(literal) - 1))
 static inline rae_String rae_jout_finish(rae_JsonOut* out) {

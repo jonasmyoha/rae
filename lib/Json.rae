@@ -908,25 +908,16 @@ func jbBool(value: view Bool) ret String {
   ret "false"
 }
 
-func nativeJsonNumber(value: Float) unsafe extern("rae_ext_json_number") ret String
-
-# The shortest decimal that round-trips this Float exactly (reload parses it
-# back to the same value). Plain `"{value}"` uses %g (6 significant digits),
-# which is LOSSY — a saved coordinate reloaded as a different value and
-# repeated save cycles eroded it.
+# The shortest decimal that reads back to this Float exactly, as JavaScript lays it out (lib/core's
+# jsonNumberWrite: "260", "0.00001", "1e-7"; NaN and the infinities null). Plain `"{value}"` uses %g
+# (6 significant digits), which is lossy: a saved coordinate reloaded as a different value.
 func jbNumber(value: view Float) ret String {
-  unsafe {
-    ret nativeJsonNumber(value: value)
-  }
+  ret jsonNumberText(value: value as Float64, single: true)
 }
 
-func nativeJsonNumber64(value: Float64) unsafe extern("rae_ext_json_number64") ret String
-
-# The shortest decimal that round-trips this double exactly
+# The shortest decimal that reads back to this double exactly
 func jbNumber64(value: view Float64) ret String {
-  unsafe {
-    ret nativeJsonNumber64(value: value)
-  }
+  ret jsonNumberText(value: value, single: false)
 }
 
 # A whole number, every digit (exact for every Int)

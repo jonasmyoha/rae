@@ -2829,6 +2829,17 @@ static void emit_json_scan_wrappers(CompilerContext* ctx, FILE* out) {
     if (mangled) fprintf(out, items[i].call, mangled); else fprintf(out, "%s", items[i].fallback);
     fprintf(out, " }\n");
   }
+  /* A Float (`single`) or Float64 appended to the toJson output as the shortest text that reads
+   * back to it: lib/core/JsonScan's jsonNumberWrite, into a stack buffer (row 19) */
+  const char* number = core_function_mangled(ctx, "jsonNumberWrite");
+  fprintf(out, "RAE_UNUSED static void rae_jout_number(rae_JsonOut* out, double value, int single) {\n");
+  if (number) {
+    fprintf(out, "  uint8_t text[48]; int64_t length = %s(value, single ? 1 : 0, text);\n"
+                 "  rae_jout_put(out, (const char*)text, length);\n", number);
+  } else {
+    fprintf(out, "  rae_jout_printf(out, \"%%.17g\", value);\n");
+  }
+  fprintf(out, "}\n");
   /* A String as a quoted JSON string appended to the toJson output: escaped
    * by jsonScanEscaped only when jsonScanNeedsEscape says so. */
   const char* needs = core_function_mangled(ctx, "jsonScanNeedsEscape");
@@ -3347,6 +3358,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   StructShape* shapes = NULL;
   size_t shape_count = collect_struct_shapes(ctx, &shapes);
 
+  // The number writer the toJson bodies call, defined with the JsonScan wrappers (row 19)
+  fprintf(out, "RAE_UNUSED static void rae_jout_number(rae_JsonOut* out, double value, int single);\n");
   // #768: forward-declare every toJson/fromJson first, so a nested-struct or
   // List(struct) field can call a child serializer defined later in the file
   // (e.g. Rect.toJson -> Vec2.toJson, Children.toJson -> EntityId.toJson).

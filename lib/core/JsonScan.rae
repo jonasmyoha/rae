@@ -525,3 +525,273 @@ func jsonScanEscaped(text: view String) ret String {
     ret rae_ext_rae_str_from_bytes(buffer: bytes.data, offset: 0, count: bytes.length)
   }
 }
+
+# ---- writing a number ---------------------------------------------------------------------------
+# The C library's two number conversions, one call each (docs/runtime-c-audit.md row 19): `value`
+# printed with `precision` significant digits in exponent form ("%.*e") into `out` (48 bytes),
+# returning its length; and that text read back as a double (`strtod`)
+func rae_ext_json_scientific(
+  value: Float64
+  precision: Int
+  out: Buffer(UInt8)
+) unsafe extern ret Int
+
+func rae_ext_json_read_double(text: Buffer(UInt8)) unsafe extern ret Float64
+
+# The shortest JSON text that reads back to `value` (through a Float when `single`, else a
+# Float64), written into `out` (48 bytes); its length. The fewest significant digits that read back,
+# laid out as JavaScript's Number.prototype.toString does: a whole number below 1e21 as plain digits
+# ("260"), a plain decimal from 1e-6 ("0.00001"), an exponent only beyond ("1e-7", "1e+21"). NaN and
+# the infinities, which JSON has no number for, are written null; -0 stays -0. The derived toJson
+# (its rae_jout_number) and lib/Json's jbNumber / jbNumber64 write every number with it.
+func jsonNumberWrite(value: copy Float64, single: copy Bool, out: copy Buffer(UInt8)) ret Int {
+  unsafe {
+    # NaN and the infinities: value - value is NaN for them, 0 for every finite number
+    let difference: Float64 = value - value
+    if difference is not 0.0 {
+      rae_ext_rae_buf_set(buf: out, index: 0, value: 110 as UInt8)
+      rae_ext_rae_buf_set(buf: out, index: 1, value: 117 as UInt8)
+      rae_ext_rae_buf_set(buf: out, index: 2, value: 108 as UInt8)
+      rae_ext_rae_buf_set(buf: out, index: 3, value: 108 as UInt8)
+      ret 4
+    }
+    # the fewest significant digits that read back to the same value: "-d.ddde+XX" in `out`. More
+    # digits never stop reading back once some do, so after 1 to 7 tried in turn (what is typed:
+    # "260", "123.456") the rest is a binary search (1/3 needs 16: 3 more tries rather than 9).
+    # `printed` is the precision whose text `out` holds, so the winner is not printed twice.
+    var maxPrecision: Int = 17
+    if single {
+      maxPrecision = 9
+    }
+    var found: Int = 0
+    var printed: Int = 0
+    loop var precision: Int = 1, precision <= 7 and precision <= maxPrecision and found is 0, ++precision {
+      printed = precision
+      if jsonReadsBack(
+        value: value
+        single: single
+        precision: precision
+        out: out
+      ) {
+        found = precision
+      }
+    }
+    if found is 0 {
+      var low: Int = 8
+      var high: Int = maxPrecision
+      loop low < high {
+        let middle: Int = (low + high) / 2
+        printed = middle
+        if jsonReadsBack(
+          value: value
+          single: single
+          precision: middle
+          out: out
+        ) {
+          high = middle
+        } else {
+          low = middle + 1
+        }
+      }
+      found = low
+    }
+    var length: Int = 0
+    if printed is found {
+      loop length < 48 and jsonByteAt(out: out, at: length) is not 0 {
+        length = length + 1
+      }
+    } else {
+      length = rae_ext_json_scientific(value: value, precision: found, out: out)
+    }
+    # its sign, its digits as one number (17 digits fit), how many, and the decimal exponent
+    var at: Int = 0
+    let negative: Bool = jsonByteAt(out: out, at: 0) is 45
+    if negative {
+      at = 1
+    }
+    var digits: Int = 0
+    var count: Int = 0
+    loop at < length and jsonByteAt(out: out, at: at) is not 101 {
+      let byte: Int = jsonByteAt(out: out, at: at)
+      if byte >= 48 and byte <= 57 {
+        digits = digits * 10 + (byte - 48)
+        count = count + 1
+      }
+      at = at + 1
+    }
+    loop count > 1 and digits % 10 is 0 {
+      digits = digits / 10
+      count = count - 1
+    }
+    var exponent: Int = 0
+    var exponentNegative: Bool = false
+    at = at + 1
+    if at < length and jsonByteAt(out: out, at: at) is 45 {
+      exponentNegative = true
+    }
+    loop at < length {
+      let byte: Int = jsonByteAt(out: out, at: at)
+      if byte >= 48 and byte <= 57 {
+        exponent = exponent * 10 + (byte - 48)
+      }
+      at = at + 1
+    }
+    if exponentNegative {
+      exponent = -exponent
+    }
+    # the value is 0.digits x 10^n
+    let n: Int = exponent + 1
+    var written: Int = 0
+    if negative {
+      written = jsonPutByte(out: out, at: written, byte: 45)
+    }
+    if count <= n and n <= 21 {
+      written = jsonPutDigits(
+        out: out
+        at: written
+        digits: digits
+        count: count
+        from: 0
+        to: count
+      )
+      loop var i: Int = count, i < n, ++i {
+        written = jsonPutByte(out: out, at: written, byte: 48)
+      }
+    } else if 0 < n and n <= 21 {
+      written = jsonPutDigits(
+        out: out
+        at: written
+        digits: digits
+        count: count
+        from: 0
+        to: n
+      )
+      written = jsonPutByte(out: out, at: written, byte: 46)
+      written = jsonPutDigits(
+        out: out
+        at: written
+        digits: digits
+        count: count
+        from: n
+        to: count
+      )
+    } else if -6 < n and n <= 0 {
+      written = jsonPutByte(out: out, at: written, byte: 48)
+      written = jsonPutByte(out: out, at: written, byte: 46)
+      loop var i: Int = 0, i < -n, ++i {
+        written = jsonPutByte(out: out, at: written, byte: 48)
+      }
+      written = jsonPutDigits(
+        out: out
+        at: written
+        digits: digits
+        count: count
+        from: 0
+        to: count
+      )
+    } else {
+      written = jsonPutDigits(
+        out: out
+        at: written
+        digits: digits
+        count: count
+        from: 0
+        to: 1
+      )
+      if count > 1 {
+        written = jsonPutByte(out: out, at: written, byte: 46)
+        written = jsonPutDigits(
+          out: out
+          at: written
+          digits: digits
+          count: count
+          from: 1
+          to: count
+        )
+      }
+      written = jsonPutByte(out: out, at: written, byte: 101)
+      var shown: Int = n - 1
+      if shown >= 0 {
+        written = jsonPutByte(out: out, at: written, byte: 43)
+      } else {
+        written = jsonPutByte(out: out, at: written, byte: 45)
+        shown = -shown
+      }
+      var places: Int = 1
+      loop places * 10 <= shown {
+        places = places * 10
+      }
+      loop places > 0 {
+        written = jsonPutByte(out: out, at: written, byte: 48 + (shown / places) % 10)
+        places = places / 10
+      }
+    }
+    ret written
+  }
+}
+
+# The byte at `at` in `out`
+func jsonByteAt(out: copy Buffer(UInt8), at: view Int) ret Int {
+  unsafe {
+    let byte: UInt8 = rae_ext_rae_buf_get(buf: out, index: at)
+    ret byte as Int
+  }
+}
+
+# Whether `value` printed with `precision` significant digits (into `out`) reads back to it
+func jsonReadsBack(
+  value: copy Float64
+  single: copy Bool
+  precision: view Int
+  out: copy Buffer(UInt8)
+) ret Bool {
+  unsafe {
+    let unusedLength: Int = rae_ext_json_scientific(value: value, precision: precision, out: out)
+    let back: Float64 = rae_ext_json_read_double(text: out)
+    if single {
+      ret (back as Float) is (value as Float)
+    }
+    ret back is value
+  }
+}
+
+# `byte` at `at` in `out`; the next position
+func jsonPutByte(out: copy Buffer(UInt8), at: view Int, byte: view Int) ret Int {
+  unsafe {
+    rae_ext_rae_buf_set(buf: out, index: at, value: byte as UInt8)
+  }
+  ret at + 1
+}
+
+# Digits `from` .. `to` (from the left) of the `count`-digit number `digits`, at `at`; the next
+# position
+func jsonPutDigits(
+  out: copy Buffer(UInt8)
+  at: view Int
+  digits: view Int
+  count: view Int
+  from: view Int
+  to: view Int
+) ret Int {
+  var written: Int = at
+  # the place of digit `from`, then one place down per digit
+  var place: Int = 1
+  loop var j: Int = from + 1, j < count, ++j {
+    place = place * 10
+  }
+  loop var i: Int = from, i < to, ++i {
+    written = jsonPutByte(out: out, at: written, byte: 48 + (digits / place) % 10)
+    place = place / 10
+  }
+  ret written
+}
+
+# jsonNumberWrite's text as a String (lib/Json's jbNumber / jbNumber64)
+func jsonNumberText(value: copy Float64, single: copy Bool) ret String {
+  # room for the text: the writer stores raw bytes into the 48 the list holds, its length stays 0
+  let bytes: List(UInt8) = List.create(UInt8, cap: 48)
+  unsafe {
+    let length: Int = jsonNumberWrite(value: value, single: single, out: bytes.data)
+    ret rae_ext_rae_str_from_bytes(buffer: bytes.data, offset: 0, count: length)
+  }
+}
