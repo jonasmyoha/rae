@@ -1,0 +1,26 @@
+# A call's `(` and an index's `[` belong to the callee's line: a line that starts with one begins a
+# new item of a vertical literal (and a new statement), it never calls or indexes the line above.
+func main() {
+  let first: Float = 2.0
+  let second: Float = 3.0
+  let values: List(Float) = {
+    first - 1.0
+    (second + 1.0) - 1.0
+    first
+    (first)
+    second
+  }
+  log(
+    "{values.length} items: {values.copyAtDefault(index: 0)}, {values.copyAtDefault(index: 1)}, {values.copyAtDefault(
+      index: 3
+    )}"
+  )
+  let pairs: List(List(Int)) = {
+    [1, 2]
+    [3, 4]
+    [5]
+    [6]
+    [7, 8]
+  }
+  log("{pairs.length} pairs")
+}

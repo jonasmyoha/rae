@@ -1614,6 +1614,14 @@ static AstExpr* parse_postfix(Parser* parser) {
   AstExpr* expr = parse_primary(parser);
 
   for (;;) {
+    /* A call's `(` and an index's `[` belong to the callee's line: a newline
+     * ends an item (of a vertical list or object literal, or a statement), so
+     * `first - 1.0` then `(second + 1.0) - 1.0` on the next line are two
+     * items, not a call of `1.0` (#52838683). */
+    if ((parser_check(parser, TOK_LPAREN) || parser_check(parser, TOK_LBRACKET))
+        && parser_peek(parser)->line != parser_previous(parser)->line) {
+      break;
+    }
     if (parser_match(parser, TOK_LPAREN)) {
 
       expr = finish_call(parser, expr, parser_previous(parser));

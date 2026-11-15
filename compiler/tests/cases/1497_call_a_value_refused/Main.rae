@@ -1,0 +1,8 @@
+# Only a function is called: a Float binding or a Float expression followed by `(...)` is a compile
+# error naming its type (it used to reach the C lowering, or compile to a garbage value).
+func main() {
+  let x: Float = 2.0
+  let y: Float = x(1.0)
+  let z: Float = (x + 1.0)(2.0)
+  log("{y} {z}")
+}

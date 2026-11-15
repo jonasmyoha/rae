@@ -2738,6 +2738,48 @@ static AstDecl* resolve_qualified_function(CompilerContext* ctx, AstModule* modu
 
 static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl);
 
+/* Only a function is called (#52838683): `x(1.0)` with a `let x: Float`, or
+ * `(a + b)(c)`, is refused here, naming the value's type, instead of reaching
+ * the C lowering (or, for an expression callee, compiling to garbage). A
+ * value of a function type stays callable. A name is a value binding when it
+ * is a local or parameter (no declaration, inside a scope), it is spelled as a
+ * value (camelCase; a type parameter is PascalCase), and no function of that
+ * name is visible. */
+static bool sema_type_is_callable(const TypeInfo* type) {
+    while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+    return !type || type->kind == TYPE_FUNC || type->kind == TYPE_ANY || type->kind == TYPE_UNKNOWN
+        || type->kind == TYPE_GENERIC_PARAM;
+}
+
+static bool sema_report_value_called(AstModule* module, const AstExpr* call, Symbol* callee_symbol) {
+    const AstExpr* callee = call->as.call.callee;
+    if (!callee) return false;
+    const TypeInfo* type = NULL;
+    char what[160];
+    if (callee->kind == AST_EXPR_IDENT) {
+        Str name = callee->as.ident;
+        if (!callee_symbol || callee_symbol->decl || callee_symbol->scope_depth <= 0) return false;
+        if (name.len == 0 || !(name.data[0] >= 'a' && name.data[0] <= 'z')) return false;
+        for (Symbol* sym = callee_symbol; sym; sym = sym->sameNext)
+            if (sym->decl && sym->decl->kind == AST_DECL_FUNC) return false;
+        type = callee_symbol->type;
+        snprintf(what, sizeof what, "'%.*s'", (int)name.len, name.data);
+    } else {
+        type = callee->resolved_type;
+        snprintf(what, sizeof what, "this expression");
+    }
+    if (sema_type_is_callable(type)) return false;
+    while (type->kind == TYPE_REF) type = type->as.ref.base;
+    char buf[480];
+    snprintf(buf, sizeof buf,
+             "%s is a %.*s, not a function: only a function can be called (a `(` that starts a line "
+             "begins a new item or statement; it never calls the line above)",
+             what, (int)type->name.len, type->name.data);
+    diag_error(sema_diag_file(module), (int)call->line, (int)call->column, buf);
+    if (module) module->had_error = true;
+    return true;
+}
+
 
 // ===== #877: unsafe-obligation scan of GENERIC TEMPLATE bodies ===============
 //
@@ -8081,6 +8123,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                                            callee_symbol->decl->module_name &&
                                            sema_module_globally_imported(callee_symbol->decl->module_name);
             if (!callee_is_prelude_const) sema_analyze_expr(ctx, module, symbols, expr->as.call.callee, false);
+            if (sema_report_value_called(module, expr, callee_symbol)) {
+                expr->resolved_type = type_get_void(ctx->type_registry);
+                break;
+            }
             AstCallArg* arg = expr->as.call.args;
             while (arg) { sema_analyze_expr(ctx, module, symbols, arg->value, true); arg = arg->next; }
             /* Skip name re-resolution if this call is ALREADY resolved (decl_link
