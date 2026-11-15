@@ -1,9 +1,10 @@
-# Hardware check for packages/storeKit (docs/store-kit.md) on a Mac: StoreKit 2 is there, a
-# products request and an entitlements request start in the background, finish and are read back
-# as the package's types, and the updates listener starts. This program has no bundle id, so
-# StoreKit answers the products request with an error (invalidApp) and no products: a purchase
-# from a StoreKit configuration file needs a test hosted by an app (QUEUE.md). Exit code 0 =
-# passed; away from an Apple platform there is nothing to test.
+# Hardware check for packages/storeKit (docs/store-kit.md) on a Mac or in the iOS Simulator:
+# StoreKit 2 is there, a products, an entitlements and a finish request start in the background,
+# finish and are read back as the package's types, and the updates listener starts. No StoreKit
+# configuration is set up here, so the products request finishes with no products: on a Mac with
+# StoreKit's invalidApp error (`rae run` gives no bundle id), in the iOS Simulator with none
+# (bash checks/storeKit/simulator.sh). The purchase test is checks/storeKitPurchase. Exit code
+# 0 = passed; away from an Apple platform there is nothing to test.
 open storeKit/StoreKit
 
 func main() ret Int {
@@ -31,10 +32,6 @@ func main() ret Int {
   log("products: {loaded.products.length}, error [{loaded.error}]")
   loop let product: view StoreProduct in loaded.products {
     log("  {product.id}: {product.displayName} {product.displayPrice} ({product.kind})")
-  }
-  if loaded.products.length is 0 and loaded.error.length() is 0 {
-    log("FAIL: no products and no error")
-    ret 1
   }
   let entitlements: StoreRequest = requestEntitlements()
   let entitlementsStatus: RequestStatus = waitForRequest(request: entitlements, timeoutMs: 20000)

@@ -309,6 +309,7 @@ fi
 # The packages with C (a `native` block, docs/toolchain-and-packages-decision.md): an app whose C
 # includes a package's header compiles its sources into the app, with its options.
 package_definitions=""
+project_swift=""
 package_lines=$(cd "$ex_dir" && "$rae" tree --native 2>/dev/null || true)
 if [ -n "$package_lines" ]; then
   tab=$(printf '\t')
@@ -321,6 +322,9 @@ if [ -n "$package_lines" ]; then
     echo "gen-ios: compiling package $package_name from source into the app"
     for package_source in $package_sources; do
       box3d_sources="${box3d_sources}  \"$package_install/$package_source\"\n"
+      # A package's Swift (the storeKit package's glue over StoreKit 2, which has no C API):
+      # the project compiles Swift too, and Xcode links the Swift runtime
+      case "$package_source" in *.swift) project_swift=" Swift" ;; esac
     done
     box3d_includes="${box3d_includes}  \"$package_install/include\"\n"
     if [ -n "$package_defines" ]; then
@@ -367,12 +371,26 @@ EOF
   XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME \"AppIcon\")\n"
 fi
 
+# The C options and definitions. With a Swift source they are limited to C and Objective-C (the
+# Swift compiler takes neither `-w` nor the C definitions); without one they stay plain, so a
+# project with no Swift is generated exactly as before.
+if [ -n "$project_swift" ]; then
+  swift_definitions=""
+  for definition in $package_definitions; do swift_definitions="$swift_definitions;$definition"; done
+  compile_settings="target_compile_definitions(\${APP} PRIVATE \"\$<\$<COMPILE_LANGUAGE:C,OBJC>:RAE_HAS_SDL3;RAE_HAS_WEBGPU$swift_definitions>\")\n"
+  compile_settings="${compile_settings}target_compile_options(\${APP} PRIVATE \"\$<\$<COMPILE_LANGUAGE:C,OBJC>:-w;-ffp-contract=off;-g>\")"
+else
+  compile_settings="target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU $package_definitions)\n"
+  compile_settings="${compile_settings}target_compile_options(\${APP} PRIVATE -w -ffp-contract=off -g)"
+fi
+
 # 3. Emit CMakeLists.
 # OBJC as well as C: a package's device sources may be Objective-C (.m), as
-# the audio package's are (miniaudio's iOS code and AVAudioSession).
+# the audio package's are (miniaudio's iOS code and AVAudioSession); and Swift
+# when one is Swift (the storeKit package's).
 cat > "$gen/CMakeLists.txt" <<EOF
 cmake_minimum_required(VERSION 3.28)
-project(RaeApp C OBJC)
+project(RaeApp C OBJC$project_swift)
 
 set(APP RaeApp)
 set(RAE_IOS_PHONE_ORIENTATIONS "$phone_orientations")
@@ -387,8 +405,7 @@ $(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asse
 
 $(printf "%b" "${pkg_lines:-}")
 
-target_compile_definitions(\${APP} PRIVATE RAE_HAS_SDL3 RAE_HAS_WEBGPU $package_definitions)
-target_compile_options(\${APP} PRIVATE -w -ffp-contract=off -g)
+$(printf "%b" "$compile_settings")
 target_include_directories(\${APP} PRIVATE
   "$runtime_dir"
   "$frameworks/SDL3.xcframework/ios-arm64/Headers"
@@ -430,15 +447,25 @@ set_target_properties(\${APP} PROPERTIES
   XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
   XCODE_ATTRIBUTE_CODE_SIGN_STYLE "Automatic"
   $entitlements_line
-  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target")
+  XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "$deployment_target"
+  XCODE_ATTRIBUTE_SWIFT_VERSION "5.0")
 $(printf "%b" "$icon_properties")
 $(printf "%b" "$wamr_cmake")
 EOF
 
 # 4. Configure the Xcode project.
 echo "gen-ios: configuring Xcode project..."
+# RAE_IOS_SDK=iphonesimulator configures it for the iOS Simulator instead of a device: CMake
+# links the xcframeworks' slice for the SDK it is configured for, so one project builds for one
+# of the two.
+ios_sdk=${RAE_IOS_SDK:-iphoneos}
+case "$ios_sdk" in
+  iphoneos|iphonesimulator) ;;
+  *) echo "error: RAE_IOS_SDK is iphoneos or iphonesimulator, not '$ios_sdk'" >&2; exit 1 ;;
+esac
 cmake -S "$gen" -B "$gen/proj" -G Xcode \
   -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_OSX_SYSROOT="$ios_sdk" \
   -DCMAKE_OSX_ARCHITECTURES=arm64 \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" >/dev/null
 
@@ -460,7 +487,8 @@ RAE_IOS_NAME="$name"
 RAE_IOS_BUILD_NAME="$build_name"
 RAE_IOS_BUNDLE_ID="$bundle_id"
 RAE_IOS_PROJ="$gen/proj/RaeApp.xcodeproj"
-RAE_IOS_APP="$gen/proj/Release-iphoneos/RaeApp.app"
+RAE_IOS_APP="$gen/proj/Release-$ios_sdk/RaeApp.app"
+RAE_IOS_SDK="$ios_sdk"
 RAE_IOS_ARCHIVE="$gen/RaeApp.xcarchive"
 EOF
 

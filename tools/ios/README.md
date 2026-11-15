@@ -48,6 +48,19 @@ device is held; `portrait` locks a phone upright), `RAE_IOS_DEPLOYMENT_TARGET` (
 icon, made the AppIcon set of a generated asset catalog (single-size; Xcode
 makes the rest).
 
+**The iOS Simulator: `RAE_IOS_SDK=iphonesimulator`.** By default the project
+is for a device (`iphoneos`). CMake links the xcframeworks' slice for the SDK it
+is configured for, so a project builds for one of the two; with
+`RAE_IOS_SDK=iphonesimulator` it builds for the simulator, unsigned:
+`xcodebuild -project build/ios/<name>/proj/RaeApp.xcodeproj -scheme RaeApp -sdk
+iphonesimulator CODE_SIGNING_ALLOWED=NO build`, then `xcrun simctl install` and
+`launch`. `checks/storeKit/simulator.sh` does the whole round.
+
+**A package's Swift.** A package whose `sourcesDevice` lists a `.swift` file
+(the storeKit package's glue over StoreKit 2) gets it compiled into the app: the
+project then enables Swift, and the C options and definitions apply to the C and
+Objective-C sources only.
+
 **The build folder: `RAE_IOS_BUILD_NAME`.** Everything is generated into
 `build/ios/<name>/` (the Xcode project under `proj/`, `meta.env`, the archive
 and the `.ipa`), where `<name>` is `RAE_IOS_BUILD_NAME`, by default the project
