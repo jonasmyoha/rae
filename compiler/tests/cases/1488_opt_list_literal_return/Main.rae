@@ -1,0 +1,54 @@
+# A list literal returned from a function that returns an optional list (`ret List(Float) { ... }`
+# into `opt List(Float)`), for each kind of element: a Float, an Int, a String, a struct and a list
+# of lists. The literal is moved into the optional; deep-copying it took the address of an rvalue
+# and the C did not compile. The run is leak-checked.
+type Point {
+  x: Int
+  y: Int
+}
+
+func floats(on: view Bool) ret opt List(Float) {
+  if not on {
+    ret none
+  }
+  ret List(Float) { 1.5, 2.5 }
+}
+
+func ints() ret opt List(Int) {
+  ret List(Int) { 1, 2, 3 }
+}
+
+func strings(name: view String) ret opt List(String) {
+  ret List(String) { "a", name, "{name}!" }
+}
+
+func points() ret opt List(Point) {
+  ret List(Point) { Point { x: 1, y: 2 }, Point { x: 3, y: 4 } }
+}
+
+func nested() ret opt List(List(Int)) {
+  ret List(List(Int)) { List(Int) { 1 }, List(Int) { 2, 3 } }
+}
+
+func main() {
+  if let got: List(Float) = floats(on: true) {
+    log("floats {got.length}: {got.copyAtDefault(index: 1)}")
+  }
+  if floats(on: false) is none {
+    log("none stays none")
+  }
+  if let got: List(Int) = ints() {
+    log("ints {got.length}: {got.copyAtDefault(index: 2)}")
+  }
+  let name: String = "rae"
+  if let got: List(String) = strings(name: name) {
+    let last: String = got.copyAtDefault(index: 2)
+    log("strings {got.length}: {last}, and the name is still {name}")
+  }
+  if let got: List(Point) = points() {
+    log("points {got.length}: {got.copyAtDefault(index: 1).y}")
+  }
+  if let got: List(List(Int)) = nested() {
+    log("nested {got.length}: {got.copyAtDefault(index: 1).length}")
+  }
+}

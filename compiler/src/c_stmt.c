@@ -267,6 +267,11 @@ static bool c_expr_can_move_owned_payload(const AstExpr* expr) {
     case AST_EXPR_CALL:
     case AST_EXPR_METHOD_CALL:
     case AST_EXPR_OBJECT:
+    // A list literal builds a fresh list that owns its elements: move it. Deep-copying it took
+    // the address of the literal's statement expression, an rvalue, and the C did not compile
+    // (`ret List(Float) { ... }` from a function returning `opt List(Float)`).
+    case AST_EXPR_COLLECTION_LITERAL:
+    case AST_EXPR_LIST:
     case AST_EXPR_INTERP:
     case AST_EXPR_BINARY:
     case AST_EXPR_OWN:
