@@ -1,0 +1,66 @@
+# Hardware check for packages/storeKit (docs/store-kit.md) on a Mac: StoreKit 2 is there, a
+# products request and an entitlements request start in the background, finish and are read back
+# as the package's types, and the updates listener starts. This program has no bundle id, so
+# StoreKit answers the products request with an error (invalidApp) and no products: a purchase
+# from a StoreKit configuration file needs a test hosted by an app (QUEUE.md). Exit code 0 =
+# passed; away from an Apple platform there is nothing to test.
+open storeKit/StoreKit
+
+func main() ret Int {
+  if not storeKitAvailable() {
+    log("STOREKIT OK: no StoreKit 2 here, nothing to test")
+    ret 0
+  }
+  let ids: List(String) = { "com.example.rae.unlock", "com.example.rae.coins" }
+  let products: StoreRequest = requestProducts(ids: ids)
+  if products.id <= 0 {
+    log("FAIL: the products request did not start")
+    ret 1
+  }
+  let productsStatus: RequestStatus = waitForRequest(request: products, timeoutMs: 20000)
+  if productsStatus is not RequestStatus.done {
+    log("FAIL: the products request did not finish ({productsStatus})")
+    ret 1
+  }
+  let loaded: ProductsResult = productsResult(request: products)
+  releaseRequest(request: products)
+  if requestStatus(request: products) is not RequestStatus.unknown {
+    log("FAIL: a released request is still there")
+    ret 1
+  }
+  log("products: {loaded.products.length}, error [{loaded.error}]")
+  loop let product: view StoreProduct in loaded.products {
+    log("  {product.id}: {product.displayName} {product.displayPrice} ({product.kind})")
+  }
+  if loaded.products.length is 0 and loaded.error.length() is 0 {
+    log("FAIL: no products and no error")
+    ret 1
+  }
+  let entitlements: StoreRequest = requestEntitlements()
+  let entitlementsStatus: RequestStatus = waitForRequest(request: entitlements, timeoutMs: 20000)
+  let held: EntitlementsResult = entitlementsResult(request: entitlements)
+  releaseRequest(request: entitlements)
+  if entitlementsStatus is not RequestStatus.done {
+    log("FAIL: the entitlements request did not finish ({entitlementsStatus})")
+    ret 1
+  }
+  log("entitlements: {held.transactions.length}")
+  let finish: StoreRequest = requestFinish(transactionId: 1)
+  let finishStatus: RequestStatus = waitForRequest(request: finish, timeoutMs: 20000)
+  let finished: FinishResult = finishResult(request: finish)
+  releaseRequest(request: finish)
+  if finishStatus is not RequestStatus.done or finished.finished {
+    log("FAIL: finishing an unknown transaction ({finishStatus}, finished {finished.finished})")
+    ret 1
+  }
+  log("finish of an unknown transaction: [{finished.error}]")
+  if not listenForUpdates() {
+    log("FAIL: the updates listener did not start")
+    ret 1
+  }
+  if let update: StoreTransaction = nextUpdate() {
+    log("update: {update.productId}")
+  }
+  log("STOREKIT OK: requests start, finish and read back; the listener runs")
+  ret 0
+}

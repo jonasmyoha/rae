@@ -43,6 +43,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `uiZoom` | a `TransformFx` scale on a whole subtree, painted: a card with a stroke, a shadow, a gradient, text, an icon and a clipped list, at `RAE_UI_ZOOM`. Pictures: docs/images/ui-zoom |
 | `webPackageAsset` | a package's shader and declared file, natively and on a page (`compiler/tools/wasm_webgpu_smoke.sh` runs it in headless Chrome) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |
+| `storeKit` | `packages/storeKit` (docs/store-kit.md): on a Mac, products, entitlements and finish requests start, finish and are read back, and the updates listener starts (no purchase: that needs an app-hosted test) |
 | `webRelay` | a player reaches a relay session over WebSocket and gets 100 messages echoed in order by a UDP host: natively (its own relay and host) and in the browser (`compiler/tools/wasm_relay_smoke.sh`, the page's own WebSocket) |
 | `webReadback` | a nonblocking readback completes in a `mainLoop`, natively and in the browser |
 | `webTask` | a spawned task that sleeps runs between the frames of a `mainLoop`, natively and in the browser |
