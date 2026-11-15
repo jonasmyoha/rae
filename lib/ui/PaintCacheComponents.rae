@@ -1,0 +1,13 @@
+# ui/PaintCacheComponents — a node whose subtree can be drawn from a picture of itself
+# (ui/renderSystem/RenderPaintCache, lib/Gpu2dCanvasCache): put it on a canvas of many nodes (the
+# Camera2D root). While all of its subtree fits on screen (a canvas zoomed out), the subtree is
+# drawn once into a texture the frame's size and then drawn as that one image, moved and scaled
+# with the camera, until the content changes or the zoom leaves `zoomOutLimit`..`zoomInLimit`
+# times the zoom it was drawn at (then it is drawn again, at the new zoom). When it does not all
+# fit (zoomed in), the nodes are drawn as they are. A cached subtree does not animate: a hover or a
+# motion inside it shows when the picture is drawn again.
+type PaintCache {
+  enabled: Bool = true
+  zoomInLimit: Float = 1.5
+  zoomOutLimit: Float = 0.5
+}

@@ -1,0 +1,338 @@
+# A cached drawing (ui/PaintCacheComponents, ui/renderSystem/RenderPaintCache,
+# lib/Gpu2dCanvasCache):
+# 50,000 mini timelines (checks/uiCanvasCull's 4-node sub-scene) on a Camera2D canvas with a
+# PaintCache. Zoomed out so all of them fit, the first frame draws them into the picture and the
+# next ones draw the picture: their drawing (the paint walk, and the frame from its begin to its
+# end) must take under 8 ms. Zoomed in past the fit, the real nodes are drawn. The pop where the
+# picture gives way to the nodes is measured: the same camera drawn from the picture and drawn as
+# the nodes, captured at that zoom and captured further out and scaled up, compared pixel by pixel.
+# Run headless:
+#
+#   RAE_HEADLESS_FRAMES=100000 compiler/bin/rae run checks/uiPaintCache/Main.rae
+#
+# RAE_CANVAS_COUNT=N for another size. Exit 0 when the zoomed-out drawing is under the bound.
+import Gpu2d
+import Math
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/PaintCacheComponents
+open ui/Pipeline
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+open Gpu2dCanvasCache
+open ui/renderSystem/RenderPaintCache
+
+const designW: Int = 1280
+
+const designH: Int = 800
+
+const timedFrames: Int = 30
+
+const boundMs: Float64 = 8.0
+
+func seconds() ret Float64 {
+  ret (nowNs() as Float64) / 1000000000.0
+}
+
+func ms(seconds: view Float64) ret String {
+  let hundredths: Int = (seconds * 100000.0) as Int
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  schedule: Schedule
+  root: EntityId
+  gridW: Float
+  gridH: Float
+}
+
+type Drawn {
+  walk: Float64
+  frame: Float64
+}
+
+# One frame with the camera at `zoom` on the grid's middle, moved by `shift` design units
+func frame(
+  rig: mod Rig
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  zoom: view Float
+  shift: view Float
+) ret Drawn {
+  rig.world.cameras.componentSet(
+    entityId: rig.root
+    data: {
+      zoom: zoom
+      offsetX: (designW as Float) * 0.5 - rig.gridW * 0.5 * zoom + shift
+      offsetY: (designH as Float) * 0.5 - rig.gridH * 0.5 * zoom
+    }
+  )
+  runScheduledUiSystems(
+    schedule: rig.schedule
+    world: rig.world
+    uiSystems: rig.uiSystems
+    res: gpuUi
+  )
+  let start: Float64 = seconds()
+  Gpu2d.beginFrame(
+    canvas: canvas
+    r: 0.02
+    g: 0.04
+    b: 0.06
+    a: 1.0
+  )
+  let walkStart: Float64 = seconds()
+  renderSystemGpu2d(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    res: gpuUi
+    canvas: canvas
+  )
+  let walk: Float64 = seconds() - walkStart
+  Gpu2d.endFrame(canvas: canvas)
+  ret Drawn { walk: walk, frame: seconds() - start }
+}
+
+# The average of `timedFrames` frames at `zoom`, panning half a unit a frame
+func timed(
+  rig: mod Rig
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  zoom: view Float
+) ret Drawn {
+  var total: Drawn = { walk: 0.0, frame: 0.0 }
+  loop var i: Int = 0, i < timedFrames, ++i {
+    let one: Drawn = frame(
+      rig: rig
+      gpuUi: gpuUi
+      canvas: canvas
+      zoom: zoom
+      shift: (i as Float) * 0.5
+    )
+    total.walk = total.walk + one.walk
+    total.frame = total.frame + one.frame
+  }
+  ret Drawn {
+    walk: total.walk / (timedFrames as Float64)
+    frame: total.frame / (timedFrames as Float64)
+  }
+}
+
+# The picture of one frame at `zoom` (from the picture, or as the nodes), as its file's bytes
+func picture(
+  rig: mod Rig
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  zoom: view Float
+  path: view String
+) ret List(Int) {
+  let unusedSet: Bool = Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: path)
+  # the file a present writes holds the frame before it: the same frame twice
+  loop var i: Int = 0, i < 2, ++i {
+    let unusedDrawn: Drawn = frame(
+      rig: rig
+      gpuUi: gpuUi
+      canvas: canvas
+      zoom: zoom
+      shift: 0.0
+    )
+  }
+  let bytes: List(Int) = Sys.readFileBytes(path: path)
+  # later frames write elsewhere, so this picture stays as it was
+  let unusedMoved: Bool = Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: "{path}.next.bmp")
+  ret bytes
+}
+
+# How two pictures differ: the mean difference of a channel (0-255) and the share of channels off
+# by more than 48, in hundredths of a percent
+func difference(a: view List(Int), b: view List(Int)) ret String {
+  if a.length is not b.length or a.length < 55 {
+    ret "(no pictures: {a.length} and {b.length} bytes)"
+  }
+  var sum: Int = 0
+  var far: Int = 0
+  loop var i: Int = 54, i < a.length, ++i {
+    var gap: Int = a.copyAtDefault(index: i) - b.copyAtDefault(index: i)
+    if gap < 0 {
+      gap = -gap
+    }
+    sum = sum + gap
+    if gap > 48 {
+      far = far + 1
+    }
+  }
+  let count: Int = a.length - 54
+  let mean: Int = sum * 100 / count
+  let share: Int = far * 10000 / count
+  ret "mean {mean / 100}.{(mean % 100) / 10}{mean % 10} of 255, {share / 100}.{(share % 100) / 10}{share % 10} % of channels off by more than 48"
+}
+
+func setCache(rig: mod Rig, enabled: view Bool) {
+  rig.world.paintCaches.componentMod(entityId: rig.root).enabled = enabled
+}
+
+func main() ret Int {
+  var count: Int = Sys.getEnv(name: "RAE_CANVAS_COUNT").toInt()
+  if count <= 0 {
+    count = 50000
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "Paint cache check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: "checks/uiCanvasCull/Page.raescene")
+  )
+  let root: EntityId = nodeEntityFor(world: world, nodeId: "CanvasRoot")
+  let mini: Scene = loadSceneFile(path: "checks/uiCanvasCull/MiniTimeline.raescene")
+  if isNone(this: root) or mini.ok is false {
+    log("UI PAINT CACHE FAILED: the scenes did not load")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  world.cameras.componentSet(entityId: root, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  world.paintCaches.componentSet(entityId: root, data: {})
+  let columns: Int = Math.max(a: 1, b: Math.sqrt(x: (count as Float) * 3.0) as Int)
+  loop var i: Int = 0, i < count, ++i {
+    var overrides: List(SceneOverride) = emptyOverrides()
+    addTextOverride(list: overrides, nodeId: "Header", value: "Scene {i + 1}")
+    let entityId: EntityId = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: mini
+      overrides: overrides
+    )
+    let rect: mod Rect = world.rects.componentMod(entityId: entityId)
+    rect.position.x = ((i % columns) as Float) * 280.0
+    rect.position.y = ((i / columns) as Float) * 110.0
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: root
+    )
+  }
+  let rows: Int = (count + columns - 1) / columns
+  let schedule: Schedule = createUiPipeline(world: world)
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    schedule: own schedule
+    root: root
+    gridW: (columns as Float) * 280.0
+    gridH: (rows as Float) * 110.0
+  }
+  # all of it on screen, with room for the pan
+  let fit: Float = Math.min(
+    a: ((designW as Float) - 60.0) / rig.gridW
+    b: ((designH as Float) - 60.0) / rig.gridH
+  )
+  # the capture frame, then the cached ones
+  let capture: Drawn = frame(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit
+    shift: 0.0
+  )
+  let cached: Drawn = timed(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit
+  )
+  let captures: Int = canvas.caches.captures
+  # zoomed in past the fit: the nodes themselves
+  let nodes: Drawn = timed(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit * 4.0
+  )
+  # the pop, captured at the fit: the same camera from the picture and as the nodes
+  let folder: String = Sys.getEnv(name: "TMPDIR")
+  let fromPicture: List(Int) = picture(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit
+    path: "{folder}/rae-paintCache-picture.bmp"
+  )
+  setCache(rig: rig, enabled: false)
+  let asNodes: List(Int) = picture(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit
+    path: "{folder}/rae-paintCache-nodes.bmp"
+  )
+  let sameZoom: String = difference(a: fromPicture, b: asNodes)
+  # captured at 0.7 of the fit, then zoomed in to it (1.43 times the picture's scale)
+  setCache(rig: rig, enabled: true)
+  canvasCacheForget(canvas: canvas, key: paintCacheKey(entityId: root))
+  let unusedOut: Drawn = frame(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit * 0.7
+    shift: 0.0
+  )
+  let scaledPicture: List(Int) = picture(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: fit
+    path: "{folder}/rae-paintCache-scaled.bmp"
+  )
+  let scaled: String = difference(a: scaledPicture, b: asNodes)
+  let allCaptures: Int = canvas.caches.captures
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let captureWalk: String = ms(seconds: capture.walk)
+  let captureFrame: String = ms(seconds: capture.frame)
+  let cachedWalk: String = ms(seconds: cached.walk)
+  let cachedFrame: String = ms(seconds: cached.frame)
+  let nodesWalk: String = ms(seconds: nodes.walk)
+  let nodesFrame: String = ms(seconds: nodes.frame)
+  log(
+    "{count} mini timelines, all on screen: the capture frame's walk {captureWalk} ms (frame {captureFrame} ms), then from the picture the walk {cachedWalk} ms, the frame {cachedFrame} ms ({captures} capture)"
+  )
+  log("  zoomed in 4 times: the nodes, the walk {nodesWalk} ms, the frame {nodesFrame} ms")
+  log("  the pop at the fit, picture against nodes: {sameZoom}")
+  log(
+    "  the same, the picture taken at 0.7 of the fit and scaled up: {scaled} ({allCaptures} captures in all)"
+  )
+  if cached.frame * 1000.0 >= boundMs or cached.walk * 1000.0 >= boundMs {
+    log(
+      "UI PAINT CACHE FAILED: drawing from the picture takes {cachedFrame} ms, the bound is {boundMs} ms"
+    )
+    ret 1
+  }
+  log("UI PAINT CACHE OK")
+  ret 0
+}

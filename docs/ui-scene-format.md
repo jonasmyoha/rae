@@ -1253,3 +1253,32 @@ Case 1486 checks the ends, the hit test (on the curve and 3 points off hit, 10 p
 side do not), a moved node, the minimum width and the scene keys; `checks/uiWires` draws 10,000
 wires between 2,000 boxes: 1.1 ms of CPU a frame with all on screen (0.26 ms zoomed in), and
 about 1.7 ms of GPU time.
+
+## 40. `PaintCache`, and what a zoomed-out canvas leaves out
+
+A canvas of many nodes, zoomed out, used to draw every node: 50,000 mini timelines took 3.6 s a
+frame. Three rules make it cheap (lib/ui/renderSystem/RenderPaintCache):
+
+- **Specks.** Under a zoomed-out camera (a node's scale under 1), a node at most 4 pixels on
+  screen draws its own box only, not its children.
+- **Small text.** Under a zoomed-out camera, text under 3 pixels tall is not drawn.
+- **A cached picture.** A node with `PaintCache` (put it on the camera's root) whose whole
+  subtree fits on screen draws that subtree once into a texture the frame's size
+  (lib/Gpu2dCanvasCache) and then draws the texture as one image, moved and scaled with the
+  camera. It draws the subtree again when the content changes (rects, shapes, texts, sprites,
+  layout's inputs, which nodes are active or there) or when the zoom leaves `zoomOutLimit`..
+  `zoomInLimit` (0.5..1.5) times the zoom it was drawn at. When the subtree does not all fit
+  (zoomed in), the nodes are drawn as they are.
+
+```json
+"CanvasRoot": { "Rect": { ... }, "Camera2D": {}, "PaintCache": {} }
+```
+
+At scale 1 or more nothing is cut, so an ordinary page draws as it always has. A cached subtree
+does not animate: a hover or a motion inside it shows when the picture is drawn again.
+
+`checks/uiPaintCache`, 50,000 mini timelines headless on an M-series Mac: the capture frame
+14 ms, then each frame drawn from the picture 0.6 ms (its paint walk 0.25 ms); zoomed in 4 times,
+the nodes themselves 8 ms. The pop where the picture gives way to the nodes, the same camera drawn
+both ways: a mean of 0.01 of 255 when the picture was drawn at that zoom, 0.48 when it was drawn
+at 0.7 of it and scaled up. Case 1487 checks the rules without a GPU.

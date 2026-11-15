@@ -1,0 +1,179 @@
+# The paint walk's detail rules and a PaintCache's bookkeeping (ui/renderSystem/RenderPaintCache),
+# headless: under a zoomed-out camera a node at most 4 pixels on screen draws its own box only and
+# text under 3 pixels tall is skipped, while at zoom 1 nothing is cut; a PaintCache node's content
+# box is the union of its subtree's boxes in its own units; the content signature stays when the
+# camera pans and zooms and changes when a node moves; with no frame open a PaintCache node walks
+# its children as usual.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/cameraSystem/CameraSystem
+open ui/layoutSystem/LayoutSystem
+open ui/renderSystem/RenderPaintCache
+open Gpu2dCanvas
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  if not isNone(this: parent) {
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: parent
+    )
+  }
+  ret entityId
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func choice(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  canvas: mod Gpu2dCanvas
+) ret String {
+  let children: PaintChildren = paintChildrenChoose(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    canvas: canvas
+  )
+  if children is PaintChildren.skip {
+    ret "skip"
+  }
+  if children is PaintChildren.capture {
+    ret "capture"
+  }
+  ret "walk"
+}
+
+func textCut(uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  ret paintTextTooSmall(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+}
+
+func main() ret Int {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let root: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: noEntity()
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+  )
+  world.cameras.componentSet(entityId: root, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  world.paintCaches.componentSet(entityId: root, data: {})
+  let card: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: root
+    x: 100.0
+    y: 50.0
+    w: 30.0
+    h: 20.0
+  )
+  let label: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: card
+    x: 2.0
+    y: 2.0
+    w: 26.0
+    h: 16.0
+  )
+  let far: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: root
+    x: 900.0
+    y: 700.0
+    w: 40.0
+    h: 30.0
+  )
+  place(world: world, uiSystems: uiSystems)
+  log("zoom 1: the card {choice(
+    world: world
+    uiSystems: uiSystems
+    entityId: card
+    canvas: canvas
+  )}, its text cut {textCut(uiSystems: uiSystems, entityId: label)}")
+  if let box: List(Float) = paintSubtreeBox(world: world, uiSystems: uiSystems, entityId: root) {
+    log(
+      "the content box: {box.copyAtDefault(index: 0)}, {box.copyAtDefault(index: 1)} to {box.copyAtDefault(
+        index: 2
+      )}, {box.copyAtDefault(index: 3)} (8 of margin)"
+    )
+  }
+  let before: Int = paintCacheSignature(world: world, uiSystems: uiSystems)
+  world.cameras.componentSet(entityId: root, data: { zoom: 0.1, offsetX: 30.0, offsetY: 20.0 })
+  place(world: world, uiSystems: uiSystems)
+  log("zoom 0.1: the card {choice(
+    world: world
+    uiSystems: uiSystems
+    entityId: card
+    canvas: canvas
+  )}, its text cut {textCut(uiSystems: uiSystems, entityId: label)}, the far box {choice(
+    world: world
+    uiSystems: uiSystems
+    entityId: far
+    canvas: canvas
+  )}")
+  log(
+    "the signature after the camera moved is the same: {paintCacheSignature(
+      world: world
+      uiSystems: uiSystems
+    ) is before}"
+  )
+  # the box is in the root's units, so it is the same under the camera
+  if let box: List(Float) = paintSubtreeBox(world: world, uiSystems: uiSystems, entityId: root) {
+    log(
+      "the content box under the camera: {box.copyAtDefault(index: 0)}, {box.copyAtDefault(index: 1)} to {box.copyAtDefault(
+        index: 2
+      )}, {box.copyAtDefault(index: 3)}"
+    )
+  }
+  log("the PaintCache root with no frame open: {choice(
+    world: world
+    uiSystems: uiSystems
+    entityId: root
+    canvas: canvas
+  )}")
+  world.rects.componentMod(entityId: card).position.x = 120.0
+  place(world: world, uiSystems: uiSystems)
+  log(
+    "the signature after a node moved changed: {paintCacheSignature(
+      world: world
+      uiSystems: uiSystems
+    ) is not before}"
+  )
+  ret 0
+}

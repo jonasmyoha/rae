@@ -1,0 +1,267 @@
+# Gpu2dCanvasCache — a drawing kept to draw again (canvas.caches): a slot is a texture the size of
+# the frame, in the frame's format, that a frame can draw into instead of the frame (between
+# canvasCacheBegin and canvasCacheEnd: every flush in between lands there) and then draw back as
+# one image, now and in later frames, moved and scaled. A canvas of 50,000 nodes zoomed out draws
+# that one image instead of its nodes (ui/renderSystem/RenderPaintCache decides when).
+#
+# As BackdropBlur's copy does, a capture ends the frame's render pass, renders into the slot's
+# texture in a pass of its own (cleared to transparent), and opens the frame's pass again keeping
+# what it holds. The texture holds premultiplied color, as everything the canvas draws, so it is
+# drawn back with the image shader's premultiplied flag.
+#
+# A slot also keeps the caller's own numbers about what it holds (where its content was, at what
+# scale, a signature of the content), so the caller can tell when to capture again.
+import Math
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open Gpu2dCanvas
+open Gpu2dCanvasFrame
+open Gpu2dCanvasImage
+
+type Gpu2dCacheSlot {
+  key: Int
+  texture: TextureId = noTextureId()
+  textureView: TextureViewId = noTextureViewId()
+  width: Int = 0
+  height: Int = 0
+  handle: Int = 0
+  # the caller's numbers: whether it holds a drawing, the content's signature, the content's box
+  # in the caller's node's own units, and that node's scale when it was drawn
+  ready: Bool = false
+  signature: Int = -1
+  left: Float = 0.0
+  top: Float = 0.0
+  right: Float = 0.0
+  bottom: Float = 0.0
+  scale: Float = 1.0
+  # where the caller's node was on screen when it was drawn
+  captureX: Float = 0.0
+  captureY: Float = 0.0
+}
+
+type Gpu2dCaches {
+  slots: List(Gpu2dCacheSlot)
+  # the slot a capture is drawing into (-1: the frame)
+  capturing: Int = -1
+  # captures made so far (a check reads it)
+  captures: Int = 0
+}
+
+func createGpu2dCaches() ret Gpu2dCaches {
+  ret Gpu2dCaches { slots: {} }
+}
+
+# The slot kept for `key`, or -1
+func canvasCacheFind(canvas: view Gpu2dCanvas, key: view Int) ret Int {
+  loop var i: Int = 0, i < canvas.caches.slots.length, ++i {
+    if canvas.caches.slots.copyAtDefault(index: i).key is key {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# The slot for `key` with a texture the frame's size (made, or made again after a resize); -1
+# when it cannot be made
+func canvasCacheSlot(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
+  var slot: Int = canvasCacheFind(canvas: canvas, key: key)
+  if slot < 0 {
+    canvas.caches.slots.add(value: Gpu2dCacheSlot { key: key })
+    slot = canvas.caches.slots.length - 1
+  }
+  let width: Int = canvas.offscreenWidth
+  let height: Int = canvas.offscreenHeight
+  if width <= 0 or height <= 0 {
+    ret -1
+  }
+  let known: Gpu2dCacheSlot = canvas.caches.slots.copyAtDefault(index: slot)
+  if known.width is width and known.height is height and known.handle > 0 {
+    ret slot
+  }
+  var made: Gpu2dCacheSlot = known
+  if let resources: mod GpuResources = canvas.gpuResources {
+    let unusedView: Bool = retireTextureView(resources: resources, id: known.textureView)
+    let unusedTexture: Bool = retireTexture(resources: resources, id: known.texture)
+    var format: Int32 = 0
+    unsafe {
+      format = nativeG2dBoxFormat() as Int32
+    }
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: width
+      height: height
+      format: format
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+    ) {
+      made.texture = texture
+    } else {
+      ret -1
+    }
+    if let textureView: TextureViewId = createTextureView(
+      resources: resources
+      texture: made.texture
+    ) {
+      made.textureView = textureView
+    } else {
+      ret -1
+    }
+  } else {
+    ret -1
+  }
+  made.width = width
+  made.height = height
+  made.ready = false
+  let image: Gpu2dImage = {
+    texture: made.texture
+    textureView: made.textureView
+    width: width
+    height: height
+  }
+  if made.handle is 0 {
+    canvas.images.add(value: image)
+    made.handle = canvas.images.length
+  } else {
+    canvas.images.set(index: made.handle - 1, value: image)
+    # a draw slot's bind group was made for the old view
+    loop var i: Int = 0, i < canvas.imageBindHandles.length, ++i {
+      if canvas.imageBindHandles.copyAtFallback(index: i, fallback: 0) is made.handle {
+        canvas.imageBindHandles.set(index: i, value: 0)
+      }
+    }
+  }
+  canvas.caches.slots.set(index: slot, value: made)
+  ret slot
+}
+
+# From here to canvasCacheEnd every draw lands in `key`'s slot (cleared first) instead of the
+# frame; the slot, or -1 when it cannot (no frame open, no texture): then draw as usual
+func canvasCacheBegin(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
+  if not canvasFrameActive(canvas: canvas) or canvas.caches.capturing >= 0 {
+    ret -1
+  }
+  let slot: Int = canvasCacheSlot(canvas: canvas, key: key)
+  if slot < 0 {
+    ret -1
+  }
+  canvasFlush(canvas: canvas)
+  let textureView: TextureViewId = canvas.caches.slots.copyAtDefault(index: slot).textureView
+  var opened: Bool = false
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let recording: mod Recording = canvas.recording {
+      unsafe {
+        endRenderPass(pass: canvas.framePass)
+        canvas.framePass = beginRenderPassWrites(
+          recording: recording
+          resources: resources
+          target: renderTarget(
+            colorView: textureViewRef(id: textureView)
+            clear: true
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+          )
+          timestampWrites: webgpuNull()
+        )
+      }
+      opened = true
+    }
+  }
+  if not opened {
+    ret -1
+  }
+  canvas.caches.capturing = slot
+  canvas.caches.captures = canvas.caches.captures + 1
+  ret slot
+}
+
+# Back to the frame, keeping what it holds; the slot now holds the drawing
+func canvasCacheEnd(canvas: mod Gpu2dCanvas) {
+  let slot: Int = canvas.caches.capturing
+  if slot < 0 {
+    ret
+  }
+  canvasFlush(canvas: canvas)
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let recording: mod Recording = canvas.recording {
+      unsafe {
+        endRenderPass(pass: canvas.framePass)
+        canvas.framePass = beginRenderPassWrites(
+          recording: recording
+          resources: resources
+          target: renderTarget(
+            colorView: canvasFrameTargetRef(canvas: canvas, loads: true)
+            clear: false
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+          )
+          timestampWrites: webgpuNull()
+        )
+      }
+    }
+  }
+  canvas.caches.capturing = -1
+  if let held: mod Gpu2dCacheSlot = canvas.caches.slots.modAt(index: slot) {
+    held.ready = true
+  }
+}
+
+# Draw `slot`'s drawing: the part of it that was at design box `fromX`..`fromX + fromW` x
+# `fromY`..`fromY + fromH` when it was captured, into design box `x`, `y`, `w`, `h` now
+func canvasDrawCache(
+  canvas: mod Gpu2dCanvas
+  slot: view Int
+  fromX: view Float
+  fromY: view Float
+  fromW: view Float
+  fromH: view Float
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) {
+  let held: Gpu2dCacheSlot = canvas.caches.slots.copyAtDefault(index: slot)
+  if not held.ready or held.handle is 0 {
+    ret
+  }
+  let scaleX: Float = xformAt(canvas: canvas, index: 2)
+  let scaleY: Float = xformAt(canvas: canvas, index: 3)
+  let offsetX: Float = xformAt(canvas: canvas, index: 4)
+  let offsetY: Float = xformAt(canvas: canvas, index: 5)
+  let frameWidth: Float = Math.max(a: 1.0, b: held.width as Float)
+  let frameHeight: Float = Math.max(a: 1.0, b: held.height as Float)
+  let before: Int = canvas.imageCommands.length
+  queueImageEx(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 0.0
+    handle: held.handle
+    tint: 4294967295
+    u0: (fromX * scaleX + offsetX) / frameWidth
+    v0: (fromY * scaleY + offsetY) / frameHeight
+    u1: ((fromX + fromW) * scaleX + offsetX) / frameWidth
+    v1: ((fromY + fromH) * scaleY + offsetY) / frameHeight
+    tiled: false
+  )
+  # the texture is premultiplied already (gpu2d_image.wgsl params.w)
+  if canvas.imageCommands.length > before {
+    canvas.imageCommands.set(index: before + 11, value: 1.0)
+  }
+}
+
+# Forget `key`'s drawing (its texture stays for the next capture)
+func canvasCacheForget(canvas: mod Gpu2dCanvas, key: view Int) {
+  let slot: Int = canvasCacheFind(canvas: canvas, key: key)
+  if let held: mod Gpu2dCacheSlot = canvas.caches.slots.modAt(index: slot) {
+    held.ready = false
+  }
+}

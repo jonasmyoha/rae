@@ -1,7 +1,7 @@
 // gpu2d_image.wgsl — the 2D image draw (one textured, rounded, tinted quad per
 // draw), a Rae asset since #908 (was the C constant G2D_IMG_WGSL). Output is
 // premultiplied. uImg = rect, tint (straight, premultiplied here),
-// params (radius, rotation about the quad center in radians, tile flag),
+// params (radius, rotation about the quad center in radians, tile flag, premultiplied source),
 // uv (origin + size), clip rect (design units), clip (radius, enabled) —
 // the last two are the rounded clip the box pass has always had (#1003),
 // written per draw from the clip active when the image was queued.
@@ -66,6 +66,11 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let cd = sdRoundBox(in.posD - cc, ch, cr);
     let caa = max(fwidth(cd), 0.0001);
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
+  }
+  // A source that is premultiplied already (uImg[2].w: a cached drawing, Gpu2dCanvasCache)
+  if (uImg[2].w > 0.5) {
+    let k = tint.a * cov;
+    return vec4<f32>(texel.rgb * tint.rgb * k, texel.a * k);
   }
   let a = texel.a * tint.a * cov;
   return vec4<f32>(texel.rgb * tint.rgb * a, a);  // premultiplied

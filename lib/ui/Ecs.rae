@@ -14,6 +14,7 @@ open ui/ValueComponents
 open ui/ChartComponents
 open ui/PlaneComponents
 open ui/WireComponents
+open ui/PaintCacheComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -144,6 +145,8 @@ type UiWorld {
   # wires between nodes (ui/WireComponents): the authored style, the app's wires
   wireSets: ComponentTable(Wires)
   wireDatas: ComponentTable(WireData)
+  # a subtree drawn from a cached picture while it all fits on screen (ui/PaintCacheComponents)
+  paintCaches: ComponentTable(PaintCache)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -376,6 +379,7 @@ func createUiWorld() ret UiWorld {
     planeViewStates: ComponentTable.create(PlaneViewState)
     wireSets: ComponentTable.create(Wires)
     wireDatas: ComponentTable.create(WireData)
+    paintCaches: ComponentTable.create(PaintCache)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)

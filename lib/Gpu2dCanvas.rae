@@ -44,6 +44,7 @@ open Gpu2dCanvasTiming
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 open Gpu2dCanvasBackdrop
+open Gpu2dCanvasCache
 
 func nativeG2dBoxFormat() unsafe extern("rae_g2d_format") ret Int
 
@@ -163,6 +164,7 @@ type Gpu2dCanvas {
   batchAtlas: Int = -1
   frameTarget: FrameTarget  # the drawable or the offscreen this frame (gpu/Surface)
   backdrop: Gpu2dBackdrop  # BackdropBlur's copy of the frame (Gpu2dCanvasBackdrop)
+  caches: Gpu2dCaches  # drawings kept to draw again (Gpu2dCanvasCache)
   gpuTiming: Canvas2dTiming  # the frame pass's GPU time under RAE_GPU2D_TIMING (Gpu2dCanvasTiming)
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
   offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
@@ -219,10 +221,11 @@ type Gpu2dCanvas {
   textAtlases: List(Gpu2dTextAtlas)  # index = atlas handle - 1, sized to the C atlas max
 }
 
-# Slot budget: one bind group + one clip external per same-clip run per flush
-# for boxes (the UI render system flushes once per entity), one uniform + bind
-# per image draw, two slots per image. Retired per frame and reused.
-const canvasManagerCapacity: Int = 2048
+# Slot budget: a buffer per flush and per image draw (kept and reused by the
+# next frames), a bind group per same-clip run. A canvas zoomed in on hundreds
+# of nodes flushes before each one's text: 2048 ran out, and every frame after
+# drew nothing.
+const canvasManagerCapacity: Int = 16384
 
 # rect, tint, params, uv, clip rect, clip params (#1003) — see gpu2d_image.wgsl.
 const imageUniformFloats: Int = 24
@@ -241,6 +244,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       framePacer: createFramePacer()
       frameTarget: createFrameTarget()
       backdrop: createGpu2dBackdrop()
+      caches: createGpu2dCaches()
       gpuTiming: createCanvas2dTiming()
       offscreenTexture: noTextureId()
       offscreenView: noTextureViewId()
