@@ -1,0 +1,231 @@
+# Drawing only what is on screen (lib/ui/renderSystem/RenderCull): a canvas of 1,000 mini
+# timelines (each a 4-node sub-scene: a box, a header text, two lanes) under a root with a Camera2D,
+# as the media editor's canvas prototype measured it. The paint walk (renderSystemGpu2d, the CPU's
+# part of drawing) zoomed in on the grid's middle (about 30 on screen) must take under 2 ms a frame;
+# zoomed out (all on screen) it takes what painting all of them takes. The whole frame (with the
+# begin, the end and the wait for the GPU's previous frame, about 0.9 ms with nothing on screen on
+# an M-series Mac) is printed beside it, and how many nodes each view paints. Run headless, as the
+# prototype did (a window waits for the display's refresh):
+#
+#   RAE_HEADLESS_FRAMES=100000 compiler/bin/rae run checks/uiCanvasCull/Main.rae
+#
+#
+# RAE_CANVAS_COUNT=N for another size. Exit 0 when the zoomed-in walk is under the bound.
+import Gpu2d
+import Math
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/renderSystem/RenderCull
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 1280
+
+const designH: Int = 800
+
+const miniW: Float = 240.0
+
+const miniH: Float = 80.0
+
+const gapW: Float = 40.0
+
+const gapH: Float = 30.0
+
+const timedFrames: Int = 20
+
+# The zoomed-in frame's bound, in milliseconds
+const zoomedInBoundMs: Float64 = 2.0
+
+func seconds() ret Float64 {
+  ret (nowNs() as Float64) / 1000000000.0
+}
+
+func ms(seconds: view Float64) ret String {
+  let hundredths: Int = (seconds * 100000.0) as Int
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+# A frame's drawing: the paint walk alone, and the whole frame (seconds)
+type DrawTimes {
+  walk: Float64
+  frame: Float64
+}
+
+# The drawing's times a frame with the camera at `zoom`, panning a little each frame
+func timeDrawing(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  schedule: mod Schedule
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  root: view EntityId
+  zoom: view Float
+  offsetX: view Float
+  offsetY: view Float
+) ret DrawTimes {
+  var walk: Float64 = 0.0
+  var drawing: Float64 = 0.0
+  loop var frame: Int = 0, frame < timedFrames, ++frame {
+    world.cameras.componentSet(
+      entityId: root
+      data: { zoom: zoom, offsetX: offsetX + (frame as Float) * 3.0, offsetY: offsetY }
+    )
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    let start: Float64 = seconds()
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.02
+      g: 0.04
+      b: 0.06
+      a: 1.0
+    )
+    let walkStart: Float64 = seconds()
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    walk = walk + seconds() - walkStart
+    Gpu2d.endFrame(canvas: canvas)
+    drawing = drawing + seconds() - start
+  }
+  ret DrawTimes { walk: walk / (timedFrames as Float64), frame: drawing / (timedFrames as Float64) }
+}
+
+# The nodes the walk paints now (not off screen)
+func paintedNodes(world: view UiWorld, uiSystems: view UiSystems) ret Int {
+  var painted: Int = 0
+  let count: Int = componentCount(this: uiSystems.layout.computedRects)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
+    if not paintOffScreen(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      viewW: paintViewWidth()
+      viewH: paintViewHeight()
+    ) {
+      painted = painted + 1
+    }
+  }
+  ret painted
+}
+
+func main() ret Int {
+  var count: Int = Sys.getEnv(name: "RAE_CANVAS_COUNT").toInt()
+  if count <= 0 {
+    count = 1000
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "Canvas culling check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: "checks/uiCanvasCull/Page.raescene")
+  )
+  let root: EntityId = nodeEntityFor(world: world, nodeId: "CanvasRoot")
+  let mini: Scene = loadSceneFile(path: "checks/uiCanvasCull/MiniTimeline.raescene")
+  if isNone(this: root) or mini.ok is false {
+    log("UI CANVAS CULL FAILED: the scenes did not load")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  world.cameras.componentSet(entityId: root, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  let columns: Int = Math.max(a: 1, b: Math.sqrt(x: (count as Float) * 3.0) as Int)
+  loop var i: Int = 0, i < count, ++i {
+    var overrides: List(SceneOverride) = emptyOverrides()
+    addTextOverride(list: overrides, nodeId: "Header", value: "Scene {i + 1}")
+    let entityId: EntityId = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: mini
+      overrides: overrides
+    )
+    let rect: mod Rect = world.rects.componentMod(entityId: entityId)
+    rect.position.x = ((i % columns) as Float) * (miniW + gapW)
+    rect.position.y = ((i / columns) as Float) * (miniH + gapH)
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: root
+    )
+  }
+  var schedule: Schedule = createUiPipeline(world: world)
+  let rows: Int = (count + columns - 1) / columns
+  let gridW: Float = (columns as Float) * (miniW + gapW)
+  let gridH: Float = (rows as Float) * (miniH + gapH)
+  let outZoom: Float = Math.min(a: (designW as Float) / gridW, b: (designH as Float) / gridH)
+  let zoomedOut: DrawTimes = timeDrawing(
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    gpuUi: gpuUi
+    canvas: canvas
+    root: root
+    zoom: outZoom
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  let paintedOut: Int = paintedNodes(world: world, uiSystems: uiSystems)
+  let zoomedIn: DrawTimes = timeDrawing(
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    gpuUi: gpuUi
+    canvas: canvas
+    root: root
+    zoom: 1.0
+    offsetX: 640.0 - gridW * 0.5
+    offsetY: 400.0 - gridH * 0.5
+  )
+  let paintedIn: Int = paintedNodes(world: world, uiSystems: uiSystems)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let outWalk: String = ms(seconds: zoomedOut.walk)
+  let outFrame: String = ms(seconds: zoomedOut.frame)
+  let inWalk: String = ms(seconds: zoomedIn.walk)
+  let inFrame: String = ms(seconds: zoomedIn.frame)
+  log(
+    "{count} mini timelines: zoomed out the paint walk {outWalk} ms a frame, the frame {outFrame} ms ({paintedOut} nodes painted)"
+  )
+  log("  zoomed in the paint walk {inWalk} ms, the frame {inFrame} ms ({paintedIn} painted)")
+  if zoomedIn.walk * 1000.0 >= zoomedInBoundMs {
+    log(
+      "UI CANVAS CULL FAILED: the zoomed-in paint walk takes {inWalk} ms, the bound is {zoomedInBoundMs} ms"
+    )
+    ret 1
+  }
+  log("UI CANVAS CULL OK")
+  ret 0
+}

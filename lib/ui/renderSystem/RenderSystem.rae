@@ -31,6 +31,7 @@ open ui/renderSystem/RenderHistogram
 open ui/renderSystem/RenderLineGraph
 open ui/renderSystem/RenderStatTable
 import Gpu2d
+import Math
 import Gpu2dText
 import SdfText
 import ui/animationSystem/AnimationSystem
@@ -48,6 +49,7 @@ open ui/UiSystems
 open ui/Transform
 open ui/renderSystem/RenderCaret
 open ui/renderSystem/RenderText
+open ui/renderSystem/RenderCull
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
@@ -677,6 +679,18 @@ func paintEntityG(
   Gpu2d.clearRotation(canvas: canvas)
 }
 
+# True when every pixel of `entityId`'s subtree is inside its own box: it clips its descendants
+# (OverflowPolicy clip) or masks them to its own box (a MaskShape with no source node)
+func paintClipsSubtree(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if entityClipsChildrenG(world: world, entityId: entityId) {
+    ret true
+  }
+  if componentHas(this: world.maskShapes, entityId: entityId) {
+    ret componentView(this: world.maskShapes, entityId: entityId).sourceNodeId.length() is 0
+  }
+  ret false
+}
+
 # True when `e` clips its descendants (OverflowPolicy.mode == clip).
 func entityClipsChildrenG(world: view UiWorld, entityId: view EntityId) ret Bool {
   if componentHas(this: world.overflows, entityId: entityId) is false {
@@ -694,6 +708,18 @@ func paintSubtreeG(
   canvas: mod Gpu2dCanvas
 ) {
   unsafe {
+    # Off screen (RenderCull): not painted, and when it clips its children (their pixels are
+    # inside its box) none of its subtree is either
+    let offScreen: Bool = paintOffScreen(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      viewW: paintViewWidth()
+      viewH: paintViewHeight()
+    )
+    if offScreen and paintClipsSubtree(world: world, entityId: entityId) {
+      ret
+    }
     # MaskShape (#1000): the entity AND its descendants are clipped to a
     # rounded rect / circle over its own box, or over `sourceNodeId`'s box in
     # the same page. Pushed before the entity paints so a masked sprite is cut
@@ -707,13 +733,15 @@ func paintSubtreeG(
         canvas: canvas
       )
     }
-    paintEntityG(
-      world: world
-      uiSystems: uiSystems
-      entityId: entityId
-      res: res
-      canvas: canvas
-    )
+    if not offScreen {
+      paintEntityG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
     if componentHas(this: world.childrens, entityId: entityId) is false {
       if masked {
         Gpu2d.popClipRect(canvas: canvas)
@@ -772,13 +800,30 @@ func paintSubtreeG(
     }
     let ch: view Children = componentView(this: world.childrens, entityId: entityId)
     let n: Int = ch.ids.length
+    # The children in up to three passes by their subtree's hover paint rank (a popped tile over
+    # its siblings). Each child is ranked once, and with nothing popped or on top anywhere (no
+    # PaintOnTop, no HoverScale) not at all: ranking walks the child's whole subtree, and three
+    # times per child at every depth was most of a large canvas's frame.
+    var ranks: List(Int) = {}
+    var passes: Int = 1
+    if componentCount(this: world.paintOnTops) > 0 or componentCount(this: world.hoverScales) > 0 {
+      ranks = List.create(Int, cap: n)
+      loop var i: Int = 0, i < n, ++i {
+        let rank: Int = subtreeHoverPaintRank(
+          world: world
+          entityId: rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        )
+        ranks.add(value: rank)
+        passes = Math.max(a: passes, b: rank + 1)
+      }
+    }
     var pass: Int = 0
-    loop pass < 3 {
+    loop pass < passes {
       var i: Int = 0
       loop i < n {
         let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
         # a raised node (ui/Layer isRaisedNode) is painted with its layer's roots instead
-        if subtreeHoverPaintRank(world: world, entityId: cid) is pass and componentHas(
+        if ranks.copyAtFallback(index: i, fallback: 0) is pass and componentHas(
           this: uiSystems.animation.sharedNodes
           entityId: cid
         ) is false and isRaisedNode(world: world, uiSystems: uiSystems, entityId: cid) is false {

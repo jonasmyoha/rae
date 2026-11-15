@@ -1,0 +1,108 @@
+# Drawing only what is on screen: a node whose box (after every transform, the Camera2D's too)
+# misses the viewport is not painted, and when it clips its children (an overflow clip, or a mask
+# over its own box) its whole subtree is skipped. Measured on a 1,000-node canvas (the media
+# editor's prototype): drawing took the same time zoomed in on 30 nodes as zoomed out on all of
+# them, because every node was painted.
+#
+# The test errs toward drawing. The box is widened by what can paint outside it: a margin, a
+# hover scale, a shadow's blur, a text shadow's offset and softness, a backdrop blur's radius, and
+# text measured wider or taller than its box. A rotated node, or one with no laid-out box, is
+# always drawn. The viewport is the design canvas (Gpu2d's design size), 0,0 at the top left.
+import Gpu2d
+import Math
+open ui/Ecs
+open ui/Components
+open ui/BackdropComponents
+open ui/Transform
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# Room around a box for strokes, outlines and small effects, in design units
+const paintCullMargin: Float = 8.0
+
+# How far a hover or press scale may grow a box (ButtonHoverScale stays under this)
+const paintCullScaleRoom: Float = 0.2
+
+# How far outside its box `entityId` may paint, in design units
+# (`scale`: the node's world scale, so the effects grow with a zoom as the box does)
+func paintSpill(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  box: view WorldRect
+  scale: view Float
+) ret Float {
+  var effects: Float = 0.0
+  if componentHas(this: world.shadows, entityId: entityId) {
+    effects = effects + componentView(this: world.shadows, entityId: entityId).blur * 3.0
+  }
+  if componentHas(this: world.textShadows, entityId: entityId) {
+    let textShadow: view TextShadow = componentView(this: world.textShadows, entityId: entityId)
+    effects = effects + Math.abs(value: textShadow.offset.x) + Math.abs(value: textShadow.offset.y) + textShadow.softness * 4.0
+  }
+  if componentHas(this: world.backdropBlurs, entityId: entityId) {
+    effects = effects + componentView(this: world.backdropBlurs, entityId: entityId).radius * 2.0
+  }
+  if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {
+    let measured: view MeasuredText = componentView(
+      this: uiSystems.layout.measuredTexts
+      entityId: entityId
+    )
+    effects = effects + Math.max(a: 0.0, b: measured.w - Math.abs(value: box.w) / scale)
+    effects = effects + Math.max(a: 0.0, b: measured.h - Math.abs(value: box.h) / scale)
+  }
+  ret paintCullMargin + Math.max(a: Math.abs(value: box.w), b: Math.abs(value: box.h)) * paintCullScaleRoom + effects * scale
+}
+
+# `entityId` paints nothing inside a `viewW` x `viewH` viewport: its box, widened by what can spill
+# out of it, misses it. False when it cannot tell (no box yet, or rotated).
+func paintOffScreen(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  viewW: view Float
+  viewH: view Float
+) ret Bool {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+    ret false
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
+    ret false
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  if transform.rotation is not 0.0 {
+    ret false
+  }
+  let box: WorldRect = worldRectOf(
+    wt: transform
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  let left: Float = Math.min(a: box.x, b: box.x + box.w)
+  let right: Float = Math.max(a: box.x, b: box.x + box.w)
+  let top: Float = Math.min(a: box.y, b: box.y + box.h)
+  let bottom: Float = Math.max(a: box.y, b: box.y + box.h)
+  let spill: Float = paintSpill(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    box: box
+    scale: Math.max(
+      a: 0.001
+      b: Math.max(a: Math.abs(value: transform.scale.x), b: Math.abs(value: transform.scale.y))
+    )
+  )
+  ret right + spill < 0.0 or left - spill > viewW or bottom + spill < 0.0 or top - spill > viewH
+}
+
+# The viewport the paint walk tests against: the design canvas
+func paintViewWidth() ret Float {
+  ret Gpu2d.designWidth()
+}
+
+func paintViewHeight() ret Float {
+  ret Gpu2d.designHeight()
+}

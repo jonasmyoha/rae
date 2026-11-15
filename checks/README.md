@@ -33,6 +33,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `uiTimeline` | the `Timeline` chart from a scene (three lanes, spans, marks, one selected), painted and compared with its `reference.png`; the rules are in case 1472 |
 | `uiFlameHistogram` | the `FlameGraph` and `Histogram` charts, painted and compared with its `reference.png`; the rules are in case 1473 |
 | `uiLineTable` | the `LineGraph` and `StatTable` charts, painted and compared with its `reference.png`; the rules are in case 1474 |
+| `uiCanvasCull` | drawing only what is on screen (`lib/ui/renderSystem/RenderCull`): 1,000 mini timelines (4-node sub-scenes) on a Camera2D canvas; the paint walk zoomed in on about 30 of them must take under 2 ms (it paints about 210 nodes, against all 3,930 zoomed out). Run headless (`RAE_HEADLESS_FRAMES=100000`): a window waits for the display's refresh. `RAE_CANVAS_COUNT` sets the size |
 | `uiZoom` | a `TransformFx` scale on a whole subtree, painted: a card with a stroke, a shadow, a gradient, text, an icon and a clipped list, at `RAE_UI_ZOOM`. Pictures: docs/images/ui-zoom |
 | `webPackageAsset` | a package's shader and declared file, natively and on a page (`compiler/tools/wasm_webgpu_smoke.sh` runs it in headless Chrome) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |
