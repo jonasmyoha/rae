@@ -1,0 +1,37 @@
+cheader "rae_storekit.h"
+
+# The bindings to native/RaeStoreKit.swift (docs/store-kit.md): each starts one StoreKit 2 call
+# as a request, or reads a request's state or result. Bytes are a List's `.data`. A program that
+# imports this links the package's library (native/build.sh builds it).
+func rae_storekit_available() unsafe extern("rae_storekit_available") ret Int
+
+func rae_storekit_products(
+  ids: Buffer(UInt8)
+  length: Int
+) unsafe extern("rae_storekit_products") ret Int
+
+func rae_storekit_purchase(
+  productId: Buffer(UInt8)
+  length: Int
+) unsafe extern("rae_storekit_purchase") ret Int
+
+func rae_storekit_entitlements() unsafe extern("rae_storekit_entitlements") ret Int
+
+func rae_storekit_finish(transactionId: Int) unsafe extern("rae_storekit_finish") ret Int
+
+func rae_storekit_poll(request: Int) unsafe extern("rae_storekit_poll") ret Int
+
+func rae_storekit_result_length(request: Int) unsafe extern("rae_storekit_result_length") ret Int
+
+func rae_storekit_result_copy(
+  request: Int
+  into: Buffer(UInt8)
+) unsafe extern("rae_storekit_result_copy")
+
+func rae_storekit_release(request: Int) unsafe extern("rae_storekit_release")
+
+func rae_storekit_listen() unsafe extern("rae_storekit_listen") ret Int
+
+func rae_storekit_update_length() unsafe extern("rae_storekit_update_length") ret Int
+
+func rae_storekit_update_take(into: Buffer(UInt8)) unsafe extern("rae_storekit_update_take")

@@ -1,0 +1,283 @@
+# StoreKit — selling in the App Store through StoreKit 2 (docs/store-kit.md): products by id
+# with their display price, a purchase and its outcome, the current entitlements, the updates
+# StoreKit sends later (Transaction.updates), each transaction's signed JWS (what an app sends its
+# server to check) and finishing a transaction. iOS and macOS only (Target.isApple); elsewhere
+# storeKitAvailable is false and no request starts.
+#
+# StoreKit's calls are asynchronous, so each is a StoreRequest: start it, poll it (each frame, or
+# waitForRequest), read its result, release it. What a product unlocks, the subscription rules and
+# the server's check of the JWS are the app's.
+import String
+open storeKit/StoreKitGlue
+
+enum ProductKind {
+  consumable
+  nonConsumable
+  autoRenewable
+  nonRenewable
+  other
+}
+
+# A product as the store shows it: `displayPrice` is the localized price text ("4,99 €"),
+# `price` the amount as decimal text ("4.99")
+type StoreProduct {
+  id: String
+  displayName: String
+  description: String
+  displayPrice: String
+  price: String
+  kind: ProductKind
+}
+
+# A transaction: `jws` is its signed JWS (StoreKit's jwsRepresentation) for the app's server;
+# `verified` is StoreKit's own check of it on the device (`verificationError` says why not)
+type StoreTransaction {
+  id: Int
+  originalId: Int
+  productId: String
+  purchaseDateMs: Int
+  revoked: Bool
+  verified: Bool
+  verificationError: String
+  jws: String
+}
+
+enum PurchaseOutcome { purchased, pending, canceled, failed }
+
+type ProductsResult {
+  products: List(StoreProduct)
+  error: String
+}
+
+# A purchase's outcome; `transactions` holds the one transaction of a purchase that went through
+type PurchaseResult {
+  outcome: PurchaseOutcome
+  transactions: List(StoreTransaction)
+  error: String
+}
+
+type EntitlementsResult {
+  transactions: List(StoreTransaction)
+  error: String
+}
+
+type FinishResult {
+  finished: Bool
+  error: String
+}
+
+# A started StoreKit call (id 0: it did not start)
+type StoreRequest {
+  id: Int
+}
+
+enum RequestStatus { running, done, unknown }
+
+# Whether StoreKit 2 is there (an Apple platform with the package's glue)
+func storeKitAvailable() ret Bool {
+  when Target.isApple {
+    unsafe {
+      ret rae_storekit_available() is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+func storeTextBytes(text: view String) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 1)
+  loop var i: Int = 0, i < text.length(), ++i {
+    bytes.add(value: text.byteAt(index: i) as UInt8)
+  }
+  # never an empty buffer: the glue reads `length` bytes only
+  bytes.add(value: 0)
+  ret bytes
+}
+
+# Load products by id (Product.products(for:)); an id the store does not know is left out
+func requestProducts(ids: view List(String)) ret StoreRequest {
+  var joined: String = ""
+  loop let id: view String in ids {
+    if joined.length() > 0 {
+      joined = "{joined}\n"
+    }
+    joined = "{joined}{id}"
+  }
+  when Target.isApple {
+    let bytes: List(UInt8) = storeTextBytes(text: joined)
+    unsafe {
+      ret StoreRequest { id: rae_storekit_products(ids: bytes.data, length: joined.length()) }
+    }
+  } else {
+    ret StoreRequest { id: 0 }
+  }
+}
+
+# Buy one product (product.purchase()): the system's purchase sheet, then the outcome
+func requestPurchase(productId: view String) ret StoreRequest {
+  when Target.isApple {
+    let bytes: List(UInt8) = storeTextBytes(text: productId)
+    unsafe {
+      ret StoreRequest {
+        id: rae_storekit_purchase(productId: bytes.data, length: productId.length())
+      }
+    }
+  } else {
+    ret StoreRequest { id: 0 }
+  }
+}
+
+# The transactions that entitle the user now (Transaction.currentEntitlements)
+func requestEntitlements() ret StoreRequest {
+  when Target.isApple {
+    unsafe {
+      ret StoreRequest { id: rae_storekit_entitlements() }
+    }
+  } else {
+    ret StoreRequest { id: 0 }
+  }
+}
+
+# Finish a transaction once the app has delivered what it bought (transaction.finish())
+func requestFinish(transactionId: view Int) ret StoreRequest {
+  when Target.isApple {
+    unsafe {
+      ret StoreRequest { id: rae_storekit_finish(transactionId: transactionId) }
+    }
+  } else {
+    ret StoreRequest { id: 0 }
+  }
+}
+
+func requestStatus(request: view StoreRequest) ret RequestStatus {
+  if request.id <= 0 {
+    ret RequestStatus.unknown
+  }
+  when Target.isApple {
+    var state: Int = -1
+    unsafe {
+      state = rae_storekit_poll(request: request.id)
+    }
+    if state is 0 {
+      ret RequestStatus.running
+    }
+    if state is 1 {
+      ret RequestStatus.done
+    }
+  }
+  ret RequestStatus.unknown
+}
+
+# Poll every 10 ms until the request is done or `timeoutMs` passed; its status then
+func waitForRequest(request: view StoreRequest, timeoutMs: view Int) ret RequestStatus {
+  var waited: Int = 0
+  var status: RequestStatus = requestStatus(request: request)
+  loop status is RequestStatus.running and waited < timeoutMs {
+    sleep(ms: 10)
+    waited = waited + 10
+    status = requestStatus(request: request)
+  }
+  ret status
+}
+
+# A done request's result as JSON text ("" when it is not done)
+func requestJson(request: view StoreRequest) ret String {
+  if requestStatus(request: request) is not RequestStatus.done {
+    ret ""
+  }
+  var length: Int = 0
+  unsafe {
+    length = rae_storekit_result_length(request: request.id)
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: length + 1)
+  loop var i: Int = 0, i <= length, ++i {
+    bytes.add(value: 0)
+  }
+  unsafe {
+    rae_storekit_result_copy(request: request.id, into: bytes.data)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: length)
+}
+
+# Forget a request and its result
+func releaseRequest(request: view StoreRequest) {
+  if request.id <= 0 {
+    ret
+  }
+  when Target.isApple {
+    unsafe {
+      rae_storekit_release(request: request.id)
+    }
+  }
+}
+
+func productsResult(request: view StoreRequest) ret ProductsResult {
+  let json: String = requestJson(request: request)
+  if json.length() is 0 {
+    ret ProductsResult { products: {}, error: "the request is not done" }
+  }
+  ret ProductsResult.fromJson(json: json)
+}
+
+func purchaseResult(request: view StoreRequest) ret PurchaseResult {
+  let json: String = requestJson(request: request)
+  if json.length() is 0 {
+    ret PurchaseResult {
+      outcome: PurchaseOutcome.failed
+      transactions: {}
+      error: "the request is not done"
+    }
+  }
+  ret PurchaseResult.fromJson(json: json)
+}
+
+func entitlementsResult(request: view StoreRequest) ret EntitlementsResult {
+  let json: String = requestJson(request: request)
+  if json.length() is 0 {
+    ret EntitlementsResult { transactions: {}, error: "the request is not done" }
+  }
+  ret EntitlementsResult.fromJson(json: json)
+}
+
+func finishResult(request: view StoreRequest) ret FinishResult {
+  let json: String = requestJson(request: request)
+  if json.length() is 0 {
+    ret FinishResult { finished: false, error: "the request is not done" }
+  }
+  ret FinishResult.fromJson(json: json)
+}
+
+# Start listening to the transactions StoreKit sends on its own (Transaction.updates: a purchase
+# finished on another device, a renewal, a refund, an Ask to Buy approved); call once at launch
+func listenForUpdates() ret Bool {
+  when Target.isApple {
+    unsafe {
+      ret rae_storekit_listen() is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# The oldest update not yet taken, if any
+func nextUpdate() ret opt StoreTransaction {
+  when Target.isApple {
+    var length: Int = 0
+    unsafe {
+      length = rae_storekit_update_length()
+    }
+    if length <= 0 {
+      ret none
+    }
+    var bytes: List(UInt8) = List.create(UInt8, cap: length + 1)
+    loop var i: Int = 0, i <= length, ++i {
+      bytes.add(value: 0)
+    }
+    unsafe {
+      rae_storekit_update_take(into: bytes.data)
+    }
+    ret StoreTransaction.fromJson(json: String.fromBytes(bytes: bytes, start: 0, count: length))
+  } else {
+    ret none
+  }
+}
