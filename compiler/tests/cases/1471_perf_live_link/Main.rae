@@ -1,0 +1,132 @@
+# The live link (lib/perf/PerfLive, docs/perf-tools-design.md §5): a capture streams its events to
+# a local listener over TCP, at most every 100 ms, from the main thread, never waiting. The
+# listener gets the header, the tables and every frame's zones in blocks. A second listener that
+# does not read is a slow network: the sender's pending bytes pass the limit, blocks are dropped
+# and counted, and what did arrive still decodes message by message.
+import Profile
+open net/Tcp
+open perf/Perf
+open perf/PerfFile
+open perf/PerfLive
+
+type Received {
+  headers: Int
+  tables: Int
+  blocks: Int
+  events: Int
+  bad: Int
+}
+
+func readAll(socketId: view SocketId, bytes: mod List(UInt8), tries: view Int) {
+  loop var i: Int = 0, i < tries, ++i {
+    let result: IoResult = socketRead(socketId: socketId, bytes: bytes, maxBytes: 65536)
+    if result.status is NetStatus.endOfStream {
+      ret
+    }
+    if result.status is NetStatus.wouldBlock {
+      sleep(ms: 2)
+    }
+  }
+}
+
+func decode(bytes: mod List(UInt8)) ret Received {
+  var received: Received = {
+    headers: 0
+    tables: 0
+    blocks: 0
+    events: 0
+    bad: 0
+  }
+  loop let message: PerfLiveMessage in perfLiveTake(bytes: bytes) {
+    if message.kind is perfLiveHeader {
+      if PerfFileHeader.fromBinary(bytes: message.payload) is not none {
+        received.headers = received.headers + 1
+      } else {
+        received.bad = received.bad + 1
+      }
+    } else if message.kind is perfLiveTables {
+      if PerfFileTables.fromBinary(bytes: message.payload) is not none {
+        received.tables = received.tables + 1
+      } else {
+        received.bad = received.bad + 1
+      }
+    } else if let block: PerfFileBlock = perfLiveBlockOf(message: message) {
+      received.blocks = received.blocks + 1
+      received.events = received.events + block.events.length
+    } else {
+      received.bad = received.bad + 1
+    }
+  }
+  ret received
+}
+
+func accepted(listener: view SocketId) ret SocketId {
+  loop var i: Int = 0, i < 500, ++i {
+    let result: SocketResult = tcpAccept(listenerSocketId: listener)
+    if result.status is NetStatus.ok {
+      ret result.socketId
+    }
+    sleep(ms: 2)
+  }
+  ret noSocket()
+}
+
+func main() ret Int {
+  let listen: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 4)
+  if listen.status is not NetStatus.ok {
+    log("FAIL: no listener")
+    ret 1
+  }
+  var port: Int = 0
+  if let local: Int = socketLocalPort(socketId: listen.socketId) {
+    port = local
+  }
+  # 1. a listener that reads: 30 frames, 10 ms apart
+  var profiler: Profiler = Profile.createProfiler()
+  Profile.startCapture(profiler: profiler, seconds: 600.0, outPath: "/tmp/rae_case_1471.json")
+  let linked: Bool = Profile.startLive(profiler: profiler, host: "127.0.0.1", port: port)
+  let peer: SocketId = accepted(listener: listen.socketId)
+  var bytes: List(UInt8) = {}
+  loop var frame: Int = 0, frame < 30, ++frame {
+    Profile.zoneBegin(profiler: profiler, name: "frame")
+    sleep(ms: 10)
+    Profile.zoneEnd(profiler: profiler, name: "frame")
+    let unusedTick: Bool = Profile.tick(profiler: profiler)
+    readAll(socketId: peer, bytes: bytes, tries: 1)
+  }
+  Profile.profileDiscard(profiler: profiler)
+  readAll(socketId: peer, bytes: bytes, tries: 500)
+  let first: Received = decode(bytes: bytes)
+  log(
+    "linked {linked}: headers {first.headers}, tables {first.tables > 0}, blocks {first.blocks > 0}, bad {first.bad}, left over {bytes.length}"
+  )
+  log("the frame zones' events received: {first.events >= 60}")
+  socketClose(socketId: peer)
+  # 2. a listener that does not read (a slow network): 40 frames of 8 000 zones, 110 ms apart
+  Profile.startCapture(profiler: profiler, seconds: 600.0, outPath: "/tmp/rae_case_1471.json")
+  let linkedAgain: Bool = Profile.startLive(profiler: profiler, host: "127.0.0.1", port: port)
+  let slowPeer: SocketId = accepted(listener: listen.socketId)
+  var dropped: Int = 0
+  loop var frame: Int = 0, frame < 40, ++frame {
+    loop var zone: Int = 0, zone < 8000, ++zone {
+      Profile.zoneBegin(profiler: profiler, name: "work")
+      Profile.zoneEnd(profiler: profiler, name: "work")
+    }
+    sleep(ms: 110)
+    let unusedTick: Bool = Profile.tick(profiler: profiler)
+  }
+  if let live: view PerfLive = profiler.live {
+    dropped = live.droppedBlocks
+  }
+  # what arrives is read only now
+  var slowBytes: List(UInt8) = {}
+  Profile.profileDiscard(profiler: profiler)
+  readAll(socketId: slowPeer, bytes: slowBytes, tries: 2000)
+  let second: Received = decode(bytes: slowBytes)
+  log(
+    "slow link {linkedAgain}: blocks dropped {dropped > 0}; what arrived decodes: headers {second.headers}, blocks {second.blocks > 0}, bad {second.bad}"
+  )
+  socketClose(socketId: slowPeer)
+  socketClose(socketId: listen.socketId)
+  ret 0
+}

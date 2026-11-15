@@ -1,0 +1,241 @@
+# perf/PerfLive — the live link (docs/perf-tools-design.md §5): a capture's events sent over TCP
+# (lib/net) to a viewer that listens, so a phone and a Mac on one network work with only the
+# viewer's address (RAE_PERF_LIVE=<host>:<port>, lib/Profile).
+#
+# The stream is messages: a kind byte, a UInt32 byte count (little-endian) and the payload, the
+# capture file's own parts (perf/PerfFile): the header once (perfLiveHeader), the tables whenever
+# names, lanes or rule breaks were added (perfLiveTables), and the events collected since the last
+# message in blocks (perfLiveBlock: the block's info part and its events part).
+#
+# perfLiveStep runs on the main thread, after the collector, once a frame: at most every 100 ms
+# it turns the new events into messages, and every call writes what the socket takes now. It
+# never waits: when the bytes not yet sent would pass perfLiveMaxPending (a slow network), the
+# new blocks are dropped instead and counted (droppedBlocks), and the stream stays whole. A
+# failed write ends the link.
+import Sys
+open net/Tcp
+open perf/Perf
+open perf/PerfFile
+
+const perfLiveHeader: Int = 1
+
+const perfLiveTables: Int = 2
+
+const perfLiveBlock: Int = 3
+
+const perfLiveIntervalNs: Int = 100000000
+
+const perfLiveMaxPending: Int = 4194304
+
+type PerfLive {
+  socketId: SocketId
+  connected: Bool
+  startNs: Int
+  # bytes made but not yet sent, from `sentTo` on
+  pending: List(UInt8)
+  sentTo: Int
+  # the hub's events sent up to (its event numbers), and when last sent
+  eventsTo: Int
+  lastSendNs: Int
+  # the tables' sizes when last sent: names, lanes, rule breaks
+  namesSent: Int
+  threadsSent: Int
+  ruleBreaksSent: Int
+  headerSent: Bool
+  sentBlocks: Int
+  droppedBlocks: Int
+}
+
+# A link to `host`:`port` (waits up to 100 ms for the connection, once); none when it cannot connect
+func perfLiveConnect(host: view String, port: view Int, startNs: view Int) ret opt PerfLive {
+  let result: SocketResult = tcpConnect(host: host, port: port, timeoutMs: 100)
+  if result.status is not NetStatus.ok {
+    ret none
+  }
+  ret PerfLive {
+    socketId: result.socketId
+    connected: true
+    startNs: startNs
+    pending: {}
+    sentTo: 0
+    eventsTo: 0
+    lastSendNs: 0
+    namesSent: -1
+    threadsSent: -1
+    ruleBreaksSent: -1
+    headerSent: false
+    sentBlocks: 0
+    droppedBlocks: 0
+  }
+}
+
+# RAE_PERF_LIVE's "<host>:<port>" split; none when it is not one
+type PerfLiveTarget {
+  host: String
+  port: Int
+}
+
+func perfLiveTarget(text: view String) ret opt PerfLiveTarget {
+  let parts: List(String) = text.split(sep: ":")
+  if parts.length is not 2 {
+    ret none
+  }
+  let port: Int = parts.copyAtDefault(index: 1).toInt()
+  if port <= 0 or port > 65535 {
+    ret none
+  }
+  ret PerfLiveTarget { host: parts.copyAtDefault(index: 0), port: port }
+}
+
+func appendMessage(bytes: mod List(UInt8), kind: view Int, payload: view List(UInt8)) {
+  bytes.add(value: kind as UInt8)
+  appendPart(bytes: bytes, part: payload)
+}
+
+# Once a frame on the main thread, after the hub's collector
+func perfLiveStep(live: mod PerfLive, hub: view PerfHub) {
+  if not live.connected {
+    ret
+  }
+  let now: Int = nowNs()
+  if now - live.lastSendNs >= perfLiveIntervalNs {
+    live.lastSendNs = now
+    perfLiveQueue(live: live, hub: hub)
+  }
+  perfLiveFlush(live: live)
+}
+
+# The new events (and the header and tables when due) as messages behind the pending bytes, or
+# dropped and counted when the pending bytes are already too many
+func perfLiveQueue(live: mod PerfLive, hub: view PerfHub) {
+  var first: Int = live.eventsTo
+  if first < hub.perfOldest() {
+    first = hub.perfOldest()
+  }
+  let end: Int = hub.perfWritten()
+  live.eventsTo = end
+  var messages: List(UInt8) = {}
+  if not live.headerSent {
+    let header: PerfFileHeader = {
+      format: perfFileFormat
+      program: Sys.getEnv(name: "RAE_PROGRAM")
+      machine: "{Target.os} {Target.arch}"
+      raeVersion: Sys.getEnv(name: "RAE_VERSION")
+      startNs: live.startNs
+      startEpochMs: nowMs() - (nowNs() - live.startNs) / 1000000
+    }
+    appendMessage(bytes: messages, kind: perfLiveHeader, payload: header.toBinary())
+    live.headerSent = true
+  }
+  let tables: PerfFileTables = perfTablesOf(hub: hub)
+  if tables.names.length is not live.namesSent or tables.threads.length is not live.threadsSent or tables.ruleBreakEntries.length is not live.ruleBreaksSent {
+    appendMessage(bytes: messages, kind: perfLiveTables, payload: tables.toBinary())
+    live.namesSent = tables.names.length
+    live.threadsSent = tables.threads.length
+    live.ruleBreaksSent = tables.ruleBreakEntries.length
+  }
+  let blocks: List(PerfFileBlock) = perfBlocksIn(hub: hub, first: first, end: end)
+  # a slow network: the blocks go, the header and tables stay (the stream stays readable)
+  let unsent: Int = live.pending.length - live.sentTo
+  var blockBytes: List(UInt8) = {}
+  loop let block: view PerfFileBlock in blocks {
+    var payload: List(UInt8) = {}
+    appendPart(bytes: payload, part: block.info.toBinary())
+    let events: PerfBlockEvents = { events: block.events }
+    appendPart(bytes: payload, part: events.toBinary())
+    appendMessage(bytes: blockBytes, kind: perfLiveBlock, payload: payload)
+  }
+  if unsent + messages.length + blockBytes.length > perfLiveMaxPending {
+    live.droppedBlocks = live.droppedBlocks + blocks.length
+  } else {
+    loop let byte: UInt8 in blockBytes {
+      messages.add(value: byte)
+    }
+    live.sentBlocks = live.sentBlocks + blocks.length
+  }
+  # the sent bytes let go, the new ones behind the rest
+  var kept: List(UInt8) = List.create(UInt8, cap: unsent + messages.length)
+  loop var i: Int = live.sentTo, i < live.pending.length, ++i {
+    kept.add(value: live.pending.copyAtDefault(index: i))
+  }
+  loop let byte: UInt8 in messages {
+    kept.add(value: byte)
+  }
+  live.pending = kept
+  live.sentTo = 0
+}
+
+# Write what the socket takes now; a failed write ends the link
+func perfLiveFlush(live: mod PerfLive) {
+  if not live.connected or live.sentTo >= live.pending.length {
+    ret
+  }
+  let result: IoResult = socketWrite(
+    socketId: live.socketId
+    bytes: live.pending
+    start: live.sentTo
+    count: live.pending.length - live.sentTo
+  )
+  if result.status is NetStatus.ok {
+    live.sentTo = live.sentTo + result.bytes
+  } else if result.status is not NetStatus.wouldBlock {
+    perfLiveClose(live: live)
+  }
+}
+
+func perfLiveClose(live: mod PerfLive) {
+  if live.connected {
+    socketClose(socketId: live.socketId)
+    live.connected = false
+  }
+}
+
+# ---- the reading side (a viewer, a test) --------------------------------------------------------
+type PerfLiveMessage {
+  kind: Int
+  payload: List(UInt8)
+}
+
+# The whole messages at the front of `bytes`, taken off it (a message still arriving stays)
+func perfLiveTake(bytes: mod List(UInt8)) ret List(PerfLiveMessage) {
+  var messages: List(PerfLiveMessage) = {}
+  var at: Int = 0
+  loop at + 5 <= bytes.length {
+    var count: Int = 0
+    loop var i: Int = 4, i >= 1, --i {
+      count = count * 256 + (bytes.copyAtDefault(index: at + i) as Int)
+    }
+    if at + 5 + count > bytes.length {
+      break
+    }
+    var payload: List(UInt8) = List.create(UInt8, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      payload.add(value: bytes.copyAtDefault(index: at + 5 + i))
+    }
+    messages.add(
+      value: PerfLiveMessage { kind: bytes.copyAtDefault(index: at) as Int, payload: payload }
+    )
+    at = at + 5 + count
+  }
+  var rest: List(UInt8) = List.create(UInt8, cap: bytes.length - at)
+  loop var i: Int = at, i < bytes.length, ++i {
+    rest.add(value: bytes.copyAtDefault(index: i))
+  }
+  bytes = rest
+  ret messages
+}
+
+# A block message's block
+func perfLiveBlockOf(message: view PerfLiveMessage) ret opt PerfFileBlock {
+  var reader: PerfFileReader = { bytes: message.payload, at: 0 }
+  if let infoPart: List(UInt8) = readPart(reader: reader) {
+    if let eventsPart: List(UInt8) = readPart(reader: reader) {
+      if let info: PerfBlockInfo = PerfBlockInfo.fromBinary(bytes: infoPart) {
+        if let events: PerfBlockEvents = PerfBlockEvents.fromBinary(bytes: eventsPart) {
+          ret PerfFileBlock { info: info, events: events.events }
+        }
+      }
+    }
+  }
+  ret none
+}

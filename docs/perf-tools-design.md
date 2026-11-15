@@ -350,6 +350,26 @@ finding, network packets.
   - Sending happens on the main thread only and never blocks: when the network is slow, blocks
     are dropped and counted.
 
+Done in Rae 0.3.140 (perf step 9):
+- `lib/perf/PerfFile`: the magic `RAEPERF1`, then parts (a UInt32 byte count and a `toBinary()`
+  value each): the header (format 1, the program from `RAE_PROGRAM`, the machine as
+  `<os> <arch>`, the Rae version from `RAE_VERSION`, which `rae run` sets, the start on `nowNs`'s
+  clock and as epoch milliseconds), the tables (names, lanes, the realtime guard's slots), then per
+  block its info (thread, time range, count) and its events. `perfFileOf(hub:)`,
+  `perfWriteFile`, `perfReadFile`; a reader can skip a block's events by their byte count. New:
+  `Sys.writeFileBytes`.
+- `lib/Profile` writes the file beside its trace when `RAE_PERF_OUT=<path>` is set (on iOS a bare
+  name lands in Documents).
+- `lib/perf/PerfChrome`: the Chrome Trace JSON from a file's contents (what `Profile` writes
+  now); `rae run tools/perfExport/Main.rae -- capture.raeperf trace.json` exports a file. Case
+  1469 holds it to a golden.
+- `lib/perf/PerfLive`: `RAE_PERF_LIVE=<host>:<port>` (or `Profile.startLive`) streams messages (a
+  kind byte, a byte count, the file's parts: the header once, the tables when they grow, the new
+  events in blocks) at most every 100 ms from `Profile.tick`, writing only what the socket takes
+  now; past 4 MB of unsent bytes the new blocks are dropped and counted. It is plain TCP: the
+  WebSocket framing devtools uses, for a viewer in a browser, is not done. Case 1471 streams to a
+  local listener, and to one that does not read.
+
 ## 6. The views (`lib/ui` widgets)
 
 New components, each a node in a `.raescene` with its data bound from code. Each draws through

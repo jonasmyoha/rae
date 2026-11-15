@@ -910,6 +910,7 @@ rae_String rae_ext_rae_sys_read_file(rae_String path);
 /* Binary counterpart: a Buffer of one-byte-per-Int values, for container
  * formats whose content is not text. */
 void* rae_ext_rae_sys_read_file_bytes(rae_String path, rae_Mod_Int64 out);
+rae_Bool rae_ext_rae_sys_write_file_bytes(rae_String path, const void* data, int64_t count);
 rae_String rae_ext_rae_sys_read_file_text(rae_String path, int64_t offset, int64_t len);
 void* rae_ext_rae_sys_dir_open(rae_String folder);
 rae_String rae_ext_rae_sys_dir_next(void* dir);

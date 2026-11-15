@@ -3848,6 +3848,8 @@ static int run_compiled_file(const RunOptions* run_opts, const char* project_roo
    * binary's own name would say nothing, so hand it the entry (relative as
    * the user wrote it) — see runtime_core_memory.c rae_install_crash_handler. */
   setenv("RAE_PROGRAM", run_opts->input_path ? run_opts->input_path : file_path, 1);
+  /* and the compiler that built it, for a capture's header (lib/perf/PerfFile) */
+  setenv("RAE_VERSION", RAE_VERSION_BASE, 1);
   fprintf(stderr, "@@RAE_APP_START@@ entry=%s\n", file_path);
   fflush(stderr);
   long long app_started_ms = rae_now_ms();
@@ -4332,6 +4334,7 @@ static int run_watch_supervisor(const RunOptions* run_opts, const char* project_
     char entry_abs[PATH_MAX];
     if (realpath(entry, entry_abs)) setenv("RAE_PROGRAM", entry_abs, 1);
     else setenv("RAE_PROGRAM", entry, 1);
+    setenv("RAE_VERSION", RAE_VERSION_BASE, 1);
   }
   pid_t child = watch_spawn_child(current_bin, lib_root, dotrae, run_opts->app_argc, run_opts->app_argv);
   if (child < 0) {

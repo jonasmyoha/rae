@@ -1,0 +1,165 @@
+# perf/PerfChrome — a capture as Chrome Trace JSON for Perfetto (ui.perfetto.dev, docs/profiling.md,
+# docs/perf-tools-design.md §5), from a capture file's contents (perf/PerfFile): lib/Profile's
+# writer at the end of a capture, and tools/perfExport for a .raeperf. Process 1 "CPU" has a
+# thread per lane of the file; process 2 "GPU" has the passes (tid 0, "a slot, not a cost on a tile
+# GPU"), the Metal command buffers (tid 1) and every counter named gpu.*. Waits are of the category
+# "wait", flows are flow events, and a realtime rule break is named by its entry point.
+import Math
+import String
+open perf/Perf
+open perf/PerfFile
+
+type PerfChromeTrace {
+  json: String
+  # the trace events written (the lanes' names not counted)
+  events: Int
+}
+
+# Nanoseconds as the trace's microseconds, to the nanosecond ("12.034")
+func traceMicroseconds(nanoseconds: view Int) ret String {
+  let fraction: Int = nanoseconds % 1000
+  if fraction < 10 {
+    ret "{nanoseconds / 1000}.00{fraction}"
+  }
+  if fraction < 100 {
+    ret "{nanoseconds / 1000}.0{fraction}"
+  }
+  ret "{nanoseconds / 1000}.{fraction}"
+}
+
+# The GPU's process in the trace: its counters and spans, apart from the threads
+const perfChromeGpuPid: Int = 2
+
+# One trace event object, or "" for a kind the trace does not show. Literal JSON
+# braces are `\{` / `\}`; `{expr}` is Rae interpolation. Zone names are static
+# identifiers, so no JSON escaping of the name is needed.
+func perfChromeFragment(
+  event: view PerfEvent
+  name: view String
+  tid: view Int
+  file: view PerfFile
+) ret String {
+  let startNs: Int = file.header.startNs
+  let ts: String = traceMicroseconds(nanoseconds: event.time - startNs)
+  if event.kind is PerfKind.counter {
+    var pid: Int = 1
+    if name.startsWith(prefix: "gpu.") {
+      pid = perfChromeGpuPid
+    }
+    ret "\{\"name\":\"{name}\",\"ph\":\"C\",\"ts\":{ts},\"pid\":{pid},\"tid\":{tid},\"args\":\{\"v\":{event.value}\}\}"
+  }
+  if event.kind is PerfKind.zoneBegin {
+    if event.value is 0 and event.extra is 0 {
+      ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+    }
+    # a chunk's iterations and index, a parallelLoop's iterations
+    ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"value\":{event.value},\"index\":{event.extra}\}\}"
+  }
+  # a wait is a span of its own category, so a view can color it
+  if event.kind is PerfKind.waitBegin {
+    ret "\{\"name\":\"{name}\",\"cat\":\"wait\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  }
+  if event.kind is PerfKind.zoneEnd or event.kind is PerfKind.waitEnd {
+    ret "\{\"name\":\"{name}\",\"ph\":\"E\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  }
+  # a flow (a spawn to its task's run): its id is the value, extra 0 its start, 1 its end
+  if event.kind is PerfKind.flow {
+    if event.extra is 0 {
+      ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"s\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+    }
+    ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"f\",\"bp\":\"e\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
+  }
+  if event.kind is PerfKind.mark and name is "realtime rule break" {
+    # the runtime guard's slot names the entry point and what it was for
+    var entry: String = "past the guard's table"
+    var detail: String = ""
+    if event.extra >= 0 and (event.extra as Int) < file.tables.ruleBreakEntries.length {
+      entry = file.tables.ruleBreakEntries.copyAtDefault(index: event.extra as Int)
+      detail = file.tables.ruleBreakDetails.copyAtDefault(index: event.extra as Int)
+    }
+    ret "\{\"name\":\"{name}: {entry}\",\"cat\":\"rule break\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"entry\":\"{entry}\",\"detail\":\"{detail}\"\}\}"
+  }
+  if event.kind is PerfKind.mark {
+    ret "\{\"name\":\"{name}\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"extra\":{event.extra}\}\}"
+  }
+  if event.kind is PerfKind.gpuSpan {
+    let duration: String = traceMicroseconds(nanoseconds: event.value - event.time)
+    # a Metal command buffer is the GPU's own busy time, on a lane of its own
+    if name is "command buffer" {
+      ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{perfChromeGpuPid},\"tid\":1\}"
+    }
+    ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{perfChromeGpuPid},\"tid\":0,\"args\":\{\"note\":\"a slot, not a cost on a tile GPU\"\}\}"
+  }
+  ret ""
+}
+
+# Join with `sep` in sqrt(n)-sized blocks. A single left-fold join is O(n^2) in
+# total bytes copied (the accumulator is recopied every step); blocking makes it
+# O(n*sqrt(n)) — sub-second for tens of thousands of events instead of tens of
+# seconds. Deferred to stop time, so it never touches a measured frame.
+func perfChromeJoin(frags: view List(String), blockSize: view Int) ret String {
+  let n: Int = frags.length
+  if n is 0 {
+    ret ""
+  }
+  var blocks: List(String) = List.create(String, cap: n / blockSize + 2)
+  var i: Int = 0
+  loop i < n {
+    let stop: Int = Math.min(a: i + blockSize, b: n)
+    var block: String = frags.copyAtDefault(index: i)
+    loop var j: Int = i + 1, j < stop, ++j {
+      block = block.concat(other: ",").concat(other: frags.copyAtDefault(index: j))
+    }
+    blocks.add(value: block)
+    i = stop
+  }
+  ret blocks.join(sep: ",")
+}
+
+# The lanes' names: the CPU process with a thread per ring, and the GPU process
+func perfChromeLaneNames(file: view PerfFile, frags: mod List(String)) {
+  frags.add(
+    value: "\{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1,\"args\":\{\"name\":\"CPU\"\}\}"
+  )
+  frags.add(
+    value: "\{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{perfChromeGpuPid},\"args\":\{\"name\":\"GPU\"\}\}"
+  )
+  frags.add(
+    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{perfChromeGpuPid},\"tid\":0,\"args\":\{\"name\":\"GPU passes\"\}\}"
+  )
+  frags.add(
+    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{perfChromeGpuPid},\"tid\":1,\"args\":\{\"name\":\"Metal command buffers\"\}\}"
+  )
+  loop var ring: Int = 0, ring < file.tables.threads.length, ++ring {
+    let threadName: String = file.tables.threads.copyAtDefault(index: ring)
+    frags.add(
+      value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":{ring},\"args\":\{\"name\":\"{threadName}\"\}\}"
+    )
+  }
+}
+
+# The file's events as a trace; times are microseconds since the capture's start
+func perfChromeTrace(file: view PerfFile) ret PerfChromeTrace {
+  var frags: List(String) = {}
+  perfChromeLaneNames(file: file, frags: frags)
+  var count: Int = 0
+  loop let block: view PerfFileBlock in file.blocks {
+    loop let event: view PerfEvent in block.events {
+      let fragment: String = perfChromeFragment(
+        event: event
+        name: file.tables.names.copyAtDefault(index: event.nameId as Int)
+        tid: block.info.thread
+        file: file
+      )
+      if fragment.length() > 0 {
+        frags.add(value: fragment)
+        count = count + 1
+      }
+    }
+  }
+  let body: String = perfChromeJoin(frags: frags, blockSize: 256)
+  ret PerfChromeTrace {
+    json: "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
+    events: count
+  }
+}

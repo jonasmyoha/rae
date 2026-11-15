@@ -1,0 +1,302 @@
+# perf/PerfFile — the capture file, `.raeperf` (docs/perf-tools-design.md §5). A hub's window
+# written out: the magic "RAEPERF1", then parts, each a UInt32 byte count (little-endian) and the
+# compiler's toBinary() of one value:
+#   1. the header (PerfFileHeader): the format version, the program, the machine, the Rae
+#      version, the start (nowNs's clock, which every time in the file is on, and the wall
+#      clock's epoch milliseconds then);
+#   2. the tables (PerfFileTables): the names, the threads' lane names, and the entry point and
+#      detail of each realtime guard slot a "realtime rule break" mark numbers;
+#   3. then per block, two parts: its PerfBlockInfo (the thread, the time range, the event count)
+#      and its events (PerfBlockEvents), so a reader can read the infos and skip a block's events
+#      by their byte count without decoding them.
+# A block holds up to perfBlockEvents of one thread's events, in the order they were collected.
+import Sys
+import String
+open perf/Perf
+
+const perfFileMagic: String = "RAEPERF1"
+
+const perfFileFormat: Int = 1
+
+const perfBlockEvents: Int = 4096
+
+type PerfFileHeader {
+  format: Int
+  program: String
+  machine: String
+  raeVersion: String
+  startNs: Int
+  startEpochMs: Int
+}
+
+type PerfFileTables {
+  names: List(String)
+  threads: List(String)
+  ruleBreakEntries: List(String)
+  ruleBreakDetails: List(String)
+}
+
+type PerfBlockInfo {
+  thread: Int
+  firstNs: Int
+  lastNs: Int
+  count: Int
+}
+
+type PerfBlockEvents {
+  events: List(PerfEvent)
+}
+
+type PerfFileBlock {
+  info: PerfBlockInfo
+  events: List(PerfEvent)
+}
+
+type PerfFile {
+  header: PerfFileHeader
+  tables: PerfFileTables
+  blocks: List(PerfFileBlock)
+}
+
+func nativeSlotEntry(index: Int) unsafe extern("rae_realtime_slot_entry") ret String
+
+func nativeSlotDetail(index: Int) unsafe extern("rae_realtime_slot_detail") ret String
+
+# The hub's window as a file's contents; `startNs` the capture's start (times stay on nowNs's
+# clock, and the header keeps where they began)
+func perfFileOf(hub: view PerfHub, startNs: view Int) ret PerfFile {
+  let blocks: List(PerfFileBlock) = perfBlocksIn(
+    hub: hub
+    first: hub.perfOldest()
+    end: hub.perfWritten()
+  )
+  ret PerfFile {
+    header: PerfFileHeader {
+      format: perfFileFormat
+      program: Sys.getEnv(name: "RAE_PROGRAM")
+      machine: "{Target.os} {Target.arch}"
+      raeVersion: Sys.getEnv(name: "RAE_VERSION")
+      startNs: startNs
+      startEpochMs: nowMs() - (nowNs() - startNs) / 1000000
+    }
+    tables: perfTablesOf(hub: hub)
+    blocks: blocks
+  }
+}
+
+# The hub's names, its lanes' names and the realtime guard's slots
+func perfTablesOf(hub: view PerfHub) ret PerfFileTables {
+  var names: List(String) = {}
+  loop var id: Int = 0, id < hub.perfNameCount(), ++id {
+    names.add(value: hub.perfNameText(nameId: id))
+  }
+  var threads: List(String) = {}
+  loop let name: view String in hub.ringNames {
+    threads.add(value: name)
+  }
+  var entries: List(String) = {}
+  var details: List(String) = {}
+  unsafe {
+    var slot: Int = 0
+    var entry: String = nativeSlotEntry(index: 0)
+    loop entry.length() > 0 {
+      entries.add(value: entry)
+      details.add(value: nativeSlotDetail(index: slot))
+      slot = slot + 1
+      entry = nativeSlotEntry(index: slot)
+    }
+  }
+  ret PerfFileTables {
+    names: names
+    threads: threads
+    ruleBreakEntries: entries
+    ruleBreakDetails: details
+  }
+}
+
+# The window's events numbered `first` .. `end` - 1 in blocks, each a thread's own, in the order
+# they were kept
+func perfBlocksIn(hub: view PerfHub, first: view Int, end: view Int) ret List(PerfFileBlock) {
+  # the events in blocks, a thread's own, in the order they were kept
+  var blocks: List(PerfFileBlock) = {}
+  var open: List(Int) = {}
+  loop var ring: Int = 0, ring < hub.rings.length, ++ring {
+    open.add(value: -1)
+  }
+  loop var number: Int = first, number < end, ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    let ring: Int = hub.perfEventRing(number: number)
+    var at: Int = open.copyAtDefault(index: ring)
+    if at < 0 or blocks.copyAtDefault(index: at).events.length >= perfBlockEvents {
+      blocks.add(
+        value: PerfFileBlock {
+          info: PerfBlockInfo { thread: ring, firstNs: event.time, lastNs: event.time, count: 0 }
+          events: {}
+        }
+      )
+      at = blocks.length - 1
+      open.set(index: ring, value: at)
+    }
+    let block: mod PerfFileBlock = blocks.modAt(index: at)
+    block.events.add(value: event)
+    block.info.count = block.events.length
+    if event.time < block.info.firstNs {
+      block.info.firstNs = event.time
+    }
+    if event.time > block.info.lastNs {
+      block.info.lastNs = event.time
+    }
+  }
+  ret blocks
+}
+
+# ---- bytes -------------------------------------------------------------------------------------
+func appendUInt32(bytes: mod List(UInt8), value: view Int) {
+  bytes.add(value: (value % 256) as UInt8)
+  bytes.add(value: (value / 256 % 256) as UInt8)
+  bytes.add(value: (value / 65536 % 256) as UInt8)
+  bytes.add(value: (value / 16777216 % 256) as UInt8)
+}
+
+func appendPart(bytes: mod List(UInt8), part: view List(UInt8)) {
+  appendUInt32(bytes: bytes, value: part.length)
+  loop let byte: UInt8 in part {
+    bytes.add(value: byte)
+  }
+}
+
+# The file's bytes
+func perfFileBytes(file: view PerfFile) ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < perfFileMagic.length(), ++i {
+    bytes.add(value: perfFileMagic.byteAt(index: i) as UInt8)
+  }
+  appendPart(bytes: bytes, part: file.header.toBinary())
+  appendPart(bytes: bytes, part: file.tables.toBinary())
+  loop let block: view PerfFileBlock in file.blocks {
+    appendPart(bytes: bytes, part: block.info.toBinary())
+    let events: PerfBlockEvents = { events: block.events }
+    appendPart(bytes: bytes, part: events.toBinary())
+  }
+  ret bytes
+}
+
+# Write the file at `path`; false when it could not be written
+func perfWriteFile(file: view PerfFile, path: view String) ret Bool {
+  ret Sys.writeFileBytes(path: path, bytes: perfFileBytes(file: file))
+}
+
+# A reader over a file's bytes
+type PerfFileReader {
+  bytes: List(UInt8)
+  at: Int
+}
+
+func readUInt32(reader: mod PerfFileReader) ret opt Int {
+  if reader.at + 4 > reader.bytes.length {
+    ret none
+  }
+  var value: Int = 0
+  loop var i: Int = 3, i >= 0, --i {
+    value = value * 256 + (reader.bytes.copyAtDefault(index: reader.at + i) as Int)
+  }
+  reader.at = reader.at + 4
+  ret value
+}
+
+# The next part's bytes, or none at the end (or when it is cut short)
+func readPart(reader: mod PerfFileReader) ret opt List(UInt8) {
+  if let count: Int = readUInt32(reader: reader) {
+    if count < 0 or reader.at + count > reader.bytes.length {
+      ret none
+    }
+    var part: List(UInt8) = List.create(UInt8, cap: count)
+    loop var i: Int = 0, i < count, ++i {
+      part.add(value: reader.bytes.copyAtDefault(index: reader.at + i))
+    }
+    reader.at = reader.at + count
+    ret part
+  }
+  ret none
+}
+
+# A file's contents from its bytes; none when they are not a .raeperf of this format
+func perfFileFromBytes(bytes: view List(UInt8)) ret opt PerfFile {
+  if bytes.length < perfFileMagic.length() {
+    ret none
+  }
+  loop var i: Int = 0, i < perfFileMagic.length(), ++i {
+    if (bytes.copyAtDefault(index: i) as Int) is not perfFileMagic.byteAt(index: i) {
+      ret none
+    }
+  }
+  var reader: PerfFileReader = { bytes: bytes, at: perfFileMagic.length() }
+  var header: PerfFileHeader = {
+    format: 0
+    program: ""
+    machine: ""
+    raeVersion: ""
+    startNs: 0
+    startEpochMs: 0
+  }
+  if let part: List(UInt8) = readPart(reader: reader) {
+    if let read: PerfFileHeader = PerfFileHeader.fromBinary(bytes: part) {
+      header = read
+    } else {
+      ret none
+    }
+  } else {
+    ret none
+  }
+  if header.format is not perfFileFormat {
+    ret none
+  }
+  var tables: PerfFileTables = {
+    names: {}
+    threads: {}
+    ruleBreakEntries: {}
+    ruleBreakDetails: {}
+  }
+  if let part: List(UInt8) = readPart(reader: reader) {
+    if let read: PerfFileTables = PerfFileTables.fromBinary(bytes: part) {
+      tables = read
+    } else {
+      ret none
+    }
+  } else {
+    ret none
+  }
+  var blocks: List(PerfFileBlock) = {}
+  loop reader.at < reader.bytes.length {
+    var info: PerfBlockInfo = { thread: 0, firstNs: 0, lastNs: 0, count: 0 }
+    if let part: List(UInt8) = readPart(reader: reader) {
+      if let read: PerfBlockInfo = PerfBlockInfo.fromBinary(bytes: part) {
+        info = read
+      } else {
+        ret none
+      }
+    } else {
+      ret none
+    }
+    if let part: List(UInt8) = readPart(reader: reader) {
+      if let read: PerfBlockEvents = PerfBlockEvents.fromBinary(bytes: part) {
+        blocks.add(value: PerfFileBlock { info: info, events: read.events })
+      } else {
+        ret none
+      }
+    } else {
+      ret none
+    }
+  }
+  ret PerfFile { header: header, tables: tables, blocks: blocks }
+}
+
+# Read the file at `path`
+func perfReadFile(path: view String) ret opt PerfFile {
+  let ints: List(Int) = Sys.readFileBytes(path: path)
+  var bytes: List(UInt8) = List.create(UInt8, cap: ints.length)
+  loop let value: Int in ints {
+    bytes.add(value: value as UInt8)
+  }
+  ret perfFileFromBytes(bytes: bytes)
+}

@@ -304,6 +304,19 @@ func writeFile(path: view String, content: view String) ret Bool {
   }
 }
 
+func rae_sys_write_file_bytes(
+  path: String
+  data: Buffer(UInt8)
+  count: Int
+) blocking unsafe extern ret Bool
+
+# Bytes as the whole file (readFileBytes reads them back); false on any failure
+func writeFileBytes(path: view String, bytes: view List(UInt8)) ret Bool {
+  unsafe {
+    ret rae_sys_write_file_bytes(path: path, data: bytes.data, count: bytes.length)
+  }
+}
+
 # The permission bits that let only a file's owner read and write it: 0600
 # (Rae has no octal literals; 384 is 0o600). A mode is these bits of a file:
 # owner, group and others, read 4, write 2, execute 1 each.

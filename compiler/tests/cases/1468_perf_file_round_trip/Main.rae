@@ -1,0 +1,85 @@
+# The capture file, .raeperf (lib/perf/PerfFile, docs/perf-tools-design.md §5): a hub's window
+# with two threads' events written out and read back is the same, block by block; a file cut
+# short or with another magic reads as none.
+import Sys
+open perf/Perf
+open perf/PerfFile
+
+func sameEvents(a: view List(PerfEvent), b: view List(PerfEvent)) ret Bool {
+  if a.length is not b.length {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length, ++i {
+    let left: PerfEvent = a.copyAtDefault(index: i)
+    let right: PerfEvent = b.copyAtDefault(index: i)
+    if left.time is not right.time or left.value is not right.value or left.kind is not right.kind or left.nameId is not right.nameId or left.extra is not right.extra {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  var hub: PerfHub = createPerfHub(
+    settings: PerfSettings { windowSeconds: 600, windowEvents: 20000, ringEvents: 10000 }
+  )
+  let start: Int = nowNs()
+  let main: PerfRing = hub.perfThreadRing(name: "main")
+  let worker: PerfRing = hub.perfThreadRing(name: "worker")
+  let update: PerfName = hub.perfName(name: "update")
+  let fps: PerfName = hub.perfName(name: "fps")
+  # 5000 zones on main (two blocks of it), 10 counters on the worker's ring
+  loop var i: Int = 0, i < 2500, ++i {
+    perfZoneBegin(ring: main, name: update)
+    perfZoneEnd(ring: main, name: update)
+  }
+  loop var i: Int = 0, i < 10, ++i {
+    perfCounter(ring: worker, name: fps, value: 60 + i)
+  }
+  hub.perfFrame()
+  let file: PerfFile = perfFileOf(hub: hub, startNs: start)
+  let path: String = "/tmp/rae_case_1468.raeperf"
+  log("written: {perfWriteFile(file: file, path: path)}, blocks {file.blocks.length}")
+  if let read: PerfFile = perfReadFile(path: path) {
+    var same: Bool = read.blocks.length is file.blocks.length
+    loop var b: Int = 0, b < file.blocks.length, ++b {
+      let mine: PerfFileBlock = file.blocks.copyAtDefault(index: b)
+      let theirs: PerfFileBlock = read.blocks.copyAtDefault(index: b)
+      same = same and mine.info.thread is theirs.info.thread and mine.info.count is theirs.info.count and mine.info.firstNs is theirs.info.firstNs and mine.info.lastNs is theirs.info.lastNs and sameEvents(
+        a: mine.events
+        b: theirs.events
+      )
+    }
+    log(
+      "read back: format {read.header.format}, start {read.header.startNs is start}, names {read.tables.names.length}, threads {read.tables.threads.copyAtDefault(
+        index: 0
+      )} and {read.tables.threads.copyAtDefault(index: 1)}, the same blocks and events {same}"
+    )
+    log(
+      "block threads and counts: {read.blocks.copyAtDefault(index: 0).info.thread}/{read.blocks.copyAtDefault(
+        index: 0
+      ).info.count}, {read.blocks.copyAtDefault(index: 1).info.thread}/{read.blocks.copyAtDefault(
+        index: 1
+      ).info.count}, {read.blocks.copyAtDefault(index: 2).info.thread}/{read.blocks.copyAtDefault(
+        index: 2
+      ).info.count}"
+    )
+  } else {
+    log("FAIL: the file did not read back")
+  }
+  # a file cut short, and one with another magic
+  let bytes: List(UInt8) = perfFileBytes(file: file)
+  var cut: List(UInt8) = {}
+  loop var i: Int = 0, i < bytes.length - 3, ++i {
+    cut.add(value: bytes.copyAtDefault(index: i))
+  }
+  var other: List(UInt8) = bytes
+  other.set(index: 0, value: 88)
+  log(
+    "cut short reads: {perfFileFromBytes(bytes: cut) is not none}, another magic reads: {perfFileFromBytes(
+      bytes: other
+    ) is not none}"
+  )
+  hub.freePerfHub()
+  ret 0
+}

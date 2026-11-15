@@ -1,0 +1,172 @@
+# Chrome Trace JSON for Perfetto from a capture file (lib/perf/PerfChrome, docs/perf-tools-design.md
+# §5) against a golden: a hand-made file with fixed times and one event of each kind — a zone, a
+# chunk with its numbers, a wait, a flow, a counter on the CPU and one on the GPU, a mark, a rule
+# break named from the file's table, a GPU pass and a Metal command buffer.
+open perf/Perf
+open perf/PerfFile
+open perf/PerfChrome
+
+func event(
+  time: view Int
+  kind: view PerfKind
+  nameId: view Int
+  value: view Int
+  extra: view Int
+) ret PerfEvent {
+  ret PerfEvent {
+    time: time
+    value: value
+    kind: kind
+    nameId: nameId as Int32
+    extra: extra as Int32
+  }
+}
+
+func main() {
+  let names: List(String) = List(String) {
+    "update"
+    "chunk"
+    "Task.get"
+    "spawn"
+    "fps"
+    "gpu.total"
+    "frame start"
+    "realtime rule break"
+    "gbuffer"
+    "command buffer"
+  }
+  let main: PerfFileBlock = {
+    info: PerfBlockInfo { thread: 0, firstNs: 1000, lastNs: 9000, count: 9 }
+    events: List(PerfEvent) {
+      event(
+        time: 1000
+        kind: PerfKind.zoneBegin
+        nameId: 0
+        value: 0
+        extra: 0
+      )
+      event(
+        time: 1500
+        kind: PerfKind.waitBegin
+        nameId: 2
+        value: 0
+        extra: 0
+      )
+      event(
+        time: 2500
+        kind: PerfKind.waitEnd
+        nameId: 2
+        value: 0
+        extra: 0
+      )
+      event(
+        time: 2600
+        kind: PerfKind.flow
+        nameId: 3
+        value: 77
+        extra: 0
+      )
+      event(
+        time: 3000
+        kind: PerfKind.counter
+        nameId: 4
+        value: 60
+        extra: 0
+      )
+      event(
+        time: 3100
+        kind: PerfKind.counter
+        nameId: 5
+        value: 1234
+        extra: 0
+      )
+      event(
+        time: 3200
+        kind: PerfKind.mark
+        nameId: 6
+        value: 0
+        extra: 5
+      )
+      event(
+        time: 3300
+        kind: PerfKind.mark
+        nameId: 7
+        value: 0
+        extra: 0
+      )
+      event(
+        time: 9000
+        kind: PerfKind.zoneEnd
+        nameId: 0
+        value: 0
+        extra: 0
+      )
+    }
+  }
+  let worker: PerfFileBlock = {
+    info: PerfBlockInfo { thread: 1, firstNs: 2000, lastNs: 4000, count: 3 }
+    events: List(PerfEvent) {
+      event(
+        time: 2000
+        kind: PerfKind.zoneBegin
+        nameId: 1
+        value: 64
+        extra: 3
+      )
+      event(
+        time: 2700
+        kind: PerfKind.flow
+        nameId: 3
+        value: 77
+        extra: 1
+      )
+      event(
+        time: 4000
+        kind: PerfKind.zoneEnd
+        nameId: 1
+        value: 0
+        extra: 3
+      )
+    }
+  }
+  let gpu: PerfFileBlock = {
+    info: PerfBlockInfo { thread: 0, firstNs: 5000, lastNs: 5100, count: 2 }
+    events: List(PerfEvent) {
+      event(
+        time: 5000
+        kind: PerfKind.gpuSpan
+        nameId: 8
+        value: 7250
+        extra: 0
+      )
+      event(
+        time: 5100
+        kind: PerfKind.gpuSpan
+        nameId: 9
+        value: 8100
+        extra: 0
+      )
+    }
+  }
+  let file: PerfFile = {
+    header: PerfFileHeader {
+      format: perfFileFormat
+      program: "golden"
+      machine: "test"
+      raeVersion: ""
+      startNs: 0
+      startEpochMs: 0
+    }
+    tables: PerfFileTables {
+      names: names
+      threads: List(String) { "main", "worker 1" }
+      ruleBreakEntries: List(String) { "rae_mem_str_tag" }
+      ruleBreakDetails: List(String) { "interp" }
+    }
+    blocks: List(PerfFileBlock) { main, worker, gpu }
+  }
+  let trace: PerfChromeTrace = perfChromeTrace(file: file)
+  log("{trace.events} events")
+  # one event per line, for a readable golden
+  log(trace.json.replace(old: "\},\{", new: "\},\n\{"))
+}

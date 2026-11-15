@@ -33,6 +33,9 @@ import String
 open collections/StringMap
 open perf/Perf
 open perf/GpuClock
+open perf/PerfFile
+open perf/PerfChrome
+open perf/PerfLive
 
 # Cap the event window so a runaway capture can't exhaust memory. 300k events is
 # ~30s at 60fps with ~160 zones/frame; past it the oldest events are let go
@@ -68,6 +71,10 @@ type Profiler {
   # difference (memoryCounters)
   lastThreadAllocations: Int = -1
   lastAllAllocations: Int = -1
+  # the live link while the capture runs (RAE_PERF_LIVE, startLive), and whether it reports in the
+  # log (a link from RAE_PERF_LIVE does; one a program started reads its own numbers)
+  live: opt PerfLive = none
+  liveLogs: Bool = false
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -125,6 +132,19 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
     profiler.endNs = profiler.startNs + rae_float_to_int(f: seconds * 1000000000.0)
     profiler.outPath = "{outPath}"
     profiler.capturing = true
+    let liveTarget: String = Sys.getEnv(name: "RAE_PERF_LIVE")
+    if liveTarget.length() > 0 {
+      if let target: PerfLiveTarget = perfLiveTarget(text: liveTarget) {
+        if startLive(profiler: profiler, host: target.host, port: target.port) {
+          profiler.liveLogs = true
+          log("profile: live link to {target.host}:{target.port}")
+        } else {
+          log("profile: no live link: nothing listens at {liveTarget}")
+        }
+      } else {
+        log("profile: RAE_PERF_LIVE is <host>:<port>, not {liveTarget}")
+      }
+    }
   }
 }
 
@@ -232,10 +252,6 @@ func counter(profiler: mod Profiler, name: view String, value: view Int) {
     value: value
   )
 }
-
-func nativeRealtimeSlotEntry(index: Int) unsafe extern("rae_realtime_slot_entry") ret String
-
-func nativeRealtimeSlotDetail(index: Int) unsafe extern("rae_realtime_slot_detail") ret String
 
 # A lib/Realtime recorder into the capture (on the thread that owns it, once a frame or so): its
 # p99.9 and maximum in microseconds, the maximum's share of the period in percent, and its calls,
@@ -443,10 +459,27 @@ func tick(profiler: mod Profiler) ret Bool {
   }
   memoryCounters(profiler: profiler)
   profiler.hub.perfFrame()
+  if let live: mod PerfLive = profiler.live {
+    perfLiveStep(live: live, hub: profiler.hub)
+  }
   if nowNs() < profiler.endNs {
     ret false
   }
   ret profileStop(profiler: profiler)
+}
+
+# Send the capture's events to a viewer listening at `host`:`port` while it runs (the live link,
+# lib/perf/PerfLive); false when it cannot connect (100 ms at most)
+func startLive(profiler: mod Profiler, host: view String, port: view Int) ret Bool {
+  if profiler.capturing is false {
+    ret false
+  }
+  if let live: PerfLive = perfLiveConnect(host: host, port: port, startNs: profiler.startNs) {
+    profiler.live = live
+    profiler.liveLogs = false
+    ret true
+  }
+  ret false
 }
 
 # Stop early and write immediately. Returns true if the file was written.
@@ -462,6 +495,16 @@ func profileStop(profiler: mod Profiler) ret Bool {
 
 # End the capture without writing it: its rings freed, the hub small again
 func profileDiscard(profiler: mod Profiler) {
+  if let live: mod PerfLive = profiler.live {
+    # the last events, and what the socket takes of them now; the link ends with the capture
+    perfLiveQueue(live: live, hub: profiler.hub)
+    perfLiveFlush(live: live)
+    if live.droppedBlocks > 0 and profiler.liveLogs {
+      log("profile: the live link dropped {live.droppedBlocks} blocks (a slow network)")
+    }
+    perfLiveClose(live: live)
+  }
+  profiler.live = none
   profiler.capturing = false
   profiler.hub.freePerfHub()
   profiler.hub = createPerfHub(settings: idlePerfSettings())
@@ -479,159 +522,28 @@ func capturedNames(profiler: view Profiler) ret List(String) {
   ret names
 }
 
-# Nanoseconds as the trace's microseconds, to the nanosecond ("12.034")
-func traceMicroseconds(nanoseconds: view Int) ret String {
-  let fraction: Int = nanoseconds % 1000
-  if fraction < 10 {
-    ret "{nanoseconds / 1000}.00{fraction}"
-  }
-  if fraction < 100 {
-    ret "{nanoseconds / 1000}.0{fraction}"
-  }
-  ret "{nanoseconds / 1000}.{fraction}"
-}
-
-# The GPU's process in the trace: its counters and spans, apart from the threads
-const profGpuPid: Int = 2
-
-# One trace event object, or "" for a kind the trace does not show. Literal JSON
-# braces are `\{` / `\}`; `{expr}` is Rae interpolation. Zone names are static
-# identifiers, so no JSON escaping of the name is needed.
-func profFragment(
-  event: view PerfEvent
-  name: view String
-  tid: view Int
-  startNs: view Int
-) ret String {
-  let ts: String = traceMicroseconds(nanoseconds: event.time - startNs)
-  if event.kind is PerfKind.counter {
-    var pid: Int = 1
-    if name.startsWith(prefix: "gpu.") {
-      pid = profGpuPid
-    }
-    ret "\{\"name\":\"{name}\",\"ph\":\"C\",\"ts\":{ts},\"pid\":{pid},\"tid\":{tid},\"args\":\{\"v\":{event.value}\}\}"
-  }
-  if event.kind is PerfKind.zoneBegin {
-    if event.value is 0 and event.extra is 0 {
-      ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
-    }
-    # a chunk's iterations and index, a parallelLoop's iterations
-    ret "\{\"name\":\"{name}\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"value\":{event.value},\"index\":{event.extra}\}\}"
-  }
-  # a wait is a span of its own category, so a view can color it
-  if event.kind is PerfKind.waitBegin {
-    ret "\{\"name\":\"{name}\",\"cat\":\"wait\",\"ph\":\"B\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
-  }
-  if event.kind is PerfKind.zoneEnd or event.kind is PerfKind.waitEnd {
-    ret "\{\"name\":\"{name}\",\"ph\":\"E\",\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
-  }
-  # a flow (a spawn to its task's run): its id is the value, extra 0 its start, 1 its end
-  if event.kind is PerfKind.flow {
-    if event.extra is 0 {
-      ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"s\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
-    }
-    ret "\{\"name\":\"{name}\",\"cat\":\"flow\",\"ph\":\"f\",\"bp\":\"e\",\"id\":{event.value},\"ts\":{ts},\"pid\":1,\"tid\":{tid}\}"
-  }
-  if event.kind is PerfKind.mark and name is "realtime rule break" {
-    # the runtime guard's slot names the entry point and what it was for
-    var entry: String = "past the guard's table"
-    var detail: String = ""
-    if event.extra >= 0 {
-      unsafe {
-        entry = nativeRealtimeSlotEntry(index: event.extra as Int)
-        detail = nativeRealtimeSlotDetail(index: event.extra as Int)
-      }
-    }
-    ret "\{\"name\":\"{name}: {entry}\",\"cat\":\"rule break\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"entry\":\"{entry}\",\"detail\":\"{detail}\"\}\}"
-  }
-  if event.kind is PerfKind.mark {
-    ret "\{\"name\":\"{name}\",\"ph\":\"i\",\"s\":\"t\",\"ts\":{ts},\"pid\":1,\"tid\":{tid},\"args\":\{\"extra\":{event.extra}\}\}"
-  }
-  if event.kind is PerfKind.gpuSpan {
-    let duration: String = traceMicroseconds(nanoseconds: event.value - event.time)
-    # a Metal command buffer is the GPU's own busy time, on a lane of its own
-    if name is "command buffer" {
-      ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":1\}"
-    }
-    ret "\{\"name\":\"{name}\",\"ph\":\"X\",\"ts\":{ts},\"dur\":{duration},\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"note\":\"a slot, not a cost on a tile GPU\"\}\}"
-  }
-  ret ""
-}
-
-# Join with `sep` in sqrt(n)-sized blocks. A single left-fold join is O(n^2) in
-# total bytes copied (the accumulator is recopied every step); blocking makes it
-# O(n*sqrt(n)) — sub-second for tens of thousands of events instead of tens of
-# seconds. Deferred to stop time, so it never touches a measured frame.
-func joinBlocked(frags: view List(String), blockSize: view Int) ret String {
-  let n: Int = frags.length
-  if n is 0 {
-    ret ""
-  }
-  var blocks: List(String) = List.create(String, cap: n / blockSize + 2)
-  var i: Int = 0
-  loop i < n {
-    let stop: Int = Math.min(a: i + blockSize, b: n)
-    var block: String = frags.copyAtDefault(index: i)
-    loop var j: Int = i + 1, j < stop, ++j {
-      block = block.concat(other: ",").concat(other: frags.copyAtDefault(index: j))
-    }
-    blocks.add(value: block)
-    i = stop
-  }
-  ret blocks.join(sep: ",")
-}
-
-# The lanes' names: the CPU process with a thread per ring, and the GPU process
-func profLaneNames(profiler: view Profiler, frags: mod List(String)) {
-  frags.add(
-    value: "\{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":1,\"args\":\{\"name\":\"CPU\"\}\}"
-  )
-  frags.add(
-    value: "\{\"name\":\"process_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"args\":\{\"name\":\"GPU\"\}\}"
-  )
-  frags.add(
-    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"tid\":0,\"args\":\{\"name\":\"GPU passes\"\}\}"
-  )
-  frags.add(
-    value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":{profGpuPid},\"tid\":1,\"args\":\{\"name\":\"Metal command buffers\"\}\}"
-  )
-  loop var ring: Int = 0, ring < profiler.hub.ringNames.length, ++ring {
-    let threadName: String = profiler.hub.ringNames.copyAtDefault(index: ring)
-    frags.add(
-      value: "\{\"name\":\"thread_name\",\"ph\":\"M\",\"pid\":1,\"tid\":{ring},\"args\":\{\"name\":\"{threadName}\"\}\}"
-    )
-  }
-}
-
-# The capture's window as a trace at `path`
+# The capture's window as a trace at `path` (lib/perf/PerfChrome, from the window's contents as a
+# capture file holds them), and as a capture file (.raeperf, lib/perf/PerfFile) at RAE_PERF_OUT
+# when that is set
 func write(profiler: view Profiler, path: view String) ret Bool {
   let hub: view PerfHub = profiler.hub
-  let first: Int = hub.perfOldest()
-  let end: Int = hub.perfWritten()
-  var frags: List(String) = List.create(String, cap: end - first + 8)
-  profLaneNames(profiler: profiler, frags: frags)
-  var count: Int = 0
-  loop var number: Int = first, number < end, ++number {
-    let event: PerfEvent = hub.perfEventAt(number: number)
-    let fragment: String = profFragment(
-      event: event
-      name: hub.perfNameText(nameId: event.nameId as Int)
-      tid: hub.perfEventRing(number: number)
-      startNs: profiler.startNs
-    )
-    if fragment.length() > 0 {
-      frags.add(value: fragment)
-      count = count + 1
-    }
-  }
-  let body: String = joinBlocked(frags: frags, blockSize: 256)
-  let json: String = "\{\"traceEvents\":[".concat(other: body).concat(other: "]\}")
-  let ok: Bool = Sys.writeFile(path: path, content: json)
+  let file: PerfFile = perfFileOf(hub: hub, startNs: profiler.startNs)
+  let trace: PerfChromeTrace = perfChromeTrace(file: file)
+  let ok: Bool = Sys.writeFile(path: path, content: trace.json)
   if ok {
-    log("profile: wrote {count} events to {path}")
+    log("profile: wrote {trace.events} events to {path}")
   } else {
     log("profile: FAILED to write {path}")
   }
+  let perfOut: String = Sys.getEnv(name: "RAE_PERF_OUT")
+  if perfOut.length() > 0 {
+    if perfWriteFile(file: file, path: perfOut) {
+      log("profile: wrote the capture file {perfOut}")
+    } else {
+      log("profile: FAILED to write the capture file {perfOut}")
+    }
+  }
+  let first: Int = hub.perfOldest()
   let dropped: Int = hub.perfDropped()
   if first > 0 or dropped > 0 {
     log(

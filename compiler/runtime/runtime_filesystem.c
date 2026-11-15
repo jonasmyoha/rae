@@ -210,6 +210,19 @@ rae_Bool rae_ext_rae_sys_write_file(rae_String path, rae_String content) {
   return writeErrno == 0 && closed == 0;
 }
 
+/* `count` bytes from `data`, the whole file, closed (Sys.writeFileBytes): as above */
+rae_Bool rae_ext_rae_sys_write_file_bytes(rae_String path, const void* data, int64_t count) {
+  if (!path.data || count < 0 || (count > 0 && !data)) { rae_file_errno_set(EINVAL); return false; }
+  FILE* f = fopen((const char*)path.data, "wb");
+  if (!f) { rae_file_errno_set(errno); return false; }
+  size_t written = count > 0 ? fwrite(data, 1, (size_t)count, f) : 0;
+  int writeErrno = written == (size_t)count ? 0 : (errno ? errno : EIO);
+  int closed = fclose(f);
+  int closeErrno = closed == 0 ? 0 : errno;
+  rae_file_errno_set(writeErrno ? writeErrno : closeErrno);
+  return writeErrno == 0 && closed == 0;
+}
+
 rae_Bool rae_ext_rae_sys_rename(rae_String oldPath, rae_String newPath) {
     if (!oldPath.data || !newPath.data) { rae_file_errno_set(EINVAL); return false; }
     int ok = rename((const char*)oldPath.data, (const char*)newPath.data) == 0;

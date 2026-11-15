@@ -1,0 +1,32 @@
+# perfExport — a capture file (.raeperf, lib/perf/PerfFile) as Chrome Trace JSON for Perfetto
+# (ui.perfetto.dev), docs/perf-tools-design.md §5:
+#
+#     rae run tools/perfExport/Main.rae -- capture.raeperf trace.json
+#
+# A program writes the file with RAE_PERF_OUT=<path> (a lib/Profile capture writes it beside its
+# trace; on iOS RAE_PERF_OUT names a file in the app's Documents folder).
+import Sys
+open perf/PerfFile
+open perf/PerfChrome
+
+func main() ret Int {
+  if Sys.argCount() < 2 {
+    log("usage: rae run tools/perfExport/Main.rae -- <capture.raeperf> <trace.json>")
+    ret 2
+  }
+  let input: String = Sys.argAt(index: 0)
+  let output: String = Sys.argAt(index: 1)
+  if let file: PerfFile = perfReadFile(path: input) {
+    let trace: PerfChromeTrace = perfChromeTrace(file: file)
+    if not Sys.writeFile(path: output, content: trace.json) {
+      log("perfExport: could not write {output}")
+      ret 1
+    }
+    log(
+      "perfExport: {trace.events} events of {file.header.program} (Rae {file.header.raeVersion}, {file.header.machine}) to {output}"
+    )
+    ret 0
+  }
+  log("perfExport: {input} is not a capture file")
+  ret 1
+}

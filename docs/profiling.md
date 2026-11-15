@@ -61,6 +61,11 @@ frames it measures.
   under `RAE_MEM_STATS=1` `mem.buffer bytes` and `mem.strings`; the walkers add their GPU tables'
   bytes. `python3 tools/perf-memory-growth.py <trace> --warmup 20` prints each one's growth per
   minute after the warm-up, and fails over `--max-buffers` / `--max-buffer-bytes`.
+- The capture file and the live link (perf step 9, Rae 0.3.140): `RAE_PERF_OUT=capture.raeperf`
+  writes the binary capture beside the trace (`rae run tools/perfExport/Main.rae --
+  capture.raeperf trace.json` makes a Perfetto trace of it), and `RAE_PERF_LIVE=<host>:<port>`
+  streams the capture over TCP while it runs, dropping (and counting) blocks rather than waiting
+  on a slow network.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

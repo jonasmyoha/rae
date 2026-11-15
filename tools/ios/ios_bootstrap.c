@@ -54,5 +54,13 @@ static void rae_ios_bootstrap(void) {
             snprintf(out, sizeof(out), "%s/Documents/rae_profile.json", home);
             setenv("RAE_PROFILE_OUT", out, 1);
         }
+        /* The capture file (RAE_PERF_OUT, lib/perf/PerfFile) given as a bare file name lands
+         * in Documents as well, pulled like the trace */
+        const char *perfOut = getenv("RAE_PERF_OUT");
+        if (perfOut && *perfOut && perfOut[0] != '/') {
+            char perfPath[1024];
+            snprintf(perfPath, sizeof(perfPath), "%s/Documents/%s", home, perfOut);
+            setenv("RAE_PERF_OUT", perfPath, 1);
+        }
     }
 }
