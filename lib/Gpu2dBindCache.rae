@@ -1,0 +1,149 @@
+# The 2D canvas's bind groups for its box and text passes, kept across frames. A draw run binds
+# the viewport, its instance (or glyph) buffer and its clip uniform (and, for text, the atlas's
+# texture view and the sampler); those buffers are the canvas's own flush and clip slots, the same
+# from frame to frame, so the same run finds its group here instead of making one and releasing
+# it at the frame's end (which was a GPU object and its entry Lists per run per frame).
+#
+# A group is found by all of what it binds and the pipeline; one whose resources were retired is
+# not usable and is made again. The groups used in a frame are pinned by its submission
+# (gpu2dBindCacheRecordUses at the frame's close), and one unused for gpu2dBindCacheIdleFrames is
+# retired at a frame's end, which the manager defers until no submission uses it.
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuIds
+
+# Frames a group may go unused before it is let go
+const gpu2dBindCacheIdleFrames: Int = 120
+
+# What a group binds, with its pipeline. No texture view: the box pass's layout (viewport,
+# instances, clip); with one: the text pass's (viewport, glyphs, texture view, sampler, clip).
+type Gpu2dBindKey {
+  pipeline: RenderPipelineId
+  viewport: BufferId
+  items: BufferId
+  clip: BufferId
+  textureView: TextureViewId
+  sampler: SamplerId
+}
+
+type Gpu2dBindCache {
+  keys: List(Gpu2dBindKey)
+  binds: List(BindGroupId)
+  lastUsed: List(Int)
+  frame: Int = 0
+}
+
+func createGpu2dBindCache() ret Gpu2dBindCache {
+  ret Gpu2dBindCache {
+    keys: List.create(Gpu2dBindKey, cap: 32)
+    binds: List.create(BindGroupId, cap: 32)
+    lastUsed: List.create(Int, cap: 32)
+  }
+}
+
+func gpu2dBindKeySame(a: view Gpu2dBindKey, b: view Gpu2dBindKey) ret Bool {
+  ret a.pipeline is b.pipeline and a.viewport is b.viewport and a.items is b.items and a.clip is b.clip and a.textureView is b.textureView and a.sampler is b.sampler
+}
+
+# Entry `index` out of the cache (the last one moved into its place)
+func gpu2dBindCacheDrop(cache: mod Gpu2dBindCache, index: view Int) {
+  let last: Int = cache.keys.length - 1
+  if index < last {
+    cache.keys.set(index: index, value: cache.keys.copyAtDefault(index: last))
+    cache.binds.set(index: index, value: cache.binds.copyAtDefault(index: last))
+    cache.lastUsed.set(index: index, value: cache.lastUsed.copyAtDefault(index: last))
+  }
+  cache.keys.remove(index: last)
+  cache.binds.remove(index: last)
+  cache.lastUsed.remove(index: last)
+}
+
+# The group binding `key`: the kept one, or a new one kept from now on; none when it cannot be
+# made
+func gpu2dBindGroup(
+  cache: mod Gpu2dBindCache
+  resources: mod GpuResources
+  key: view Gpu2dBindKey
+) ret opt BindGroupId {
+  var found: Int = -1
+  loop var i: Int = 0, i < cache.keys.length and found < 0, ++i {
+    if let kept: view Gpu2dBindKey = cache.keys.viewAt(index: i) {
+      if gpu2dBindKeySame(a: kept, b: key) {
+        found = i
+      }
+    }
+  }
+  if found >= 0 {
+    let bind: BindGroupId = cache.binds.copyAtDefault(index: found)
+    if bindGroupIsUsable(resources: resources, id: bind) {
+      cache.lastUsed.set(index: found, value: cache.frame)
+      ret bind
+    }
+    # a resource under it was retired: made again below
+    let unusedRetired: Bool = retireBindGroup(resources: resources, id: bind)
+    gpu2dBindCacheDrop(cache: cache, index: found)
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
+  entries.add(value: bufferRef(id: key.viewport))
+  entries.add(value: bufferRef(id: key.items))
+  if key.textureView is not noTextureViewId() {
+    entries.add(value: textureViewRef(id: key.textureView))
+    entries.add(value: samplerRef(id: key.sampler))
+  }
+  entries.add(value: bufferRef(id: key.clip))
+  if let made: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: key.pipeline
+    entries: entries
+  ) {
+    cache.keys.add(value: key)
+    cache.binds.add(value: made)
+    cache.lastUsed.add(value: cache.frame)
+    ret made
+  }
+  ret none
+}
+
+# The groups this frame used, pinned by its submission (at the frame's close, before submit)
+func gpu2dBindCacheRecordUses(
+  cache: view Gpu2dBindCache
+  recording: mod Recording
+  resources: view GpuResources
+) {
+  loop var i: Int = 0, i < cache.binds.length, ++i {
+    if cache.lastUsed.copyAtDefault(index: i) is cache.frame {
+      recordBindGroupUse(
+        recording: recording
+        resources: resources
+        id: cache.binds.copyAtDefault(index: i)
+      )
+    }
+  }
+}
+
+# The frame's end: groups unused for a while let go, and the next frame begun
+func gpu2dBindCacheFrameEnd(cache: mod Gpu2dBindCache, resources: mod GpuResources) {
+  var i: Int = 0
+  loop i < cache.binds.length {
+    if cache.frame - cache.lastUsed.copyAtDefault(index: i) > gpu2dBindCacheIdleFrames {
+      let unusedRetired: Bool = retireBindGroup(
+        resources: resources
+        id: cache.binds.copyAtDefault(index: i)
+      )
+      gpu2dBindCacheDrop(cache: cache, index: i)
+    } else {
+      i = i + 1
+    }
+  }
+  cache.frame = cache.frame + 1
+}
+
+# Every group let go (the canvas's shutdown)
+func gpu2dBindCacheShutdown(cache: mod Gpu2dBindCache, resources: mod GpuResources) {
+  retireBindGroupIds(resources: resources, list: cache.binds)
+  cache.keys.clear()
+  cache.binds.clear()
+  cache.lastUsed.clear()
+}

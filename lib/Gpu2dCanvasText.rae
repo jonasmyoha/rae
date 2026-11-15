@@ -20,6 +20,7 @@ open Gpu2dCanvas
 open Gpu2dCanvasImage
 open Gpu2dCanvasClip
 open Gpu2dCanvasFrame
+open Gpu2dBindCache
 
 # ----- text pass (#909) ---------------------------------------------------
 func ensureTextPipeline(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
@@ -374,20 +375,19 @@ func textFlushAtlas(
         start: runStart
         count: count
       )
-      var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
-      entries.add(value: bufferRef(id: canvas.viewport))
-      entries.add(value: bufferRef(id: glyphs))
-      entries.add(value: textureViewRef(id: textureView))
-      entries.add(value: samplerRef(id: canvas.imageSampler))
-      entries.add(
-        value: bufferRef(id: clipUniformFor(canvas: canvas, resources: resources, clip: clip))
-      )
-      if let bind: BindGroupId = createRenderBindGroup(
-        resources: resources
+      let key: Gpu2dBindKey = {
         pipeline: canvas.textPipeline
-        entries: entries
+        viewport: canvas.viewport
+        items: glyphs
+        clip: clipUniformFor(canvas: canvas, resources: resources, clip: clip)
+        textureView: textureView
+        sampler: canvas.imageSampler
+      }
+      if let bind: BindGroupId = gpu2dBindGroup(
+        cache: canvas.bindCache
+        resources: resources
+        key: key
       ) {
-        canvas.frameBinds.add(value: bind)
         g2dScissor(canvas: canvas, clip: clip)
         unsafe {
           let drawn: Bool = recordDrawInPass(

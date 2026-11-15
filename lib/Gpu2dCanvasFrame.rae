@@ -22,6 +22,7 @@ open Gpu2dCanvasClip
 open Gpu2dCanvasText
 open Gpu2dCanvasTiming
 open Gpu2dCanvasBackdrop
+open Gpu2dBindCache
 
 # ----- frame (#915) ----------------------------------------------------------
 
@@ -111,6 +112,7 @@ func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
           recordBindGroupUse(recording: recording, resources: resources, id: bind)
         }
       }
+      gpu2dBindCacheRecordUses(cache: canvas.bindCache, recording: recording, resources: resources)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.pipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.imagePipeline)
       recordRenderPipelineUse(recording: recording, resources: resources, id: canvas.textPipeline)
@@ -175,6 +177,7 @@ func boxFrameEnd(canvas: mod Gpu2dCanvas) {
     # deferred until pollSubmissions sees the GPU finish — no wgpu-side reliance.
     retireBindGroupIds(resources: resources, list: canvas.frameBinds)
     canvas.frameBinds.clear()
+    gpu2dBindCacheFrameEnd(cache: canvas.bindCache, resources: resources)
     pollSubmissions(inFlight: canvas.inFlight, resources: resources)
     let compacted: Bool = compactDependencies(resources: resources)
   }
