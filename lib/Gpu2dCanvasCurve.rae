@@ -1,0 +1,208 @@
+# Gpu2dCanvasCurve — a cubic Bezier stroke on the 2D canvas, in the box shader's curve mode
+# (gpu2d_box.wgsl, mode 4): primitives of the frame's one box draw, antialiased like every box.
+# A long curve is cut into a few sub-curves (each an exact cubic of its stretch), and each is one
+# quad turned along its chord, as wide as it bulges: one quad round a whole S-curve between two
+# far nodes covered a big empty rectangle, and its pixels made 10,000 wires take 2.4 s a frame on
+# the GPU. The shader measures each pixel's distance to its piece cut into 6 straight bits. Where
+# two pieces meet their round ends overlap, so a see-through color is a little denser there.
+import Math
+open Gpu2dCanvas
+open Gpu2dCanvasFrame
+
+# A curve from (x0, y0) to (x3, y3) pulled toward (x1, y1) and (x2, y2), `width` units wide, in
+# design units like every primitive
+func canvasDrawCurve(
+  canvas: mod Gpu2dCanvas
+  x0: copy Float
+  y0: copy Float
+  x1: copy Float
+  y1: copy Float
+  x2: copy Float
+  y2: copy Float
+  x3: copy Float
+  y3: copy Float
+  width: copy Float
+  color: copy Int
+) {
+  if width <= 0.0 or colorAlpha(color: color) is 0 {
+    ret
+  }
+  canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
+  # The canvas rotation (#1003) turns the four points about its pivot
+  if canvas.spinAngle is not 0.0 {
+    let a: SpinPoint = spinPoint(canvas: canvas, x: x0, y: y0)
+    let b: SpinPoint = spinPoint(canvas: canvas, x: x1, y: y1)
+    let c: SpinPoint = spinPoint(canvas: canvas, x: x2, y: y2)
+    let d: SpinPoint = spinPoint(canvas: canvas, x: x3, y: y3)
+    x0 = a.x
+    y0 = a.y
+    x1 = b.x
+    y1 = b.y
+    x2 = c.x
+    y2 = c.y
+    x3 = d.x
+    y3 = d.y
+  }
+  # cut into sub-curves of about 48 units of control polygon each (1 to 24), each an exact cubic
+  # of its stretch, so each quad hugs its piece of the curve
+  let reach: Float = curveSide(
+    ax: x0
+    ay: y0
+    bx: x1
+    by: y1
+  ) + curveSide(
+    ax: x1
+    ay: y1
+    bx: x2
+    by: y2
+  ) + curveSide(
+    ax: x2
+    ay: y2
+    bx: x3
+    by: y3
+  )
+  let count: Int = Math.min(a: 24, b: Math.max(a: 1, b: Math.ceil(x: reach / 48.0) as Int))
+  let curve: CurvePoints = {
+    x0: x0
+    y0: y0
+    x1: x1
+    y1: y1
+    x2: x2
+    y2: y2
+    x3: x3
+    y3: y3
+  }
+  loop var i: Int = 0, i < count, ++i {
+    let a: Float = (i as Float) / (count as Float)
+    let b: Float = ((i + 1) as Float) / (count as Float)
+    let start: CurveVec = curvePoint(curve: curve, t: a)
+    let end: CurveVec = curvePoint(curve: curve, t: b)
+    let startSlope: CurveVec = curveSlope(curve: curve, t: a)
+    let endSlope: CurveVec = curveSlope(curve: curve, t: b)
+    let third: Float = (b - a) / 3.0
+    canvasPushCurvePiece(
+      canvas: canvas
+      piece: CurvePoints {
+        x0: start.x
+        y0: start.y
+        x1: start.x + startSlope.x * third
+        y1: start.y + startSlope.y * third
+        x2: end.x - endSlope.x * third
+        y2: end.y - endSlope.y * third
+        x3: end.x
+        y3: end.y
+      }
+      width: width
+      color: color
+    )
+  }
+}
+
+type CurvePoints {
+  x0: Float
+  y0: Float
+  x1: Float
+  y1: Float
+  x2: Float
+  y2: Float
+  x3: Float
+  y3: Float
+}
+
+type CurveVec {
+  x: Float
+  y: Float
+}
+
+func curvePoint(curve: view CurvePoints, t: view Float) ret CurveVec {
+  let u: Float = 1.0 - t
+  let a: Float = u * u * u
+  let b: Float = 3.0 * u * u * t
+  let c: Float = 3.0 * u * t * t
+  let d: Float = t * t * t
+  ret CurveVec {
+    x: a * curve.x0 + b * curve.x1 + c * curve.x2 + d * curve.x3
+    y: a * curve.y0 + b * curve.y1 + c * curve.y2 + d * curve.y3
+  }
+}
+
+# The curve's derivative at t
+func curveSlope(curve: view CurvePoints, t: view Float) ret CurveVec {
+  let u: Float = 1.0 - t
+  let a: Float = 3.0 * u * u
+  let b: Float = 6.0 * u * t
+  let c: Float = 3.0 * t * t
+  ret CurveVec {
+    x: a * (curve.x1 - curve.x0) + b * (curve.x2 - curve.x1) + c * (curve.x3 - curve.x2)
+    y: a * (curve.y1 - curve.y0) + b * (curve.y2 - curve.y1) + c * (curve.y3 - curve.y2)
+  }
+}
+
+# One piece as one primitive: its quad turned along its chord, as long as the chord and as wide as
+# the piece bulges, plus half the width and a pixel of antialiasing all round
+func canvasPushCurvePiece(
+  canvas: mod Gpu2dCanvas
+  piece: view CurvePoints
+  width: view Float
+  color: view Int
+) {
+  let chordX: Float = piece.x3 - piece.x0
+  let chordY: Float = piece.y3 - piece.y0
+  let chord: Float = Math.sqrt(x: chordX * chordX + chordY * chordY)
+  var ux: Float = 1.0
+  var uy: Float = 0.0
+  if chord > 0.0001 {
+    ux = chordX / chord
+    uy = chordY / chord
+  }
+  # the piece's points along the chord (s) and across it (t), from its start
+  let s1: Float = (piece.x1 - piece.x0) * ux + (piece.y1 - piece.y0) * uy
+  let t1: Float = (piece.y1 - piece.y0) * ux - (piece.x1 - piece.x0) * uy
+  let s2: Float = (piece.x2 - piece.x0) * ux + (piece.y2 - piece.y0) * uy
+  let t2: Float = (piece.y2 - piece.y0) * ux - (piece.x2 - piece.x0) * uy
+  let s3: Float = chord
+  let pad: Float = width * 0.5 + 1.0
+  let minS: Float = Math.min(a: Math.min(a: 0.0, b: s1), b: Math.min(a: s2, b: s3)) - pad
+  let maxS: Float = Math.max(a: Math.max(a: 0.0, b: s1), b: Math.max(a: s2, b: s3)) + pad
+  let minT: Float = Math.min(a: Math.min(a: 0.0, b: t1), b: t2) - pad
+  let maxT: Float = Math.max(a: Math.max(a: 0.0, b: t1), b: t2) + pad
+  let boxW: Float = maxS - minS
+  let boxH: Float = maxT - minT
+  # the box's middle, back on the canvas
+  let middleS: Float = (minS + maxS) * 0.5
+  let middleT: Float = (minT + maxT) * 0.5
+  let middleX: Float = piece.x0 + ux * middleS - uy * middleT
+  let middleY: Float = piece.y0 + uy * middleS + ux * middleT
+  canvas.prims.add(value: middleX - boxW * 0.5)
+  canvas.prims.add(value: middleY - boxH * 0.5)
+  canvas.prims.add(value: boxW)
+  canvas.prims.add(value: boxH)
+  canvas.prims.add(value: 0.0 - minS)
+  canvas.prims.add(value: 0.0 - minT)
+  canvas.prims.add(value: s1 - minS)
+  canvas.prims.add(value: t1 - minT)
+  pushPremultiplied(canvas: canvas, color: color)
+  canvas.prims.add(value: s2 - minS)
+  canvas.prims.add(value: t2 - minT)
+  canvas.prims.add(value: s3 - minS)
+  canvas.prims.add(value: 0.0 - minT)
+  canvas.prims.add(value: width)
+  canvas.prims.add(value: Math.atan2(y: uy, x: ux))
+  # Mode 4: a cubic Bezier stroke, measured against 6 straight pieces
+  canvas.prims.add(value: 4.0)
+  canvas.prims.add(value: 0.0)
+  canvas.prims.add(value: 6.0)
+  canvas.prims.add(value: 0.0)
+  canvas.prims.add(value: 0.0)
+  canvas.prims.add(value: 0.0)
+  canvas.primClips.add(value: canvas.currentClip)
+}
+
+func curveSide(
+  ax: view Float
+  ay: view Float
+  bx: view Float
+  by: view Float
+) ret Float {
+  ret Math.sqrt(x: (bx - ax) * (bx - ax) + (by - ay) * (by - ay))
+}

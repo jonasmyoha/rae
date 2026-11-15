@@ -13,6 +13,7 @@ open ui/RadialGradientFill
 open ui/ValueComponents
 open ui/ChartComponents
 open ui/PlaneComponents
+open ui/WireComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -140,6 +141,9 @@ type UiWorld {
   planeViews: ComponentTable(PlaneView)
   planeViewDatas: ComponentTable(PlaneViewData)
   planeViewStates: ComponentTable(PlaneViewState)
+  # wires between nodes (ui/WireComponents): the authored style, the app's wires
+  wireSets: ComponentTable(Wires)
+  wireDatas: ComponentTable(WireData)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -370,6 +374,8 @@ func createUiWorld() ret UiWorld {
     planeViews: ComponentTable.create(PlaneView)
     planeViewDatas: ComponentTable.create(PlaneViewData)
     planeViewStates: ComponentTable.create(PlaneViewState)
+    wireSets: ComponentTable.create(Wires)
+    wireDatas: ComponentTable.create(WireData)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)

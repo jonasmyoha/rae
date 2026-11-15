@@ -1224,3 +1224,32 @@ every Float stays small: a screen point is `root + offset + zoom * (point - orig
 
 Case 1485 pans a node at 3, 1e5, 1e6 and 1e7 under zoom 50 both ways (0.000 px by the origin at
 every distance) and windows a plane view at 1e7.
+
+## 39. `Wires`: curves between nodes
+
+A node with `Wires` draws many wires (its `WireData`, filled by the app), each a cubic Bezier from
+one end to the other, leaving and arriving level, as a node editor draws its links:
+
+```json
+"Links": { "Rect": { "x": 0, "y": 0, "w": 1, "h": 1 }, "Wires": { "color": "accent", "width": 2 } }
+```
+
+- The keys: `color` (a theme palette name), `width` (in the node's units, so it zooms with a
+  camera), `minScreenWidth` (1.5: never thinner on screen, so wires stay readable zoomed out),
+  `hitTolerance` (4 screen points past a wire's edge still hit it) and `bend` (0.5: how far the
+  middle points reach out along x, as a share of the ends' horizontal distance).
+- Each end follows a node (`wireEndOn(entityId, anchorX, anchorY)`: a share of its box, 1, 0.5 the
+  right edge's middle) or is a fixed point in the Wires node's units (`wireEndAt(x, y)`);
+  `wireConnect(world, wiresEntityId, fromEntityId, toEntityId)` joins a right edge to a left
+  edge. The ends are read from the nodes' places every frame, so a wire follows a moved node.
+- `wireAt(world, uiSystems, wiresEntityId, x, y)` gives the wire under a screen point (the
+  nearest within the tolerance), or -1.
+- The drawing (lib/ui/renderSystem/RenderWires, lib/Gpu2dCanvasCurve) puts each wire in the
+  frame's one box draw, in the box shader's curve mode: cut into a few exact sub-curves, each a
+  quad turned along its chord, whose pixels measure their distance to the curve. Put the Wires
+  node first under the canvas, so wires go under the nodes.
+
+Case 1486 checks the ends, the hit test (on the curve and 3 points off hit, 10 points off on either
+side do not), a moved node, the minimum width and the scene keys; `checks/uiWires` draws 10,000
+wires between 2,000 boxes: 1.1 ms of CPU a frame with all on screen (0.26 ms zoomed in), and
+about 1.7 ms of GPU time.

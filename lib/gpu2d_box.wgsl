@@ -11,7 +11,10 @@
 // gradient (Gpu2dCanvasRadial: `border` holds its center as a fraction of the
 // box, its radius as a fraction of the distance from the center to the
 // farthest corner, and the share of that radius where the color reaches `grad`;
-// fill at the center, grad from the stop out).
+// fill at the center, grad from the stop out), mode 4 a cubic Bezier stroke
+// (Gpu2dCanvasCurve: its four points relative to the rect's corner in `radius`
+// (p0, p1) and `border` (p2, p3), params.x its width, grad.x how many straight
+// pieces the distance is measured against).
 struct Prim {
   rect: vec4<f32>,
   radius: vec4<f32>,
@@ -57,6 +60,27 @@ fn vs(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> VsOut
   o.posD = posDesign;  // design-space pos for the clip SDF
   return o;
 }
+// Distance from `p` to the segment a..b
+fn sdSegment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+  let pa = p - a;
+  let ba = b - a;
+  let h = clamp(dot(pa, ba) / max(dot(ba, ba), 0.000001), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+// Distance from `p` to a cubic Bezier p0..p3, measured against `pieces`
+// straight pieces of it
+fn sdCubic(p: vec2<f32>, p0: vec2<f32>, p1: vec2<f32>, p2: vec2<f32>, p3: vec2<f32>, pieces: i32) -> f32 {
+  var prev = p0;
+  var best = 1.0e9;
+  for (var i = 1; i <= pieces; i = i + 1) {
+    let t = f32(i) / f32(pieces);
+    let u = 1.0 - t;
+    let q = u * u * u * p0 + 3.0 * u * u * t * p1 + 3.0 * u * t * t * p2 + t * t * t * p3;
+    best = min(best, sdSegment(p, prev, q));
+    prev = q;
+  }
+  return best;
+}
 fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: vec4<f32>) -> f32 {
   let rad = select(r.zw, r.xy, p.x > 0.0);
   let rr = select(rad.y, rad.x, p.y > 0.0);
@@ -100,9 +124,14 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let rad4 = min(p.radius, vec4<f32>(rmax, rmax, rmax, rmax));
   var d = sdRoundBox(center, halfSize, rad4);
   let arc = p.params.z > 1.5 && p.params.z < 2.5;
-  let radial = p.params.z > 2.5;
+  let radial = p.params.z > 2.5 && p.params.z < 3.5;
+  let curve = p.params.z > 3.5;
   if (arc) {
     d = sdRingArc(center, rmax, p.params.x, p.params.w);
+  }
+  if (curve) {
+    let pieces = i32(clamp(p.grad.x, 2.0, 64.0));
+    d = sdCubic(in.local, p.radius.xy, p.radius.zw, p.border.xy, p.border.zw, pieces) - p.params.x * 0.5;
   }
   let aa = max(fwidth(d), 0.0001);
   var cov = 1.0 - smoothstep(-aa, aa, d);
@@ -115,7 +144,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
   }
   var col = p.fill;
-  if (arc) {
+  if (arc || curve) {
     return col * cov;
   }
   if (radial) {

@@ -1,0 +1,268 @@
+# Wires (ui/WireComponents, ui/wireSystem): two nodes on a Camera2D canvas joined by a wire from
+# A's right edge to B's left edge. A point on the curve hits it, one 3 points off still does, one
+# 10 points off does not; when B moves the wire's end moves with it; zoomed out the width stays
+# at its minimum on screen; a fixed end stays put; and a scene authors the Wires style.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/WireComponents
+open ui/cameraSystem/CameraSystem
+open ui/layoutSystem/LayoutSystem
+open ui/wireSystem/WireSystem
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  if not isNone(this: parent) {
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: parent
+    )
+  }
+  ret entityId
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func curveOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  wiresEntityId: view EntityId
+  index: view Int
+) ret WireCurve {
+  ret wireCurveOf(
+    uiSystems: uiSystems
+    space: wireSpace(uiSystems: uiSystems, wiresEntityId: wiresEntityId)
+    style: componentView(this: world.wireSets, entityId: wiresEntityId)
+    wire: componentView(this: world.wireDatas, entityId: wiresEntityId).wires.copyAtDefault(
+      index: index
+    )
+  )
+}
+
+# A point `away` points from the curve's middle, across it
+func across(curve: view WireCurve, away: view Float) ret WirePoint {
+  let middle: WirePoint = wirePointAt(curve: curve, t: 0.5)
+  let ahead: WirePoint = wirePointAt(curve: curve, t: 0.51)
+  let dx: Float = ahead.x - middle.x
+  let dy: Float = ahead.y - middle.y
+  let length: Float = Math.sqrt(x: dx * dx + dy * dy)
+  ret WirePoint { x: middle.x - dy / length * away, y: middle.y + dx / length * away }
+}
+
+func hits(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  wiresEntityId: view EntityId
+  away: view Float
+) ret Int {
+  let point: WirePoint = across(
+    curve: curveOf(
+      world: world
+      uiSystems: uiSystems
+      wiresEntityId: wiresEntityId
+      index: 0
+    )
+    away: away
+  )
+  ret wireAt(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wiresEntityId
+    x: point.x
+    y: point.y
+  )
+}
+
+func whole(value: view Float) ret Int {
+  ret Math.round(x: value) as Int
+}
+
+func main() ret Int {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let canvas: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: noEntity()
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+  )
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  let wires: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+  )
+  world.wireSets.componentSet(entityId: wires, data: {})
+  let a: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 100.0
+    y: 100.0
+    w: 120.0
+    h: 60.0
+  )
+  let b: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 500.0
+    y: 300.0
+    w: 120.0
+    h: 60.0
+  )
+  let linked: Int = wireConnect(
+    world: world
+    wiresEntityId: wires
+    fromEntityId: a
+    toEntityId: b
+  )
+  let fixed: Int = wireAdd(
+    world: world
+    wiresEntityId: wires
+    wire: Wire {
+      from: wireEndOn(entityId: b, anchorX: 1.0, anchorY: 0.5)
+      to: wireEndAt(x: 760.0, y: 40.0)
+    }
+  )
+  place(world: world, uiSystems: uiSystems)
+  let curve: WireCurve = curveOf(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    index: linked
+  )
+  log(
+    "wire {linked}: from {whole(value: curve.x0)}, {whole(value: curve.y0)} to {whole(
+      value: curve.x3
+    )}, {whole(value: curve.y3)}, width {curve.width}"
+  )
+  log("on the curve hits {hits(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    away: 0.0
+  )}, 3 points off {hits(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    away: 3.0
+  )}, 10 points off {hits(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    away: 10.0
+  )}, -10 {hits(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    away: -10.0
+  )}")
+  # B moves: the wire's end follows
+  world.rects.componentMod(entityId: b).position = { x: 420.0, y: 420.0 }
+  place(world: world, uiSystems: uiSystems)
+  let moved: WireCurve = curveOf(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    index: linked
+  )
+  log("B moved: the wire ends at {whole(value: moved.x3)}, {whole(value: moved.y3)}; on the curve hits {hits(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    away: 0.0
+  )}")
+  let fixedCurve: WireCurve = curveOf(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    index: fixed
+  )
+  log(
+    "the fixed end: from {whole(value: fixedCurve.x0)}, {whole(value: fixedCurve.y0)} to {whole(
+      value: fixedCurve.x3
+    )}, {whole(value: fixedCurve.y3)}"
+  )
+  # zoomed: the width follows the zoom, but not under its minimum
+  world.cameras.componentSet(
+    entityId: canvas
+    data: { zoom: 2.0, offsetX: -100.0, offsetY: -100.0 }
+  )
+  place(world: world, uiSystems: uiSystems)
+  let near: WireCurve = curveOf(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    index: linked
+  )
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 0.1, offsetX: 0.0, offsetY: 0.0 })
+  place(world: world, uiSystems: uiSystems)
+  let far: WireCurve = curveOf(
+    world: world
+    uiSystems: uiSystems
+    wiresEntityId: wires
+    index: linked
+  )
+  log(
+    "zoom 2: width {near.width}, from {whole(value: near.x0)}, {whole(value: near.y0)}; zoom 0.1: width {far.width}, from {whole(
+      value: far.x0
+    )}, {whole(value: far.y0)}"
+  )
+  # a scene authors the style
+  var styled: UiWorld = createUiWorld()
+  var styledSystems: UiSystems = createUiSystems()
+  loadScene(
+    world: styled
+    uiSystems: styledSystems
+    scene: parseScene(
+      source: "\{\"type\": \"Scene\", \"version\": 2, \"root\": \"Links\", \"nodes\": \{\"Links\": \{\"Rect\": \{\"x\": 0, \"y\": 0, \"w\": 100, \"h\": 100\}, \"Wires\": \{\"color\": \"textMuted\", \"width\": 3, \"minScreenWidth\": 2, \"hitTolerance\": 6, \"bend\": 0.3\}\}\}\}"
+    )
+  )
+  if let index: Int = styled.nodeIds.get(k: "Links") {
+    let links: EntityId = nodeEntityId(world: styled, index: index)
+    if componentHas(this: styled.wireSets, entityId: links) {
+      let style: view Wires = componentView(this: styled.wireSets, entityId: links)
+      log(
+        "from a scene: {style.color}, width {style.width}, at least {style.minScreenWidth}, tolerance {style.hitTolerance}, bend {style.bend}"
+      )
+    } else {
+      log("from a scene: no Wires")
+    }
+  }
+  ret 0
+}

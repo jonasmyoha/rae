@@ -65,11 +65,11 @@ func paintOffScreen(
   viewW: view Float
   viewH: view Float
 ) ret Bool {
-  # a plane draws its items wherever they are, outside its own box too
+  # a plane draws its items wherever they are, outside its own box too, and a Wires node its wires
   if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false or componentHas(
     this: world.planeViews
     entityId: entityId
-  ) {
+  ) or componentHas(this: world.wireSets, entityId: entityId) {
     ret false
   }
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {

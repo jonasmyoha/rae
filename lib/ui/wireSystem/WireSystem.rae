@@ -1,0 +1,251 @@
+# wireSystem — where the wires of a `Wires` node are on screen (ui/WireComponents), and which one
+# a point hits. Nothing is kept between frames: each end is read from its node's place as the
+# transform pass left it, so a wire follows a node that moves, a layout or a camera, at once. The
+# drawing (ui/renderSystem/RenderWires) and the hit test use the same curve.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/WireComponents
+
+# A wire on screen: its four Bezier points and its width, in design units
+type WireCurve {
+  x0: Float
+  y0: Float
+  x1: Float
+  y1: Float
+  x2: Float
+  y2: Float
+  x3: Float
+  y3: Float
+  width: Float
+  ok: Bool = true
+}
+
+# Where the Wires node's units land on screen
+type WireSpace {
+  x: Float = 0.0
+  y: Float = 0.0
+  scale: Float = 1.0
+}
+
+func wireSpace(uiSystems: view UiSystems, wiresEntityId: view EntityId) ret WireSpace {
+  if not componentHas(this: uiSystems.transform2d.worldTransforms, entityId: wiresEntityId) {
+    ret WireSpace {}
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: wiresEntityId
+  )
+  ret WireSpace { x: transform.position.x, y: transform.position.y, scale: transform.scale.x }
+}
+
+# An end on screen; false in `ok` when its node has no place (not laid out, gone)
+type WirePoint {
+  x: Float
+  y: Float
+  ok: Bool = true
+}
+
+func wireEndPoint(
+  uiSystems: view UiSystems
+  space: view WireSpace
+  end: view WireEnd
+) ret WirePoint {
+  if isNone(this: end.entityId) {
+    ret WirePoint { x: space.x + end.x * space.scale, y: space.y + end.y * space.scale }
+  }
+  if not componentHas(this: uiSystems.transform2d.worldTransforms, entityId: end.entityId) or not componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: end.entityId
+  ) {
+    ret WirePoint { x: 0.0, y: 0.0, ok: false }
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: end.entityId
+  )
+  let rect: WorldRect = worldRectOf(
+    wt: transform
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: end.entityId)
+  )
+  ret WirePoint {
+    x: rect.x + rect.w * end.anchorX + end.x * transform.scale.x
+    y: rect.y + rect.h * end.anchorY + end.y * transform.scale.y
+  }
+}
+
+# Wire `wire` of a Wires node styled `style`, on screen
+func wireCurveOf(
+  uiSystems: view UiSystems
+  space: view WireSpace
+  style: view Wires
+  wire: view Wire
+) ret WireCurve {
+  let from: WirePoint = wireEndPoint(uiSystems: uiSystems, space: space, end: wire.from)
+  let to: WirePoint = wireEndPoint(uiSystems: uiSystems, space: space, end: wire.to)
+  # level at both ends: the middle points reach out along x, at least a little so a wire between
+  # two ends above each other still curves
+  let reach: Float = style.bend * Math.max(
+    a: Math.abs(value: to.x - from.x)
+    b: 24.0 * Math.abs(value: space.scale)
+  )
+  ret WireCurve {
+    x0: from.x
+    y0: from.y
+    x1: from.x + reach
+    y1: from.y
+    x2: to.x - reach
+    y2: to.y
+    x3: to.x
+    y3: to.y
+    width: Math.max(a: style.width * Math.abs(value: space.scale), b: style.minScreenWidth)
+    ok: from.ok and to.ok
+  }
+}
+
+func wirePointAt(curve: view WireCurve, t: view Float) ret WirePoint {
+  let u: Float = 1.0 - t
+  let a: Float = u * u * u
+  let b: Float = 3.0 * u * u * t
+  let c: Float = 3.0 * u * t * t
+  let d: Float = t * t * t
+  ret WirePoint {
+    x: a * curve.x0 + b * curve.x1 + c * curve.x2 + d * curve.x3
+    y: a * curve.y0 + b * curve.y1 + c * curve.y2 + d * curve.y3
+  }
+}
+
+# Distance from (x, y) to the segment a..b
+func wireSegmentDistance(
+  x: view Float
+  y: view Float
+  a: view WirePoint
+  b: view WirePoint
+) ret Float {
+  let dx: Float = b.x - a.x
+  let dy: Float = b.y - a.y
+  let lengthSquared: Float = dx * dx + dy * dy
+  var t: Float = 0.0
+  if lengthSquared > 0.0 {
+    t = Math.max(a: 0.0, b: Math.min(a: 1.0, b: ((x - a.x) * dx + (y - a.y) * dy) / lengthSquared))
+  }
+  let px: Float = a.x + dx * t - x
+  let py: Float = a.y + dy * t - y
+  ret Math.sqrt(x: px * px + py * py)
+}
+
+# Distance from screen point (x, y) to the curve's middle line, the curve cut into 48 pieces
+func wireDistance(curve: view WireCurve, x: view Float, y: view Float) ret Float {
+  var best: Float = 1000000000.0
+  var previous: WirePoint = { x: curve.x0, y: curve.y0 }
+  loop var i: Int = 1, i <= 48, ++i {
+    let next: WirePoint = wirePointAt(curve: curve, t: (i as Float) / 48.0)
+    best = Math.min(
+      a: best
+      b: wireSegmentDistance(
+        x: x
+        y: y
+        a: previous
+        b: next
+      )
+    )
+    previous = next
+  }
+  ret best
+}
+
+# The wire of Wires node `wiresEntityId` under screen point (x, y): within `hitTolerance` points
+# of its edge, the nearest; -1 when none
+func wireAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  wiresEntityId: view EntityId
+  x: view Float
+  y: view Float
+) ret Int {
+  if not componentHas(this: world.wireSets, entityId: wiresEntityId) or not componentHas(
+    this: world.wireDatas
+    entityId: wiresEntityId
+  ) {
+    ret -1
+  }
+  let style: view Wires = componentView(this: world.wireSets, entityId: wiresEntityId)
+  let space: WireSpace = wireSpace(uiSystems: uiSystems, wiresEntityId: wiresEntityId)
+  var found: Int = -1
+  var nearest: Float = 0.0
+  let wires: view List(Wire) = componentView(this: world.wireDatas, entityId: wiresEntityId).wires
+  loop var i: Int = 0, i < wires.length, ++i {
+    if let wire: view Wire = wires.viewAt(index: i) {
+      let curve: WireCurve = wireCurveOf(
+        uiSystems: uiSystems
+        space: space
+        style: style
+        wire: wire
+      )
+      let reach: Float = curve.width * 0.5 + style.hitTolerance
+      # the curve lies inside its four points: a point beyond them by more than the reach misses
+      let near: Bool = x >= Math.min(
+        a: Math.min(a: curve.x0, b: curve.x1)
+        b: Math.min(a: curve.x2, b: curve.x3)
+      ) - reach and x <= Math.max(
+        a: Math.max(a: curve.x0, b: curve.x1)
+        b: Math.max(a: curve.x2, b: curve.x3)
+      ) + reach and y >= Math.min(
+        a: Math.min(a: curve.y0, b: curve.y1)
+        b: Math.min(a: curve.y2, b: curve.y3)
+      ) - reach and y <= Math.max(
+        a: Math.max(a: curve.y0, b: curve.y1)
+        b: Math.max(a: curve.y2, b: curve.y3)
+      ) + reach
+      if curve.ok and near {
+        let distance: Float = wireDistance(curve: curve, x: x, y: y)
+        if distance <= reach and (found < 0 or distance < nearest) {
+          found = i
+          nearest = distance
+        }
+      }
+    }
+  }
+  ret found
+}
+
+# An end on node `entityId` at its box share `anchorX`, `anchorY` (1, 0.5: the right edge's middle)
+func wireEndOn(entityId: view EntityId, anchorX: view Float, anchorY: view Float) ret WireEnd {
+  ret WireEnd { entityId: entityId, anchorX: anchorX, anchorY: anchorY }
+}
+
+# An end at a fixed point in the Wires node's units
+func wireEndAt(x: view Float, y: view Float) ret WireEnd {
+  ret WireEnd { x: x, y: y }
+}
+
+# A wire from the right edge of `fromEntityId` to the left edge of `toEntityId` added to Wires
+# node `wiresEntityId` (a WireData made when it has none); its index
+func wireConnect(
+  world: mod UiWorld
+  wiresEntityId: view EntityId
+  fromEntityId: view EntityId
+  toEntityId: view EntityId
+) ret Int {
+  ret wireAdd(
+    world: world
+    wiresEntityId: wiresEntityId
+    wire: Wire {
+      from: wireEndOn(entityId: fromEntityId, anchorX: 1.0, anchorY: 0.5)
+      to: wireEndOn(entityId: toEntityId, anchorX: 0.0, anchorY: 0.5)
+    }
+  )
+}
+
+func wireAdd(world: mod UiWorld, wiresEntityId: view EntityId, wire: view Wire) ret Int {
+  if not componentHas(this: world.wireDatas, entityId: wiresEntityId) {
+    componentSet(this: world.wireDatas, entityId: wiresEntityId, data: WireData { wires: {} })
+  }
+  let data: mod WireData = componentMod(this: world.wireDatas, entityId: wiresEntityId)
+  data.wires.add(value: wire)
+  ret data.wires.length - 1
+}

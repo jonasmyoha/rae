@@ -31,6 +31,7 @@ open ui/renderSystem/RenderHistogram
 open ui/renderSystem/RenderLineGraph
 open ui/renderSystem/RenderStatTable
 open ui/renderSystem/RenderPlane
+open ui/renderSystem/RenderWires
 import Gpu2d
 import Math
 import Gpu2dText
@@ -567,6 +568,16 @@ func paintEntityG(
       world: world
       entityId: entityId
       wt: wt
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  # its wires, as one curve each (ui/WireComponents)
+  if componentHas(this: world.wireSets, entityId: entityId) {
+    paintWiresG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
       chain255: chain255
       canvas: canvas
     )

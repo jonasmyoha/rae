@@ -1,0 +1,264 @@
+# Wires (ui/WireComponents), painted: 2,000 boxes on a Camera2D canvas joined by 10,000 wires
+# (each box to five near ones: the next, the one below, the two below on either side, the one after
+# the next), each one curve in the frame's one box draw
+# (Gpu2dCanvasCurve). Times the wires' drawing alone (the CPU's part: paintWiresG queueing every
+# curve) and the whole frame with everything on screen, then zoomed in. Run headless, and keep a
+# picture:
+#
+#   RAE_HEADLESS_FRAMES=100000 RAE_GPU2D_SCREENSHOT=/tmp/wires.bmp \
+#     compiler/bin/rae run checks/uiWires/Main.rae
+#
+# RAE_WIRES_PER_BOX=0 times the same frames without wires. Exit 0 when drawing the 10,000 wires
+# takes under 2 ms a frame.
+import Gpu2d
+import Math
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/WireComponents
+open ui/renderSystem/RenderSystem
+open ui/renderSystem/RenderWires
+open ui/wireSystem/WireSystem
+open Gpu2dCanvas
+
+const designW: Int = 1280
+
+const designH: Int = 800
+
+const boxes: Int = 2000
+
+const columns: Int = 50
+
+const timedFrames: Int = 30
+
+const boundMs: Float64 = 2.0
+
+func seconds() ret Float64 {
+  ret (nowNs() as Float64) / 1000000000.0
+}
+
+func ms(seconds: view Float64) ret String {
+  let hundredths: Int = (seconds * 100000.0) as Int
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+type Times {
+  wires: Float64
+  frame: Float64
+}
+
+func timeFrames(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  schedule: mod Schedule
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  root: view EntityId
+  wires: view EntityId
+  zoom: view Float
+) ret Times {
+  var wireTime: Float64 = 0.0
+  var frameTime: Float64 = 0.0
+  loop var frame: Int = 0, frame < timedFrames, ++frame {
+    world.cameras.componentSet(
+      entityId: root
+      data: { zoom: zoom, offsetX: 20.0 - (frame as Float) * 0.5, offsetY: 20.0 }
+    )
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    let start: Float64 = seconds()
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.06
+      g: 0.07
+      b: 0.09
+      a: 1.0
+    )
+    let wireStart: Float64 = seconds()
+    paintWiresG(
+      world: world
+      uiSystems: uiSystems
+      entityId: wires
+      chain255: 255
+      canvas: canvas
+    )
+    wireTime = wireTime + seconds() - wireStart
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frameTime = frameTime + seconds() - start
+  }
+  ret Times {
+    wires: wireTime / (timedFrames as Float64)
+    frame: frameTime / (timedFrames as Float64)
+  }
+}
+
+# The box a box's k-th wire goes to, as an offset: the next one, the one below, the two below on
+# either side, the one after the next (a canvas of mini timelines joins near ones)
+func neighbor(k: view Int) ret Int {
+  if k is 1 {
+    ret 1
+  }
+  if k is 2 {
+    ret columns
+  }
+  if k is 3 {
+    ret columns + 1
+  }
+  if k is 4 {
+    ret columns - 1
+  }
+  ret 2
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "Wires check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: "checks/uiCanvasCull/Page.raescene")
+  )
+  let root: EntityId = nodeEntityFor(world: world, nodeId: "CanvasRoot")
+  # the wires' node first, so they are painted under the boxes; this check paints them itself too,
+  # to time them alone, so the node in the tree paints the same wires again
+  let wires: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: wires
+    data: { position: { x: 0.0, y: 0.0 }, size: { x: 1.0, y: 1.0 } }
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: wires
+    parent: root
+  )
+  world.wireSets.componentSet(entityId: wires, data: { width: 2.0 })
+  var nodes: List(EntityId) = {}
+  loop var i: Int = 0, i < boxes, ++i {
+    let box: EntityId = createEntity(world: world)
+    world.rects.componentSet(
+      entityId: box
+      data: {
+        position: { x: ((i % columns) as Float) * 160.0, y: ((i / columns) as Float) * 90.0 }
+        size: { x: 90.0, y: 50.0 }
+      }
+    )
+    world.shapes.componentSet(
+      entityId: box
+      data: {
+        kind: ShapeKind.roundedRect
+        fill: { r: 52, g: 60, b: 76, a: 255 }
+        stroke: { r: 90, g: 100, b: 120, a: 255 }
+        strokeWidth: 1.0
+        radius: 6.0
+      }
+    )
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: box
+      parent: root
+    )
+    nodes.add(value: box)
+  }
+  # RAE_WIRES_PER_BOX: 0 to 5 (5 by default; 0 times the frame without wires)
+  var perBox: Int = 5
+  let asked: String = Sys.getEnv(name: "RAE_WIRES_PER_BOX")
+  if asked.length() > 0 {
+    perBox = Math.max(a: 0, b: Math.min(a: 5, b: asked.toInt()))
+  }
+  loop var i: Int = 0, i < boxes, ++i {
+    loop var k: Int = 1, k <= perBox, ++k {
+      let unusedWire: Int = wireConnect(
+        world: world
+        wiresEntityId: wires
+        fromEntityId: nodes.copyAtDefault(index: i)
+        toEntityId: nodes.copyAtDefault(index: (i + neighbor(k: k)) % boxes)
+      )
+    }
+  }
+  var schedule: Schedule = createUiPipeline(world: world)
+  let rows: Int = boxes / columns
+  let outZoom: Float = Math.min(
+    a: (designW as Float - 40.0) / ((columns as Float) * 160.0)
+    b: (designH as Float - 40.0) / ((rows as Float) * 90.0)
+  )
+  let all: Times = timeFrames(
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    gpuUi: gpuUi
+    canvas: canvas
+    root: root
+    wires: wires
+    zoom: outZoom
+  )
+  let close: Times = timeFrames(
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    gpuUi: gpuUi
+    canvas: canvas
+    root: root
+    wires: wires
+    zoom: 1.0
+  )
+  # the picture, zoomed in (RAE_GPU2D_SCREENSHOT takes the last frame)
+  let unusedLast: Times = timeFrames(
+    world: world
+    uiSystems: uiSystems
+    schedule: schedule
+    gpuUi: gpuUi
+    canvas: canvas
+    root: root
+    wires: wires
+    zoom: 1.0
+  )
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let allWires: String = ms(seconds: all.wires)
+  let allFrame: String = ms(seconds: all.frame)
+  let closeWires: String = ms(seconds: close.wires)
+  let closeFrame: String = ms(seconds: close.frame)
+  log(
+    "{componentView(this: world.wireDatas, entityId: wires).wires.length} wires between {boxes} boxes, all on screen: the wires {allWires} ms a frame, the whole frame {allFrame} ms"
+  )
+  log("  zoomed in: the wires {closeWires} ms, the frame {closeFrame} ms")
+  if all.wires * 1000.0 >= boundMs {
+    log("UI WIRES FAILED: drawing the wires takes {allWires} ms, the bound is {boundMs} ms")
+    ret 1
+  }
+  log("UI WIRES OK")
+  ret 0
+}

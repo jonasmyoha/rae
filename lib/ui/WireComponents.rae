@@ -1,0 +1,43 @@
+# ui/WireComponents — wires between nodes on a canvas (ui/wireSystem, ui/renderSystem/RenderWires):
+# a node graph's links, the media editor's lines between mini timelines. One node with `Wires`
+# holds many wires (its `WireData`), drawn where that node is painted (put it first under the
+# canvas, so the wires go under the nodes) as one curve each in the frame's one box draw.
+#
+# A wire is a cubic Bezier from one end to the other, leaving and arriving level (a node editor's
+# S curve): its middle points are `bend` times the ends' horizontal distance out along x. Each end
+# follows a node (its `anchor`, a share of the node's box: 1, 0.5 is the middle of its right edge,
+# plus an offset in the node's units) or is a fixed point in the `Wires` node's units. The width is
+# in the Wires node's units, so it zooms with a camera, but never thinner than `minScreenWidth` on
+# screen, so a wire stays readable zoomed out.
+open ecs/Entity
+
+type Wires {
+  # a theme palette name
+  color: String = "accent"
+  width: Float = 2.0
+  minScreenWidth: Float = 1.5
+  # how far from a wire's edge a point still hits it, in screen points
+  hitTolerance: Float = 4.0
+  bend: Float = 0.5
+}
+
+type WireEnd {
+  # the node it follows (noEntity(): the fixed point x, y)
+  entityId: EntityId = noEntity()
+  anchorX: Float = 0.5
+  anchorY: Float = 0.5
+  x: Float = 0.0
+  y: Float = 0.0
+}
+
+type Wire {
+  from: WireEnd
+  to: WireEnd
+  # ARGB; 0 = the Wires node's theme color
+  color: Int = 0
+}
+
+# The app's wires (not saved with the scene)
+type WireData {
+  wires: List(Wire)
+}

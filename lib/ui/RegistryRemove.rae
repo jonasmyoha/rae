@@ -150,6 +150,11 @@ func removeComponentByName(world: mod UiWorld, entityId: view EntityId, name: vi
     componentRemove(this: world.planeViewStates, entityId: entityId)
     ret
   }
+  if name is "Wires" {
+    componentRemove(this: world.wireSets, entityId: entityId)
+    componentRemove(this: world.wireDatas, entityId: entityId)
+    ret
+  }
   if name is "RadialGradientFill" {
     componentRemove(this: world.radialGradientFills, entityId: entityId)
     ret
