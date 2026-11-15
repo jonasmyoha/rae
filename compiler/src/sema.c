@@ -1308,6 +1308,21 @@ static void sema_check_rebinding(AstModule* module, SymbolTable* symbols, const 
 
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type);
 static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstTypeRef* type_ref);
+
+/* A type written in declaration `decl` (a parameter's or its return's),
+ * resolved where `decl` was written: its own package's reach, and any error
+ * names its own file and line. A method call weighs functions of other
+ * modules by their `this`; checking their types from the CALLER's file
+ * reported a type of a package the caller does not depend on, at the
+ * caller's file with the callee's line. */
+static TypeInfo* sema_resolve_decl_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                        const AstDecl* decl, AstTypeRef* type_ref) {
+    const char* saved_origin = s_current_decl_origin;
+    if (decl && decl->origin_file) s_current_decl_origin = decl->origin_file;
+    TypeInfo* resolved = sema_resolve_type_internal(ctx, module, symbols, type_ref);
+    s_current_decl_origin = saved_origin;
+    return resolved;
+}
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symbols, const AstExpr* call);
@@ -8791,17 +8806,21 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     // First try simple symbol lookup (works for non-overloaded methods)
                     // But verify receiver type matches to avoid wrong overload
                     Symbol* sym = symbol_table_lookup(symbols, expr->as.method_call.method_name);
-                    if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
+                    /* only a function this file's package reaches (its own,
+                     * the stdlib, its dependencies): a same-named method of a
+                     * package it does not depend on is never the callee */
+                    if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC
+                        && sema_package_reaches(s_current_decl_origin, sym->decl)) {
                         AstFuncDecl* fd = &sym->decl->as.func_decl;
                         if (!fd->generic_params && fd->params) {
                             // Check if this param type matches receiver
-                            TypeInfo* param_t = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                            TypeInfo* param_t = sema_resolve_decl_type(ctx, module, symbols, sym->decl, fd->params->type);
                             TypeInfo* recv_t = expr->as.method_call.object->resolved_type;
                             if (recv_t && recv_t->kind == TYPE_REF) recv_t = recv_t->as.ref.base;
                             if (param_t && param_t->kind == TYPE_REF) param_t = param_t->as.ref.base;
                             if (!recv_t || !param_t || recv_t == param_t) {
                                 expr->decl_link = sym->decl;
-                                if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type);
+                                if (fd->returns) expr->resolved_type = sema_resolve_decl_type(ctx, module, symbols, sym->decl, fd->returns->type);
                                 found = true;
                             }
                         } else if (!fd->generic_params && !fd->params) {
@@ -8843,6 +8862,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     for (size_t k = 0; k < named_count; k++) {
                         AstDecl* dd = (AstDecl*)module_index_function_at(module, method_name, named_count, k);
                         if (dd->as.func_decl.specialization_args) continue; // skip existing specializations
+                        if (!sema_package_reaches(s_current_decl_origin, dd)) continue;
                         AstFuncDecl* fd = &dd->as.func_decl;
                         if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
                         if (fd->generic_params && rec) {
@@ -8850,7 +8870,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             if (ga && sema_array_receiver_matches(fd->params->type, rec)) { best_decl = dd; break; }
                         } else if (!fd->generic_params && rec) {
                             // Non-generic: check receiver type matches this param
-                            TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                            TypeInfo* pt = sema_resolve_decl_type(ctx, module, symbols, dd, fd->params->type);
                             if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
                             if (pt == rec || (pt && rec && pt->kind == rec->kind && pt->kind != TYPE_ARRAY && str_eq(pt->name, rec->name))) {
                                 best_decl = dd; break;
@@ -8865,13 +8885,14 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             for (size_t k = 0; k < imported_count; k++) {
                                 AstDecl* dd = (AstDecl*)module_index_function_at(imp->module, method_name, imported_count, k);
                                 if (dd->as.func_decl.specialization_args) continue;
+                                if (!sema_package_reaches(s_current_decl_origin, dd)) continue;
                                 AstFuncDecl* fd = &dd->as.func_decl;
                                 if (!fd->params || !str_eq_cstr(fd->params->name, "this")) continue;
                                 if (fd->generic_params && rec) {
                                     AstTypeRef* ga = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
                                     if (ga && sema_array_receiver_matches(fd->params->type, rec)) { best_decl = dd; break; }
                                 } else if (!fd->generic_params && rec) {
-                                    TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
+                                    TypeInfo* pt = sema_resolve_decl_type(ctx, module, symbols, dd, fd->params->type);
                                     if (pt && pt->kind == TYPE_REF) pt = pt->as.ref.base;
                                     if (pt == rec || (pt && rec && pt->kind == rec->kind && pt->kind != TYPE_ARRAY && str_eq(pt->name, rec->name))) {
                                         best_decl = dd; break;

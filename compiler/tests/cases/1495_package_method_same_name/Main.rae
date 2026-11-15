@@ -1,0 +1,10 @@
+# Two packages each declare `finish(this: mod T)` for their own T, and each calls its own
+# (audio's through a field, video's on a local). A method call resolves among the methods its
+# module can see, by the receiver's type: audio's call never reaches video's finish.
+import audio/Butler
+import video/Ffmpeg
+
+func main() {
+  Butler.runButler()
+  Ffmpeg.runEncoder()
+}
