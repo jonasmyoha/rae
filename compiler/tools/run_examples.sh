@@ -1968,6 +1968,30 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | tail -8 | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "151_perfViewer" ]; then
+          # Rae Perf (docs/perf-tools-design.md §8.2): each of its eight views of the walker sample
+          # capture (assets/walker.raeperf), 10 headless frames, compared with its reference picture
+          # (references/<view>.png; tools/references.sh writes them), and the capture read whole
+          PERF_OK=1
+          for PERF_VIEW in frames timeline flame threads gpu audio memory systems; do
+            SCREENSHOT="$TMP_OUT/perf-$PERF_VIEW.bmp"
+            if ! (cd .. && RAE_PERF_VIEW="$PERF_VIEW" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+               perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render-$PERF_VIEW.log" 2>&1 \
+               || ! grep -q "\[perfViewer\] $PERF_VIEW: 29 frames, 4318 spans, 64 counters, charts filled true" "$TMP_OUT/render-$PERF_VIEW.log" \
+               || ! python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/151_perfViewer/references/$PERF_VIEW.png" \
+                  --skip-size-mismatch > "$TMP_OUT/diff-$PERF_VIEW.log" 2>&1; then
+              PERF_OK=0
+              echo "  view $PERF_VIEW:"
+              cat "$TMP_OUT/render-$PERF_VIEW.log" "$TMP_OUT/diff-$PERF_VIEW.log" 2>/dev/null | tail -6 | sed 's/^/  /'
+            fi
+          done
+          if [ "$PERF_OK" = 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (eight views of the walker capture match their references: frames, timeline, flame graph, threads, GPU, audio, memory, systems)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (perf viewer views)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "138_procgen_showcase" ]; then
           # The low-poly museum (docs/tree-sets-design.md §3): the composed
           # grove and its seven close-up views, as at rae 4d28e11d, and the

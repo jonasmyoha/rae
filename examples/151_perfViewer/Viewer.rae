@@ -1,0 +1,412 @@
+# The viewer's charts filled from one capture (lib/perf/PerfCapture): each view's nodes in
+# assets/Viewer.raescene get their data here once the capture is read. Times on the charts are
+# nanoseconds from the capture's first event.
+import Math
+import String
+open perf/PerfCapture
+open ui/ChartComponents
+open ui/timelineSystem/TimelineSystem
+open ui/flameGraphSystem/FlameGraphSystem
+open ui/histogramSystem/HistogramSystem
+open ui/lineGraphSystem/LineGraphSystem
+open ui/statTableSystem/StatTableSystem
+
+# The lanes of the GPU, of audio, and the rest (the program's own threads)
+func gpuLanePrefixes() ret List(String) {
+  ret List(String) { "GPU", "Metal" }
+}
+
+func audioLanePrefixes() ret List(String) {
+  ret List(String) { "audio" }
+}
+
+func threadLanes(capture: view PerfCapture) ret List(Int) {
+  var lanes: List(Int) = {}
+  let gpu: List(Int) = perfLanesNamed(capture: capture, prefixes: gpuLanePrefixes())
+  let audio: List(Int) = perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
+  loop var lane: Int = 0, lane < capture.lanes.length, ++lane {
+    var other: Bool = true
+    loop let taken: Int in gpu {
+      if taken is lane {
+        other = false
+      }
+    }
+    loop let taken: Int in audio {
+      if taken is lane {
+        other = false
+      }
+    }
+    if other {
+      lanes.add(value: lane)
+    }
+  }
+  ret lanes
+}
+
+func milliseconds(nanoseconds: view Int) ret String {
+  let hundredths: Int = (nanoseconds + 5000) / 10000
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+func microseconds(nanoseconds: view Int) ret String {
+  ret "{(nanoseconds + 500) / 1000}"
+}
+
+func percent(part: view Int, whole: view Int) ret String {
+  if whole <= 0 {
+    ret "0"
+  }
+  ret "{(part * 1000 / whole + 5) / 10}"
+}
+
+# Counter `name` as a series of the graph, its values times `scale`; false when the capture has
+# no such counter
+func addCounter(
+  state: mod LineGraphState
+  capture: view PerfCapture
+  name: view String
+  label: view String
+  scale: view Float
+) ret Bool {
+  if let series: PerfCounterSeries = perfCounterNamed(capture: capture, name: name) {
+    let index: Int = lineAddSeries(state: state, name: label)
+    loop var i: Int = 0, i < series.times.length, ++i {
+      let unusedAdded: Bool = lineAddPoint(
+        state: state
+        series: index
+        time: series.times.copyAtDefault(index: i) - capture.startNs
+        value: series.values.copyAtDefault(index: i) as Float * scale
+      )
+    }
+    ret true
+  }
+  ret false
+}
+
+# Frames: each frame's time at its start (ms), and the CPU's and GPU's share where recorded
+func fillFrameGraph(state: mod LineGraphState, capture: view PerfCapture) {
+  let frames: Int = lineAddSeries(state: state, name: "frame ms")
+  loop var i: Int = 1, i < capture.frameStarts.length, ++i {
+    let start: Int = capture.frameStarts.copyAtDefault(index: i - 1)
+    let unusedAdded: Bool = lineAddPoint(
+      state: state
+      series: frames
+      time: start - capture.startNs
+      value: (capture.frameStarts.copyAtDefault(index: i) - start) as Float / 1000000.0
+    )
+  }
+  let unusedCpu: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "frame.cpu.us"
+    label: "CPU ms"
+    scale: 0.001
+  )
+  let unusedGpu: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "gpu.busy.us"
+    label: "GPU ms"
+    scale: 0.001
+  )
+  lineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# Frames: how the frame times spread, in 1 ms buckets up to the slowest (at most 60)
+func fillFrameSpread(state: mod HistogramState, capture: view PerfCapture) {
+  let intervals: List(Int) = perfFrameIntervals(capture: capture)
+  var slowest: Int = 1
+  loop let interval: Int in intervals {
+    slowest = Math.max(a: slowest, b: interval)
+  }
+  let buckets: Int = Math.min(a: 60, b: slowest / 1000000 + 1)
+  var edges: List(Float) = {}
+  var counts: List(Int) = {}
+  loop var b: Int = 0, b <= buckets, ++b {
+    edges.add(value: b as Float)
+  }
+  loop var b: Int = 0, b < buckets, ++b {
+    counts.add(value: 0)
+  }
+  loop let interval: Int in intervals {
+    let bucket: Int = Math.min(a: buckets - 1, b: interval / 1000000)
+    counts.set(index: bucket, value: counts.copyAtDefault(index: bucket) + 1)
+  }
+  let unusedSet: Bool = histogramSetBuckets(state: state, edges: edges, counts: counts)
+}
+
+# Timeline: a lane per thread that recorded, its spans at their depths, the frames as marks
+func fillTimeline(state: mod TimelineState, capture: view PerfCapture) {
+  var nameIds: List(Int) = {}
+  loop let name: view String in capture.names {
+    nameIds.add(value: timelineName(state: state, name: name))
+  }
+  loop let use: view PerfLaneUse in perfLaneUses(capture: capture) {
+    let lane: Int = timelineAddLane(state: state, name: use.name)
+    loop let span: view PerfSpan in capture.spans {
+      if span.lane is use.lane {
+        let unusedAdded: Bool = timelineAddSpan(
+          state: state
+          lane: lane
+          start: span.start - capture.startNs
+          end: span.end - capture.startNs
+          nameId: nameIds.copyAtDefault(index: span.nameId)
+          depth: span.depth
+        )
+      }
+    }
+    if use.lane is 0 {
+      loop let start: Int in capture.frameStarts {
+        timelineAddMark(state: state, lane: lane, time: start - capture.startNs)
+      }
+    }
+  }
+  timelineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# Flame graph: every zone's own time (microseconds) along its lane and its call path
+func fillFlame(state: mod FlameGraphState, capture: view PerfCapture) {
+  loop let span: view PerfSpan in capture.spans {
+    if span.selfNs > 0 {
+      var path: List(String) = { perfCaptureLane(capture: capture, lane: span.lane) }
+      loop let part: view String in span.path.split(sep: " > ") {
+        path.add(value: part)
+      }
+      flameAddSample(state: state, path: path, value: span.selfNs / 1000)
+    }
+  }
+}
+
+# Threads: each lane's busy, waiting and idle share of the capture
+func fillThreads(state: mod StatTableState, capture: view PerfCapture) {
+  let unusedName: Int = statAddColumn(
+    state: state
+    title: "thread"
+    width: 340.0
+    numeric: false
+  )
+  let busy: Int = statAddColumn(
+    state: state
+    title: "busy %"
+    width: 180.0
+    numeric: true
+  )
+  let unusedWaiting: Int = statAddColumn(
+    state: state
+    title: "waiting %"
+    width: 180.0
+    numeric: true
+  )
+  let unusedIdle: Int = statAddColumn(
+    state: state
+    title: "idle %"
+    width: 180.0
+    numeric: true
+  )
+  let unusedSpans: Int = statAddColumn(
+    state: state
+    title: "spans"
+    width: 160.0
+    numeric: true
+  )
+  let whole: Int = Math.max(a: 1, b: capture.endNs - capture.startNs)
+  loop let use: view PerfLaneUse in perfLaneUses(capture: capture) {
+    let idle: Int = Math.max(a: 0, b: whole - use.busyNs - use.waitNs)
+    let unusedRow: Int = statAddRow(
+      state: state
+      texts: List(String) {
+        use.name
+        percent(part: use.busyNs, whole: whole)
+        percent(part: use.waitNs, whole: whole)
+        percent(part: idle, whole: whole)
+        "{use.spans}"
+      }
+      values: List(Float) {
+        0.0
+        use.busyNs as Float / whole as Float
+        use.waitNs as Float / whole as Float
+        idle as Float / whole as Float
+        use.spans as Float
+      }
+    )
+  }
+  statSort(state: state, column: busy, descending: true)
+}
+
+# A table of the zones on `lanes`: count, total, mean, p95, maximum and spread, by total
+func fillZoneTable(state: mod StatTableState, capture: view PerfCapture, lanes: view List(Int)) {
+  let unusedName: Int = statAddColumn(
+    state: state
+    title: "zone"
+    width: 320.0
+    numeric: false
+  )
+  let unusedCount: Int = statAddColumn(
+    state: state
+    title: "count"
+    width: 110.0
+    numeric: true
+  )
+  let total: Int = statAddColumn(
+    state: state
+    title: "total ms"
+    width: 150.0
+    numeric: true
+  )
+  let unusedMean: Int = statAddColumn(
+    state: state
+    title: "mean us"
+    width: 150.0
+    numeric: true
+  )
+  let unusedP95: Int = statAddColumn(
+    state: state
+    title: "p95 us"
+    width: 150.0
+    numeric: true
+  )
+  let unusedMax: Int = statAddColumn(
+    state: state
+    title: "max us"
+    width: 150.0
+    numeric: true
+  )
+  let unusedSpread: Int = statAddColumn(
+    state: state
+    title: "spread us"
+    width: 150.0
+    numeric: true
+  )
+  if lanes.length is 0 {
+    ret
+  }
+  loop let stat: view PerfZoneStat in perfZoneStats(capture: capture, lanes: lanes) {
+    let unusedRow: Int = statAddRow(
+      state: state
+      texts: List(String) {
+        stat.name
+        "{stat.count}"
+        milliseconds(nanoseconds: stat.totalNs)
+        microseconds(nanoseconds: stat.meanNs)
+        microseconds(nanoseconds: stat.p95Ns)
+        microseconds(nanoseconds: stat.maxNs)
+        microseconds(nanoseconds: stat.spreadNs)
+      }
+      values: List(Float) {
+        0.0
+        stat.count as Float
+        stat.totalNs as Float
+        stat.meanNs as Float
+        stat.p95Ns as Float
+        stat.maxNs as Float
+        stat.spreadNs as Float
+      }
+    )
+  }
+  statSort(state: state, column: total, descending: true)
+}
+
+# GPU: the GPU resource tables' memory (MB) and their counts
+func fillGpuGraph(state: mod LineGraphState, capture: view PerfCapture) {
+  let unusedBuffers: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "gpu.buffer kb"
+    label: "buffers MB"
+    scale: 1.0 / 1024.0
+  )
+  let unusedTextures: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "gpu.texture kb"
+    label: "textures MB"
+    scale: 1.0 / 1024.0
+  )
+  let unusedDraws: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "draws.gbuffer.instances"
+    label: "instances / 100"
+    scale: 0.01
+  )
+  lineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# Audio: the render's time and its share of the period, the underruns
+func fillAudioGraph(state: mod LineGraphState, capture: view PerfCapture) {
+  let unusedShare: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "audio.render share %"
+    label: "render % of period"
+    scale: 1.0
+  )
+  let unusedRender: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "audio.render us"
+    label: "render us"
+    scale: 1.0
+  )
+  let unusedUnderruns: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "audio.underrun frames"
+    label: "underrun frames"
+    scale: 1.0
+  )
+  lineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# Memory: resident size and the buffers' bytes (MB)
+func fillMemoryGraph(state: mod LineGraphState, capture: view PerfCapture) {
+  let unusedRss: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "mem.rss kb"
+    label: "resident MB"
+    scale: 1.0 / 1024.0
+  )
+  let unusedBytes: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "mem.buffer bytes"
+    label: "buffers MB"
+    scale: 1.0 / 1048576.0
+  )
+  lineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# Memory: allocations a frame and the buffers alive
+func fillAllocationGraph(state: mod LineGraphState, capture: view PerfCapture) {
+  let unusedFrame: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "mem.frame allocations"
+    label: "allocations a frame"
+    scale: 1.0
+  )
+  let unusedBuffers: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "mem.buffers"
+    label: "buffers / 10"
+    scale: 0.1
+  )
+  lineShow(state: state, start: 0, end: capture.endNs - capture.startNs)
+}
+
+# The Audio view's note: what the capture holds of audio, or how a program records it
+func audioNote(capture: view PerfCapture) ret String {
+  let lanes: List(Int) = perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
+  var counters: Int = 0
+  loop let series: view PerfCounterSeries in capture.counters {
+    if series.name.startsWith(prefix: "audio.") {
+      counters = counters + 1
+    }
+  }
+  if lanes.length is 0 and counters is 0 {
+    ret "No audio in this capture: a program records its engine's blocks with audio/AudioCapture's recordAudioCapture, once a frame while capturing."
+  }
+  ret "{lanes.length} audio lanes, {counters} audio counters"
+}

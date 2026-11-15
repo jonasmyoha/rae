@@ -1,0 +1,387 @@
+# perf/PerfCapture — a capture file (perf/PerfFile) read into what the views show
+# (docs/perf-tools-design.md §6, §8.2): each lane's spans (zones paired begin to end, GPU spans,
+# waits), each zone's numbers (count, total, mean, p95, maximum and spread), each lane's busy and
+# waiting time, every counter as a series, the frames (the "frame start" marks) and the call paths
+# for a flame graph. Pure functions over the file's events; the viewer (examples/151_perfViewer)
+# and the reports draw from them.
+import Math
+open perf/Perf
+open perf/PerfFile
+
+# A span on a lane: a zone from its begin to its end at its nesting depth, a wait, or a GPU span
+type PerfSpan {
+  lane: Int
+  nameId: Int
+  start: Int
+  end: Int
+  depth: Int
+  # the time inside it not inside a span nested in it (zones only)
+  selfNs: Int = 0
+  # the names from the lane's outermost open zone to this one, joined with " > " (zones only)
+  path: String = ""
+}
+
+# A zone's numbers over the capture, in nanoseconds
+type PerfZoneStat {
+  nameId: Int
+  name: String
+  count: Int = 0
+  totalNs: Int = 0
+  meanNs: Int = 0
+  p95Ns: Int = 0
+  maxNs: Int = 0
+  # the spread of its durations: their standard deviation
+  spreadNs: Int = 0
+}
+
+# A lane's time over the capture: inside a zone at the lane's top level, and waiting
+type PerfLaneUse {
+  lane: Int
+  name: String
+  busyNs: Int = 0
+  waitNs: Int = 0
+  spans: Int = 0
+}
+
+type PerfCounterSeries {
+  nameId: Int
+  name: String
+  times: List(Int)
+  values: List(Int)
+}
+
+type PerfCapture {
+  names: List(String)
+  lanes: List(String)
+  startNs: Int
+  endNs: Int
+  # zones and GPU spans, each lane's in order of its start
+  spans: List(PerfSpan)
+  waits: List(PerfSpan)
+  marks: List(PerfSpan)
+  counters: List(PerfCounterSeries)
+  # when each frame started ("frame start" marks), in order
+  frameStarts: List(Int)
+}
+
+# The open zones of a lane while its events are read
+type PerfOpenZone {
+  nameId: Int
+  start: Int
+  childNs: Int
+  path: String
+}
+
+func perfCaptureName(capture: view PerfCapture, nameId: view Int) ret String {
+  ret capture.names.copyAtDefault(index: nameId)
+}
+
+func perfCaptureLane(capture: view PerfCapture, lane: view Int) ret String {
+  ret capture.lanes.copyAtDefault(index: lane)
+}
+
+# The events of `lane`, in the order they were kept
+func perfLaneEvents(file: view PerfFile, lane: view Int) ret List(PerfEvent) {
+  var events: List(PerfEvent) = {}
+  loop let block: view PerfFileBlock in file.blocks {
+    if block.info.thread is lane {
+      loop let event: view PerfEvent in block.events {
+        events.add(value: event)
+      }
+    }
+  }
+  ret events
+}
+
+# Spans sorted by start (an insertion sort: a lane's spans come nearly in order already)
+func perfSortSpans(spans: mod List(PerfSpan)) {
+  loop var i: Int = 1, i < spans.length, ++i {
+    var j: Int = i
+    loop j > 0 and spans.copyAtDefault(index: j - 1).start > spans.copyAtDefault(index: j).start {
+      let earlier: PerfSpan = spans.copyAtDefault(index: j - 1)
+      spans.set(index: j - 1, value: spans.copyAtDefault(index: j))
+      spans.set(index: j, value: earlier)
+      j = j - 1
+    }
+  }
+}
+
+func perfCounterIndex(capture: mod PerfCapture, nameId: view Int) ret Int {
+  loop var i: Int = 0, i < capture.counters.length, ++i {
+    if capture.counters.copyAtDefault(index: i).nameId is nameId {
+      ret i
+    }
+  }
+  capture.counters.add(
+    value: PerfCounterSeries {
+      nameId: nameId
+      name: capture.names.copyAtDefault(index: nameId)
+      times: {}
+      values: {}
+    }
+  )
+  ret capture.counters.length - 1
+}
+
+# One lane's events into spans, waits, marks and counter points
+func perfReadLane(capture: mod PerfCapture, events: view List(PerfEvent), lane: view Int) {
+  var open: List(PerfOpenZone) = {}
+  var waitStarts: List(Int) = {}
+  var waitNames: List(Int) = {}
+  var laneSpans: List(PerfSpan) = {}
+  loop let event: view PerfEvent in events {
+    let nameId: Int = event.nameId as Int
+    if event.kind is PerfKind.zoneBegin {
+      var path: String = capture.names.copyAtDefault(index: nameId)
+      if let outer: view PerfOpenZone = open.viewAt(index: open.length - 1) {
+        path = "{outer.path} > {path}"
+      }
+      open.add(value: PerfOpenZone { nameId: nameId, start: event.time, childNs: 0, path: path })
+    } else if event.kind is PerfKind.zoneEnd {
+      # the innermost open zone of this name (one left open inside it is closed with it)
+      var at: Int = open.length - 1
+      loop at >= 0 and open.copyAtDefault(index: at).nameId is not nameId {
+        at = at - 1
+      }
+      if at >= 0 {
+        loop open.length - 1 > at {
+          open.remove(index: open.length - 1)
+        }
+        let zone: PerfOpenZone = open.copyAtDefault(index: at)
+        open.remove(index: at)
+        let duration: Int = Math.max(a: 0, b: event.time - zone.start)
+        laneSpans.add(value: PerfSpan {
+          lane: lane
+          nameId: nameId
+          start: zone.start
+          end: event.time
+          depth: open.length
+          selfNs: Math.max(a: 0, b: duration - zone.childNs)
+          path: zone.path
+        })
+        if let outer: mod PerfOpenZone = open.modAt(index: open.length - 1) {
+          outer.childNs = outer.childNs + duration
+        }
+      }
+    } else if event.kind is PerfKind.gpuSpan {
+      laneSpans.add(value: PerfSpan {
+        lane: lane
+        nameId: nameId
+        start: event.time
+        end: Math.max(a: event.time, b: event.value)
+        depth: 0
+        selfNs: Math.max(a: 0, b: event.value - event.time)
+        path: capture.names.copyAtDefault(index: nameId)
+      })
+    } else if event.kind is PerfKind.waitBegin {
+      waitStarts.add(value: event.time)
+      waitNames.add(value: nameId)
+    } else if event.kind is PerfKind.waitEnd {
+      if waitStarts.length > 0 {
+        let start: Int = waitStarts.copyAtDefault(index: waitStarts.length - 1)
+        waitStarts.remove(index: waitStarts.length - 1)
+        waitNames.remove(index: waitNames.length - 1)
+        capture.waits.add(value: PerfSpan {
+          lane: lane
+          nameId: nameId
+          start: start
+          end: event.time
+          depth: 0
+        })
+      }
+    } else if event.kind is PerfKind.mark {
+      capture.marks.add(value: PerfSpan {
+        lane: lane
+        nameId: nameId
+        start: event.time
+        end: event.time
+        depth: 0
+      })
+      if capture.names.copyAtDefault(index: nameId) is "frame start" {
+        capture.frameStarts.add(value: event.time)
+      }
+    } else if event.kind is PerfKind.counter {
+      let index: Int = perfCounterIndex(capture: capture, nameId: nameId)
+      if let series: mod PerfCounterSeries = capture.counters.modAt(index: index) {
+        series.times.add(value: event.time)
+        series.values.add(value: event.value)
+      }
+    }
+  }
+  perfSortSpans(spans: laneSpans)
+  loop let span: view PerfSpan in laneSpans {
+    capture.spans.add(value: span)
+  }
+}
+
+# A capture file read into spans, waits, marks, counters and frames
+func perfCaptureOf(file: view PerfFile) ret PerfCapture {
+  var capture: PerfCapture = {
+    names: file.tables.names
+    lanes: file.tables.threads
+    startNs: file.header.startNs
+    endNs: file.header.startNs
+    spans: {}
+    waits: {}
+    marks: {}
+    counters: {}
+    frameStarts: {}
+  }
+  var first: Int = -1
+  loop let block: view PerfFileBlock in file.blocks {
+    if block.info.count > 0 {
+      if first < 0 or block.info.firstNs < first {
+        first = block.info.firstNs
+      }
+      capture.endNs = Math.max(a: capture.endNs, b: block.info.lastNs)
+    }
+  }
+  if first >= 0 {
+    capture.startNs = first
+  }
+  loop var lane: Int = 0, lane < capture.lanes.length, ++lane {
+    let events: List(PerfEvent) = perfLaneEvents(file: file, lane: lane)
+    perfReadLane(capture: capture, events: events, lane: lane)
+  }
+  capture.frameStarts.sort()
+  ret capture
+}
+
+# The time between frames, in nanoseconds (one fewer than the frames)
+func perfFrameIntervals(capture: view PerfCapture) ret List(Int) {
+  var intervals: List(Int) = {}
+  loop var i: Int = 1, i < capture.frameStarts.length, ++i {
+    intervals.add(
+      value: capture.frameStarts.copyAtDefault(index: i) - capture.frameStarts.copyAtDefault(
+        index: i - 1
+      )
+    )
+  }
+  ret intervals
+}
+
+# `values`' `perMille` thousandth (500 the median), from a sorted copy; 0 with none
+func perfPercentile(values: view List(Int), perMille: view Int) ret Int {
+  if values.length is 0 {
+    ret 0
+  }
+  var sorted: List(Int) = values
+  sorted.sort()
+  let index: Int = Math.min(a: sorted.length - 1, b: (sorted.length - 1) * perMille / 1000)
+  ret sorted.copyAtDefault(index: index)
+}
+
+# The zones' numbers for the spans on `lanes` (every lane when the list is empty)
+func perfZoneStats(capture: view PerfCapture, lanes: view List(Int)) ret List(PerfZoneStat) {
+  var durations: List(List(Int)) = {}
+  var ids: List(Int) = {}
+  loop let span: view PerfSpan in capture.spans {
+    var wanted: Bool = lanes.length is 0
+    loop let lane: Int in lanes {
+      if lane is span.lane {
+        wanted = true
+      }
+    }
+    if wanted {
+      var at: Int = -1
+      loop var i: Int = 0, i < ids.length and at < 0, ++i {
+        if ids.copyAtDefault(index: i) is span.nameId {
+          at = i
+        }
+      }
+      if at < 0 {
+        ids.add(value: span.nameId)
+        durations.add(value: List(Int) {})
+        at = ids.length - 1
+      }
+      if let list: mod List(Int) = durations.modAt(index: at) {
+        list.add(value: span.end - span.start)
+      }
+    }
+  }
+  var stats: List(PerfZoneStat) = {}
+  loop var i: Int = 0, i < ids.length, ++i {
+    if let list: view List(Int) = durations.viewAt(index: i) {
+      var total: Int = 0
+      var largest: Int = 0
+      loop let duration: Int in list {
+        total = total + duration
+        largest = Math.max(a: largest, b: duration)
+      }
+      let mean: Int = total / Math.max(a: 1, b: list.length)
+      var squares: Float64 = 0.0
+      loop let duration: Int in list {
+        let difference: Float64 = (duration - mean) as Float64
+        squares = squares + difference * difference
+      }
+      let spread: Float = Math.sqrt(
+        x: (squares / (Math.max(a: 1, b: list.length) as Float64)) as Float
+      )
+      stats.add(value: PerfZoneStat {
+        nameId: ids.copyAtDefault(index: i)
+        name: capture.names.copyAtDefault(index: ids.copyAtDefault(index: i))
+        count: list.length
+        totalNs: total
+        meanNs: mean
+        p95Ns: perfPercentile(values: list, perMille: 950)
+        maxNs: largest
+        spreadNs: spread as Int
+      })
+    }
+  }
+  ret stats
+}
+
+# The lanes whose name starts with any of `prefixes` (every lane when none is given)
+func perfLanesNamed(capture: view PerfCapture, prefixes: view List(String)) ret List(Int) {
+  var lanes: List(Int) = {}
+  loop var lane: Int = 0, lane < capture.lanes.length, ++lane {
+    let name: String = capture.lanes.copyAtDefault(index: lane)
+    loop let prefix: view String in prefixes {
+      if name.startsWith(prefix: prefix) {
+        lanes.add(value: lane)
+        break
+      }
+    }
+  }
+  ret lanes
+}
+
+# Each lane's busy time (its top-level zones) and waiting time, for the lanes that recorded any
+func perfLaneUses(capture: view PerfCapture) ret List(PerfLaneUse) {
+  var uses: List(PerfLaneUse) = {}
+  loop var lane: Int = 0, lane < capture.lanes.length, ++lane {
+    var use: PerfLaneUse = { lane: lane, name: capture.lanes.copyAtDefault(index: lane) }
+    # busy is the time covered by its top-level spans: overlapping ones (a GPU's command buffers)
+    # count once. A lane's spans are in order of their start.
+    var coveredTo: Int = 0
+    loop let span: view PerfSpan in capture.spans {
+      if span.lane is lane {
+        use.spans = use.spans + 1
+        if span.depth is 0 and span.end > coveredTo {
+          use.busyNs = use.busyNs + span.end - Math.max(a: span.start, b: coveredTo)
+          coveredTo = span.end
+        }
+      }
+    }
+    loop let wait: view PerfSpan in capture.waits {
+      if wait.lane is lane {
+        use.waitNs = use.waitNs + wait.end - wait.start
+      }
+    }
+    if use.spans > 0 or use.waitNs > 0 {
+      uses.add(value: use)
+    }
+  }
+  ret uses
+}
+
+# The series of counter `name`, or none
+func perfCounterNamed(capture: view PerfCapture, name: view String) ret opt PerfCounterSeries {
+  loop let series: view PerfCounterSeries in capture.counters {
+    if series.name is name {
+      ret series
+    }
+  }
+  ret none
+}

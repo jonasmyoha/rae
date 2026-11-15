@@ -1,0 +1,230 @@
+# perf/PerfCapture from events at known times (nanoseconds after the hub's start), through a
+# capture file's bytes and back: zones paired into spans with their depth, own time and call path
+# (an end that skips an inner open zone closes it too), waits, GPU spans, frame marks and counters;
+# each zone's count, total, mean, p95, maximum and spread; each lane's busy time (overlapping
+# top-level spans count once) and waiting time; the flame-graph paths.
+open perf/Perf
+open perf/PerfFile
+open perf/PerfCapture
+
+func write(
+  hub: mod PerfHub
+  base: view Int
+  ring: view PerfRing
+  kind: view PerfKind
+  name: view String
+  time: view Int
+  value: view Int
+) {
+  let perfName: PerfName = hub.perfName(name: name)
+  perfWriteAt(
+    ring: ring
+    kind: kind
+    name: perfName
+    time: base + time
+    value: value
+    extra: 0
+  )
+}
+
+func main() {
+  var hub: PerfHub = createPerfHub(settings: defaultPerfSettings())
+  let base: Int = hub.frameStartNs
+  let main: PerfRing = hub.perfThreadRing(name: "CPU main loop")
+  let worker: PerfRing = hub.perfThreadRing(name: "worker 1")
+  let gpu: PerfRing = hub.perfThreadRing(name: "Metal command buffers")
+  # two frames on the main lane: update > physics, render; a zone left open inside update
+  loop var frame: Int = 0, frame < 2, ++frame {
+    let at: Int = frame * 10000000
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.mark
+      name: "frame start"
+      time: at
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "update"
+      time: at
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "physics"
+      time: at + 1000000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneEnd
+      name: "physics"
+      time: at + 3000000 + frame * 1000000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "unclosed"
+      time: at + 4500000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneEnd
+      name: "update"
+      time: at + 5000000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "render"
+      time: at + 6000000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneEnd
+      name: "render"
+      time: at + 9000000
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.counter
+      name: "mem.rss kb"
+      time: at + 9500000
+      value: 1000 + frame * 24
+    )
+  }
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "frame start"
+    time: 20000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneBegin
+    name: "chunk"
+    time: 2000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneEnd
+    name: "chunk"
+    time: 6000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.waitBegin
+    name: "Task.get"
+    time: 7000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.waitEnd
+    name: "Task.get"
+    time: 8500000
+    value: 0
+  )
+  # two overlapping command buffers: 1..4 ms and 3..5 ms cover 4 ms
+  write(
+    hub: hub
+    base: base
+    ring: gpu
+    kind: PerfKind.gpuSpan
+    name: "command buffer"
+    time: 1000000
+    value: base + 4000000
+  )
+  write(
+    hub: hub
+    base: base
+    ring: gpu
+    kind: PerfKind.gpuSpan
+    name: "command buffer"
+    time: 3000000
+    value: base + 5000000
+  )
+  hub.perfFrame()
+
+  let bytes: List(UInt8) = perfFileBytes(file: perfFileOf(hub: hub, startNs: base))
+  if let file: PerfFile = perfFileFromBytes(bytes: bytes) {
+    let capture: PerfCapture = perfCaptureOf(file: file)
+    log(
+      "lanes {capture.lanes.length}, spans {capture.spans.length}, waits {capture.waits.length}, frames {capture.frameStarts.length}, counters {capture.counters.length}, {(capture.endNs - capture.startNs) / 1000} us"
+    )
+    loop let span: view PerfSpan in capture.spans {
+      if span.lane is 0 {
+        log(
+          "  {perfCaptureName(capture: capture, nameId: span.nameId)} at {(span.start - base) / 1000} us for {(span.end - span.start) / 1000}, depth {span.depth}, own {span.selfNs / 1000}: {span.path}"
+        )
+      }
+    }
+    let intervals: List(Int) = perfFrameIntervals(capture: capture)
+    log(
+      "frame intervals: {intervals.copyAtDefault(index: 0) / 1000} us, {intervals.copyAtDefault(
+        index: 1
+      ) / 1000} us"
+    )
+    loop let stat: view PerfZoneStat in perfZoneStats(capture: capture, lanes: List(Int) { 0 }) {
+      log(
+        "zone {stat.name}: count {stat.count}, total {stat.totalNs / 1000}, mean {stat.meanNs / 1000}, p95 {stat.p95Ns / 1000}, max {stat.maxNs / 1000}, spread {stat.spreadNs / 1000}"
+      )
+    }
+    loop let use: view PerfLaneUse in perfLaneUses(capture: capture) {
+      log(
+        "lane {use.name}: busy {use.busyNs / 1000} us, waiting {use.waitNs / 1000} us, spans {use.spans}"
+      )
+    }
+    if let rss: PerfCounterSeries = perfCounterNamed(capture: capture, name: "mem.rss kb") {
+      log(
+        "mem.rss kb: {rss.values.copyAtDefault(index: 0)} then {rss.values.copyAtDefault(index: 1)}"
+      )
+    }
+    let gpuLanes: List(Int) = perfLanesNamed(
+      capture: capture
+      prefixes: List(String) { "GPU", "Metal" }
+    )
+    log("GPU lanes: {gpuLanes.length}")
+  } else {
+    log("the capture did not read back")
+  }
+  hub.freePerfHub()
+}

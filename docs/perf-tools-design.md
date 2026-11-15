@@ -494,6 +494,17 @@ Examples, built from `.raescene` files with the shared editor chrome where it fi
 - reads `RAE_AB` results as two captures;
 - runs on the Mac and on an iPad.
 
+Done in Rae 0.3.148 (perf step 12, part 1): `examples/151_perfViewer` opens one `.raeperf`
+(`RAE_PERF_OPEN`, the walker sample by default) in the eight views, built from
+`assets/Viewer.raescene` with the `lib/ui` chart widgets. `lib/perf/PerfCapture` reads a capture
+file into what they show: each lane's spans (zones paired by a stack, a zone left open closed with
+the one around it, with their depth, own time and call path), waits, GPU spans, marks, counter
+series and the frames ("frame start" marks); each zone's count, total, mean, p95, maximum and
+spread; each lane's busy time (the union of its top-level spans) and waiting time (case 1477). The
+example gate compares each view of the sample with a reference picture. Live programs, folders,
+comparing two captures (and `RAE_AB`), the critical path and the audio plan's nodes are the next
+steps (QUEUE.md); an iPad run waits for a person.
+
 ### 8.3 Headless reports and budgets
 
 - **The report:** `rae perf report capture.raeperf` (or a Rae program under `tools/`) prints the
