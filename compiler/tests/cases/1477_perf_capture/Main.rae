@@ -2,10 +2,14 @@
 # capture file's bytes and back: zones paired into spans with their depth, own time and call path
 # (an end that skips an inner open zone closes it too), waits, GPU spans, frame marks and counters;
 # each zone's count, total, mean, p95, maximum and spread; each lane's busy time (overlapping
-# top-level spans count once) and waiting time; the flame-graph paths.
+# top-level spans count once) and waiting time; the flame-graph paths. And perf/PerfPaths: frame 1's
+# critical path through a task the main lane spawned at 11 ms and waited for (Task.get, 11.2 to
+# 14.6 ms) while a worker ran it (12 to 14.5 ms after 1 ms in the queue), the waits by lane and
+# kind, the frames each bound counts, a system's skips and a render plan node's zone.
 open perf/Perf
 open perf/PerfFile
 open perf/PerfCapture
+open perf/PerfPaths
 
 func write(
   hub: mod PerfHub
@@ -182,6 +186,116 @@ func main() {
     time: 3000000
     value: base + 5000000
   )
+  # a task: spawned on the main lane at 11 ms, run on the worker 12 to 14.5 ms, waited for 11.2 to
+  # 14.6 ms (inside update)
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.flow
+    name: "spawn"
+    time: 11000000
+    value: 77
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.waitBegin
+    name: "Task.get"
+    time: 11200000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.waitEnd
+    name: "Task.get"
+    time: 14600000
+    value: 0
+  )
+  let spawnName: PerfName = hub.perfName(name: "spawn")
+  perfWriteAt(
+    ring: worker
+    kind: PerfKind.flow
+    name: spawnName
+    time: base + 12000000
+    value: 77
+    extra: 1
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneBegin
+    name: "task"
+    time: 12000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneEnd
+    name: "task"
+    time: 14500000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "bound by the GPU"
+    time: 9000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "bound by the GPU"
+    time: 19000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "bound by the CPU"
+    time: 19500000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "physics (skipped)"
+    time: 19600000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.zoneBegin
+    name: "reverb 7"
+    time: 21000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.zoneEnd
+    name: "reverb 7"
+    time: 21500000
+    value: 0
+  )
   hub.perfFrame()
 
   let bytes: List(UInt8) = perfFileBytes(file: perfFileOf(hub: hub, startNs: base))
@@ -223,6 +337,48 @@ func main() {
       prefixes: List(String) { "GPU", "Metal" }
     )
     log("GPU lanes: {gpuLanes.length}")
+    log(
+      "flows: {capture.flows.length}, the first spawned on lane {capture.flows.copyAtDefault(
+        index: 0
+      ).spawnLane} at {(capture.flows.copyAtDefault(index: 0).spawnTime - base) / 1000} us, run on lane {capture.flows.copyAtDefault(
+        index: 0
+      ).runLane} at {(capture.flows.copyAtDefault(index: 0).runTime - base) / 1000} us"
+    )
+    log("frame 1's critical path:")
+    loop let step: view PerfPathStep in perfCriticalPath(
+      capture: capture
+      lane: 0
+      start: base + 10000000
+      end: base + 20000000
+    ) {
+      var what: String = ""
+      if step.nameId >= 0 {
+        what = " {perfCaptureName(capture: capture, nameId: step.nameId)}"
+      }
+      log(
+        "  {perfCaptureLane(capture: capture, lane: step.lane)}: {step.kind}{what} {(step.start - base) / 100000} .. {(step.end - base) / 100000} (0.1 ms)"
+      )
+    }
+    loop let total: view PerfWaitTotal in perfWaitTotals(capture: capture) {
+      log(
+        "waits on {perfCaptureLane(capture: capture, lane: total.lane)}: {total.count} {perfCaptureName(
+          capture: capture
+          nameId: total.nameId
+        )}, {total.totalNs / 1000} us"
+      )
+    }
+    let boundGpu: Int = perfMarkCount(capture: capture, name: "bound by the GPU")
+    let boundCpu: Int = perfMarkCount(capture: capture, name: "bound by the CPU")
+    let skips: Int = perfSkipCount(capture: capture, name: "physics")
+    log("bound by the GPU {boundGpu}, the CPU {boundCpu}; physics skipped {skips}")
+    let reverb: Bool = perfIsNodeName(name: "reverb 7")
+    let update: Bool = perfIsNodeName(name: "update")
+    let notNumbered: Bool = perfIsNodeName(name: "sum x")
+    log(
+      "node zones: reverb 7 {reverb}, update {update}, sum x {notNumbered}; lanes with nodes {perfNodeLanes(
+        capture: capture
+      ).length}"
+    )
   } else {
     log("the capture did not read back")
   }

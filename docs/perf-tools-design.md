@@ -525,6 +525,17 @@ ended or not) above the `.raeperf` files of a folder (`RAE_PERF_FOLDER`); a clic
 a live one's views are filled again twice a second as its blocks arrive. The gate runs
 `examples/151_perfViewer/tools/liveCheck.sh`: `checks/perfHud` streams into a viewer on a free port.
 
+Rae 0.3.151 (step 12d): the deeper views, from `perf/PerfPaths`. A capture keeps the runtime's
+spawn flows (a task's spawn and run, by its id). A frame's critical path is walked back from its
+end on the main lane: a top-level zone up to the last wait inside it, a wait through to the span on
+another lane that ended last inside it (the task it waited for), that task back through its time in
+the queue to where it was spawned, and idle time between; consecutive pieces of one zone merge and
+idle moments under 20 µs drop (case 1477). The Threads view shows the slowest frame's path, step by
+step, and each lane's waits by kind; the GPU view counts the frames each of the CPU, the GPU and
+the drawable bounded (app3d/FrameLog's marks) and plots the `draws.*` counters; the Audio view
+lists the render plan's node zones (a word and a number) and blocks, with the clock drift; the
+Systems view adds each ECS system's skips (lib/ecs/Schedule's "(skipped)" marks).
+
 ### 8.3 Headless reports and budgets
 
 - **The report:** `rae perf report capture.raeperf` (or a Rae program under `tools/`) prints the

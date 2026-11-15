@@ -1,0 +1,136 @@
+# The deeper parts of the Threads and GPU views (lib/perf/PerfPaths): each lane's waits by kind,
+# the slowest frame's critical path (which lane held the frame up, with what, for how long, through
+# the waits and the tasks that ended them), and how many frames the CPU, the GPU and the drawable
+# each bounded.
+import Math
+open perf/PerfCapture
+open perf/PerfPaths
+open ui/ChartComponents
+open ui/statTableSystem/StatTableSystem
+open Viewer
+
+func deepColumns(state: mod StatTableState, titles: view List(String), first: view Float) {
+  if state.columns.length > 0 {
+    ret
+  }
+  loop var i: Int = 0, i < titles.length, ++i {
+    var width: Float = 150.0
+    if i is 0 {
+      width = first
+    }
+    let unusedColumn: Int = statAddColumn(
+      state: state
+      title: titles.copyAtDefault(index: i)
+      width: width
+      numeric: i >= 2
+    )
+  }
+}
+
+# Threads: each lane's waits by kind, longest first
+func fillWaitTable(state: mod StatTableState, capture: view PerfCapture, tag: view String) {
+  deepColumns(
+    state: state
+    titles: List(String) {
+      "thread"
+      "waiting on"
+      "count"
+      "total ms"
+      "mean us"
+    }
+    first: 300.0
+  )
+  loop let total: view PerfWaitTotal in perfWaitTotals(capture: capture) {
+    let mean: Int = total.totalNs / Math.max(a: 1, b: total.count)
+    let unusedRow: Int = statAddRow(
+      state: state
+      texts: List(String) {
+        "{perfCaptureLane(capture: capture, lane: total.lane)}{tag}"
+        perfCaptureName(capture: capture, nameId: total.nameId)
+        "{total.count}"
+        milliseconds(nanoseconds: total.totalNs)
+        microseconds(nanoseconds: mean)
+      }
+      values: List(Float) {
+        0.0
+        0.0
+        total.count as Float
+        total.totalNs as Float
+        mean as Float
+      }
+    )
+  }
+  statSort(state: state, column: 3, descending: true)
+}
+
+func stepWhat(capture: view PerfCapture, step: view PerfPathStep) ret String {
+  if step.kind is PerfPathKind.queued {
+    ret "in the queue (spawned, not yet run)"
+  }
+  if step.kind is PerfPathKind.idle {
+    ret "idle"
+  }
+  if step.kind is PerfPathKind.wait {
+    ret "waiting: {perfCaptureName(capture: capture, nameId: step.nameId)}"
+  }
+  ret perfCaptureName(capture: capture, nameId: step.nameId)
+}
+
+# Threads: the slowest frame's critical path, step by step in order of time; its note
+func fillCriticalPath(state: mod StatTableState, capture: view PerfCapture) ret String {
+  deepColumns(
+    state: state
+    titles: List(String) { "thread", "what", "from ms", "for ms" }
+    first: 300.0
+  )
+  if let frame: PerfFrame = perfSlowestFrame(capture: capture) {
+    let steps: List(PerfPathStep) = perfCriticalPath(
+      capture: capture
+      lane: 0
+      start: frame.start
+      end: frame.start + frame.length
+    )
+    var mainNs: Int = 0
+    var otherNs: Int = 0
+    var waitNs: Int = 0
+    loop let step: view PerfPathStep in steps {
+      let length: Int = step.end - step.start
+      if step.kind is PerfPathKind.wait or step.kind is PerfPathKind.queued or step.kind is PerfPathKind.idle {
+        waitNs = waitNs + length
+      } else if step.lane is 0 {
+        mainNs = mainNs + length
+      } else {
+        otherNs = otherNs + length
+      }
+      let unusedRow: Int = statAddRow(
+        state: state
+        texts: List(String) {
+          perfCaptureLane(capture: capture, lane: step.lane)
+          stepWhat(capture: capture, step: step)
+          milliseconds(nanoseconds: step.start - frame.start)
+          milliseconds(nanoseconds: length)
+        }
+        values: List(Float) { 0.0, 0.0, (step.start - frame.start) as Float, length as Float }
+      )
+    }
+    let whole: Int = Math.max(a: 1, b: frame.length)
+    ret "The slowest frame, {milliseconds(nanoseconds: frame.length)} ms at {milliseconds(
+      nanoseconds: frame.start - capture.startNs
+    )} ms: its critical path is {percent(part: mainNs, whole: whole)} % the main thread's work, {percent(
+      part: otherNs
+      whole: whole
+    )} % other threads' (tasks it waited for), {percent(part: waitNs, whole: whole)} % waiting, queued or idle."
+  }
+  ret "No frames in this capture: no critical path."
+}
+
+# GPU: which of the CPU, the GPU and the drawable bounded how many frames (app3d/FrameLog's marks)
+func boundNote(capture: view PerfCapture) ret String {
+  let cpu: Int = perfMarkCount(capture: capture, name: "bound by the CPU")
+  let gpu: Int = perfMarkCount(capture: capture, name: "bound by the GPU")
+  let drawable: Int = perfMarkCount(capture: capture, name: "bound by the drawable")
+  if cpu + gpu + drawable is 0 {
+    ret "No frame was marked bound by the CPU or the GPU (app3d/FrameLog marks them under a capture)."
+  }
+  ret "Bound by the CPU in {cpu} frames, by the GPU in {gpu}, by the drawable in {drawable}."
+}

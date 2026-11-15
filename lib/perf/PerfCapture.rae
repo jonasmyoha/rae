@@ -50,6 +50,15 @@ type PerfCounterSeries {
   values: List(Int)
 }
 
+# A task's flow (the runtime's spawn flows): where it was spawned and where and when it began to run
+type PerfFlow {
+  id: Int
+  spawnLane: Int = -1
+  spawnTime: Int = 0
+  runLane: Int = -1
+  runTime: Int = 0
+}
+
 type PerfCapture {
   names: List(String)
   lanes: List(String)
@@ -64,6 +73,8 @@ type PerfCapture {
   frameStarts: List(Int)
   # where a split capture (perf/PerfSplit) skips time: no frame spans one
   gaps: List(Int) = {}
+  # the tasks' flows, by id (spawn and run)
+  flows: List(PerfFlow) = {}
 }
 
 # The open zones of a lane while its events are read
@@ -123,6 +134,29 @@ func perfCounterIndex(capture: mod PerfCapture, nameId: view Int) ret Int {
     }
   )
   ret capture.counters.length - 1
+}
+
+# A flow event: a spawn (extra 0) or the task's run beginning (extra 1), joined by the task's id
+func perfNoteFlow(capture: mod PerfCapture, event: view PerfEvent, lane: view Int) {
+  var at: Int = -1
+  loop var i: Int = capture.flows.length - 1, i >= 0 and at < 0, --i {
+    if capture.flows.copyAtDefault(index: i).id is event.value {
+      at = i
+    }
+  }
+  if at < 0 or (event.extra as Int is 0 and capture.flows.copyAtDefault(index: at).spawnLane >= 0) {
+    capture.flows.add(value: PerfFlow { id: event.value })
+    at = capture.flows.length - 1
+  }
+  if let flow: mod PerfFlow = capture.flows.modAt(index: at) {
+    if event.extra as Int is 0 {
+      flow.spawnLane = lane
+      flow.spawnTime = event.time
+    } else {
+      flow.runLane = lane
+      flow.runTime = event.time
+    }
+  }
 }
 
 # One lane's events into spans, waits, marks and counter points
@@ -204,6 +238,8 @@ func perfReadLane(capture: mod PerfCapture, events: view List(PerfEvent), lane: 
       } else if capture.names.copyAtDefault(index: nameId) is "capture gap" {
         capture.gaps.add(value: event.time)
       }
+    } else if event.kind is PerfKind.flow {
+      perfNoteFlow(capture: capture, event: event, lane: lane)
     } else if event.kind is PerfKind.counter {
       let index: Int = perfCounterIndex(capture: capture, nameId: nameId)
       if let series: mod PerfCounterSeries = capture.counters.modAt(index: index) {

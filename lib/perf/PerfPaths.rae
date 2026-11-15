@@ -1,0 +1,359 @@
+# perf/PerfPaths — the deeper readings of a capture (perf/PerfCapture) the viewer's Threads, GPU,
+# Audio and Systems views show (docs/perf-tools-design.md §8.2, §9):
+# - a frame's critical path: from the frame's end back to its start along what the main lane was
+#   doing, and through each wait to what ended it on another lane (the last top-level span there to
+#   end inside the wait), and from a task's start back to where it was spawned (the runtime's spawn
+#   flows); the steps say which lane held the frame up, with what, for how long;
+# - each lane's waits by kind (Task.get, a Signal, a lock, a channel);
+# - how many frames each of the CPU, the GPU and the drawable bounded (app3d/FrameLog's marks);
+# - how often each ECS system was skipped (lib/ecs/Schedule's "<name> (skipped)" marks);
+# - which zones are the audio render plan's nodes ("sum 0", "reverb 7": a word and a number).
+import Math
+import String
+open perf/PerfCapture
+
+# A step of a critical path: a zone, a wait no other lane's span explains, a task's time in the
+# queue between its spawn and its run, or a lane's idle time; `nameId` the zone's or wait's (-1 for
+# the queue and idle)
+enum PerfPathKind { zone, wait, queued, idle }
+
+type PerfPathStep {
+  lane: Int
+  kind: PerfPathKind
+  nameId: Int = -1
+  start: Int
+  end: Int
+}
+
+# The wait on `lane` going on just before `time` (start < time <= end), or -1
+func perfWaitBefore(capture: view PerfCapture, lane: view Int, time: view Int) ret Int {
+  loop var i: Int = 0, i < capture.waits.length, ++i {
+    if let wait: view PerfSpan = capture.waits.viewAt(index: i) {
+      if wait.lane is lane and wait.start < time and wait.end >= time {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The top-level span on `lane` going on just before `time`, or -1
+func perfSpanBefore(capture: view PerfCapture, lane: view Int, time: view Int) ret Int {
+  loop var i: Int = 0, i < capture.spans.length, ++i {
+    if let span: view PerfSpan = capture.spans.viewAt(index: i) {
+      if span.lane is lane and span.depth is 0 and span.start < time and span.end >= time {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# What ended a wait from `start` to `end` on `lane`: the top-level span on another lane that ended
+# last inside it (and began before `end`), or -1
+func perfReleaser(
+  capture: view PerfCapture
+  lane: view Int
+  start: view Int
+  end: view Int
+) ret Int {
+  var found: Int = -1
+  var foundEnd: Int = start
+  loop var i: Int = 0, i < capture.spans.length, ++i {
+    if let span: view PerfSpan = capture.spans.viewAt(index: i) {
+      if span.lane is not lane and span.depth is 0 and span.end > foundEnd and span.end <= end and span.start < end {
+        found = i
+        foundEnd = span.end
+      }
+    }
+  }
+  ret found
+}
+
+# The flow of the task whose run began on `lane` at about `time` (its "task" zone's start), or -1
+func perfFlowRunAt(capture: view PerfCapture, lane: view Int, time: view Int) ret Int {
+  var found: Int = -1
+  var nearest: Int = 1000000
+  loop var i: Int = 0, i < capture.flows.length, ++i {
+    if let flow: view PerfFlow = capture.flows.viewAt(index: i) {
+      let before: Int = time - flow.runTime
+      if flow.runLane is lane and flow.spawnLane >= 0 and before >= 0 and before < nearest {
+        found = i
+        nearest = before
+      }
+    }
+  }
+  ret found
+}
+
+# The latest end of a wait on `lane` after `after` and before `before` (`after` when none)
+func perfWaitEndInside(
+  capture: view PerfCapture
+  lane: view Int
+  after: view Int
+  before: view Int
+) ret Int {
+  var latest: Int = after
+  loop let wait: view PerfSpan in capture.waits {
+    if wait.lane is lane and wait.end > latest and wait.end < before {
+      latest = wait.end
+    }
+  }
+  ret latest
+}
+
+# The end of the last span or wait on `lane` before `time` (`floor` when none is after it)
+func perfLaneActiveBefore(
+  capture: view PerfCapture
+  lane: view Int
+  time: view Int
+  floor: view Int
+) ret Int {
+  var latest: Int = floor
+  loop let span: view PerfSpan in capture.spans {
+    if span.lane is lane and span.depth is 0 and span.end < time and span.end > latest {
+      latest = span.end
+    }
+  }
+  loop let wait: view PerfSpan in capture.waits {
+    if wait.lane is lane and wait.end < time and wait.end > latest {
+      latest = wait.end
+    }
+  }
+  ret latest
+}
+
+# A step onto a path being built backward: an idle moment under 20 µs left out, and a step that
+# continues the one after it (the same lane, kind and name, meeting it) merged into it
+func perfPathAdd(steps: mod List(PerfPathStep), step: view PerfPathStep) {
+  if step.kind is PerfPathKind.idle and step.end - step.start < 20000 {
+    ret
+  }
+  if let later: mod PerfPathStep = steps.modAt(index: steps.length - 1) {
+    if later.lane is step.lane and later.kind is step.kind and later.nameId is step.nameId and later.start is step.end {
+      later.start = step.start
+      ret
+    }
+  }
+  steps.add(value: step)
+}
+
+# The critical path of the time from `start` to `end`, beginning on `lane` at the end, in order of
+# time
+func perfCriticalPath(
+  capture: view PerfCapture
+  lane: view Int
+  start: view Int
+  end: view Int
+) ret List(PerfPathStep) {
+  var backward: List(PerfPathStep) = {}
+  var at: Int = end
+  var on: Int = lane
+  var rounds: Int = 0
+  loop at > start and rounds < 100000 {
+    rounds = rounds + 1
+    let wait: Int = perfWaitBefore(capture: capture, lane: on, time: at)
+    let span: Int = perfSpanBefore(capture: capture, lane: on, time: at)
+    if wait >= 0 {
+      let waiting: PerfSpan = capture.waits.copyAtDefault(index: wait)
+      let released: Int = perfReleaser(
+        capture: capture
+        lane: on
+        start: waiting.start
+        end: at
+      )
+      if released >= 0 and capture.spans.copyAtDefault(index: released).start < at {
+        let task: PerfSpan = capture.spans.copyAtDefault(index: released)
+        # the wait from the task's end to `at` (the wake), then the task itself
+        if task.end < at {
+          perfPathAdd(
+            steps: backward
+            step: PerfPathStep {
+              lane: on
+              kind: PerfPathKind.wait
+              nameId: waiting.nameId
+              start: task.end
+              end: at
+            }
+          )
+        }
+        let from: Int = Math.max(a: task.start, b: start)
+        perfPathAdd(
+          steps: backward
+          step: PerfPathStep {
+            lane: task.lane
+            kind: PerfPathKind.zone
+            nameId: task.nameId
+            start: from
+            end: task.end
+          }
+        )
+        let flow: Int = perfFlowRunAt(capture: capture, lane: task.lane, time: task.start)
+        if flow >= 0 and capture.flows.copyAtDefault(index: flow).spawnTime < task.start {
+          let spawned: PerfFlow = capture.flows.copyAtDefault(index: flow)
+          let queuedFrom: Int = Math.max(a: spawned.spawnTime, b: start)
+          if queuedFrom < from {
+            perfPathAdd(
+              steps: backward
+              step: PerfPathStep {
+                lane: task.lane
+                kind: PerfPathKind.queued
+                start: queuedFrom
+                end: from
+              }
+            )
+          }
+          on = spawned.spawnLane
+          at = queuedFrom
+        } else {
+          # no flow: back on the waiting lane at the task's start
+          at = from
+        }
+      } else {
+        let from: Int = Math.max(a: waiting.start, b: start)
+        perfPathAdd(
+          steps: backward
+          step: PerfPathStep {
+            lane: on
+            kind: PerfPathKind.wait
+            nameId: waiting.nameId
+            start: from
+            end: at
+          }
+        )
+        at = from
+      }
+    } else if span >= 0 {
+      let zone: PerfSpan = capture.spans.copyAtDefault(index: span)
+      # a wait inside the zone before `at` takes the path from where it ended
+      let from: Int = Math.max(
+        a: Math.max(a: zone.start, b: start)
+        b: perfWaitEndInside(
+          capture: capture
+          lane: on
+          after: zone.start
+          before: at
+        )
+      )
+      perfPathAdd(
+        steps: backward
+        step: PerfPathStep {
+          lane: on
+          kind: PerfPathKind.zone
+          nameId: zone.nameId
+          start: from
+          end: at
+        }
+      )
+      at = from
+    } else {
+      let from: Int = perfLaneActiveBefore(
+        capture: capture
+        lane: on
+        time: at
+        floor: start
+      )
+      perfPathAdd(
+        steps: backward
+        step: PerfPathStep { lane: on, kind: PerfPathKind.idle, start: from, end: at }
+      )
+      at = from
+    }
+  }
+  var steps: List(PerfPathStep) = List.create(PerfPathStep, cap: backward.length)
+  loop var i: Int = backward.length - 1, i >= 0, --i {
+    steps.add(value: backward.copyAtDefault(index: i))
+  }
+  ret steps
+}
+
+# The slowest frame (perfFrames: gaps of a split capture left out); none without frames
+func perfSlowestFrame(capture: view PerfCapture) ret opt PerfFrame {
+  var slowest: opt PerfFrame = none
+  var longest: Int = -1
+  loop let frame: view PerfFrame in perfFrames(capture: capture) {
+    if frame.length > longest {
+      longest = frame.length
+      slowest = frame
+    }
+  }
+  ret slowest
+}
+
+# Waits by lane and kind: their count and time
+type PerfWaitTotal {
+  lane: Int
+  nameId: Int
+  count: Int = 0
+  totalNs: Int = 0
+}
+
+func perfWaitTotals(capture: view PerfCapture) ret List(PerfWaitTotal) {
+  var totals: List(PerfWaitTotal) = {}
+  loop let wait: view PerfSpan in capture.waits {
+    var at: Int = -1
+    loop var i: Int = 0, i < totals.length and at < 0, ++i {
+      let known: PerfWaitTotal = totals.copyAtDefault(index: i)
+      if known.lane is wait.lane and known.nameId is wait.nameId {
+        at = i
+      }
+    }
+    if at < 0 {
+      totals.add(value: PerfWaitTotal { lane: wait.lane, nameId: wait.nameId })
+      at = totals.length - 1
+    }
+    if let total: mod PerfWaitTotal = totals.modAt(index: at) {
+      total.count = total.count + 1
+      total.totalNs = total.totalNs + wait.end - wait.start
+    }
+  }
+  ret totals
+}
+
+# How many marks are named `name`
+func perfMarkCount(capture: view PerfCapture, name: view String) ret Int {
+  var count: Int = 0
+  loop let mark: view PerfSpan in capture.marks {
+    if capture.names.copyAtDefault(index: mark.nameId) is name {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+# How often system `name` was skipped (its "<name> (skipped)" marks)
+func perfSkipCount(capture: view PerfCapture, name: view String) ret Int {
+  ret perfMarkCount(capture: capture, name: "{name} (skipped)")
+}
+
+# A render plan node's zone: a word, a space and a number ("sum 0", "reverb 7")
+func perfIsNodeName(name: view String) ret Bool {
+  let parts: List(String) = name.split(sep: " ")
+  if parts.length is not 2 {
+    ret false
+  }
+  let number: String = parts.copyAtDefault(index: 1)
+  if number.length() is 0 {
+    ret false
+  }
+  loop var i: Int = 0, i < number.length(), ++i {
+    let byte: Int = number.byteAt(index: i) as Int
+    if byte < 48 or byte > 57 {
+      ret false
+    }
+  }
+  ret parts.copyAtDefault(index: 0).length() > 0
+}
+
+# The lanes that hold a render plan node's zone
+func perfNodeLanes(capture: view PerfCapture) ret List(Int) {
+  var lanes: List(Int) = {}
+  loop let span: view PerfSpan in capture.spans {
+    if not lanes.contains(value: span.lane) and perfIsNodeName(
+      name: capture.names.copyAtDefault(index: span.nameId)
+    ) {
+      lanes.add(value: span.lane)
+    }
+  }
+  ret lanes
+}

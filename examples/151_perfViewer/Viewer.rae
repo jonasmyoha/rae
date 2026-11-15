@@ -4,6 +4,7 @@
 import Math
 import String
 open perf/PerfCapture
+open perf/PerfPaths
 open ui/ChartComponents
 open ui/timelineSystem/TimelineSystem
 open ui/flameGraphSystem/FlameGraphSystem
@@ -238,18 +239,22 @@ func fillThreads(state: mod StatTableState, capture: view PerfCapture, tag: view
 }
 
 # A table of the zones on `lanes`: count, total, mean, p95, maximum and spread, by total
+# `nodesOnly`: only the audio render plan's nodes and blocks; `withSkips`: a column of how often
+# each was skipped (an ECS system's "(skipped)" marks)
 func fillZoneTable(
   state: mod StatTableState
   capture: view PerfCapture
   lanes: view List(Int)
   tag: view String
+  nodesOnly: view Bool
+  withSkips: view Bool
 ) {
   # the columns once: a second capture adds its rows to the same table
   if state.columns.length is 0 {
     let unusedName: Int = statAddColumn(
       state: state
       title: "zone"
-      width: 320.0
+      width: 280.0
       numeric: false
     )
     let unusedCount: Int = statAddColumn(
@@ -261,60 +266,74 @@ func fillZoneTable(
     let unusedTotalColumn: Int = statAddColumn(
       state: state
       title: "total ms"
-      width: 150.0
+      width: 140.0
       numeric: true
     )
     let unusedMean: Int = statAddColumn(
       state: state
       title: "mean us"
-      width: 150.0
+      width: 140.0
       numeric: true
     )
     let unusedP95: Int = statAddColumn(
       state: state
       title: "p95 us"
-      width: 150.0
+      width: 140.0
       numeric: true
     )
     let unusedMax: Int = statAddColumn(
       state: state
       title: "max us"
-      width: 150.0
+      width: 140.0
       numeric: true
     )
     let unusedSpread: Int = statAddColumn(
       state: state
       title: "spread us"
-      width: 150.0
+      width: 140.0
       numeric: true
     )
+    if withSkips {
+      let unusedSkipped: Int = statAddColumn(
+        state: state
+        title: "skipped"
+        width: 110.0
+        numeric: true
+      )
+    }
   }
   let total: Int = 2
   if lanes.length is 0 {
     ret
   }
   loop let stat: view PerfZoneStat in perfZoneStats(capture: capture, lanes: lanes) {
-    let unusedRow: Int = statAddRow(
-      state: state
-      texts: List(String) {
-        "{stat.name}{tag}"
-        "{stat.count}"
-        milliseconds(nanoseconds: stat.totalNs)
-        microseconds(nanoseconds: stat.meanNs)
-        microseconds(nanoseconds: stat.p95Ns)
-        microseconds(nanoseconds: stat.maxNs)
-        microseconds(nanoseconds: stat.spreadNs)
-      }
-      values: List(Float) {
-        0.0
-        stat.count as Float
-        stat.totalNs as Float
-        stat.meanNs as Float
-        stat.p95Ns as Float
-        stat.maxNs as Float
-        stat.spreadNs as Float
-      }
-    )
+    if nodesOnly and not perfIsNodeName(name: stat.name) and stat.name is not "block" {
+      continue
+    }
+    var texts: List(String) = {
+      "{stat.name}{tag}"
+      "{stat.count}"
+      milliseconds(nanoseconds: stat.totalNs)
+      microseconds(nanoseconds: stat.meanNs)
+      microseconds(nanoseconds: stat.p95Ns)
+      microseconds(nanoseconds: stat.maxNs)
+      microseconds(nanoseconds: stat.spreadNs)
+    }
+    var values: List(Float) = {
+      0.0
+      stat.count as Float
+      stat.totalNs as Float
+      stat.meanNs as Float
+      stat.p95Ns as Float
+      stat.maxNs as Float
+      stat.spreadNs as Float
+    }
+    if withSkips {
+      let skips: Int = perfSkipCount(capture: capture, name: stat.name)
+      texts.add(value: "{skips}")
+      values.add(value: skips as Float)
+    }
+    let unusedRow: Int = statAddRow(state: state, texts: texts, values: values)
   }
   statSort(state: state, column: total, descending: true)
 }
@@ -345,6 +364,22 @@ func fillGpuGraph(state: mod LineGraphState, capture: view PerfCapture, tag: vie
     scale: 0.01
     tag: tag
   )
+  let unusedTriangles: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "draws.gbuffer.triangles"
+    label: "triangles / 10 000"
+    scale: 0.0001
+    tag: tag
+  )
+  let unusedShadowDraws: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "draws.shadow.instances"
+    label: "shadow instances / 100"
+    scale: 0.01
+    tag: tag
+  )
 }
 
 # Audio: the render's time and its share of the period, the underruns
@@ -370,6 +405,14 @@ func fillAudioGraph(state: mod LineGraphState, capture: view PerfCapture, tag: v
     capture: capture
     name: "audio.underrun frames"
     label: "underrun frames"
+    scale: 1.0
+    tag: tag
+  )
+  let unusedDrift: Bool = addCounter(
+    state: state
+    capture: capture
+    name: "audio.clock drift ppm"
+    label: "clock drift ppm"
     scale: 1.0
     tag: tag
   )

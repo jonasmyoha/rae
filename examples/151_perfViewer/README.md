@@ -49,11 +49,11 @@ The tabs choose the view:
 | Frames | each frame's time (from the "frame start" marks), the CPU's and GPU's time where recorded (`frame.cpu.us`, `gpu.busy.us`), and how the frame times spread against the budget, with p50 and p95 |
 | Timeline | every lane that recorded: its zones at their depths, the frames as marks; the wheel zooms, a drag pans, a click selects |
 | Flame graph | each zone's own time along its lane and call path |
-| Threads | each lane's busy, waiting and idle share of the capture (overlapping spans count once) |
-| GPU | the GPU's buffer and texture memory and the draws, and the GPU lanes' spans (Metal command buffers, passes) |
-| Audio | the audio render's share of its period, its time and underruns, and the audio lanes' spans |
+| Threads | each lane's busy, waiting and idle share of the capture (overlapping spans count once); each lane's waits by kind (Task.get, a Signal, a lock, a channel); and the slowest frame's critical path: from its end back to its start along the main thread, through each wait to the task on another thread that ended it, and from a task back to its spawn (its time in the queue), with the shares of the main thread's work, other threads' and waiting |
+| GPU | how many frames the CPU, the GPU and the drawable each bounded ("bound by" marks), the GPU's buffer and texture memory and the draws (`draws.*`), and the GPU lanes' spans (the passes, Metal command buffers) |
+| Audio | the audio render's share of its period, its time, underruns and clock drift, and the render plan's nodes ("sum 0", "reverb 7") and blocks |
 | Memory | the resident size and the buffers' bytes; allocations a frame and the buffers alive |
-| Systems | every zone of the program's own threads: count, total, mean, p95, maximum and spread |
+| Systems | every zone of the program's own threads: count, total, mean, p95, maximum, spread, and how often an ECS system was skipped (its "(skipped)" marks: nothing it reads changed) |
 
 The numbers come from `lib/perf/PerfCapture` (pure functions over the file's events, checked by
 case 1477); `Viewer.rae` puts them into the `lib/ui` chart widgets laid out in
@@ -84,5 +84,5 @@ headless frames, compares each with `references/<view>.png`, and runs `tools/liv
 
 ## Not yet
 
-The threads' critical path, the audio render plan's nodes and an iPad run are queued in
+An iPad run is queued in
 QUEUE.md.

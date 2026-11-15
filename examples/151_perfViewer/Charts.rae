@@ -19,6 +19,8 @@ open ui/statTableSystem/StatTableSystem
 open ui/timelineSystem/TimelineSystem
 open Viewer
 open Compare
+open Deep
+open perf/PerfPaths
 
 # The captures shown, and the view
 type PerfViewer {
@@ -244,6 +246,26 @@ func fillTables(
       tag: tag
     )
   }
+  let waits: EntityId = nodeEntityFor(world: world, nodeId: "WaitTable")
+  if componentHas(this: world.statTableStates, entityId: waits) {
+    fillWaitTable(
+      state: componentMod(this: world.statTableStates, entityId: waits)
+      capture: capture
+      tag: tag
+    )
+  }
+  # the critical path is the first capture's (its slowest frame)
+  let critical: EntityId = nodeEntityFor(world: world, nodeId: "CriticalTable")
+  if first and componentHas(this: world.statTableStates, entityId: critical) {
+    let note: String = fillCriticalPath(
+      state: componentMod(this: world.statTableStates, entityId: critical)
+      capture: capture
+    )
+    setNodeText(world: world, nodeId: "CriticalNote", value: note)
+  }
+  if first {
+    setNodeText(world: world, nodeId: "BoundNote", value: boundNote(capture: capture))
+  }
   let gpu: EntityId = nodeEntityFor(world: world, nodeId: "GpuTable")
   if componentHas(this: world.statTableStates, entityId: gpu) {
     fillZoneTable(
@@ -251,6 +273,8 @@ func fillTables(
       capture: capture
       lanes: perfLanesNamed(capture: capture, prefixes: gpuLanePrefixes())
       tag: tag
+      nodesOnly: false
+      withSkips: false
     )
   }
   let audio: EntityId = nodeEntityFor(world: world, nodeId: "AudioTable")
@@ -258,8 +282,10 @@ func fillTables(
     fillZoneTable(
       state: componentMod(this: world.statTableStates, entityId: audio)
       capture: capture
-      lanes: perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
+      lanes: audioAndNodeLanes(capture: capture)
       tag: tag
+      nodesOnly: true
+      withSkips: false
     )
   }
   let systems: EntityId = nodeEntityFor(world: world, nodeId: "SystemTable")
@@ -269,6 +295,8 @@ func fillTables(
       capture: capture
       lanes: threadLanes(capture: capture)
       tag: tag
+      nodesOnly: false
+      withSkips: true
     )
   }
 }
@@ -375,6 +403,8 @@ func resetCharts(world: mod UiWorld) {
     "AudioTable"
     "SystemTable"
     "CompareTable"
+    "WaitTable"
+    "CriticalTable"
   } {
     let table: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
     if componentHas(this: world.statTableStates, entityId: table) {
@@ -393,4 +423,15 @@ func resetCharts(world: mod UiWorld) {
   if componentHas(this: world.flameGraphStates, entityId: flame) {
     componentSet(this: world.flameGraphStates, entityId: flame, data: createFlameGraphState())
   }
+}
+
+# The audio lanes and the lanes that hold a render plan node's zone
+func audioAndNodeLanes(capture: view PerfCapture) ret List(Int) {
+  var lanes: List(Int) = perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
+  loop let lane: Int in perfNodeLanes(capture: capture) {
+    if not lanes.contains(value: lane) {
+      lanes.add(value: lane)
+    }
+  }
+  ret lanes
 }
