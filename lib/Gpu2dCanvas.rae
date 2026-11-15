@@ -366,16 +366,6 @@ func ensureViewportUniform(canvas: mod Gpu2dCanvas, resources: mod GpuResources)
   }
 }
 
-func refreshXform(canvas: mod Gpu2dCanvas) {
-  canvas.xform.clear()
-  loop var k: Int = 0, k < 8, ++k {
-    canvas.xform.add(value: 0.0)
-  }
-  unsafe {
-    nativeG2dXform(out: canvas.xform.data)
-  }
-}
-
 func xformAt(canvas: view Gpu2dCanvas, index: copy Int) ret Float {
   if let value: Float = canvas.xform.copyAt(index: index) {
     ret value
@@ -383,19 +373,8 @@ func xformAt(canvas: view Gpu2dCanvas, index: copy Int) ret Float {
   ret 0.0
 }
 
-func uploadViewport(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
-  ensureViewportUniform(canvas: canvas, resources: resources)
-  refreshXform(canvas: canvas)
-  unsafe {
-    let written: Bool = writeBufferFromPtr(
-      resources: resources
-      id: canvas.viewport
-      offset: 0
-      data: canvas.xform.data
-      size: 32
-    )
-  }
-}
+# refreshXform and uploadViewport (the transform of a flush, the frame's or a sized capture's) are
+# in Gpu2dCanvasCache.
 
 # This flush's instance buffer: the slot for the flush index, grown (retired
 # and re-created, doubling) when the batch outgrew it.

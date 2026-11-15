@@ -16,6 +16,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `gpuArgs` | `gpu/GpuArgs`: a packed argument struct reads back the same through WGSL's own layout |
 | `gpuLifetime` | `gpu/GpuLifetime`: recordings, submissions, completion polling, retirement behind in-flight work |
 | `gpu2dTiming` | the 2D canvas's GPU time per frame (`Gpu2dCanvasTiming`, `RAE_GPU2D_TIMING=1`): the frame pass's own timestamps read back without waiting; 40 light and 40 heavy frames are timed, and the heavy ones take longer |
+| `gpu2dSizedCapture` | `Gpu2dCanvasCache` sized slots: a box and a word drawn into a 3840x2160 slot from a 1280x800 window, read back against their pixels and the font's glyph boxes; the frame keeps its own transform after the capture |
 | `gpuManagerTiming` | `gpu/GpuTiming`, the one GPU timing module: per-pass timestamps read back without blocking, named passes, and the last sample published as profiler counters (gpu.<pass>, gpu.total) |
 | `gpuReadback` | `gpu/GpuReadback`: concurrent manager-owned readbacks, reuse, cancellation, shutdown |
 | `gpuRender` | `gpu/GpuRender`: a manager render pipeline draws into a texture that is read back and compared |

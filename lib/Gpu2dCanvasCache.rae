@@ -4,10 +4,21 @@
 # one image, now and in later frames, moved and scaled. A canvas of 50,000 nodes zoomed out draws
 # that one image instead of its nodes (ui/renderSystem/RenderPaintCache decides when).
 #
+# A SIZED slot (canvasCacheBegin with a width and height) is a texture of its own size whatever the
+# window's, for a program that uses the texture itself: a movie's title drawn at 3840x2160 and laid
+# into the frame by a compute pass (canvasCacheTextureView). While it captures, one design unit is
+# one pixel of the slot, from its top-left corner, and the scissor is the slot.
+#
 # As BackdropBlur's copy does, a capture ends the frame's render pass, renders into the slot's
 # texture in a pass of its own (cleared to transparent), and opens the frame's pass again keeping
 # what it holds. The texture holds premultiplied color, as everything the canvas draws, so it is
 # drawn back with the image shader's premultiplied flag.
+#
+# The transform every 2D pipeline reads is one uniform buffer (canvas.viewport), and a queue write
+# lands before the frame's commands run, so a write per flush cannot give one capture another
+# transform. A sized capture instead records a copy of its slot's transform into that buffer when
+# it opens and a copy of the frame's (caches.frameViewport) when it ends; those copies run in order
+# with the passes.
 #
 # A slot also keeps the caller's own numbers about what it holds (where its content was, at what
 # scale, a signature of the content), so the caller can tell when to capture again.
@@ -17,6 +28,8 @@ open webgpu/Context
 open gpu/GpuResources
 open gpu/GpuRender
 open gpu/GpuRenderPass
+open gpu/GpuLifetime
+open gpu/GpuRenderTransfer
 open gpu/GpuIds
 open Gpu2dCanvas
 open Gpu2dCanvasFrame
@@ -41,6 +54,10 @@ type Gpu2dCacheSlot {
   # where the caller's node was on screen when it was drawn
   captureX: Float = 0.0
   captureY: Float = 0.0
+  # a sized slot (its own size, not the frame's) and its transform, copied into the viewport
+  # uniform while it captures
+  sized: Bool = false
+  viewportCopy: BufferId = noBufferId()
 }
 
 type Gpu2dCaches {
@@ -49,6 +66,11 @@ type Gpu2dCaches {
   capturing: Int = -1
   # captures made so far (a check reads it)
   captures: Int = 0
+  # the size of the sized slot capturing now (0: the frame's transform)
+  captureWidth: Int = 0
+  captureHeight: Int = 0
+  # the frame's transform, copied back into the viewport uniform when a sized capture ends
+  frameViewport: BufferId = noBufferId()
 }
 
 func createGpu2dCaches() ret Gpu2dCaches {
@@ -68,18 +90,88 @@ func canvasCacheFind(canvas: view Gpu2dCanvas, key: view Int) ret Int {
 # The slot for `key` with a texture the frame's size (made, or made again after a resize); -1
 # when it cannot be made
 func canvasCacheSlot(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
+  ret cacheSlotOfSize(
+    canvas: canvas
+    key: key
+    width: canvas.offscreenWidth
+    height: canvas.offscreenHeight
+    sized: false
+  )
+}
+
+# The sized slot for `key`: a texture `width` x `height` whatever the frame's size, in the frame's
+# format (the canvas's pipelines draw that format), RenderAttachment + TextureBinding + CopySrc so
+# a compute pass can sample it and a check can read it back; -1 when it cannot be made
+func canvasCacheSlot(
+  canvas: mod Gpu2dCanvas
+  key: view Int
+  width: view Int
+  height: view Int
+) ret Int {
+  ret cacheSlotOfSize(
+    canvas: canvas
+    key: key
+    width: width
+    height: height
+    sized: true
+  )
+}
+
+# The slot's transform (8 floats: its size, scale 1, no offset), written once into a buffer of its
+# own that a capture copies into the viewport uniform
+func writeSlotViewport(
+  slot: mod Gpu2dCacheSlot
+  resources: mod GpuResources
+  width: view Int
+  height: view Int
+) ret Bool {
+  if not isValidBuffer(resources: resources, id: slot.viewportCopy) {
+    if let buffer: BufferId = createBuffer(
+      resources: resources
+      size: 32
+      usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst
+    ) {
+      slot.viewportCopy = buffer
+    } else {
+      ret false
+    }
+  }
+  var transform: List(Float) = List.create(Float, cap: 8)
+  transform.add(value: width.toFloat())
+  transform.add(value: height.toFloat())
+  transform.add(value: 1.0)
+  transform.add(value: 1.0)
+  loop var k: Int = 0, k < 4, ++k {
+    transform.add(value: 0.0)
+  }
+  unsafe {
+    ret writeBufferFromPtr(
+      resources: resources
+      id: slot.viewportCopy
+      offset: 0
+      data: transform.data
+      size: 32
+    )
+  }
+}
+
+func cacheSlotOfSize(
+  canvas: mod Gpu2dCanvas
+  key: view Int
+  width: view Int
+  height: view Int
+  sized: view Bool
+) ret Int {
   var slot: Int = canvasCacheFind(canvas: canvas, key: key)
   if slot < 0 {
     canvas.caches.slots.add(value: Gpu2dCacheSlot { key: key })
     slot = canvas.caches.slots.length - 1
   }
-  let width: Int = canvas.offscreenWidth
-  let height: Int = canvas.offscreenHeight
   if width <= 0 or height <= 0 {
     ret -1
   }
   let known: Gpu2dCacheSlot = canvas.caches.slots.copyAtDefault(index: slot)
-  if known.width is width and known.height is height and known.handle > 0 {
+  if known.width is width and known.height is height and known.handle > 0 and known.sized is sized {
     ret slot
   }
   var made: Gpu2dCacheSlot = known
@@ -95,7 +187,7 @@ func canvasCacheSlot(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
       width: width
       height: height
       format: format
-      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopySrc
     ) {
       made.texture = texture
     } else {
@@ -109,11 +201,20 @@ func canvasCacheSlot(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
     } else {
       ret -1
     }
+    if sized and not writeSlotViewport(
+      slot: made
+      resources: resources
+      width: width
+      height: height
+    ) {
+      ret -1
+    }
   } else {
     ret -1
   }
   made.width = width
   made.height = height
+  made.sized = sized
   made.ready = false
   let image: Gpu2dImage = {
     texture: made.texture
@@ -143,22 +244,80 @@ func canvasCacheBegin(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
   if not canvasFrameActive(canvas: canvas) or canvas.caches.capturing >= 0 {
     ret -1
   }
-  let slot: Int = canvasCacheSlot(canvas: canvas, key: key)
+  ret cacheCaptureOpen(canvas: canvas, slot: canvasCacheSlot(canvas: canvas, key: key))
+}
+
+# The same into `key`'s sized slot, `width` x `height` pixels whatever the window's size: until
+# canvasCacheEnd one design unit is one pixel of the slot, from its top-left corner, and the scissor
+# is the slot. canvasCacheTextureView is its texture for the caller's own passes.
+func canvasCacheBegin(
+  canvas: mod Gpu2dCanvas
+  key: view Int
+  width: view Int
+  height: view Int
+) ret Int {
+  if not canvasFrameActive(canvas: canvas) or canvas.caches.capturing >= 0 {
+    ret -1
+  }
+  ret cacheCaptureOpen(
+    canvas: canvas
+    slot: canvasCacheSlot(
+      canvas: canvas
+      key: key
+      width: width
+      height: height
+    )
+  )
+}
+
+# The frame's transform kept to copy back after a sized capture (a buffer of its own, written with
+# the viewport uniform)
+func ensureFrameViewport(canvas: mod Gpu2dCanvas, resources: mod GpuResources) ret Bool {
+  if isValidBuffer(resources: resources, id: canvas.caches.frameViewport) {
+    ret true
+  }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: 32
+    usage: WGPUBufferUsage_CopySrc + WGPUBufferUsage_CopyDst
+  ) {
+    canvas.caches.frameViewport = buffer
+    ret true
+  }
+  ret false
+}
+
+func cacheCaptureOpen(canvas: mod Gpu2dCanvas, slot: view Int) ret Int {
   if slot < 0 {
     ret -1
   }
   canvasFlush(canvas: canvas)
-  let textureView: TextureViewId = canvas.caches.slots.copyAtDefault(index: slot).textureView
+  let held: Gpu2dCacheSlot = canvas.caches.slots.copyAtDefault(index: slot)
   var opened: Bool = false
   if let resources: mod GpuResources = canvas.gpuResources {
     if let recording: mod Recording = canvas.recording {
       unsafe {
         endRenderPass(pass: canvas.framePass)
+      }
+      # the slot's transform, in order with the passes (see the module comment)
+      var transformed: Bool = not held.sized
+      if held.sized {
+        transformed = recordCopyBuffer(
+          recording: recording
+          resources: resources
+          source: held.viewportCopy
+          sourceOffset: 0
+          destination: canvas.viewport
+          destinationOffset: 0
+          size: 32
+        )
+      }
+      unsafe {
         canvas.framePass = beginRenderPassWrites(
           recording: recording
           resources: resources
           target: renderTarget(
-            colorView: textureViewRef(id: textureView)
+            colorView: textureViewRef(id: held.textureView)
             clear: true
             r: 0.0
             g: 0.0
@@ -168,7 +327,7 @@ func canvasCacheBegin(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
           timestampWrites: webgpuNull()
         )
       }
-      opened = true
+      opened = transformed
     }
   }
   if not opened {
@@ -176,7 +335,70 @@ func canvasCacheBegin(canvas: mod Gpu2dCanvas, key: view Int) ret Int {
   }
   canvas.caches.capturing = slot
   canvas.caches.captures = canvas.caches.captures + 1
+  if held.sized {
+    canvas.caches.captureWidth = held.width
+    canvas.caches.captureHeight = held.height
+  }
   ret slot
+}
+
+# The texture view of `slot` (a sized slot's drawing, for the caller's own render or compute pass;
+# it holds premultiplied color in the frame's format)
+func canvasCacheTextureView(canvas: view Gpu2dCanvas, slot: view Int) ret TextureViewId {
+  ret canvas.caches.slots.copyAtDefault(index: slot).textureView
+}
+
+# Its texture (to copy or read back)
+func canvasCacheTexture(canvas: view Gpu2dCanvas, slot: view Int) ret TextureId {
+  ret canvas.caches.slots.copyAtDefault(index: slot).texture
+}
+
+# The transform of this flush into canvas.xform: a sized capture's (its size, scale 1, no
+# offset), else the platform's (the window's size and the design fit)
+func refreshXform(canvas: mod Gpu2dCanvas) {
+  canvas.xform.clear()
+  loop var k: Int = 0, k < 8, ++k {
+    canvas.xform.add(value: 0.0)
+  }
+  if canvas.caches.captureWidth > 0 {
+    canvas.xform.set(index: 0, value: canvas.caches.captureWidth.toFloat())
+    canvas.xform.set(index: 1, value: canvas.caches.captureHeight.toFloat())
+    canvas.xform.set(index: 2, value: 1.0)
+    canvas.xform.set(index: 3, value: 1.0)
+    ret
+  }
+  unsafe {
+    nativeG2dXform(out: canvas.xform.data)
+  }
+}
+
+# A flush's transform: into canvas.xform for the scissor, and into the viewport uniform (and the
+# frame's copy of it) outside a sized capture; inside one the uniform holds the slot's transform
+# from the copy the capture recorded
+func uploadViewport(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
+  ensureViewportUniform(canvas: canvas, resources: resources)
+  refreshXform(canvas: canvas)
+  if canvas.caches.captureWidth > 0 {
+    ret
+  }
+  unsafe {
+    let written: Bool = writeBufferFromPtr(
+      resources: resources
+      id: canvas.viewport
+      offset: 0
+      data: canvas.xform.data
+      size: 32
+    )
+    if ensureFrameViewport(canvas: canvas, resources: resources) {
+      let kept: Bool = writeBufferFromPtr(
+        resources: resources
+        id: canvas.caches.frameViewport
+        offset: 0
+        data: canvas.xform.data
+        size: 32
+      )
+    }
+  }
 }
 
 # Back to the frame, keeping what it holds; the slot now holds the drawing
@@ -186,10 +408,24 @@ func canvasCacheEnd(canvas: mod Gpu2dCanvas) {
     ret
   }
   canvasFlush(canvas: canvas)
+  let sized: Bool = canvas.caches.captureWidth > 0
   if let resources: mod GpuResources = canvas.gpuResources {
     if let recording: mod Recording = canvas.recording {
       unsafe {
         endRenderPass(pass: canvas.framePass)
+      }
+      if sized {
+        let restored: Bool = recordCopyBuffer(
+          recording: recording
+          resources: resources
+          source: canvas.caches.frameViewport
+          sourceOffset: 0
+          destination: canvas.viewport
+          destinationOffset: 0
+          size: 32
+        )
+      }
+      unsafe {
         canvas.framePass = beginRenderPassWrites(
           recording: recording
           resources: resources
@@ -207,6 +443,8 @@ func canvasCacheEnd(canvas: mod Gpu2dCanvas) {
     }
   }
   canvas.caches.capturing = -1
+  canvas.caches.captureWidth = 0
+  canvas.caches.captureHeight = 0
   if let held: mod Gpu2dCacheSlot = canvas.caches.slots.modAt(index: slot) {
     held.ready = true
   }

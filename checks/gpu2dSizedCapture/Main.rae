@@ -1,0 +1,449 @@
+# Hardware check for Gpu2dCanvasCache's sized slots: from a 1280x800 window, a frame draws into a
+# 3840x2160 slot (one design unit = one pixel of the slot) a box at known pixels and a word in the
+# canvas's SDF font (and at a quarter of the size), then a box into a frame-sized slot (drawn as
+# the frame draws, through the
+# frame's transform). Read back: the slot's box has exactly its pixel edges, the word's ink box is
+# the font's glyph boxes at that size (SdfText's sdfMeasureTextBounds, within its edge falloff),
+# and the frame-sized slot's box is where the frame's own transform puts it, so the frame got its
+# transform back after the sized capture. Exit code 0 = passed.
+import Gpu2d
+import Gpu2dText
+import SdfText
+import Math
+import Sys
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+open Gpu2dCanvas
+open Gpu2dCanvasCache
+
+const slotWidth: Int = 3840
+
+const slotHeight: Int = 2160
+
+const titleKey: Int = 7
+
+const frameKey: Int = 8
+
+const word: String = "Title"
+
+const wordSize: Float = 400.0
+
+const wordX: Float = 600.0
+
+const wordY: Float = 1400.0
+
+# the same word at a quarter of the size, below it: its ink is a quarter as wide and as tall
+const smallSize: Float = 100.0
+
+const smallX: Float = 2400.0
+
+const smallY: Float = 1900.0
+
+# Roboto's atlas (lib/assets/walker/Roboto-Regular.mtsdf.json): made at 48 px per em with a
+# distance range of 12 px, so a glyph box sits half the range (6/48 em) outside the outline, and up
+# to one atlas pixel more where the box was rounded out to the atlas grid
+const atlasEmPixels: Float = 48.0
+
+const atlasDistanceRange: Float = 12.0
+
+# A GPU wait: tries, each a blocking device poll
+const checkWaitTries: Int = 1000
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
+# A pixel box: the first and last row and column whose alpha is at least half
+type InkBox {
+  found: Bool
+  left: Int
+  top: Int
+  right: Int
+  bottom: Int
+}
+
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  if let value: UInt8 = bytes.copyAt(index: index) {
+    ret value as Int
+  }
+  ret -1
+}
+
+# Rows of `rowBytes` bytes, 4 per pixel; the box of pixels whose alpha is 128 or more in
+# `left`..`right` x `top`..`bottom` (exclusive)
+func inkBox(
+  bytes: view List(UInt8)
+  rowBytes: view Int
+  left: view Int
+  top: view Int
+  right: view Int
+  bottom: view Int
+) ret InkBox {
+  var box: InkBox = {
+    found: false
+    left: 0
+    top: 0
+    right: 0
+    bottom: 0
+  }
+  loop var y: Int = top, y < bottom, ++y {
+    loop var x: Int = left, x < right, ++x {
+      if byteAt(bytes: bytes, index: y * rowBytes + x * 4 + 3) >= 128 {
+        if not box.found {
+          box = {
+            found: true
+            left: x
+            top: y
+            right: x
+            bottom: y
+          }
+        } else {
+          box.left = Math.min(a: box.left, b: x)
+          box.top = Math.min(a: box.top, b: y)
+          box.right = Math.max(a: box.right, b: x)
+          box.bottom = Math.max(a: box.bottom, b: y)
+        }
+      }
+    }
+  }
+  ret box
+}
+
+# The texture copied to a buffer and read back: `height` rows of `rowBytes`
+func readTexture(
+  resources: mod GpuResources
+  texture: view TextureId
+  rowBytes: view Int
+  height: view Int
+) ret opt List(UInt8) {
+  let size: Int = rowBytes * height
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: size
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if not recordCopyTextureToBuffer(
+        recording: recording
+        resources: resources
+        texture: texture
+        buffer: buffer
+        bytesPerRow: rowBytes
+      ) {
+        log("FAIL: texture copy refused")
+        ret none
+      }
+      if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+        var status: Int = 0
+        loop var tries: Int = 0, status is 0 and tries < checkWaitTries, ++tries {
+          status = pollSubmission(resources: resources, id: submission)
+          if status is 0 {
+            checkWaitForGpu()
+          }
+        }
+        retireSubmission(resources: resources, id: submission)
+        if let read: ReadbackId = startReadback(
+          resources: resources
+          buffer: buffer
+          offset: 0
+          size: size
+        ) {
+          var done: Int = 0
+          loop var tries: Int = 0, done is 0 and tries < checkWaitTries, ++tries {
+            done = pollReadback(resources: resources, id: read)
+            if done is 0 {
+              checkWaitForGpu()
+            }
+          }
+          var bytes: List(UInt8) = List.create(UInt8, cap: size)
+          loop var i: Int = 0, i < size, ++i {
+            bytes.add(value: 0)
+          }
+          let copied: Bool = copyReadback(resources: resources, id: read, destination: bytes)
+          retireReadback(resources: resources, id: read)
+          let retired: Bool = retireBuffer(resources: resources, id: buffer)
+          if copied {
+            ret bytes
+          }
+        }
+      }
+    }
+  }
+  log("FAIL: readback")
+  ret none
+}
+
+func near(measured: view Int, expected: view Float, tolerance: view Float) ret Bool {
+  ret Math.abs(value: measured.toFloat() - expected) <= tolerance
+}
+
+func checkSlot(canvas: mod Gpu2dCanvas, font: view SdfFont, slot: view Int) ret Bool {
+  let rowBytes: Int = slotWidth * 4
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let bytes: List(UInt8) = readTexture(
+      resources: resources
+      texture: canvasCacheTexture(canvas: canvas, slot: slot)
+      rowBytes: rowBytes
+      height: slotHeight
+    ) {
+      # the box: design 100..3700 x 100..300 is pixels 100..3699 x 100..299
+      let box: InkBox = inkBox(
+        bytes: bytes
+        rowBytes: rowBytes
+        left: 0
+        top: 0
+        right: slotWidth
+        bottom: 400
+      )
+      log("slot box: {box.left},{box.top} .. {box.right},{box.bottom}")
+      if not box.found or box.left is not 100 or box.top is not 100 or box.right is not 3699 or box.bottom is not 299 {
+        log("FAIL: the slot's box is not at its pixels 100,100 .. 3699,299")
+        ret false
+      }
+      # the word
+      let bounds: SdfTextBounds = SdfText.sdfMeasureTextBounds(
+        font: font
+        text: word
+        sizePx: wordSize
+      )
+      let ink: InkBox = inkBox(
+        bytes: bytes
+        rowBytes: rowBytes
+        left: 0
+        top: 400
+        right: 2000
+        bottom: slotHeight
+      )
+      let scale: Float = wordSize / font.emSize
+      let advance: Float = Gpu2dText.measureText(font: font, text: word, sizePx: wordSize)
+      let ascent: Float = font.ascender * scale
+      let descent: Float = (font.lineHeight - font.ascender) * scale
+      log("word ink: {ink.left},{ink.top} .. {ink.right},{ink.bottom}")
+      log(
+        "glyph boxes: {wordX + bounds.left},{wordY + bounds.top} .. {wordX + bounds.right},{wordY + bounds.bottom}"
+      )
+      log(
+        "measureText {advance} (pen {wordX} .. {wordX + advance}); ascent {ascent}, descent {descent} (lines {wordY - ascent} .. {wordY + descent})"
+      )
+      if not ink.found {
+        log("FAIL: the word drew nothing into the slot")
+        ret false
+      }
+      # Each edge of the ink lies inside its glyph box by the box's margin: half the distance
+      # range, plus up to one atlas pixel of rounding, within a pixel.
+      let margin: Float = atlasDistanceRange * 0.5 / atlasEmPixels * scale
+      let rounding: Float = scale / atlasEmPixels
+      let insetLeft: Float = ink.left.toFloat() - (wordX + bounds.left)
+      let insetRight: Float = wordX + bounds.right - ink.right.toFloat() - 1.0
+      let insetTop: Float = ink.top.toFloat() - (wordY + bounds.top)
+      let insetBottom: Float = wordY + bounds.bottom - ink.bottom.toFloat() - 1.0
+      log(
+        "insets from the glyph boxes: {insetLeft}, {insetRight}, {insetTop}, {insetBottom} (margin {margin}, rounding up to {rounding})"
+      )
+      var insets: List(Float) = List.create(Float, cap: 4)
+      insets.add(value: insetLeft)
+      insets.add(value: insetRight)
+      insets.add(value: insetTop)
+      insets.add(value: insetBottom)
+      loop let inset: view Float in insets {
+        if inset < margin - 1.0 or inset > margin + rounding + 1.0 {
+          log("FAIL: the word's ink is not the font's glyph boxes at {wordSize} px")
+          ret false
+        }
+      }
+      # the small copy: a quarter of the ink, within a pixel at the small size
+      let small: InkBox = inkBox(
+        bytes: bytes
+        rowBytes: rowBytes
+        left: 2000
+        top: 1600
+        right: slotWidth
+        bottom: slotHeight
+      )
+      let ratio: Float = smallSize / wordSize
+      let bigWidth: Float = (ink.right - ink.left + 1).toFloat()
+      let bigHeight: Float = (ink.bottom - ink.top + 1).toFloat()
+      let smallWidth: Float = (small.right - small.left + 1).toFloat()
+      let smallHeight: Float = (small.bottom - small.top + 1).toFloat()
+      log(
+        "ink {bigWidth}x{bigHeight} at {wordSize} px, {smallWidth}x{smallHeight} at {smallSize} px"
+      )
+      if not small.found or Math.abs(value: smallWidth - bigWidth * ratio) > 1.5 or Math.abs(
+        value: smallHeight - bigHeight * ratio
+      ) > 1.5 or Math.abs(
+        value: small.left.toFloat() - (smallX + (ink.left.toFloat() - wordX) * ratio)
+      ) > 1.5 or Math.abs(
+        value: small.top.toFloat() - (smallY + (ink.top.toFloat() - wordY) * ratio)
+      ) > 1.5 {
+        log("FAIL: the word at {smallSize} px is not the word at {wordSize} px scaled")
+        ret false
+      }
+      # and the ink lies in the pen's span and between the font's ascent and descent lines
+      if ink.left.toFloat() < wordX - 1.0 or ink.right.toFloat() > wordX + advance + 1.0 or ink.top.toFloat() < wordY - ascent - 1.0 or ink.bottom.toFloat() > wordY + descent + 1.0 {
+        log("FAIL: the word's ink leaves the pen's span or the ascent and descent lines")
+        ret false
+      }
+      ret true
+    }
+  }
+  ret false
+}
+
+# The frame's box (design 10,10 .. 110,60) through the frame's own transform, in the frame-sized
+# slot `slot`
+func checkFrame(canvas: mod Gpu2dCanvas, slot: view Int) ret Bool {
+  let frameWidth: Int = canvas.offscreenWidth
+  let frameHeight: Int = canvas.offscreenHeight
+  let rowBytes: Int = (frameWidth * 4 + 255) / 256 * 256
+  let scaleX: Float = xformAt(canvas: canvas, index: 2)
+  let scaleY: Float = xformAt(canvas: canvas, index: 3)
+  let offsetX: Float = xformAt(canvas: canvas, index: 4)
+  let offsetY: Float = xformAt(canvas: canvas, index: 5)
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let bytes: List(UInt8) = readTexture(
+      resources: resources
+      texture: canvasCacheTexture(canvas: canvas, slot: slot)
+      rowBytes: rowBytes
+      height: frameHeight
+    ) {
+      # the green channel: the slot is cleared to transparent, the box is green (BGRA or RGBA alike)
+      var box: InkBox = {
+        found: false
+        left: 0
+        top: 0
+        right: 0
+        bottom: 0
+      }
+      loop var y: Int = 0, y < frameHeight, ++y {
+        loop var x: Int = 0, x < frameWidth, ++x {
+          if byteAt(bytes: bytes, index: y * rowBytes + x * 4 + 1) >= 128 {
+            if not box.found {
+              box = {
+                found: true
+                left: x
+                top: y
+                right: x
+                bottom: y
+              }
+            } else {
+              box.left = Math.min(a: box.left, b: x)
+              box.top = Math.min(a: box.top, b: y)
+              box.right = Math.max(a: box.right, b: x)
+              box.bottom = Math.max(a: box.bottom, b: y)
+            }
+          }
+        }
+      }
+      let left: Float = 10.0 * scaleX + offsetX
+      let top: Float = 10.0 * scaleY + offsetY
+      let right: Float = 110.0 * scaleX + offsetX - 1.0
+      let bottom: Float = 60.0 * scaleY + offsetY - 1.0
+      log(
+        "frame {frameWidth}x{frameHeight}: box {box.left},{box.top} .. {box.right},{box.bottom}, expected {left},{top} .. {right},{bottom}"
+      )
+      if not box.found or not near(measured: box.left, expected: left, tolerance: 1.0) or not near(
+        measured: box.top
+        expected: top
+        tolerance: 1.0
+      ) or not near(measured: box.right, expected: right, tolerance: 1.0) or not near(
+        measured: box.bottom
+        expected: bottom
+        tolerance: 1.0
+      ) {
+        log("FAIL: the frame's box is not where the frame's transform puts it")
+        ret false
+      }
+      ret true
+    }
+  }
+  ret false
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 1280, height: 800, title: "2D sized capture check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let font: SdfFont = SdfText.loadSdfFontJson(
+    jsonPath: Sys.stdlibPath(path: "lib/assets/walker/Roboto-Regular.mtsdf.json")
+  )
+  var slot: Int = -1
+  var frameSlot: Int = -1
+  var frames: Int = 0
+  # a few frames, so a drawable is there; the last one is the one read back
+  loop not Gpu2d.pollClose() and frames < 3 {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    slot = canvasCacheBegin(
+      canvas: canvas
+      key: titleKey
+      width: slotWidth
+      height: slotHeight
+    )
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 100.0
+      y: 100.0
+      w: 3600.0
+      h: 200.0
+      color: 0xFFFFFFFF
+    )
+    let pen: Float = Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: word
+      x: wordX
+      y: wordY
+      sizePx: wordSize
+      color: 0xFFFFFFFF
+    )
+    let smallPen: Float = Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: word
+      x: smallX
+      y: smallY
+      sizePx: smallSize
+      color: 0xFFFFFFFF
+    )
+    canvasCacheEnd(canvas: canvas)
+    frameSlot = canvasCacheBegin(canvas: canvas, key: frameKey)
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 10.0
+      y: 10.0
+      w: 100.0
+      h: 50.0
+      color: 0xFF00FF00
+    )
+    canvasCacheEnd(canvas: canvas)
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  var passed: Bool = slot >= 0 and frameSlot >= 0
+  if not passed {
+    log("FAIL: canvasCacheBegin gave no slot ({slot}, {frameSlot})")
+  }
+  if passed {
+    passed = checkSlot(canvas: canvas, font: font, slot: slot)
+  }
+  if passed {
+    passed = checkFrame(canvas: canvas, slot: frameSlot)
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if not passed {
+    ret 1
+  }
+  log("SIZED CAPTURE OK: a 3840x2160 slot drawn from a 1280x800 window, the frame's transform kept")
+  ret 0
+}
