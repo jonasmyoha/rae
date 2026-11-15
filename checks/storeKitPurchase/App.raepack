@@ -1,0 +1,25 @@
+pack App {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  dependencies: {
+    dep storeKit: {
+      git: "../.."
+      subdir: "packages/storeKit"
+      version: "0.1.1"
+      hash: "git-tree:ef35b9f879ac7988bf2075037eeea7e65e0c86ea"
+    }
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Purchase.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}

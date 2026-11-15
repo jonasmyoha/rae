@@ -1,0 +1,172 @@
+# The purchase test of packages/storeKit (docs/store-kit.md), run inside a test hosted by an app
+# (run.sh, beside it): the test starts StoreKit's test session over
+# packages/storeKit/testing/Products.storekit, then calls this program's main. It loads both
+# products, buys the non-consumable (outcome purchased, a JWS of three base64url parts whose
+# payload names the product), finds it in the current entitlements, finishes it, and buys the
+# consumable twice. Exit code 0 = passed. Run plainly (no test session), StoreKit has nothing to
+# sell it and it fails at the first step.
+import String
+open text/Base64
+open storeKit/StoreKit
+
+const unlockId: String = "com.example.rae.unlock"
+
+const coinsId: String = "com.example.rae.coins"
+
+const waitMs: Int = 30000
+
+# A base64url part of a JWS as text (base64url to base64, padded); none when it does not decode
+func base64UrlText(part: view String) ret opt String {
+  var standard: String = ""
+  loop var i: Int = 0, i < part.length(), ++i {
+    let byte: Int = part.byteAt(index: i)
+    if byte is 45 {
+      standard = "{standard}+"
+    } else if byte is 95 {
+      standard = "{standard}/"
+    } else {
+      standard = "{standard}{part.sub(start: i, len: 1)}"
+    }
+  }
+  loop standard.length() % 4 is not 0 {
+    standard = "{standard}="
+  }
+  if let bytes: List(UInt8) = base64Decode(text: standard) {
+    ret String.fromBytes(bytes: bytes, start: 0, count: bytes.length)
+  }
+  ret none
+}
+
+# The JWS's three parts, split at its two dots
+func jwsParts(jws: view String) ret List(String) {
+  var parts: List(String) = {}
+  var start: Int = 0
+  loop var i: Int = 0, i < jws.length(), ++i {
+    if jws.byteAt(index: i) is 46 {
+      parts.add(value: jws.sub(start: start, len: i - start))
+      start = i + 1
+    }
+  }
+  parts.add(value: jws.sub(start: start, len: jws.length() - start))
+  ret parts
+}
+
+# Whether `jws` has three base64url parts and its payload names `productId`
+func jwsNamesProduct(jws: view String, productId: view String) ret Bool {
+  let parts: List(String) = jwsParts(jws: jws)
+  if parts.length is not 3 {
+    log("FAIL: the JWS has {parts.length} parts")
+    ret false
+  }
+  if let payload: String = base64UrlText(part: parts.copyAtFallback(index: 1, fallback: "")) {
+    if payload.contains(sub: "\"productId\":\"{productId}\"") {
+      ret true
+    }
+    log("FAIL: the JWS payload does not name {productId}: {payload}")
+    ret false
+  }
+  log("FAIL: the JWS payload is not base64url")
+  ret false
+}
+
+# Buy `productId`; its one transaction when the outcome is purchased
+func buy(productId: view String) ret opt StoreTransaction {
+  let request: StoreRequest = requestPurchase(productId: productId)
+  let status: RequestStatus = waitForRequest(request: request, timeoutMs: waitMs)
+  let result: PurchaseResult = purchaseResult(request: request)
+  releaseRequest(request: request)
+  if status is not RequestStatus.done or result.outcome is not PurchaseOutcome.purchased {
+    log("FAIL: buying {productId}: {status}, {result.outcome}, [{result.error}]")
+    ret none
+  }
+  if let transaction: StoreTransaction = result.transactions.copyAt(index: 0) {
+    log(
+      "bought {transaction.productId}: transaction {transaction.id}, verified {transaction.verified}, at {transaction.purchaseDateMs}, JWS ending {transaction.jws.sub(
+        start: transaction.jws.length() - 12
+        len: 12
+      )}"
+    )
+    ret transaction
+  }
+  log("FAIL: buying {productId} gave no transaction")
+  ret none
+}
+
+func finish(transactionId: view Int) ret Bool {
+  let request: StoreRequest = requestFinish(transactionId: transactionId)
+  let status: RequestStatus = waitForRequest(request: request, timeoutMs: waitMs)
+  let result: FinishResult = finishResult(request: request)
+  releaseRequest(request: request)
+  if status is not RequestStatus.done or not result.finished {
+    log("FAIL: finishing transaction {transactionId}: {status} [{result.error}]")
+    ret false
+  }
+  ret true
+}
+
+func main() ret Int {
+  if not storeKitAvailable() {
+    log("FAIL: no StoreKit 2")
+    ret 1
+  }
+  let ids: List(String) = { unlockId, coinsId }
+  let products: StoreRequest = requestProducts(ids: ids)
+  let productsStatus: RequestStatus = waitForRequest(request: products, timeoutMs: waitMs)
+  let loaded: ProductsResult = productsResult(request: products)
+  releaseRequest(request: products)
+  loop let product: view StoreProduct in loaded.products {
+    log("product {product.id}: {product.displayName}, {product.displayPrice} ({product.kind})")
+  }
+  if productsStatus is not RequestStatus.done or loaded.products.length is not 2 {
+    log("FAIL: products: {productsStatus}, {loaded.products.length} loaded [{loaded.error}]")
+    ret 1
+  }
+  # the non-consumable: purchased, its JWS names it, it is an entitlement, then finished
+  if let unlock: StoreTransaction = buy(productId: unlockId) {
+    if not unlock.verified or not jwsNamesProduct(jws: unlock.jws, productId: unlockId) {
+      ret 1
+    }
+    log("the JWS of {unlockId} has three base64url parts and names it")
+    let entitlements: StoreRequest = requestEntitlements()
+    let entitlementsStatus: RequestStatus = waitForRequest(request: entitlements, timeoutMs: waitMs)
+    let held: EntitlementsResult = entitlementsResult(request: entitlements)
+    releaseRequest(request: entitlements)
+    var entitled: Bool = false
+    loop let transaction: view StoreTransaction in held.transactions {
+      if transaction.productId is unlockId {
+        entitled = true
+      }
+    }
+    if entitlementsStatus is not RequestStatus.done or not entitled {
+      log("FAIL: {unlockId} is not among the {held.transactions.length} current entitlements")
+      ret 1
+    }
+    log("{unlockId} is a current entitlement")
+    if not finish(transactionId: unlock.id) {
+      ret 1
+    }
+    log("finished {unlockId}")
+  } else {
+    ret 1
+  }
+  # the consumable, twice: two purchases, two transactions
+  var coinIds: List(Int) = {}
+  loop var round: Int = 0, round < 2, ++round {
+    if let coins: StoreTransaction = buy(productId: coinsId) {
+      if not finish(transactionId: coins.id) {
+        ret 1
+      }
+      coinIds.add(value: coins.id)
+    } else {
+      ret 1
+    }
+  }
+  if coinIds.copyAtDefault(index: 0) is coinIds.copyAtDefault(index: 1) {
+    log("FAIL: both purchases of {coinsId} have one transaction")
+    ret 1
+  }
+  log(
+    "STOREKIT PURCHASE OK: products, a purchase with its JWS, an entitlement, finish, a consumable twice"
+  )
+  ret 0
+}
