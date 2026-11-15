@@ -1032,3 +1032,38 @@ above the first blurred row moves with the finger.
 
 `checks/backdropBlur` paints three tiles over stripes, reads the picture back, and counts the copies
 over 20 frames (the stripes move once, a box moves on top every frame).
+
+## 33. `Timeline`: lanes of spans against time
+
+A chart for large data (docs/perf-tools-design.md §6), general, not tied to the profiler. The
+scene authors its look; the app gives it its data in code, and the data is never saved with the
+scene.
+
+```json
+"Chart": { "Rect": { "x": 0, "y": 0, "w": 760, "h": 300 },
+           "Shape": { "kind": "RoundedRect", "fill": "surface", "radius": 6 },
+           "Timeline": { "rowHeight": 22, "laneGap": 6, "actionId": "timeline.pick" },
+           "WheelTarget": {} }
+```
+
+- `rowHeight` (default 16) is one row of a lane; a lane has as many rows as its spans' deepest
+  nesting. `laneGap` (default 4) is the space between lanes. `actionId` (when set) is sent as a UI
+  action, with the chart as its entity, when a click selects a span.
+- Its system is `timelineSystem(world, uiSystems, input)` (lib/ui/timelineSystem), once a frame
+  after `updateUiInput`; it gives the node a `TimelineState` (not saved) on its first frame. The
+  wheel over the chart zooms about the pointer (give the node a `WheelTarget` so the wheel comes to
+  it), a drag pans, and a click without a drag selects the span under the pointer
+  (`selectedLane`, `selectedSpan`; -1 for none).
+- The app fills the state: `timelineAddLane(state:, name:)`, `timelineName(state:, name:)` (a
+  span's name as an index), `timelineAddSpan(state:, lane:, start:, end:, nameId:, depth:)` in
+  order of `start` (an earlier one is refused), `timelineAddMark(state:, lane:, time:)`, and
+  `timelineShow(state:, start:, end:)` for the view.
+- It is drawn (lib/ui/renderSystem/RenderTimeline) over the node's own fill, clipped to its box:
+  the lanes' bands, each span in its name's color with the name inside when it is wide enough,
+  the selection outlined, the marks as thin lines, and each lane's name on a chip. Its cost is
+  what is visible: spans narrower than a pixel are one rect per pixel column, found by binary
+  search, so a lane of a million spans zoomed all the way out is about one rect per column.
+
+Case 1472 checks the keys, the rects, the hit test, the click, the wheel and the drag, and a
+million spans; `checks/uiTimeline` paints one (`RAE_HEADLESS_FRAMES=10
+RAE_GPU2D_SCREENSHOT=/tmp/timeline.bmp compiler/bin/rae run checks/uiTimeline/Main.rae`).

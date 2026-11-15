@@ -1,0 +1,171 @@
+# The Timeline chart, painted (ui/ChartComponents, ui/timelineSystem,
+# ui/renderSystem/RenderTimeline,
+# docs/perf-tools-design.md §6): a frame with nested parts on "main", a worker's tasks, a lane of
+# 200 000 tiny spans drawn a pixel column at a time, marks, and one span selected:
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/timeline.bmp \
+#     compiler/bin/rae run checks/uiTimeline/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1472_ui_timeline. Exit 0 when it drew.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/ChartComponents
+open ui/Ecs
+open ui/Pipeline
+open ui/renderSystem/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func fill(state: mod TimelineState) {
+  let main: Int = timelineAddLane(state: state, name: "main")
+  let worker: Int = timelineAddLane(state: state, name: "worker")
+  let busy: Int = timelineAddLane(state: state, name: "busy")
+  let frame: Int = timelineName(state: state, name: "frame")
+  let update: Int = timelineName(state: state, name: "update")
+  let physics: Int = timelineName(state: state, name: "physics")
+  let render: Int = timelineName(state: state, name: "render")
+  let task: Int = timelineName(state: state, name: "task")
+  let tiny: Int = timelineName(state: state, name: "tiny")
+  loop var f: Int = 0, f < 6, ++f {
+    let start: Int = f * 16000000
+    let unusedFrame: Bool = timelineAddSpan(
+      state: state
+      lane: main
+      start: start
+      end: start + 14000000
+      nameId: frame
+      depth: 0
+    )
+    let unusedUpdate: Bool = timelineAddSpan(
+      state: state
+      lane: main
+      start: start + 500000
+      end: start + 6000000
+      nameId: update
+      depth: 1
+    )
+    let unusedPhysics: Bool = timelineAddSpan(
+      state: state
+      lane: main
+      start: start + 1000000
+      end: start + 4500000
+      nameId: physics
+      depth: 2
+    )
+    let unusedRender: Bool = timelineAddSpan(
+      state: state
+      lane: main
+      start: start + 6500000
+      end: start + 13000000
+      nameId: render
+      depth: 1
+    )
+    let unusedTask: Bool = timelineAddSpan(
+      state: state
+      lane: worker
+      start: start + 2000000
+      end: start + 9000000
+      nameId: task
+      depth: 0
+    )
+    timelineAddMark(state: state, lane: main, time: start)
+  }
+  loop var i: Int = 0, i < 200000, ++i {
+    let unusedTiny: Bool = timelineAddSpan(
+      state: state
+      lane: busy
+      start: i * 480
+      end: i * 480 + 120
+      nameId: tiny
+      depth: 0
+    )
+  }
+  timelineShow(state: state, start: 0, end: 96000000)
+  state.selectedLane = main
+  state.selectedSpan = 3
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI timeline check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiTimeline/timeline.raescene")
+  if scene.ok is false {
+    log("UI TIMELINE FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+  )
+  let unusedMade: Bool = timelineSystem(world: world, uiSystems: uiSystems, input: input)
+  var filled: Bool = false
+  if let raw: Int = world.nodeIds.get(k: "Chart") {
+    let chart: EntityId = id(v: raw)
+    if componentHas(this: world.timelineStates, entityId: chart) {
+      fill(state: componentMod(this: world.timelineStates, entityId: chart))
+      filled = true
+    }
+  }
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if not filled {
+    log("UI TIMELINE FAILED: the chart has no state")
+    ret 1
+  }
+  log("UI TIMELINE OK: {frames} frames")
+  ret 0
+}

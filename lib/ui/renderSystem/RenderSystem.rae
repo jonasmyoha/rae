@@ -25,6 +25,7 @@ open ui/renderSystem/RenderPaintBox
 open ui/renderSystem/RenderTextBounds
 open ui/renderSystem/RenderSwitch
 open ui/renderSystem/RenderFills
+open ui/renderSystem/RenderTimeline
 import Gpu2d
 import Gpu2dText
 import SdfText
@@ -504,6 +505,18 @@ func paintEntityG(
       wt: wt
       cr: cr
       chain255: chain255
+      canvas: canvas
+    )
+  }
+  # a chart over its node's own fill (ui/ChartComponents)
+  if componentHas(this: world.timelines, entityId: entityId) {
+    paintTimelineG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
       canvas: canvas
     )
   }

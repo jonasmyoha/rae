@@ -1,0 +1,57 @@
+# ui/ChartComponents — chart widgets for large data (docs/perf-tools-design.md §6), general
+# widgets that know nothing of where the data comes from. A chart node has two components: the
+# authored one (its scene keys, saved with the scene) and its state (the app's data and what the
+# view shows, never saved), which the chart's system creates and the app fills.
+
+# A timeline: lanes of spans and marks against time (ui/timelineSystem). Each lane is as many
+# rows as its spans' nesting depth needs, `rowHeight` each, with `laneGap` between lanes. The
+# wheel over it zooms about the pointer, a drag pans, a click selects the span under the pointer
+# and sends `actionId` (when set) as a UI action. Give the node a WheelTarget too, so the wheel
+# comes to it.
+type Timeline {
+  rowHeight: Float = 16.0
+  laneGap: Float = 4.0
+  actionId: String = ""
+}
+
+# One span: from `start` to `end` (the app's time unit, nanoseconds for a capture), its name (an
+# index into the state's `names`) and its nesting depth (its row in the lane)
+type TimelineSpan {
+  start: Int
+  end: Int
+  nameId: Int
+  depth: Int
+}
+
+# Spans per block of the lane's index of block ends (timelineAddSpan keeps it)
+const timelineBlockSpans: Int = 64
+
+# A lane: its spans in order of their start, its marks (moments), its deepest row, the longest
+# span (how far back a span that reaches into the view can start), and the latest end of each
+# block of timelineBlockSpans spans (so the drawing can skip a block it knows ends too early)
+type TimelineLane {
+  name: String
+  spans: List(TimelineSpan)
+  marks: List(Int)
+  rows: Int = 1
+  maxDuration: Int = 0
+  blockEnds: List(Int)
+}
+
+type TimelineState {
+  # the time at the view's left and right edges
+  viewStart: Int = 0
+  viewEnd: Int = 1000000000
+  lanes: List(TimelineLane)
+  names: List(String)
+  # the selected span (-1 none) and its lane
+  selectedLane: Int = -1
+  selectedSpan: Int = -1
+  # a press on the timeline: where it began, the view then, and whether it moved (a pan, not a
+  # click)
+  dragging: Bool = false
+  dragX: Float = 0.0
+  dragViewStart: Int = 0
+  dragViewEnd: Int = 0
+  dragMoved: Bool = false
+}

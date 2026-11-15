@@ -11,6 +11,7 @@ open ui/PaintOnTop
 open ui/Dialog
 open ui/RadialGradientFill
 open ui/ValueComponents
+open ui/ChartComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -122,6 +123,10 @@ type UiWorld {
   radialGradientFills: ComponentTable(RadialGradientFill)
   valueSliders: ComponentTable(ValueSlider)
   valueTexts: ComponentTable(ValueText)
+  # the chart widgets (ui/ChartComponents): their authored settings, and their state (the app's
+  # data and the view; not saved)
+  timelines: ComponentTable(Timeline)
+  timelineStates: ComponentTable(TimelineState)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -339,6 +344,8 @@ func createUiWorld() ret UiWorld {
     radialGradientFills: ComponentTable.create(RadialGradientFill)
     valueSliders: ComponentTable.create(ValueSlider)
     valueTexts: ComponentTable.create(ValueText)
+    timelines: ComponentTable.create(Timeline)
+    timelineStates: ComponentTable.create(TimelineState)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)

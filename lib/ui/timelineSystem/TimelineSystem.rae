@@ -1,0 +1,412 @@
+# ui/timelineSystem — the Timeline chart (ui/ChartComponents, docs/perf-tools-design.md §6): its
+# data (timelineAddLane, timelineAddSpan, timelineAddMark), what of it is visible
+# (timelineVisible), what is under a point (timelineHit), zoom and pan, and the system that turns
+# the wheel, drags and clicks into them. The drawing is ui/renderSystem/RenderTimeline.
+#
+# Its cost is what is visible, not the data: a lane's spans are kept in order of their start, so
+# the first span that can reach into the view is a binary search away; and where spans are
+# narrower than a pixel, each pixel column is one merged rect, and the next column's first span
+# is a binary search away too. A million spans zoomed all the way out are about as many rects as
+# the timeline is pixels wide, per lane.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+
+# The timeline's box on screen
+type TimelineBox {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+# One rect to draw: a span (`span` its index), or a pixel column of spans narrower than a pixel
+# merged (`span` -1, `nameId` of the first)
+type TimelineRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  lane: Int
+  span: Int
+  nameId: Int
+  depth: Int
+}
+
+# What is under a point: a lane (-1 none) and a span of it (-1 none)
+type TimelineHit {
+  lane: Int
+  span: Int
+}
+
+# ---- the data -------------------------------------------------------------------------------
+func createTimelineState() ret TimelineState {
+  ret TimelineState { lanes: {}, names: {} }
+}
+
+func timelineAddLane(state: mod TimelineState, name: view String) ret Int {
+  state.lanes.add(value: TimelineLane { name: name, spans: {}, marks: {}, blockEnds: {} })
+  ret state.lanes.length - 1
+}
+
+# A name's index in the state's names (the same index for the same name)
+func timelineName(state: mod TimelineState, name: view String) ret Int {
+  loop var i: Int = 0, i < state.names.length, ++i {
+    if state.names.copyAtDefault(index: i) is name {
+      ret i
+    }
+  }
+  state.names.add(value: name)
+  ret state.names.length - 1
+}
+
+# A span of lane `lane`; spans are added in order of their start (a span that starts before the
+# last one is not added: false)
+func timelineAddSpan(
+  state: mod TimelineState
+  lane: view Int
+  start: view Int
+  end: view Int
+  nameId: view Int
+  depth: view Int
+) ret Bool {
+  if lane < 0 or lane >= state.lanes.length or end < start {
+    ret false
+  }
+  let target: mod TimelineLane = state.lanes.modAt(index: lane)
+  let count: Int = target.spans.length
+  if count > 0 and target.spans.copyAtDefault(index: count - 1).start > start {
+    ret false
+  }
+  target.spans.add(value: TimelineSpan { start: start, end: end, nameId: nameId, depth: depth })
+  if depth + 1 > target.rows {
+    target.rows = depth + 1
+  }
+  if end - start > target.maxDuration {
+    target.maxDuration = end - start
+  }
+  let block: Int = count / timelineBlockSpans
+  if block >= target.blockEnds.length {
+    target.blockEnds.add(value: end)
+  } else if end > target.blockEnds.copyAtDefault(index: block) {
+    target.blockEnds.set(index: block, value: end)
+  }
+  ret true
+}
+
+func timelineAddMark(state: mod TimelineState, lane: view Int, time: view Int) {
+  if lane >= 0 and lane < state.lanes.length {
+    state.lanes.modAt(index: lane).marks.add(value: time)
+  }
+}
+
+# The view from `start` to `end` (at least a nanosecond wide)
+func timelineShow(state: mod TimelineState, start: view Int, end: view Int) {
+  state.viewStart = start
+  state.viewEnd = Math.max(a: end, b: start + 1)
+}
+
+# ---- what is where ----------------------------------------------------------------------------
+
+# The first span of `lane` that starts at `time` or later
+func timelineFirstFrom(lane: view TimelineLane, time: view Int) ret Int {
+  var low: Int = 0
+  var high: Int = lane.spans.length
+  loop low < high {
+    let middle: Int = (low + high) / 2
+    if lane.spans.copyAtDefault(index: middle).start < time {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  ret low
+}
+
+func timelineLaneHeight(timeline: view Timeline, lane: view TimelineLane) ret Float {
+  ret (lane.rows as Float) * timeline.rowHeight
+}
+
+# Lane `index`'s top, from the box's top
+func timelineLaneTop(
+  timeline: view Timeline
+  state: view TimelineState
+  index: view Int
+) ret Float {
+  var top: Float = 0.0
+  loop var i: Int = 0, i < index and i < state.lanes.length, ++i {
+    if let lane: view TimelineLane = state.lanes.viewAt(index: i) {
+      top = top + timelineLaneHeight(timeline: timeline, lane: lane) + timeline.laneGap
+    }
+  }
+  ret top
+}
+
+func timelineNsPerPixel(state: view TimelineState, box: view TimelineBox) ret Float64 {
+  ret ((state.viewEnd - state.viewStart) as Float64) / (Math.max(a: 1.0, b: box.w) as Float64)
+}
+
+func timelineX(state: view TimelineState, box: view TimelineBox, time: view Int) ret Float {
+  ret box.x + (((time - state.viewStart) as Float64) / timelineNsPerPixel(state: state, box: box)) as Float
+}
+
+# The rects to draw: every lane's spans in the view, a pixel column of spans narrower than a
+# pixel as one rect, clipped to the box (the box's lanes below its bottom are not looked at)
+func timelineVisible(
+  timeline: view Timeline
+  state: view TimelineState
+  box: view TimelineBox
+) ret List(TimelineRect) {
+  var rects: List(TimelineRect) = {}
+  let nsPerPixel: Float64 = timelineNsPerPixel(state: state, box: box)
+  var top: Float = 0.0
+  loop var laneIndex: Int = 0, laneIndex < state.lanes.length and top < box.h, ++laneIndex {
+    if let lane: view TimelineLane = state.lanes.viewAt(index: laneIndex) {
+      timelineLaneRects(
+        rects: rects
+        lane: lane
+        laneIndex: laneIndex
+        laneY: box.y + top
+        timeline: timeline
+        state: state
+        box: box
+        nsPerPixel: nsPerPixel
+      )
+      top = top + timelineLaneHeight(timeline: timeline, lane: lane) + timeline.laneGap
+    }
+  }
+  ret rects
+}
+
+func timelineLaneRects(
+  rects: mod List(TimelineRect)
+  lane: view TimelineLane
+  laneIndex: view Int
+  laneY: view Float
+  timeline: view Timeline
+  state: view TimelineState
+  box: view TimelineBox
+  nsPerPixel: view Float64
+) {
+  let count: Int = lane.spans.length
+  var i: Int = timelineFirstFrom(lane: lane, time: state.viewStart - lane.maxDuration)
+  loop i < count {
+    let span: TimelineSpan = lane.spans.copyAtDefault(index: i)
+    if span.start > state.viewEnd {
+      break
+    }
+    if span.end < state.viewStart {
+      i = i + 1
+      continue
+    }
+    let x0: Float = Math.max(a: box.x, b: timelineX(state: state, box: box, time: span.start))
+    let x1: Float = Math.min(a: box.x + box.w, b: timelineX(state: state, box: box, time: span.end))
+    let y: Float = laneY + (span.depth as Float) * timeline.rowHeight
+    if x1 - x0 >= 1.0 {
+      rects.add(value: TimelineRect {
+        x: x0
+        y: y
+        w: x1 - x0
+        h: timeline.rowHeight - 1.0
+        lane: laneIndex
+        span: i
+        nameId: span.nameId
+        depth: span.depth
+      })
+      i = i + 1
+      continue
+    }
+    # narrower than a pixel: this pixel column as one rect, then on past the column's spans,
+    # drawing any of them that is a pixel wide or more, and skipping a block of them at once when
+    # its latest end is still in the column
+    let column: Float = Math.floor(x: x0)
+    rects.add(value: TimelineRect {
+      x: column
+      y: y
+      w: 1.0
+      h: timeline.rowHeight - 1.0
+      lane: laneIndex
+      span: -1
+      nameId: span.nameId
+      depth: span.depth
+    })
+    let columnEnd: Int = state.viewStart + (((column + 1.0 - box.x) as Float64) * nsPerPixel) as Int
+    i = i + 1
+    loop i < count and lane.spans.copyAtDefault(index: i).start < columnEnd {
+      if i % timelineBlockSpans is 0 {
+        let blockLast: Int = Math.min(a: i + timelineBlockSpans, b: count) - 1
+        if lane.blockEnds.copyAtDefault(index: i / timelineBlockSpans) < columnEnd + (nsPerPixel as Int) and lane.spans.copyAtDefault(
+          index: blockLast
+        ).start < columnEnd {
+          i = blockLast + 1
+          continue
+        }
+      }
+      let inner: TimelineSpan = lane.spans.copyAtDefault(index: i)
+      if ((inner.end - inner.start) as Float64) >= nsPerPixel {
+        break
+      }
+      i = i + 1
+    }
+  }
+}
+
+# What is at (x, y): the lane under it, and the span of that lane (at the row under it) whose time
+# covers the point, a pixel either way counted in
+func timelineHit(
+  timeline: view Timeline
+  state: view TimelineState
+  box: view TimelineBox
+  x: view Float
+  y: view Float
+) ret TimelineHit {
+  if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
+    ret TimelineHit { lane: -1, span: -1 }
+  }
+  let nsPerPixel: Float64 = timelineNsPerPixel(state: state, box: box)
+  let time: Int = state.viewStart + (((x - box.x) as Float64) * nsPerPixel) as Int
+  let slack: Int = nsPerPixel as Int
+  var top: Float = box.y
+  loop var laneIndex: Int = 0, laneIndex < state.lanes.length, ++laneIndex {
+    var height: Float = 0.0
+    if let lane: view TimelineLane = state.lanes.viewAt(index: laneIndex) {
+      height = timelineLaneHeight(timeline: timeline, lane: lane)
+    }
+    if let lane: view TimelineLane = state.lanes.viewAt(index: laneIndex) {
+      if y >= top and y < top + height {
+        let row: Int = ((y - top) / timeline.rowHeight) as Int
+        var found: Int = -1
+        var i: Int = timelineFirstFrom(lane: lane, time: time - lane.maxDuration - slack)
+        loop i < lane.spans.length {
+          let span: TimelineSpan = lane.spans.copyAtDefault(index: i)
+          if span.start > time + slack {
+            break
+          }
+          if span.depth is row and span.start - slack <= time and span.end + slack >= time {
+            found = i
+          }
+          i = i + 1
+        }
+        ret TimelineHit { lane: laneIndex, span: found }
+      }
+    }
+    top = top + height + timeline.laneGap
+  }
+  ret TimelineHit { lane: -1, span: -1 }
+}
+
+# Zoom by `factor` (below 1 in, above 1 out) keeping the time at `share` of the width in place
+func timelineZoom(state: mod TimelineState, share: view Float, factor: view Float) {
+  let width: Float64 = (state.viewEnd - state.viewStart) as Float64
+  let anchor: Float64 = (state.viewStart as Float64) + width * (share as Float64)
+  var newWidth: Float64 = width * (factor as Float64)
+  if newWidth < 1000.0 {
+    newWidth = 1000.0
+  }
+  let start: Int = (anchor - newWidth * (share as Float64)) as Int
+  timelineShow(state: state, start: start, end: start + newWidth as Int)
+}
+
+# Move the view by `pixels` of a `width`-pixel box (a drag to the right shows earlier times)
+func timelinePan(state: mod TimelineState, pixels: view Float, width: view Float) {
+  let span: Int = state.viewEnd - state.viewStart
+  let shift: Int = (((pixels as Float64) / (Math.max(a: 1.0, b: width) as Float64)) * (span as Float64)) as Int
+  timelineShow(state: state, start: state.viewStart - shift, end: state.viewEnd - shift)
+}
+
+# ---- the system -------------------------------------------------------------------------------
+func timelineBoxOf(uiSystems: view UiSystems, entityId: view EntityId) ret opt TimelineBox {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false or componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  ) is false {
+    ret none
+  }
+  let rect: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let placed: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  ret TimelineBox {
+    x: placed.position.x
+    y: placed.position.y
+    w: rect.size.x * placed.scale.x
+    h: rect.size.y * placed.scale.y
+  }
+}
+
+# Once a frame after updateUiInput: every Timeline gets its state (empty until the app fills it),
+# the wheel over one zooms it about the pointer, a drag pans it, and a click selects the span under
+# the pointer (sending the Timeline's action). True when a view or a selection changed.
+func timelineSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.timelines), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.timelines, i: i)
+    if componentHas(this: world.timelineStates, entityId: entityId) is false {
+      componentSet(this: world.timelineStates, entityId: entityId, data: createTimelineState())
+    }
+    if let box: TimelineBox = timelineBoxOf(uiSystems: uiSystems, entityId: entityId) {
+      let timelineView: view Timeline = componentView(this: world.timelines, entityId: entityId)
+      let timeline: Timeline = timelineView
+      let state: mod TimelineState = componentMod(this: world.timelineStates, entityId: entityId)
+      let inside: Bool = input.pointer.x >= box.x and input.pointer.x < box.x + box.w and input.pointer.y >= box.y and input.pointer.y < box.y + box.h
+      if input.wheelTarget is entityId and input.wheel is not 0.0 {
+        timelineZoom(
+          state: state
+          share: (input.pointer.x - box.x) / Math.max(a: 1.0, b: box.w)
+          factor: Math.pow(base: 0.85, exp: input.wheel)
+        )
+        changed = true
+      }
+      if input.pointer.pressed and inside {
+        state.dragging = true
+        state.dragX = input.pointer.x
+        state.dragViewStart = state.viewStart
+        state.dragViewEnd = state.viewEnd
+        state.dragMoved = false
+      }
+      if state.dragging and input.pointer.down {
+        let moved: Float = input.pointer.x - state.dragX
+        if moved > 3.0 or moved < -3.0 {
+          state.dragMoved = true
+        }
+        if state.dragMoved {
+          timelineShow(state: state, start: state.dragViewStart, end: state.dragViewEnd)
+          timelinePan(state: state, pixels: moved, width: box.w)
+          changed = true
+        }
+      }
+      if state.dragging and input.pointer.released {
+        state.dragging = false
+        if not state.dragMoved {
+          let hit: TimelineHit = timelineHit(
+            timeline: timeline
+            state: state
+            box: box
+            x: input.pointer.x
+            y: input.pointer.y
+          )
+          state.selectedLane = hit.lane
+          state.selectedSpan = hit.span
+          changed = true
+          if timeline.actionId.length() > 0 {
+            eventSend(
+              this: world.uiActions
+              value: UiAction { entityId: entityId, actionId: "{timeline.actionId}" }
+            )
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}

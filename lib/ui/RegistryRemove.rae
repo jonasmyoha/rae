@@ -119,6 +119,11 @@ func removeComponentByName(world: mod UiWorld, entityId: view EntityId, name: vi
     componentRemove(this: world.valueTexts, entityId: entityId)
     ret
   }
+  if name is "Timeline" {
+    componentRemove(this: world.timelines, entityId: entityId)
+    componentRemove(this: world.timelineStates, entityId: entityId)
+    ret
+  }
   if name is "RadialGradientFill" {
     componentRemove(this: world.radialGradientFills, entityId: entityId)
     ret

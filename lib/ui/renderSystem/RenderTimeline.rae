@@ -1,0 +1,205 @@
+# RenderTimeline — a Timeline (ui/ChartComponents, ui/timelineSystem) drawn into its node's box:
+# each lane's band, the rects timelineVisible gives (a span in its name's color, a merged pixel
+# column of tiny spans the same way), the selected span outlined, the marks as thin lines, the
+# lanes' names (each on a chip), and a span's name inside it when it is wide enough. Clipped to the
+# box; its cost
+# is the visible rects, not the data.
+import Gpu2d
+import Gpu2dText
+import SdfText
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/renderSystem/RenderPaintBox
+open ui/timelineSystem/TimelineSystem
+
+# The spans' colors, by their name (ARGB)
+func timelineSpanColor(nameId: view Int) ret Int {
+  let slot: Int = nameId % 8
+  if slot is 0 {
+    ret 0xFF4E79A7
+  }
+  if slot is 1 {
+    ret 0xFFF28E2B
+  }
+  if slot is 2 {
+    ret 0xFF59A14F
+  }
+  if slot is 3 {
+    ret 0xFFE15759
+  }
+  if slot is 4 {
+    ret 0xFF76B7B2
+  }
+  if slot is 5 {
+    ret 0xFFEDC948
+  }
+  if slot is 6 {
+    ret 0xFFB07AA1
+  }
+  ret 0xFF9C755F
+}
+
+func paintTimelineG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if componentHas(this: world.timelineStates, entityId: entityId) is false {
+    ret
+  }
+  let timeline: view Timeline = componentView(this: world.timelines, entityId: entityId)
+  let state: view TimelineState = componentView(this: world.timelineStates, entityId: entityId)
+  let paint: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let box: TimelineBox = { x: paint.x, y: paint.y, w: paint.w, h: paint.h }
+  let textColor: Int = g2dColor(
+    color: g2dChain(color: world.theme.active.palette.textPrimary, chain255: chain255)
+  )
+  let bandColor: Int = g2dColor(
+    color: g2dChain(color: world.theme.active.palette.textMuted, chain255: chain255 / 6)
+  )
+  Gpu2d.pushClipRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+  )
+  # the lanes' bands and their marks
+  var top: Float = 0.0
+  loop var laneIndex: Int = 0, laneIndex < state.lanes.length and top < box.h, ++laneIndex {
+    if let lane: view TimelineLane = state.lanes.viewAt(index: laneIndex) {
+      let height: Float = timelineLaneHeight(timeline: timeline, lane: lane)
+      if laneIndex % 2 is 0 {
+        Gpu2d.drawRect(
+          canvas: canvas
+          x: box.x
+          y: box.y + top
+          w: box.w
+          h: height
+          color: bandColor
+        )
+      }
+      loop let mark: Int in lane.marks {
+        if mark >= state.viewStart and mark <= state.viewEnd {
+          Gpu2d.drawRect(
+            canvas: canvas
+            x: timelineX(state: state, box: box, time: mark)
+            y: box.y + top
+            w: 1.0
+            h: height
+            color: textColor
+          )
+        }
+      }
+      top = top + height + timeline.laneGap
+    }
+  }
+  # the spans
+  let rects: List(TimelineRect) = timelineVisible(timeline: timeline, state: state, box: box)
+  loop let rect: TimelineRect in rects {
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: rect.x
+      y: rect.y
+      w: rect.w
+      h: rect.h
+      color: timelineSpanColor(nameId: rect.nameId)
+    )
+    if rect.span >= 0 and rect.w > 48.0 {
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: res.textFont
+        text: state.names.copyAtDefault(index: rect.nameId)
+        x: rect.x + 3.0
+        y: rect.y + rect.h * 0.78
+        sizePx: rect.h * 0.7
+        color: 0xFF101010
+      )
+    }
+    if rect.lane is state.selectedLane and rect.span is state.selectedSpan {
+      timelineOutline(canvas: canvas, rect: rect, color: textColor)
+    }
+  }
+  # the lanes' names over them
+  top = 0.0
+  loop var laneIndex: Int = 0, laneIndex < state.lanes.length and top < box.h, ++laneIndex {
+    if let lane: view TimelineLane = state.lanes.viewAt(index: laneIndex) {
+      # on a chip of its own, so it reads over the spans under it
+      let nameWidth: Float = Gpu2dText.measureText(
+        font: res.textFont
+        text: lane.name
+        sizePx: timeline.rowHeight * 0.7
+      )
+      Gpu2d.drawRoundedRect(
+        canvas: canvas
+        x: box.x + 1.0
+        y: box.y + top + 1.0
+        w: nameWidth + 8.0
+        h: timeline.rowHeight - 2.0
+        radius: 3.0
+        color: 0xD0101418
+      )
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: res.textFont
+        text: lane.name
+        x: box.x + 4.0
+        y: box.y + top + timeline.rowHeight * 0.78
+        sizePx: timeline.rowHeight * 0.7
+        color: 0xFFF0F0F0
+      )
+      top = top + timelineLaneHeight(timeline: timeline, lane: lane) + timeline.laneGap
+    }
+  }
+  Gpu2d.popClipRect(canvas: canvas)
+}
+
+func timelineOutline(canvas: mod Gpu2dCanvas, rect: view TimelineRect, color: view Int) {
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: rect.x - 1.0
+    y: rect.y - 1.0
+    w: rect.w + 2.0
+    h: 1.0
+    color: color
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: rect.x - 1.0
+    y: rect.y + rect.h
+    w: rect.w + 2.0
+    h: 1.0
+    color: color
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: rect.x - 1.0
+    y: rect.y
+    w: 1.0
+    h: rect.h
+    color: color
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: rect.x + rect.w
+    y: rect.y
+    w: 1.0
+    h: rect.h
+    color: color
+  )
+}

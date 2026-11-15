@@ -1,0 +1,302 @@
+# The Timeline chart (ui/ChartComponents, ui/timelineSystem): the scene keys load, the system gives
+# the node its state, the visible rects are where the view says, a click selects the span under it
+# and sends the action, the wheel zooms about the pointer, a drag pans. A lane of a million spans
+# zoomed all the way out is about one rect per pixel column, quickly, and a wide span among them
+# is still drawn. `\{`/`\}` keep the JSON braces literal.
+open ui/Ecs
+open ui/Components
+open ui/ChartComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func chartScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Chart\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Chart\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"Timeline\":\{\"rowHeight\":20,\"laneGap\":4,\"actionId\":\"timeline.pick\"\},\"WheelTarget\":\{\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  chart: EntityId
+}
+
+func frame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+  pressed: view Bool
+  wheel: view Float
+) ret Bool {
+  frameAdvance(this: rig.world.uiActions)
+  rig.input.pointer.x = x
+  rig.input.pointer.y = y
+  rig.input.pointer.released = rig.input.pointer.down and down is false
+  rig.input.pointer.pressed = pressed
+  rig.input.pointer.down = down
+  rig.input.wheel = wheel
+  rig.input.wheelTarget = rig.chart
+  ret timelineSystem(world: rig.world, uiSystems: rig.uiSystems, input: rig.input)
+}
+
+func actions(world: view UiWorld) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(this: world.uiActions), ++i {
+    text = "{text} {eventAt(this: world.uiActions, i: i).actionId}"
+  }
+  ret text
+}
+
+func main() {
+  var rig: Rig = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    chart: noEntity()
+  }
+  rig.world.layoutW = 1000.0
+  rig.world.layoutH = 200.0
+  let unusedRoot: EntityId = loadScene(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    scene: parseScene(source: chartScene())
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  if let raw: Int = rig.world.nodeIds.get(k: "Chart") {
+    rig.chart = id(v: raw)
+  }
+  let unusedFirst: Bool = frame(
+    rig: rig
+    x: 0.0
+    y: 0.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  let timelineView: view Timeline = componentView(this: rig.world.timelines, entityId: rig.chart)
+  let timeline: Timeline = timelineView
+  log(
+    "scene keys: row {timeline.rowHeight}, gap {timeline.laneGap}, action {timeline.actionId}; state made {componentHas(
+      this: rig.world.timelineStates
+      entityId: rig.chart
+    )}"
+  )
+
+  # the app's data: a frame with two nested parts on lane "main", a mark, and a lane "worker"
+  let state: mod TimelineState = componentMod(this: rig.world.timelineStates, entityId: rig.chart)
+  let main: Int = timelineAddLane(state: state, name: "main")
+  let worker: Int = timelineAddLane(state: state, name: "worker")
+  let frameName: Int = timelineName(state: state, name: "frame")
+  let updateName: Int = timelineName(state: state, name: "update")
+  let renderName: Int = timelineName(state: state, name: "render")
+  let added: Bool = timelineAddSpan(
+    state: state
+    lane: main
+    start: 0
+    end: 100000
+    nameId: frameName
+    depth: 0
+  ) and timelineAddSpan(
+    state: state
+    lane: main
+    start: 10000
+    end: 40000
+    nameId: updateName
+    depth: 1
+  ) and timelineAddSpan(
+    state: state
+    lane: main
+    start: 50000
+    end: 90000
+    nameId: renderName
+    depth: 1
+  ) and timelineAddSpan(
+    state: state
+    lane: worker
+    start: 20000
+    end: 60000
+    nameId: updateName
+    depth: 0
+  )
+  let refused: Bool = timelineAddSpan(
+    state: state
+    lane: main
+    start: 5000
+    end: 6000
+    nameId: frameName
+    depth: 1
+  )
+  timelineAddMark(state: state, lane: main, time: 95000)
+  timelineShow(state: state, start: 0, end: 100000)
+  log(
+    "spans added {added}, one out of order refused {not refused}, main has {state.lanes.copyAtDefault(
+      index: main
+    ).rows} rows"
+  )
+
+  let box: TimelineBox = { x: 0.0, y: 0.0, w: 1000.0, h: 200.0 }
+  var shown: String = ""
+  loop let rect: TimelineRect in timelineVisible(timeline: timeline, state: state, box: box) {
+    shown = "{shown} [{state.names.copyAtDefault(index: rect.nameId)} lane {rect.lane} x {rect.x.toInt()} w {rect.w.toInt()} y {rect.y.toInt()}]"
+  }
+  log("visible:{shown}")
+  log("worker lane top {timelineLaneTop(timeline: timeline, state: state, index: worker).toInt()}")
+  let hit: TimelineHit = timelineHit(
+    timeline: timeline
+    state: state
+    box: box
+    x: 200.0
+    y: 30.0
+  )
+  let miss: TimelineHit = timelineHit(
+    timeline: timeline
+    state: state
+    box: box
+    x: 450.0
+    y: 30.0
+  )
+  let outside: TimelineHit = timelineHit(
+    timeline: timeline
+    state: state
+    box: box
+    x: 1200.0
+    y: 30.0
+  )
+  log(
+    "hit at (200, 30): lane {hit.lane} span {hit.span}; (450, 30): lane {miss.lane} span {miss.span}; outside: lane {outside.lane}"
+  )
+
+  # a click on "render" (x 700, row 1 of main) selects it and sends the action
+  let unusedPress: Bool = frame(
+    rig: rig
+    x: 700.0
+    y: 30.0
+    down: true
+    pressed: true
+    wheel: 0.0
+  )
+  let clicked: Bool = frame(
+    rig: rig
+    x: 700.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  let afterClick: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log(
+    "click: changed {clicked}, selected lane {afterClick.selectedLane} span {afterClick.selectedSpan}, actions:{actions(
+      world: rig.world
+    )}"
+  )
+
+  # the wheel at the middle zooms in about it; a drag of 100 px to the right shows earlier times
+  let unusedWheel: Bool = frame(
+    rig: rig
+    x: 500.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 4.0
+  )
+  let zoomed: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log(
+    "zoomed: {zoomed.viewStart} .. {zoomed.viewEnd}, the middle stays at {(zoomed.viewStart + zoomed.viewEnd) / 2}"
+  )
+  let width: Int = zoomed.viewEnd - zoomed.viewStart
+  let startBefore: Int = zoomed.viewStart
+  let unusedGrab: Bool = frame(
+    rig: rig
+    x: 300.0
+    y: 30.0
+    down: true
+    pressed: true
+    wheel: 0.0
+  )
+  let unusedDrag: Bool = frame(
+    rig: rig
+    x: 400.0
+    y: 30.0
+    down: true
+    pressed: false
+    wheel: 0.0
+  )
+  let unusedLet: Bool = frame(
+    rig: rig
+    x: 400.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  let panned: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log(
+    "panned: moved {startBefore - panned.viewStart} ns earlier (a tenth of {width}), width kept {panned.viewEnd - panned.viewStart is width}, selection kept {panned.selectedSpan}, actions:{actions(
+      world: rig.world
+    )}"
+  )
+
+  # a million spans of 100 ns, a microsecond apart, and one wide span among them
+  var big: TimelineState = createTimelineState()
+  let lane: Int = timelineAddLane(state: big, name: "busy")
+  let tiny: Int = timelineName(state: big, name: "tiny")
+  let wide: Int = timelineName(state: big, name: "wide")
+  var all: Bool = true
+  loop var i: Int = 0, i < 1000000, ++i {
+    all = all and timelineAddSpan(
+      state: big
+      lane: lane
+      start: i * 1000
+      end: i * 1000 + 100
+      nameId: tiny
+      depth: 0
+    )
+    if i is 500000 {
+      all = all and timelineAddSpan(
+        state: big
+        lane: lane
+        start: i * 1000 + 1
+        end: i * 1000 + 200000000
+        nameId: wide
+        depth: 1
+      )
+    }
+  }
+  timelineShow(state: big, start: 0, end: 1000000000)
+  let started: Int = nowNs()
+  let rects: List(TimelineRect) = timelineVisible(timeline: timeline, state: big, box: box)
+  let took: Int = nowNs() - started
+  var wideShown: Bool = false
+  loop let rect: TimelineRect in rects {
+    if rect.nameId is wide and rect.w >= 199.0 {
+      wideShown = true
+    }
+  }
+  log(
+    "a million spans: added {all}, rects {rects.length <= 1100} ({rects.length > 900} near one per column), the wide one drawn {wideShown}, under 20 ms {took < 20000000}"
+  )
+}
