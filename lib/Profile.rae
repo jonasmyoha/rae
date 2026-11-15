@@ -64,6 +64,10 @@ type Profiler {
   gpuSamplesWritten: StringMap(Int)
   # the lanes laneSpan made, by name -> their ring's index in the hub
   laneRings: StringMap(Int)
+  # the allocation counts at the last tick (this thread's, every thread's): a frame's are the
+  # difference (memoryCounters)
+  lastThreadAllocations: Int = -1
+  lastAllAllocations: Int = -1
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -106,9 +110,15 @@ func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view Str
     profiler.hub = createPerfHub(settings: settings)
     profiler.nameIds = StringMap.create(Int, cap: 64)
     profiler.laneRings = StringMap.create(Int, cap: 4)
+    profiler.lastThreadAllocations = -1
+    profiler.lastAllAllocations = -1
     let mainRing: PerfRing = profiler.hub.perfThreadRing(name: profMainThreadName)
     # the runtime's work too: the pool's workers on lanes of their own, the waits as spans
     profiler.hub.perfInstallRuntime(mainRing: mainRing)
+    # the profiler's own counters' names, before the program's (capturedNames leaves them out)
+    loop let name: String in profMemoryNames() {
+      let unusedName: PerfName = profNameId(profiler: profiler, name: name)
+    }
     profiler.firstOwnName = profiler.hub.perfNameCount()
     profiler.mainRing = mainRing
     profiler.startNs = nowNs()
@@ -377,6 +387,53 @@ func gpuSpans(
   counter(profiler: profiler, name: "gpu.clock drift ns per s", value: profiler.gpuClock.driftNs)
 }
 
+func profMemoryNames() ret List(String) {
+  ret List(String) {
+    "mem.frame allocations"
+    "mem.frame allocations, all threads"
+    "mem.buffers"
+    "mem.buffer bytes"
+    "mem.strings"
+    "mem.rss kb"
+  }
+}
+
+# Memory once a frame (docs/perf-tools-design.md §4.7): the allocations since the last tick on
+# this thread (mem.frame allocations: 0 for a frame that allocated nothing) and on every thread
+# (mem.frame allocations, all threads), the buffers alive, their bytes and the Strings alive
+# (these two under RAE_MEM_STATS=1, which measures them), and the process's resident memory
+# (mem.rss kb).
+# Writing them allocates nothing once their names are known (the first frame of a capture).
+func memoryCounters(profiler: mod Profiler) {
+  let threadAllocations: Int = Sys.threadAllocationCount()
+  let allAllocations: Int = Sys.allocationCount()
+  if profiler.lastThreadAllocations >= 0 {
+    counter(
+      profiler: profiler
+      name: "mem.frame allocations"
+      value: threadAllocations - profiler.lastThreadAllocations
+    )
+    counter(
+      profiler: profiler
+      name: "mem.frame allocations, all threads"
+      value: allAllocations - profiler.lastAllAllocations
+    )
+  }
+  counter(profiler: profiler, name: "mem.buffers", value: Sys.liveBufferCount())
+  let bufferBytes: Int = Sys.liveBufferBytes()
+  if bufferBytes >= 0 {
+    counter(profiler: profiler, name: "mem.buffer bytes", value: bufferBytes)
+  }
+  let strings: Int = Sys.liveStringCount()
+  if strings >= 0 {
+    counter(profiler: profiler, name: "mem.strings", value: strings)
+  }
+  counter(profiler: profiler, name: "mem.rss kb", value: Sys.processRssKb())
+  # read again: the first frame's counter names were allocated above
+  profiler.lastThreadAllocations = Sys.threadAllocationCount()
+  profiler.lastAllAllocations = Sys.allocationCount()
+}
+
 # Call once per frame. Collects the rings into the capture's window, and auto-stops
 # and writes the trace when the capture window elapses. Returns true on the frame
 # it wrote the file.
@@ -384,6 +441,7 @@ func tick(profiler: mod Profiler) ret Bool {
   if profiler.capturing is false {
     ret false
   }
+  memoryCounters(profiler: profiler)
   profiler.hub.perfFrame()
   if nowNs() < profiler.endNs {
     ret false

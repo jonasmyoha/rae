@@ -543,6 +543,51 @@ func processRssKb() ret Int {
   }
 }
 
+func rae_ext_rae_mem_thread_alloc_total() unsafe extern ret Int
+
+func rae_ext_rae_mem_live_buffers() unsafe extern ret Int
+
+func rae_ext_rae_mem_live_buffer_bytes() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_on() unsafe extern ret Bool
+
+# This thread's allocations since it started (allocationCount for one thread): a frame loop's
+# difference between two frames is what the frame allocated on this thread
+func threadAllocationCount() ret Int {
+  unsafe {
+    ret rae_ext_rae_mem_thread_alloc_total()
+  }
+}
+
+# The buffers (List and Buffer storage) alive now (always counted), and their bytes (-1 unless
+# RAE_MEM_STATS=1: measuring each allocation's size is the cost that switch turns on)
+func liveBufferCount() ret Int {
+  unsafe {
+    ret rae_ext_rae_mem_live_buffers()
+  }
+}
+
+func liveBufferBytes() ret Int {
+  unsafe {
+    if not rae_ext_rae_mem_stats_on() {
+      ret -1
+    }
+    ret rae_ext_rae_mem_live_buffer_bytes()
+  }
+}
+
+# The Strings alive now; -1 unless RAE_MEM_STATS=1 (they are counted only then)
+func liveStringCount() ret Int {
+  unsafe {
+    if not rae_ext_rae_mem_stats_on() {
+      ret -1
+    }
+    ret rae_ext_rae_mem_stats_outstanding()
+  }
+}
+
 # Heap allocations made through Rae since the program started: String bodies
 # and List/Buffer storage, a growing List's reallocation included. Always
 # counted (no env var). Sample it either side of some work: the difference is

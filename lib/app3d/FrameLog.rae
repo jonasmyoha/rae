@@ -19,6 +19,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuReadback
 open gpu/GpuRender
+open gpu/GpuMemory
 open RendererDeferred
 open app3d/RenderScale
 
@@ -263,7 +264,8 @@ func frameBoundCounters(profiler: mod Profiler, renderer: view DeferredRenderer)
 }
 
 # The GPU resource tables' sizes (gpu/GpuResources: the live buffers, textures, views, samplers,
-# pipelines, bind groups, readbacks and the releases still pending) as counters of a capture,
+# pipelines, bind groups, readbacks and the releases still pending), and the bytes of its buffers
+# and (about) its textures (gpu/GpuMemory), as counters of a capture,
 # named `prefix` and the table ("gpu." for the renderer's)
 func gpuResourceCounters(
   profiler: mod Profiler
@@ -313,4 +315,7 @@ func gpuResourceCounters(
     name: "{prefix}pendingReleases"
     value: pendingReleaseCount(resources: resources)
   )
+  let bytes: GpuResourceBytes = gpuResourceBytes(resources: resources)
+  Profile.counter(profiler: profiler, name: "{prefix}buffer kb", value: bytes.buffers / 1024)
+  Profile.counter(profiler: profiler, name: "{prefix}texture kb", value: bytes.textures / 1024)
 }

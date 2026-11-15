@@ -615,6 +615,7 @@ void rae_ext_rae_log_write(rae_String text, rae_Bool newline);
 rae_String rae_ext_rae_str_from_cstr(const void* s);
 /* The event recorder: the name of the thread that claimed named slot `index` (runtime_perf_hooks.c) */
 rae_String rae_perf_thread_name(int64_t index);
+rae_Bool rae_perf_thread_named(int64_t index);
 rae_Bool rae_perf_name_box_ready(void);
 rae_String rae_realtime_slot_entry(int64_t index);
 rae_String rae_realtime_slot_detail(int64_t index);
@@ -847,6 +848,10 @@ rae_Char rae_ext_rae_io_read_char(void);
  * isolate which allocation class (string body, List/Map buffer, ...)
  * is leaking when residual RSS growth is small but linear. */
 void rae_ext_rae_mem_stats_dump(void);
+rae_Bool rae_ext_rae_mem_stats_on(void);
+int64_t rae_ext_rae_mem_thread_alloc_total(void);
+int64_t rae_ext_rae_mem_live_buffers(void);
+int64_t rae_ext_rae_mem_live_buffer_bytes(void);
 void rae_mem_stats_silence_exit_report(void);
 int64_t rae_ext_rae_mem_stats_outstanding(void);
 int64_t rae_ext_rae_mem_stats_unknown_frees(void); /* #761: untracked-free count */

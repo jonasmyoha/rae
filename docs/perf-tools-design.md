@@ -308,6 +308,20 @@ As counters, sampled once a frame:
 
 A slow growth over minutes is what the memory view (and the existing memory test) looks for.
 
+Done in Rae 0.3.139 (perf step 8): `Profile.tick` writes, once a frame while capturing, the
+allocations since the last tick on this thread (`mem.frame allocations`, from the thread's own
+counter block, `Sys.threadAllocationCount`; 0 for a frame that allocated nothing, which case
+1467 checks) and on every thread, the live buffers (`mem.buffers`, always counted), their bytes
+and the live Strings (`mem.buffer bytes`, `mem.strings`: under `RAE_MEM_STATS=1`, which
+measures them) and `mem.rss kb`. Writing them allocates nothing after a capture's first frame
+(the recorder no longer asks for an unclaimed thread slot's name each frame, which allocated 8
+Strings). The walker writes its GPU managers' table counts and their bytes (`gpu.buffer kb`
+exactly, `gpu.texture kb` approximately: texels x the format's bytes, a mip chain as 4/3;
+`gpu/GpuMemory`). Real threads' allocations are their rule-break marks (§4.4).
+`tools/perf-memory-growth.py <trace> --warmup S --max-buffers N --max-buffer-bytes N` reads the
+growth from a capture, the check the 121 memory test makes from its `[mem:live]` lines (121 over
+30 s: buffers, bytes and Strings flat).
+
 ### 4.8 The app's own
 
 `perfZone` and `perfCounter` in app code, for what only the app knows: physics steps, path

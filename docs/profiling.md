@@ -56,6 +56,11 @@ frames it measures.
   and "presented" (the display link's target time on iOS), with `frame.interval us`,
   `frame.jitter us`, `frame.missed refreshes` and `thermal.state`. The video source's events are
   defined in `lib/perf/VideoEvents` for a player to write.
+- Memory (perf step 8, Rae 0.3.139): each tick writes `mem.frame allocations` (this thread; 0 for an
+  allocation-free frame), `mem.frame allocations, all threads`, `mem.buffers`, `mem.rss kb`, and
+  under `RAE_MEM_STATS=1` `mem.buffer bytes` and `mem.strings`; the walkers add their GPU tables'
+  bytes. `python3 tools/perf-memory-growth.py <trace> --warmup 20` prints each one's growth per
+  minute after the warm-up, and fails over `--max-buffers` / `--max-buffer-bytes`.
 - Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
 - New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
   draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward

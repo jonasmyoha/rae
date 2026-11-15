@@ -1,0 +1,86 @@
+# gpu/GpuMemory — the bytes a GPU manager's resources hold (docs/perf-tools-design.md §4.7): the
+# live buffers' sizes exactly (wgpuBufferGetSize), and the live textures' approximately (width x
+# height x layers x the format's bytes per texel, a full mip chain counted as 4/3; a
+# block-compressed
+# format as one byte per texel). Read for a capture's counters (app3d/FrameLog), not each draw.
+import Math
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open webgpu/Context
+open gpu/GpuResources
+open gpu/SlotTable
+
+type GpuResourceBytes {
+  buffers: Int
+  textures: Int
+}
+
+func gpuResourceBytes(resources: view GpuResources) ret GpuResourceBytes {
+  var buffers: Int = 0
+  var textures: Int = 0
+  unsafe {
+    loop var slot: Int = 0, slot < resources.capacity, ++slot {
+      if resources.buffers.live.copyAtDefault(index: slot) is 1 {
+        let handle: Ptr = slotHandle(table: resources.buffers, slot: slot)
+        if handle is not webgpuNull() {
+          buffers = buffers + (wgpuBufferGetSize(buffer: handle) as Int)
+        }
+      }
+      if resources.textures.live.copyAtDefault(index: slot) is 1 {
+        let handle: Ptr = slotHandle(table: resources.textures, slot: slot)
+        if handle is not webgpuNull() {
+          textures = textures + textureBytes(texture: handle)
+        }
+      }
+    }
+  }
+  ret GpuResourceBytes { buffers: buffers, textures: textures }
+}
+
+func textureBytes(texture: view Ptr) unsafe ret Int {
+  unsafe {
+    let width: Int = wgpuTextureGetWidth(texture: texture) as Int
+    let height: Int = wgpuTextureGetHeight(texture: texture) as Int
+    let layers: Int = wgpuTextureGetDepthOrArrayLayers(texture: texture) as Int
+    let samples: Int = wgpuTextureGetSampleCount(texture: texture) as Int
+    var bytes: Int = width * height * layers * Math.max(a: 1, b: samples) * texelBytes(
+      format: wgpuTextureGetFormat(texture: texture)
+    )
+    if (wgpuTextureGetMipLevelCount(texture: texture) as Int) > 1 {
+      bytes = bytes * 4 / 3
+    }
+    ret bytes
+  }
+}
+
+# Bytes per texel of a format (the WebGPU formats in their order)
+func texelBytes(format: view Int32) ret Int {
+  if (format < WGPUTextureFormat_R16Unorm) {
+    ret 1
+  }
+  if (format < WGPUTextureFormat_R32Float) {
+    ret 2
+  }
+  if (format < WGPUTextureFormat_RG32Float) {
+    ret 4
+  }
+  if (format < WGPUTextureFormat_RGBA32Float) {
+    ret 8
+  }
+  if (format < WGPUTextureFormat_Stencil8) {
+    ret 16
+  }
+  if (format is WGPUTextureFormat_Stencil8) {
+    ret 1
+  }
+  if (format is WGPUTextureFormat_Depth16Unorm) {
+    ret 2
+  }
+  if (format is WGPUTextureFormat_Depth32FloatStencil8) {
+    ret 8
+  }
+  if (format < WGPUTextureFormat_BC1RGBAUnorm) {
+    ret 4
+  }
+  ret 1
+}

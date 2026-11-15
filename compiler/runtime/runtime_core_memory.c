@@ -768,6 +768,30 @@ int64_t rae_ext_rae_mem_alloc_total(void) {
   return rae_mem_counter_read(RAE_MC_ALLOC_TOTAL_N) + rae_mem_counter_read(RAE_MC_BUF_ALLOC_N);
 }
 
+/* The calling thread's own allocations since it started (String bodies and buffers, as
+ * rae_ext_rae_mem_alloc_total counts them, from this thread's counter block): the event recorder's
+ * allocations in a frame (lib/Profile). Always counted. */
+rae_Bool rae_ext_rae_mem_stats_on(void) {
+  return g_mem_stats_enabled ? 1 : 0;
+}
+
+int64_t rae_ext_rae_mem_thread_alloc_total(void) {
+  RaeMemCounterBlock* block = t_mem_block;
+  if (!block) return 0;
+  return atomic_load_explicit(&block->value[RAE_MC_ALLOC_TOTAL_N], memory_order_relaxed) +
+         atomic_load_explicit(&block->value[RAE_MC_BUF_ALLOC_N], memory_order_relaxed);
+}
+
+/* The buffers alive now and their bytes, over all threads. The count is always kept; the bytes
+ * only under RAE_MEM_STATS (rae_mem_buf_bytes measures each allocation then). */
+int64_t rae_ext_rae_mem_live_buffers(void) {
+  return rae_mem_counter_read(RAE_MC_BUF_ALLOC_N) - rae_mem_counter_read(RAE_MC_BUF_FREE_N);
+}
+
+int64_t rae_ext_rae_mem_live_buffer_bytes(void) {
+  return rae_mem_counter_read(RAE_MC_BUF_ALLOC_B) - rae_mem_counter_read(RAE_MC_BUF_FREE_B);
+}
+
 int64_t rae_ext_rae_mem_stats_buf_outstanding(void) {
   if (!g_mem_stats_enabled) return 0;
   return rae_mem_counter_read(RAE_MC_BUF_ALLOC_N) - rae_mem_counter_read(RAE_MC_BUF_FREE_N);

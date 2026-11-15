@@ -481,6 +481,8 @@ func nativePerfThreadSlotCount() unsafe extern("rae_perf_thread_slot_count") ret
 
 func nativePerfThreadName(index: Int) unsafe extern("rae_perf_thread_name") ret String
 
+func nativePerfThreadNamed(index: Int) unsafe extern("rae_perf_thread_named") ret Bool
+
 # Record the runtime's work into this hub: `mainRing` (this thread's) is slot 0, each worker of
 # the pool gets a ring of its own, its lane named "worker <n>", and a few rings wait for named
 # threads (a `spawn thread`, named by its function; a thread C attached), whose lanes perfFrame
@@ -543,7 +545,12 @@ func perfInstallRuntime(hub: mod PerfHub, mainRing: view PerfRing) {
 func perfNameThreadLanes(hub: mod PerfHub) {
   if let table: mod PerfRuntimeTable = hub.runtime {
     loop var thread: Int = 0, thread < table.threadRings.length, ++thread {
-      if not table.threadNamed.copyAtDefault(index: thread) {
+      # asked first: a name is a new String, and a frame that allocates nothing must stay so
+      var claimed: Bool = false
+      unsafe {
+        claimed = nativePerfThreadNamed(index: thread)
+      }
+      if not table.threadNamed.copyAtDefault(index: thread) and claimed {
         unsafe {
           let name: String = nativePerfThreadName(index: thread)
           if name.length() > 0 {

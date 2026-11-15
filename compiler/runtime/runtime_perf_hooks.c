@@ -224,6 +224,12 @@ int64_t rae_perf_thread_slot_count(void) {
   return RAE_PERF_THREAD_SLOTS;
 }
 
+/* Whether a thread has claimed named slot `index` (asked before its name, which allocates) */
+rae_Bool rae_perf_thread_named(int64_t index) {
+  return index >= 0 && index < RAE_PERF_THREAD_SLOTS &&
+         atomic_load_explicit(&g_rae_perf_thread_names[index], memory_order_acquire) != NULL;
+}
+
 /* The name of the thread that claimed named slot `index` ("" while none has) */
 rae_String rae_perf_thread_name(int64_t index) {
   const char* name = index >= 0 && index < RAE_PERF_THREAD_SLOTS

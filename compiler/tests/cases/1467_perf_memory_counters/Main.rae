@@ -1,0 +1,70 @@
+# Memory in a lib/Profile capture (docs/perf-tools-design.md §4.7): Profile.tick writes, once a
+# frame, the allocations the frame made on this thread (and on all threads), the buffers alive and
+# their bytes (RAE_MEM_STATS=1, config.env), and the process's resident memory. A frame loop that
+# allocates nothing reads 0 in
+# every frame; frames that make a String each read it.
+import Sys
+import Profile
+open perf/Perf
+
+func spin(rounds: copy Int) ret Int {
+  var value: Int = 1
+  loop var i: Int = 0, i < rounds, ++i {
+    value = (value * 31 + i) % 1000003
+  }
+  ret value
+}
+
+# The values of counter `name` in the capture, in order
+func counterValues(profiler: view Profiler, name: view String) ret List(Int) {
+  var values: List(Int) = {}
+  let hub: view PerfHub = profiler.hub
+  loop var number: Int = hub.perfOldest(), number < hub.perfWritten(), ++number {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    if event.kind is PerfKind.counter and hub.perfNameText(nameId: event.nameId as Int) is name {
+      values.add(value: event.value)
+    }
+  }
+  ret values
+}
+
+func main() {
+  var profiler: Profiler = Profile.createProfiler()
+  Profile.startCapture(profiler: profiler, seconds: 600.0, outPath: "/tmp/rae_case_1467.json")
+  var checksum: Int = 0
+  # frames 1..12: nothing allocated
+  loop var frame: Int = 0, frame < 12, ++frame {
+    let unusedWritten: Bool = Profile.tick(profiler: profiler)
+    checksum = checksum + spin(rounds: 1000 + frame)
+  }
+  # frames 13..18: one String each
+  var lengths: Int = 0
+  loop var frame: Int = 0, frame < 6, ++frame {
+    let unusedWritten: Bool = Profile.tick(profiler: profiler)
+    let text: String = "frame {frame}"
+    lengths = lengths + text.length()
+  }
+  let unusedLast: Bool = Profile.tick(profiler: profiler)
+  let frames: List(Int) = counterValues(profiler: profiler, name: "mem.frame allocations")
+  var quiet: String = ""
+  var busy: String = ""
+  loop var i: Int = 0, i < frames.length, ++i {
+    if i < 12 {
+      quiet = "{quiet} {frames.copyAtDefault(index: i)}"
+    } else {
+      busy = "{busy} {frames.copyAtDefault(index: i) > 0}"
+    }
+  }
+  log("frames counted: {frames.length}")
+  log("the quiet frames' allocations:{quiet}")
+  log("the frames that made a String allocated:{busy}")
+  let buffers: List(Int) = counterValues(profiler: profiler, name: "mem.buffers")
+  let bytes: List(Int) = counterValues(profiler: profiler, name: "mem.buffer bytes")
+  let rss: List(Int) = counterValues(profiler: profiler, name: "mem.rss kb")
+  log(
+    "buffers alive {buffers.copyAtDefault(index: 0) > 0}, their bytes {bytes.copyAtDefault(index: 0) > 0}, rss {rss.copyAtDefault(
+      index: 0
+    ) > 0}, every frame {rss.length is 19}; checksum {checksum > 0}, lengths {lengths}"
+  )
+  Profile.profileDiscard(profiler: profiler)
+}
