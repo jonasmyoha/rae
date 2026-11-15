@@ -1,0 +1,25 @@
+pack App {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  dependencies: {
+    dep audio: {
+      git: "../../../.."
+      subdir: "packages/audio"
+      version: "0.22.0"
+      hash: "git-tree:f53afc971699c587c68f8767fd6095b81db5eed9"
+    }
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,278 @@
+# WAV files at 16 and 24 bits, and written as they render (packages/audio Sound, WavWriter;
+# docs/audio-design.md §7.3). A ramp past +/-1 and a stereo sine are written in each format and
+# read back with decodeWav: float exactly, 24-bit within 1/2^23 and 16-bit within 1/2^15 of the
+# value clipped to +/-1, the clipped ends at the format's limits. Dither moves 16-bit samples by
+# at most 1.5 steps. A file streamed in blocks is byte for byte the one encodeWav makes; an
+# abandoned writer, and one dropped while open, leave no file; a closed writer refuses frames.
+import Math
+open audio/Sound
+open audio/WavWriter
+
+const rampFrames: Int = 1001
+
+const sineFrames: Int = 4800
+
+const sampleRate: Int = 48000
+
+func clipped(value: view Float) ret Float {
+  ret max(a: -1.0, b: min(a: 1.0, b: value))
+}
+
+# A ramp from -1.25 to 1.25, one channel
+func rampSamples() ret Buffer(Float) {
+  let samples: Buffer(Float) = createSampleBuffer(count: rampFrames)
+  loop var i: Int = 0, i < rampFrames, ++i {
+    setSampleAt(
+      samples: samples
+      index: i
+      value: -1.25 + 2.5 * (i as Float) / ((rampFrames - 1) as Float)
+    )
+  }
+  ret samples
+}
+
+# A 1 kHz sine at 0.8, two channels (the right one negated)
+func sineSamples() ret Buffer(Float) {
+  let samples: Buffer(Float) = createSampleBuffer(count: sineFrames * 2)
+  loop var i: Int = 0, i < sineFrames, ++i {
+    let value: Float = 0.8 * sin(x: 2.0 * pi * 1000.0 * (i as Float) / (sampleRate as Float))
+    setSampleAt(samples: samples, index: 2 * i, value: value)
+    setSampleAt(samples: samples, index: 2 * i + 1, value: -value)
+  }
+  ret samples
+}
+
+func formatName(format: view WavFormat) ret String {
+  if format is WavFormat.pcm16 {
+    ret "pcm16"
+  }
+  if format is WavFormat.pcm24 {
+    ret "pcm24"
+  }
+  ret "float32"
+}
+
+# Write, read back, and give the largest difference from the expected samples
+func roundTrip(
+  name: view String
+  samples: view Buffer(Float)
+  frameCount: view Int
+  channels: view Int
+  format: view WavFormat
+  dither: view Bool
+) ret Float {
+  let path: String = "/tmp/rae-case-1498-{name}-{formatName(format: format)}.wav"
+  if not writeWavFile(
+    path: path
+    samples: samples
+    frameCount: frameCount
+    channels: channels
+    sampleRate: sampleRate
+    format: format
+    dither: dither
+  ) {
+    log("cannot write {path}")
+    ret 1.0
+  }
+  let data: SoundData = readSoundFile(path: path)
+  var largest: Float = 0.0
+  if data.frameCount is not frameCount or data.channels is not channels or data.error.length() > 0 {
+    log("{path}: {data.frameCount} frames, {data.channels} channels [{data.error}]")
+    largest = 1.0
+  } else {
+    loop var i: Int = 0, i < frameCount * channels, ++i {
+      var expected: Float = sampleAt(samples: samples, index: i)
+      if format is not WavFormat.float32 {
+        expected = clipped(value: expected)
+      }
+      let difference: Float = abs(value: sampleAt(samples: data.samples, index: i) - expected)
+      largest = max(a: largest, b: difference)
+    }
+  }
+  freeSoundData(data: data)
+  ret largest
+}
+
+func checkFormat(
+  format: view WavFormat
+  ramp: view Buffer(Float)
+  sine: view Buffer(Float)
+  bound: view Float
+) {
+  let rampError: Float = roundTrip(
+    name: "ramp"
+    samples: ramp
+    frameCount: rampFrames
+    channels: 1
+    format: format
+    dither: false
+  )
+  let sineError: Float = roundTrip(
+    name: "sine"
+    samples: sine
+    frameCount: sineFrames
+    channels: 2
+    format: format
+    dither: false
+  )
+  let within: Bool = rampError <= bound and sineError <= bound
+  if bound is 0.0 {
+    log("{formatName(format: format)}: ramp and sine read back exactly: {within}")
+  } else {
+    log("{formatName(format: format)}: ramp and sine within its step: {within}")
+  }
+}
+
+# The clipped ends of the ramp read back at the format's limits
+func checkClipping(format: view WavFormat, ramp: view Buffer(Float), top: view Float) {
+  let path: String = "/tmp/rae-case-1498-ramp-{formatName(format: format)}.wav"
+  let data: SoundData = readSoundFile(path: path)
+  let first: Float = sampleAt(samples: data.samples, index: 0)
+  let last: Float = sampleAt(samples: data.samples, index: rampFrames - 1)
+  log("{formatName(format: format)}: -1.25 reads {first}, 1.25 reads the top sample: {last is top}")
+  freeSoundData(data: data)
+}
+
+func fileBytes(path: view String) ret List(UInt8) {
+  ret readAudioFileBytes(path: path)
+}
+
+# The sine streamed in blocks of 333 frames equals encodeWav's file
+func checkStreamed(sine: view Buffer(Float), format: view WavFormat) {
+  let path: String = "/tmp/rae-case-1498-streamed-{formatName(format: format)}.wav"
+  var writer: WavWriter = openWavWriter(
+    path: path
+    channels: 2
+    sampleRate: sampleRate
+    format: format
+    dither: false
+  )
+  let block: Buffer(Float) = createSampleBuffer(count: 333 * 2)
+  var written: Int = 0
+  var good: Bool = writer.error.length() is 0
+  loop written < sineFrames and good {
+    let count: Int = min(a: 333, b: sineFrames - written)
+    loop var i: Int = 0, i < count * 2, ++i {
+      setSampleAt(samples: block, index: i, value: sampleAt(samples: sine, index: written * 2 + i))
+    }
+    good = writeWavFrames(writer: writer, samples: block, frameCount: count)
+    written = written + count
+  }
+  unsafe {
+    rae_ext_rae_buf_free(buf: block)
+  }
+  let closed: Bool = closeWavWriter(writer: writer)
+  let refused: Bool = not writeWavFrames(writer: writer, samples: sine, frameCount: 1)
+  let streamed: List(UInt8) = fileBytes(path: path)
+  let whole: List(UInt8) = encodeWav(
+    samples: sine
+    frameCount: sineFrames
+    channels: 2
+    sampleRate: sampleRate
+    format: format
+    dither: false
+  )
+  var same: Bool = streamed.length() is whole.length()
+  loop var i: Int = 0, i < whole.length() and same, ++i {
+    same = streamed.copyAtFallback(index: i, fallback: 0) is whole.copyAtFallback(
+      index: i
+      fallback: 1
+    )
+  }
+  log(
+    "{formatName(format: format)} streamed in 333-frame blocks: closed {closed}, {writer.framesWritten} frames, same bytes as encodeWav: {same}, refuses frames after close: {refused}"
+  )
+}
+
+# Half a sine, then abandoned: no file
+func checkAbandoned(sine: view Buffer(Float)) {
+  let path: String = "/tmp/rae-case-1498-abandoned.wav"
+  var writer: WavWriter = openWavWriter(
+    path: path
+    channels: 2
+    sampleRate: sampleRate
+    format: WavFormat.pcm16
+    dither: false
+  )
+  let wrote: Bool = writeWavFrames(writer: writer, samples: sine, frameCount: sineFrames / 2)
+  let existed: Bool = fileBytes(path: path).length() > 0
+  abandonWavWriter(writer: writer)
+  log(
+    "abandoned half way: it was being written {wrote and existed}, now there is no file: {fileBytes(
+      path: path
+    ).length() is 0}"
+  )
+}
+
+# A writer dropped while open (the function returns without closing it)
+func writeAndForget(sine: view Buffer(Float), path: view String) ret Bool {
+  var writer: WavWriter = openWavWriter(
+    path: path
+    channels: 2
+    sampleRate: sampleRate
+    format: WavFormat.pcm24
+    dither: false
+  )
+  ret writeWavFrames(writer: writer, samples: sine, frameCount: 100)
+}
+
+func main() {
+  let ramp: Buffer(Float) = rampSamples()
+  let sine: Buffer(Float) = sineSamples()
+  checkFormat(
+    format: WavFormat.float32
+    ramp: ramp
+    sine: sine
+    bound: 0.0
+  )
+  checkFormat(
+    format: WavFormat.pcm24
+    ramp: ramp
+    sine: sine
+    bound: 1.0 / 8388608.0
+  )
+  checkFormat(
+    format: WavFormat.pcm16
+    ramp: ramp
+    sine: sine
+    bound: 1.0 / 32768.0
+  )
+  checkClipping(format: WavFormat.pcm24, ramp: ramp, top: 8388607.0 / 8388608.0)
+  checkClipping(format: WavFormat.pcm16, ramp: ramp, top: 32767.0 / 32768.0)
+  # TPDF dither: within 1.5 steps, and not the undithered file
+  let dithered: Float = roundTrip(
+    name: "dithered"
+    samples: sine
+    frameCount: sineFrames
+    channels: 2
+    format: WavFormat.pcm16
+    dither: true
+  )
+  let plain: List(UInt8) = fileBytes(path: "/tmp/rae-case-1498-sine-pcm16.wav")
+  let noisy: List(UInt8) = fileBytes(path: "/tmp/rae-case-1498-dithered-pcm16.wav")
+  var differs: Bool = false
+  loop var i: Int = 44, i < plain.length() and not differs, ++i {
+    differs = plain.copyAtFallback(index: i, fallback: 0) is not noisy.copyAtFallback(
+      index: i
+      fallback: 0
+    )
+  }
+  log(
+    "pcm16 dithered: within 1.5 steps {dithered <= 1.5 / 32768.0}, differs from undithered {differs}"
+  )
+  checkStreamed(sine: sine, format: WavFormat.pcm24)
+  checkStreamed(sine: sine, format: WavFormat.pcm16)
+  checkStreamed(sine: sine, format: WavFormat.float32)
+  checkAbandoned(sine: sine)
+  let forgottenPath: String = "/tmp/rae-case-1498-forgotten.wav"
+  let wroteForgotten: Bool = writeAndForget(sine: sine, path: forgottenPath)
+  log(
+    "dropped while open: wrote {wroteForgotten}, now there is no file: {fileBytes(
+      path: forgottenPath
+    ).length() is 0}"
+  )
+  unsafe {
+    rae_ext_rae_buf_free(buf: ramp)
+    rae_ext_rae_buf_free(buf: sine)
+  }
+}
