@@ -1,6 +1,7 @@
 # The Timeline chart (ui/ChartComponents, ui/timelineSystem): the scene keys load, the system gives
 # the node its state, the visible rects are where the view says, a click selects the span under it
-# and sends the action, the wheel zooms about the pointer, a drag pans. A lane of a million spans
+# and sends the action, the wheel zooms about the pointer, a drag pans, a trackpad's sideways scroll
+# pans and its pinch zooms, two fingers on a touch screen pan and zoom. A lane of a million spans
 # zoomed all the way out is about one rect per pixel column, quickly, and a wide span among them
 # is still drawn. `\{`/`\}` keep the JSON braces literal.
 open ui/Ecs
@@ -258,6 +259,115 @@ func main() {
     "panned: moved {startBefore - panned.viewStart} ns earlier (a tenth of {width}), width kept {panned.viewEnd - panned.viewStart is width}, selection kept {panned.selectedSpan}, actions:{actions(
       world: rig.world
     )}"
+  )
+
+  # the trackpad: two fingers sideways (2 steps: 40 px), then a pinch apart (2x) at the middle
+  timelineShow(
+    state: componentMod(this: rig.world.timelineStates, entityId: rig.chart)
+    start: 0
+    end: 100000
+  )
+  rig.input.wheelX = 2.0
+  let unusedSideways: Bool = frame(
+    rig: rig
+    x: 500.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  rig.input.wheelX = 0.0
+  let sideways: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log("sideways scroll: {sideways.viewStart} .. {sideways.viewEnd}")
+  rig.input.pinch = 2.0
+  let unusedPinch: Bool = frame(
+    rig: rig
+    x: 500.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  rig.input.pinch = 1.0
+  let pinched: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log("pinch apart: {pinched.viewStart} .. {pinched.viewEnd}")
+
+  # two fingers on a touch screen: down at 400 and 600, then at 450 and 750 (the middle moves
+  # 100 px right, the spread grows from 200 to 300 px)
+  timelineShow(
+    state: componentMod(this: rig.world.timelineStates, entityId: rig.chart)
+    start: 0
+    end: 100000
+  )
+  uiTwoFingerStep(
+    input: rig.input
+    count: 2
+    x0: 400.0
+    y0: 30.0
+    x1: 600.0
+    y1: 30.0
+  )
+  log(
+    "two fingers down: middle {rig.input.twoFingerX}, shift {rig.input.twoFingerShiftX}, scale {rig.input.twoFingerScale}"
+  )
+  let unusedDown: Bool = frame(
+    rig: rig
+    x: 400.0
+    y: 30.0
+    down: true
+    pressed: true
+    wheel: 0.0
+  )
+  uiTwoFingerStep(
+    input: rig.input
+    count: 2
+    x0: 450.0
+    y0: 30.0
+    x1: 750.0
+    y1: 30.0
+  )
+  let unusedMove: Bool = frame(
+    rig: rig
+    x: 450.0
+    y: 30.0
+    down: true
+    pressed: false
+    wheel: 0.0
+  )
+  let touched: view TimelineState = componentView(
+    this: rig.world.timelineStates
+    entityId: rig.chart
+  )
+  log(
+    "two fingers moved: shift {rig.input.twoFingerShiftX}, scale {rig.input.twoFingerScale}; view {touched.viewStart} .. {touched.viewEnd}, no drag {not touched.dragging}"
+  )
+  uiTwoFingerStep(
+    input: rig.input
+    count: 0
+    x0: 0.0
+    y0: 0.0
+    x1: 0.0
+    y1: 0.0
+  )
+  let unusedUp: Bool = frame(
+    rig: rig
+    x: 450.0
+    y: 30.0
+    down: false
+    pressed: false
+    wheel: 0.0
+  )
+  log(
+    "fingers up: two fingers {rig.input.twoFingers}, selection kept {componentView(
+      this: rig.world.timelineStates
+      entityId: rig.chart
+    ).selectedSpan}"
   )
 
   # a million spans of 100 ns, a microsecond apart, and one wide span among them

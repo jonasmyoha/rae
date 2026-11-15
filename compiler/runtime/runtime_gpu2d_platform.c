@@ -96,6 +96,10 @@ static int g_g2d_touch_n = 0;
 /* Per-frame mouse-wheel accumulator (reset + summed in pollClose, read by
  * gpu2d.wheelMove). Mirrors raylib's GetMouseWheelMove per-frame semantics. */
 static float  g_g2d_wheel = 0.0f;
+/* This frame's horizontal scroll (a trackpad's two fingers sideways, a tilted wheel) and pinch:
+ * the product of the pinch's scale changes, 1 when there was none (lib/ui charts zoom by it) */
+static float  g_g2d_wheel_x = 0.0f;
+static float  g_g2d_pinch = 1.0f;
 /* What kind of scrolling came this frame (gpu2d.wheelKind): 0 none, 1 whole
  * steps only (a wheel's notches), 2 some in fractions (a precise surface: a
  * trackpad, or a mouse whose top is a touch surface; macOS gives their
@@ -579,6 +583,8 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
     for (int ti = 0; ti < g_g2d_touch_n; ti++) g_g2d_touch[ti].pressed = 0;   /* clear edge */
     g_g2d_wheel = 0.0f;
+    g_g2d_wheel_x = 0.0f;
+    g_g2d_pinch = 1.0f;
     g_g2d_wheel_kind = 0;
     g_g2d_text_input_len = 0; g_g2d_text_input[0] = 0;
     SDL_Event e;
@@ -678,8 +684,12 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
                 break;
             }
+            case SDL_EVENT_PINCH_UPDATE:
+                if (e.pinch.scale > 0.0f) g_g2d_pinch *= e.pinch.scale;
+                break;
             case SDL_EVENT_MOUSE_WHEEL:
                 g_g2d_wheel += e.wheel.y;
+                g_g2d_wheel_x += e.wheel.x;
                 if (e.wheel.y != 0.0f || e.wheel.x != 0.0f) {
                     int fractional = e.wheel.y != (float)(int)e.wheel.y || e.wheel.x != (float)(int)e.wheel.x;
                     if (fractional) g_g2d_wheel_kind = 2;
@@ -1106,6 +1116,8 @@ rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return g_sdl_mouse_pressed[SDL_BUT
 rae_Bool rae_ext_Gpu2d_pointerReleased(void) { return g_sdl_mouse_released[SDL_BUTTON_LEFT] != 0; }
 /* Per-frame wheel delta (positive = wheel/scroll up). */
 float rae_ext_Gpu2d_wheelMove(void){ return (double)g_g2d_wheel; }
+float rae_ext_Gpu2d_wheelMoveX(void){ return g_g2d_wheel_x; }
+float rae_ext_Gpu2d_pinchScale(void){ return g_g2d_pinch; }
 int64_t rae_ext_Gpu2d_wheelKind(void){ return (int64_t)g_g2d_wheel_kind; }
 
 void rae_ext_Gpu2d_setMouseCursor(int64_t kind) {

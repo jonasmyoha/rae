@@ -1053,7 +1053,10 @@ scene.
   after `updateUiInput`; it gives the node a `TimelineState` (not saved) on its first frame. The
   wheel over the chart zooms about the pointer (give the node a `WheelTarget` so the wheel comes to
   it), a drag pans, and a click without a drag selects the span under the pointer
-  (`selectedLane`, `selectedSpan`; -1 for none).
+  (`selectedLane`, `selectedSpan`; -1 for none). On a trackpad a sideways two-finger scroll pans
+  and a pinch zooms about the pointer (`UiInput.wheelX`, `UiInput.pinch`, from lib/Gpu2dGestures);
+  on a touch screen two fingers inside the chart pan with their middle and zoom with their spread
+  (`UiInput.twoFingers`, `twoFingerShiftX`, `twoFingerScale`), and they never start a drag.
 - The app fills the state: `timelineAddLane(state:, name:)`, `timelineName(state:, name:)` (a
   span's name as an index), `timelineAddSpan(state:, lane:, start:, end:, nameId:, depth:)` in
   order of `start` (an earlier one is refused), `timelineAddMark(state:, lane:, time:)`, and
@@ -1064,9 +1067,10 @@ scene.
   what is visible: spans narrower than a pixel are one rect per pixel column, found by binary
   search, so a lane of a million spans zoomed all the way out is about one rect per column.
 
-Case 1472 checks the keys, the rects, the hit test, the click, the wheel and the drag, and a
-million spans; `checks/uiTimeline` paints one (`RAE_HEADLESS_FRAMES=10
-RAE_GPU2D_SCREENSHOT=/tmp/timeline.bmp compiler/bin/rae run checks/uiTimeline/Main.rae`).
+Case 1472 checks the keys, the rects, the hit test, the click, the wheel, the drag, the trackpad
+and touch gestures, and a million spans; `checks/uiTimeline` paints one and compares it with its
+`reference.png` (checks/README.md, "Reference pictures"), like `checks/uiFlameHistogram` and
+`checks/uiLineTable` for the other charts.
 
 ## 34. `FlameGraph` and `Histogram`
 

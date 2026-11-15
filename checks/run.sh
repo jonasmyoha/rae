@@ -29,8 +29,19 @@ for dir in checks/*/; do
     esac
   fi
   log="$TMP/$name.log"
+  # A check with a reference.png is a picture: it runs for RAE_HEADLESS_FRAMES=10 with a
+  # screenshot, and the screenshot must match the reference (compiler/tools/assert_bmp_diff.py:
+  # tolerant, and skipped at another display scale than the reference's). checks/references.sh
+  # writes the references.
+  picture=()
+  shot="$TMP/$name.bmp"
+  if [ -f "$dir/reference.png" ]; then
+    picture=(env RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$shot")
+  fi
   if perl -e 'alarm shift; exec @ARGV' "$TIMEOUT_S" \
-      "$RAE" run --target compiled --project "$dir" "$dir/Main.rae" > "$log" 2>&1; then
+      ${picture[@]+"${picture[@]}"} "$RAE" run --target compiled --project "$dir" "$dir/Main.rae" > "$log" 2>&1 \
+     && { [ ! -f "$dir/reference.png" ] || python3 compiler/tools/assert_bmp_diff.py "$shot" "$dir/reference.png" \
+            --skip-size-mismatch >> "$log" 2>&1; }; then
     echo "PASS: $name"
     PASSED=$((PASSED + 1))
   else

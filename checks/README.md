@@ -29,6 +29,9 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `uiLists` | list motion through the real pipeline, and `RAE_ANIMATION_HOLD` pictures of a ghost, a new row and a glide, or with `RAE_LIST_CHECK=sideways` a change of all the data (`docs/images/ui-lists/`) |
 | `uiPageBudget` | how a 30-row page transition with a new world holds its frame rate, by part, on a device (`RAE_IOS_HIGH_REFRESH=1 sh tools/ios/gen-ios.sh checks/uiPageBudget`, then `run-ios.sh`; the `[pageBudget]` lines are in the app's `Documents/rae.log`) |
 | `uiPageTransitions` | a page transition with a new world per screen, with a `SharedElement` bar that stays and a tile that morphs, through the real pipeline and `pageTransitionDraw`, and `RAE_ANIMATION_HOLD` pictures by `RAE_PAGE_KIND` and `RAE_PAGE_BACK`; `RAE_PAGE_DRAG` runs it from a held finger's share of the way (`docs/images/ui-pages/`) |
+| `uiTimeline` | the `Timeline` chart from a scene (three lanes, spans, marks, one selected), painted and compared with its `reference.png`; the rules are in case 1472 |
+| `uiFlameHistogram` | the `FlameGraph` and `Histogram` charts, painted and compared with its `reference.png`; the rules are in case 1473 |
+| `uiLineTable` | the `LineGraph` and `StatTable` charts, painted and compared with its `reference.png`; the rules are in case 1474 |
 | `uiZoom` | a `TransformFx` scale on a whole subtree, painted: a card with a stroke, a shadow, a gradient, text, an icon and a clipped list, at `RAE_UI_ZOOM`. Pictures: docs/images/ui-zoom |
 | `webPackageAsset` | a package's shader and declared file, natively and on a page (`compiler/tools/wasm_webgpu_smoke.sh` runs it in headless Chrome) |
 | `readRequest` | `webgpu/ReadRequest`: independent buffer reads (docs/webgpu-readback.md) |
@@ -53,6 +56,22 @@ make -C compiler checks                         # the same
 `make test-examples` (the visual examples gate) runs them too when it runs
 every example. The two `web*` checks are also built for the browser and run in
 headless Chrome by `compiler/tools/wasm_webgpu_smoke.sh`.
+
+## Reference pictures
+
+A check whose folder has a `reference.png` is also a picture test. `checks/run.sh`
+runs it for 10 frames (`RAE_HEADLESS_FRAMES=10`) with a screenshot
+(`RAE_GPU2D_SCREENSHOT`), and the check fails when more than 0.1% of the
+screenshot's pixels differ from the reference by more than 8 levels
+(`compiler/tools/assert_bmp_diff.py`). A screenshot of another size than the
+reference (another display scale) is not compared. The references are in Git
+LFS. After a change to how a chart is drawn, write them again and look at
+each one before committing it:
+
+```sh
+bash checks/references.sh uiTimeline uiFlameHistogram uiLineTable
+bash checks/references.sh                       # every check with a reference
+```
 
 A new check is a folder here with a `Main.rae` whose `main` returns 0 only
 when it passed. The devtools page lists the checks in their own Checks tab.

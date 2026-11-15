@@ -25,6 +25,8 @@ open ui/AnimationComponents
 open ui/Components
 open ui/Layer
 import Gpu2d
+import Gpu2dGestures
+import Math
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
@@ -70,6 +72,47 @@ type UiInput {
   # The finger SDL makes the pointer of (Gpu2d.touchId), -1 while none is
   # down: its press is the pointer's, not one more finger's
   pointerFingerId: Int = -1
+  # This frame's sideways scroll and trackpad pinch (scale change, 1 none), routed with the wheel
+  # to `wheelTarget` (a chart pans and zooms by them)
+  wheelX: Float = 0.0
+  pinch: Float = 1.0
+  # Two fingers on a touch screen (uiTwoFingerStep): whether two are down, how far their middle
+  # moved sideways this frame, how much their spread grew (1 none), and where their middle is
+  twoFingers: Bool = false
+  twoFingerShiftX: Float = 0.0
+  twoFingerScale: Float = 1.0
+  twoFingerX: Float = 0.0
+  twoFingerY: Float = 0.0
+  twoFingerSpread: Float = 0.0
+}
+
+# Two fingers this frame at (x0, y0) and (x1, y1) (`count` the fingers down): their middle's move
+# and their spread's change since the last frame they were both down
+func uiTwoFingerStep(
+  input: mod UiInput
+  count: view Int
+  x0: view Float
+  y0: view Float
+  x1: view Float
+  y1: view Float
+) {
+  input.twoFingerShiftX = 0.0
+  input.twoFingerScale = 1.0
+  if count < 2 {
+    input.twoFingers = false
+    ret
+  }
+  let middleX: Float = (x0 + x1) / 2.0
+  let middleY: Float = (y0 + y1) / 2.0
+  let spread: Float = Math.sqrt(x: (x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0))
+  if input.twoFingers and input.twoFingerSpread > 1.0 {
+    input.twoFingerShiftX = middleX - input.twoFingerX
+    input.twoFingerScale = spread / input.twoFingerSpread
+  }
+  input.twoFingers = true
+  input.twoFingerX = middleX
+  input.twoFingerY = middleY
+  input.twoFingerSpread = spread
 }
 
 func createUiInput() pub ret UiInput {
@@ -449,7 +492,7 @@ func routeUiWheel(
   input.wheel = wheel
   input.wheelTarget = noEntity()
   input.wheelBlocked = false
-  if wheel is not 0.0 {
+  if wheel is not 0.0 or input.wheelX is not 0.0 or input.pinch is not 1.0 {
     let route: UiWheelRoute = uiWheelRoute(
       world: world
       uiSystems: uiSystems
@@ -474,6 +517,28 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     pressed: Gpu2d.pointerPressed()
     released: Gpu2d.pointerReleased()
     kind: lastPointerKind()
+  }
+  input.wheelX = Gpu2dGestures.wheelMoveX()
+  input.pinch = Gpu2dGestures.pinchScale()
+  let fingers: Int = Gpu2d.touchCount()
+  if fingers >= 2 {
+    uiTwoFingerStep(
+      input: input
+      count: fingers
+      x0: Gpu2d.touchX(index: 0)
+      y0: Gpu2d.touchY(index: 0)
+      x1: Gpu2d.touchX(index: 1)
+      y1: Gpu2d.touchY(index: 1)
+    )
+  } else {
+    uiTwoFingerStep(
+      input: input
+      count: fingers
+      x0: 0.0
+      y0: 0.0
+      x1: 0.0
+      y1: 0.0
+    )
   }
   stepUiInput(
     input: input

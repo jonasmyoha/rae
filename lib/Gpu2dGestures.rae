@@ -1,0 +1,22 @@
+# Gpu2dGestures — the trackpad's gestures beside the wheel (Gpu2d.wheelMove): the sideways scroll
+# and the pinch, per frame, read by lib/ui's input (UiInput.wheelX, UiInput.pinch). Touch screens'
+# two fingers are read from Gpu2d's touches (ui/inputSystem uiTwoFingerStep).
+func nativeWheelMoveX() mainThread unsafe extern("rae_ext_Gpu2d_wheelMoveX") ret Float
+
+func nativePinchScale() mainThread unsafe extern("rae_ext_Gpu2d_pinchScale") ret Float
+
+# This frame's sideways scroll (a trackpad's two fingers moved sideways, a tilted wheel): positive
+# to the right
+func wheelMoveX() ret Float {
+  unsafe {
+    ret nativeWheelMoveX()
+  }
+}
+
+# This frame's pinch on a trackpad (or a touch screen where the system reports one): the product of
+# its scale changes, above 1 apart (zoom in), below 1 together, 1 when there was none
+func pinchScale() ret Float {
+  unsafe {
+    ret nativePinchScale()
+  }
+}

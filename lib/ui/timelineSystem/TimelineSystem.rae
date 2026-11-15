@@ -345,8 +345,9 @@ func timelineBoxOf(uiSystems: view UiSystems, entityId: view EntityId) ret opt T
 }
 
 # Once a frame after updateUiInput: every Timeline gets its state (empty until the app fills it),
-# the wheel over one zooms it about the pointer, a drag pans it, and a click selects the span under
-# the pointer (sending the Timeline's action). True when a view or a selection changed.
+# the wheel over one zooms it about the pointer, a trackpad's sideways scroll pans it and its pinch
+# zooms it, two fingers on a touch screen pan and zoom it, a drag pans it, and a click selects the
+# span under the pointer (sending the Timeline's action). True when a view or a selection changed.
 func timelineSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
   var changed: Bool = false
   loop var i: Int = 0, i < componentCount(this: world.timelines), ++i {
@@ -367,7 +368,38 @@ func timelineSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view U
         )
         changed = true
       }
-      if input.pointer.pressed and inside {
+      # a trackpad: two fingers sideways pan, a pinch zooms about the pointer
+      if input.wheelTarget is entityId and input.wheelX is not 0.0 {
+        timelinePan(state: state, pixels: -input.wheelX * 20.0, width: box.w)
+        changed = true
+      }
+      if input.wheelTarget is entityId and input.pinch is not 1.0 and input.pinch > 0.0 {
+        timelineZoom(
+          state: state
+          share: (input.pointer.x - box.x) / Math.max(a: 1.0, b: box.w)
+          factor: 1.0 / input.pinch
+        )
+        changed = true
+      }
+      # two fingers on a touch screen: their middle's move pans, their spread zooms about it (the
+      # first finger's drag does not pan as well)
+      let fingersInside: Bool = input.twoFingerX >= box.x and input.twoFingerX < box.x + box.w and input.twoFingerY >= box.y and input.twoFingerY < box.y + box.h
+      if input.twoFingers and fingersInside {
+        state.dragging = false
+        if input.twoFingerShiftX is not 0.0 {
+          timelinePan(state: state, pixels: input.twoFingerShiftX, width: box.w)
+          changed = true
+        }
+        if input.twoFingerScale is not 1.0 and input.twoFingerScale > 0.0 {
+          timelineZoom(
+            state: state
+            share: (input.twoFingerX - box.x) / Math.max(a: 1.0, b: box.w)
+            factor: 1.0 / input.twoFingerScale
+          )
+          changed = true
+        }
+      }
+      if input.pointer.pressed and inside and not input.twoFingers {
         state.dragging = true
         state.dragX = input.pointer.x
         state.dragViewStart = state.viewStart
