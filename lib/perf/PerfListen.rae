@@ -1,0 +1,181 @@
+# perf/PerfListen — the viewer's end of the live link (perf/PerfLive, docs/perf-tools-design.md
+# §5): a TCP listener that programs started with RAE_PERF_LIVE=<host>:<port> connect to. Each
+# connection is a source: its header (the program, its machine), its tables and the blocks of the
+# last `keepSeconds`, as a capture file (perfLiveSourceFile) the views read like a saved one.
+#
+# perfListenStep runs once a frame and never waits: it accepts new programs, reads what each sent
+# (the sockets do not block), decodes the whole messages and lets go of blocks older than the
+# window. A program that ends stays listed, with the blocks it sent.
+open net/Tcp
+open perf/Perf
+open perf/PerfFile
+open perf/PerfLive
+
+type PerfLiveSource {
+  socketId: SocketId
+  connected: Bool = true
+  # bytes received and not yet a whole message
+  bytes: List(UInt8)
+  header: opt PerfFileHeader = none
+  tables: PerfFileTables
+  blocks: List(PerfFileBlock)
+  received: Int = 0
+  # a block arrived since the views last read the source (perfLiveSourceTaken)
+  fresh: Bool = false
+}
+
+type PerfListener {
+  socketId: SocketId
+  port: Int
+  keepSeconds: Int = 10
+  sources: List(PerfLiveSource)
+}
+
+func emptyPerfTables() ret PerfFileTables {
+  ret PerfFileTables { names: {}, threads: {}, ruleBreakEntries: {}, ruleBreakDetails: {} }
+}
+
+# A listener on `host`:`port` (port 0: any free one, then read `port`); none when it cannot
+func perfListen(host: view String, port: view Int) ret opt PerfListener {
+  let result: SocketResult = tcpListen(host: host, port: port, backlog: 8)
+  if result.status is not NetStatus.ok {
+    ret none
+  }
+  var bound: Int = port
+  if let local: Int = socketLocalPort(socketId: result.socketId) {
+    bound = local
+  }
+  ret PerfListener { socketId: result.socketId, port: bound, sources: {} }
+}
+
+# Its whole messages into the source: the header, the tables, the blocks
+func perfLiveSourceRead(source: mod PerfLiveSource) {
+  loop let message: PerfLiveMessage in perfLiveTake(bytes: source.bytes) {
+    if message.kind is perfLiveHeader {
+      if let header: PerfFileHeader = PerfFileHeader.fromBinary(bytes: message.payload) {
+        source.header = header
+      }
+    } else if message.kind is perfLiveTables {
+      if let tables: PerfFileTables = PerfFileTables.fromBinary(bytes: message.payload) {
+        source.tables = tables
+      }
+    } else if let block: PerfFileBlock = perfLiveBlockOf(message: message) {
+      source.blocks.add(value: block)
+      source.received = source.received + 1
+      source.fresh = true
+    }
+  }
+}
+
+# The blocks that ended more than `seconds` before the newest let go
+func perfLiveSourceTrim(source: mod PerfLiveSource, seconds: view Int) {
+  var newest: Int = 0
+  loop let block: view PerfFileBlock in source.blocks {
+    if block.info.lastNs > newest {
+      newest = block.info.lastNs
+    }
+  }
+  let horizon: Int = newest - seconds * 1000000000
+  var kept: Int = 0
+  loop let block: view PerfFileBlock in source.blocks {
+    if block.info.lastNs >= horizon {
+      kept = kept + 1
+    }
+  }
+  if kept is source.blocks.length {
+    ret
+  }
+  var blocks: List(PerfFileBlock) = List.create(PerfFileBlock, cap: kept)
+  loop let block: view PerfFileBlock in source.blocks {
+    if block.info.lastNs >= horizon {
+      blocks.add(value: block)
+    }
+  }
+  source.blocks = blocks
+}
+
+# Once a frame: new programs accepted, every source read; true when anything arrived or changed
+func perfListenStep(listener: mod PerfListener) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < 8, ++i {
+    let accepted: SocketResult = tcpAccept(listenerSocketId: listener.socketId)
+    if accepted.status is not NetStatus.ok {
+      break
+    }
+    listener.sources.add(
+      value: PerfLiveSource {
+        socketId: accepted.socketId
+        bytes: {}
+        tables: emptyPerfTables()
+        blocks: {}
+      }
+    )
+    changed = true
+  }
+  loop var s: Int = 0, s < listener.sources.length, ++s {
+    if let source: mod PerfLiveSource = listener.sources.modAt(index: s) {
+      if source.connected {
+        let before: Int = source.received
+        loop var reads: Int = 0, reads < 64, ++reads {
+          let result: IoResult = socketRead(
+            socketId: source.socketId
+            bytes: source.bytes
+            maxBytes: 65536
+          )
+          if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+            source.connected = false
+            socketClose(socketId: source.socketId)
+            changed = true
+            break
+          }
+          if result.status is not NetStatus.ok {
+            break
+          }
+        }
+        perfLiveSourceRead(source: source)
+        perfLiveSourceTrim(source: source, seconds: listener.keepSeconds)
+        if source.received is not before {
+          changed = true
+        }
+      }
+    }
+  }
+  ret changed
+}
+
+# The source as a capture file: its header (or an empty one before it arrived), tables and blocks
+func perfLiveSourceFile(source: view PerfLiveSource) ret PerfFile {
+  var header: PerfFileHeader = {
+    format: perfFileFormat
+    program: ""
+    machine: ""
+    raeVersion: ""
+    startNs: 0
+    startEpochMs: 0
+  }
+  if let known: view PerfFileHeader = source.header {
+    header = known
+  }
+  ret PerfFile { header: header, tables: source.tables, blocks: source.blocks }
+}
+
+# The source's program and machine, as a list shows them
+func perfLiveSourceName(source: view PerfLiveSource) ret String {
+  if let header: view PerfFileHeader = source.header {
+    var program: String = header.program
+    if program.length() is 0 {
+      program = "a program"
+    }
+    ret "{program} on {header.machine}"
+  }
+  ret "a program (no header yet)"
+}
+
+func perfListenClose(listener: mod PerfListener) {
+  loop let source: view PerfLiveSource in listener.sources {
+    if source.connected {
+      socketClose(socketId: source.socketId)
+    }
+  }
+  socketClose(socketId: listener.socketId)
+}

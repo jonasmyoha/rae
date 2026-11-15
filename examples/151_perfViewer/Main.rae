@@ -11,6 +11,7 @@
 #   RAE_PERF_OPEN=capture.raeperf compiler/bin/rae run examples/151_perfViewer/Main.rae
 #   RAE_PERF_VIEW=timeline ...                                            # open on a view
 #   RAE_PERF_COMPARE=other.raeperf ...                                    # compare with another
+#   RAE_PERF_LISTEN=7470 RAE_PERF_FOLDER=captures ...                       # the Sources view
 #
 # A second capture (RAE_PERF_COMPARE, or the settings of an RAE_AB run's capture) shows in every
 # view beside the first, marked A and B, and in a ninth, Compare: every zone's change against its
@@ -27,6 +28,7 @@ open ecs/Entity
 open ecs/Schedule
 open perf/PerfFile
 open perf/PerfCapture
+open perf/PerfListen
 open ui/ChartComponents
 open ui/Components
 open ui/Ecs
@@ -47,6 +49,7 @@ open ui/timelineSystem/TimelineSystem
 open Gpu2dCanvas
 open Viewer
 open Charts
+open Sources
 
 const designW: Int = 1280
 
@@ -66,6 +69,7 @@ func viewKeys() ret List(String) {
     "memory"
     "systems"
     "compare"
+    "sources"
   }
 }
 
@@ -81,6 +85,7 @@ func viewNodeNames() ret List(String) {
     "Memory"
     "Systems"
     "Compare"
+    "Sources"
   }
 }
 
@@ -143,6 +148,23 @@ func main() ret Int {
   ret 1
 }
 
+# The summary lines and the notes for the captures shown
+func showTexts(world: mod UiWorld, viewer: view PerfViewer) {
+  setNodeText(world: world, nodeId: "Summary", value: summaryOf(viewer: viewer))
+  setNodeText(world: world, nodeId: "SummaryCompare", value: compareSummaryOf(viewer: viewer))
+  setNodeText(world: world, nodeId: "CompareNote", value: compareNoteOf(viewer: viewer))
+  setNodeText(world: world, nodeId: "AudioNote", value: audioNote(capture: viewer.capture))
+}
+
+# How long the loop may sleep: a tenth of a second while listening (a program's blocks arrive
+# without waking it), else half a second
+func listenHeartbeat(sources: view ViewerSources) ret Float {
+  if sources.listener is not none {
+    ret 0.1
+  }
+  ret 0.5
+}
+
 # The window and its loop, showing `viewer`'s capture
 func runViewer(viewer: mod PerfViewer) ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "151: Rae Perf")
@@ -166,10 +188,20 @@ func runViewer(viewer: mod PerfViewer) ret Int {
     ret 1
   }
   loadScene(world: world, uiSystems: uiSystems, scene: scene)
-  setNodeText(world: world, nodeId: "Summary", value: summaryOf(viewer: viewer))
-  setNodeText(world: world, nodeId: "SummaryCompare", value: compareSummaryOf(viewer: viewer))
-  setNodeText(world: world, nodeId: "CompareNote", value: compareNoteOf(viewer: viewer))
-  setNodeText(world: world, nodeId: "AudioNote", value: audioNote(capture: viewer.capture))
+  showTexts(world: world, viewer: viewer)
+  var folder: String = Sys.getEnv(name: "RAE_PERF_FOLDER")
+  if folder.length() is 0 {
+    folder = "{assets}"
+    folder = folder.sub(start: 0, len: folder.length() - 1)
+  }
+  var sources: ViewerSources = openSources(
+    listen: Sys.getEnv(name: "RAE_PERF_LISTEN")
+    folder: folder
+  )
+  sources.follow = Sys.getEnv(name: "RAE_PERF_FOLLOW") is "1"
+  # RAE_PERF_END_AFTER_LIVE=1: the viewer ends once the program it follows ended (the live check)
+  let endAfterLive: Bool = Sys.getEnv(name: "RAE_PERF_END_AFTER_LIVE") is "1"
+  setNodeText(world: world, nodeId: "SourcesNote", value: sourcesNote(sources: sources))
   var startView: String = Sys.getEnv(name: "RAE_PERF_VIEW")
   if startView.length() is 0 {
     startView = "frames"
@@ -190,6 +222,14 @@ func runViewer(viewer: mod PerfViewer) ret Int {
       }
     }
     changed = chartSystems(world: world, uiSystems: uiSystems, input: input) or changed
+    changed = sourcesFrame(world: world, viewer: viewer, sources: sources) or changed
+    if endAfterLive and followedEnded(viewer: viewer, sources: sources) and renderedOnce {
+      break
+    }
+    if viewer.opened {
+      viewer.opened = false
+      showTexts(world: world, viewer: viewer)
+    }
     if not viewer.filled {
       viewer.filled = fillCharts(world: world, viewer: viewer)
       changed = true
@@ -235,12 +275,16 @@ func runViewer(viewer: mod PerfViewer) ret Int {
         mouseDown: false
         pollWatcher: false
         frameSeconds: 0.016667
-        heartbeatSeconds: 0.5
+        heartbeatSeconds: listenHeartbeat(sources: sources)
       ))
     }
   }
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
+  log("[perfViewer] sources: {sourcesSummary(sources: sources)}")
+  if let listener: mod PerfListener = sources.listener {
+    perfListenClose(listener: listener)
+  }
   log(
     "[perfViewer] {viewer.shown}: {viewer.capture.frameStarts.length} frames, {viewer.capture.spans.length} spans, {viewer.capture.counters.length} counters, charts filled {viewer.filled}"
   )

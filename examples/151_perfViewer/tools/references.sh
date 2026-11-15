@@ -12,7 +12,7 @@ cd "$(dirname "$0")/../../.."
 RAE="${RAE_BIN:-compiler/bin/rae}"
 views=("$@")
 if [ ${#views[@]} -eq 0 ]; then
-  views=(frames timeline flame threads gpu audio memory systems compare)
+  views=(frames timeline flame threads gpu audio memory systems compare sources)
 fi
 TMP="$(mktemp -d -t rae_perfviewer_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
@@ -21,7 +21,7 @@ for view in "${views[@]}"; do
   if [ "$view" = compare ]; then
     capture="examples/151_perfViewer/assets/ab-walker.raeperf"
   fi
-  RAE_PERF_OPEN="$capture" RAE_PERF_VIEW="$view" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$TMP/$view.bmp" \
+  RAE_PERF_LISTEN=off RAE_PERF_OPEN="$capture" RAE_PERF_VIEW="$view" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$TMP/$view.bmp" \
     perl -e 'alarm shift; exec @ARGV' 180 "$RAE" run examples/151_perfViewer/Main.rae > "$TMP/$view.log" 2>&1 \
     || { echo "render of $view failed:"; tail -20 "$TMP/$view.log"; exit 1; }
   python3 compiler/tools/assert_bmp_diff.py --convert "$TMP/$view.bmp" "examples/151_perfViewer/references/$view.png"

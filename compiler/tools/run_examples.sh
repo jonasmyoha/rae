@@ -1974,7 +1974,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           # (references/<view>.png; tools/references.sh writes them), and the capture read whole
           # and the Compare view of the A/B sample (assets/ab-walker.raeperf: its baseline and ssao)
           PERF_OK=1
-          for PERF_VIEW in frames timeline flame threads gpu audio memory systems compare; do
+          for PERF_VIEW in frames timeline flame threads gpu audio memory systems compare sources; do
             SCREENSHOT="$TMP_OUT/perf-$PERF_VIEW.bmp"
             PERF_CAPTURE="examples/151_perfViewer/assets/walker.raeperf"
             PERF_LINE="$PERF_VIEW: 29 frames, 4318 spans, 64 counters, charts filled true"
@@ -1982,7 +1982,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
               PERF_CAPTURE="examples/151_perfViewer/assets/ab-walker.raeperf"
               PERF_LINE="compare: 205 frames, 32223 spans, 63 counters, charts filled true"
             fi
-            if ! (cd .. && RAE_PERF_OPEN="$PERF_CAPTURE" RAE_PERF_VIEW="$PERF_VIEW" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+            if ! (cd .. && RAE_PERF_LISTEN=off RAE_PERF_OPEN="$PERF_CAPTURE" RAE_PERF_VIEW="$PERF_VIEW" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render-$PERF_VIEW.log" 2>&1 \
                || ! grep -q "\[perfViewer\] $PERF_LINE" "$TMP_OUT/render-$PERF_VIEW.log" \
                || ! python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/151_perfViewer/references/$PERF_VIEW.png" \
@@ -1992,8 +1992,14 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
               cat "$TMP_OUT/render-$PERF_VIEW.log" "$TMP_OUT/diff-$PERF_VIEW.log" 2>/dev/null | tail -6 | sed 's/^/  /'
             fi
           done
+          # and a program streams into it (tools/liveCheck.sh: checks/perfHud with RAE_PERF_LIVE)
+          if ! (cd .. && bash examples/151_perfViewer/tools/liveCheck.sh "$TMP_OUT/app") > "$TMP_OUT/live.log" 2>&1; then
+            PERF_OK=0
+            echo "  live:"
+            tail -8 "$TMP_OUT/live.log" | sed 's/^/  /'
+          fi
           if [ "$PERF_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (eight views of the walker capture and the A/B capture's Compare view match their references)"
+            echo "PASS: $EXAMPLE_NAME (the views of the walker capture, the A/B capture's Compare view and the Sources list match their references; a program streamed into it live)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (perf viewer views)"

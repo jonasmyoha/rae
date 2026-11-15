@@ -1,0 +1,74 @@
+# perf/PerfListen, the viewer's end of the live link: a program's capture (lib/Profile with
+# startLive) streams to a listener on a free port; perfListenStep accepts it and reads its header,
+# tables and blocks without waiting; the source reads as a capture file whose spans are the
+# program's zones; the program's end marks the source ended; and a source keeps only the blocks of
+# its last seconds (perfLiveSourceTrim).
+import Profile
+open perf/PerfFile
+open perf/PerfCapture
+open perf/PerfListen
+
+func main() ret Int {
+  if var listener: PerfListener = perfListen(host: "127.0.0.1", port: 0) {
+    log("listening on a free port: {listener.port > 0}")
+    var profiler: Profiler = Profile.createProfiler()
+    Profile.startCapture(profiler: profiler, seconds: 600.0, outPath: "/tmp/rae_case_1479.json")
+    let linked: Bool = Profile.startLive(profiler: profiler, host: "127.0.0.1", port: listener.port)
+    loop var frame: Int = 0, frame < 20, ++frame {
+      Profile.zoneBegin(profiler: profiler, name: "frame")
+      Profile.zoneBegin(profiler: profiler, name: "update")
+      sleep(ms: 3)
+      Profile.zoneEnd(profiler: profiler, name: "update")
+      sleep(ms: 3)
+      Profile.zoneEnd(profiler: profiler, name: "frame")
+      let unusedTick: Bool = Profile.tick(profiler: profiler)
+      let unusedChanged: Bool = perfListenStep(listener: listener)
+    }
+    Profile.profileDiscard(profiler: profiler)
+    loop var i: Int = 0, i < 300, ++i {
+      let unusedChanged: Bool = perfListenStep(listener: listener)
+      var ended: Bool = false
+      if let source: view PerfLiveSource = listener.sources.viewAt(index: 0) {
+        ended = not source.connected
+      }
+      if ended {
+        break
+      }
+      sleep(ms: 5)
+    }
+    log("linked {linked}, sources {listener.sources.length}")
+    if let source: mod PerfLiveSource = listener.sources.modAt(index: 0) {
+      let capture: PerfCapture = perfCaptureOf(file: perfLiveSourceFile(source: source))
+      var frames: Int = 0
+      var updates: Int = 0
+      loop let span: view PerfSpan in capture.spans {
+        let name: String = perfCaptureName(capture: capture, nameId: span.nameId)
+        if name is "frame" {
+          frames = frames + 1
+        } else if name is "update" and span.depth is 1 {
+          updates = updates + 1
+        }
+      }
+      log(
+        "source: header {source.header is not none}, ended {not source.connected}, blocks {source.received > 0}"
+      )
+      log(
+        "as a capture: {frames} frame zones, {updates} update zones inside them, lanes named {capture.lanes.length > 0}"
+      )
+      # a block from 20 s later: the window keeps the last 10 s, so the program's go
+      var late: PerfFileBlock = source.blocks.copyAtDefault(index: source.blocks.length - 1)
+      late.info.firstNs = late.info.firstNs + 20000000000
+      late.info.lastNs = late.info.lastNs + 20000000000
+      let before: Int = source.blocks.length
+      source.blocks.add(value: late)
+      perfLiveSourceTrim(source: source, seconds: 10)
+      log(
+        "a block 20 s later: {before > 0} blocks before it; after the trim only it is kept: {source.blocks.length is 1}"
+      )
+    }
+    perfListenClose(listener: listener)
+    ret 0
+  }
+  log("FAIL: could not listen")
+  ret 1
+}

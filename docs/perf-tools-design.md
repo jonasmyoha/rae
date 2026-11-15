@@ -517,6 +517,14 @@ frame to frame can still have moved for certain over a hundred frames. Case 1478
 the Compare view of the A/B sample (`assets/ab-walker.raeperf`, 143 with `RAE_AB="ssao"`,
 `RAE_AB_HOLD_SECONDS=3`).
 
+Rae 0.3.150 (step 12c): the viewer's Sources tab. `perf/PerfListen` is the live link's other end:
+a TCP listener (port 7470, `RAE_PERF_LISTEN`) that accepts programs started with `RAE_PERF_LIVE`,
+reads their header, tables and blocks once a frame without waiting, keeps each one's last 10 s and
+reads it as a capture file (case 1479). The tab lists them (program, machine, blocks received,
+ended or not) above the `.raeperf` files of a folder (`RAE_PERF_FOLDER`); a click opens a row, and
+a live one's views are filled again twice a second as its blocks arrive. The gate runs
+`examples/151_perfViewer/tools/liveCheck.sh`: `checks/perfHud` streams into a viewer on a free port.
+
 ### 8.3 Headless reports and budgets
 
 - **The report:** `rae perf report capture.raeperf` (or a Rae program under `tools/`) prints the

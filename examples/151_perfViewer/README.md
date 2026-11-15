@@ -13,6 +13,22 @@ RAE_PERF_OPEN=examples/151_perfViewer/assets/ab-walker.raeperf RAE_PERF_VIEW=com
   compiler/bin/rae run examples/151_perfViewer/Main.rae                          # an RAE_AB run
 ```
 
+## Sources: live programs and folders
+
+The Sources tab lists what there is to look at; a click on a row opens it.
+
+- **Live programs.** The viewer listens on port 7470 (`RAE_PERF_LISTEN=<port>`, `0` for any free
+  one, `off` for none). A program started with `RAE_PROFILE=1 RAE_PERF_LIVE=<this machine>:7470`
+  (or with its perf HUD open) streams its capture there (lib/perf/PerfLive); each is a row with its
+  program, its machine and the blocks it sent, and stays listed when it ends. Opened, its views
+  show its last 10 s and follow it twice a second as blocks arrive (lib/perf/PerfListen, case
+  1479). `RAE_PERF_FOLLOW=1` opens the first program to stream by itself.
+- **A folder.** The `.raeperf` files of `RAE_PERF_FOLDER` (a profile run's captures; this
+  example's samples by default), by name.
+
+`tools/liveCheck.sh` checks the live path: the viewer listens on a free port, `checks/perfHud`
+streams into it, and the viewer's last lines must name that program and the views filled from it.
+
 ## Comparing two captures
 
 With a second capture every view shows both, each series, lane, flame root and row marked " A" or
@@ -63,10 +79,10 @@ gate expects in `compiler/tools/run_examples.sh`.
 ## The gate
 
 `RAE_EXAMPLE_FILTER=151_perfViewer make -C compiler test-examples` renders each view of the
-walker sample, and the Compare view of the A/B sample, for 10 headless frames and compares each
-with `references/<view>.png`.
+walker sample, the Compare view of the A/B sample and the Sources list (not listening), for 10
+headless frames, compares each with `references/<view>.png`, and runs `tools/liveCheck.sh`.
 
 ## Not yet
 
-Live programs (`RAE_PERF_LIVE`), folders of captures, the threads' critical path, the audio render plan's nodes and an iPad run are queued in
+The threads' critical path, the audio render plan's nodes and an iPad run are queued in
 QUEUE.md.

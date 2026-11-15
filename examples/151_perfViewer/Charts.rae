@@ -12,7 +12,10 @@ open perf/PerfCapture
 open perf/PerfSplit
 open ui/ChartComponents
 open ui/Ecs
+open ui/flameGraphSystem/FlameGraphSystem
+open ui/histogramSystem/HistogramSystem
 open ui/lineGraphSystem/LineGraphSystem
+open ui/statTableSystem/StatTableSystem
 open ui/timelineSystem/TimelineSystem
 open Viewer
 open Compare
@@ -37,6 +40,11 @@ type PerfViewer {
   }
   labelA: String = ""
   labelB: String = ""
+  # the live source shown (Sources.rae; -1 none) and when its views were last filled
+  liveIndex: Int = -1
+  liveFilledNs: Int = 0
+  # a capture was opened from the Sources view since the texts were last written
+  opened: Bool = false
 }
 
 # The capture at `path`, and the one to compare it with: the file at `comparePath`, or else the
@@ -325,5 +333,64 @@ func showSpan(world: mod UiWorld, end: view Int) {
       start: 0
       end: end
     )
+  }
+}
+
+# `file` shown in place of the captures shown (a file picked, a live source's last seconds): every
+# chart emptied and filled again, alone (no second capture)
+func showCapture(
+  world: mod UiWorld
+  viewer: mod PerfViewer
+  file: view PerfFile
+  path: view String
+) {
+  viewer.path = "{path}"
+  viewer.header = file.header
+  viewer.capture = perfCaptureOf(file: file)
+  viewer.compare = none
+  viewer.comparePath = ""
+  viewer.labelA = ""
+  viewer.labelB = ""
+  resetCharts(world: world)
+  viewer.filled = fillCharts(world: world, viewer: viewer)
+}
+
+# Every chart's state empty again
+func resetCharts(world: mod UiWorld) {
+  loop let nodeId: view String in List(String) {
+    "FrameGraph"
+    "GpuGraph"
+    "AudioGraph"
+    "MemoryGraph"
+    "AllocationGraph"
+  } {
+    let graph: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+    if componentHas(this: world.lineGraphStates, entityId: graph) {
+      componentSet(this: world.lineGraphStates, entityId: graph, data: createLineGraphState())
+    }
+  }
+  loop let nodeId: view String in List(String) {
+    "ThreadTable"
+    "GpuTable"
+    "AudioTable"
+    "SystemTable"
+    "CompareTable"
+  } {
+    let table: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+    if componentHas(this: world.statTableStates, entityId: table) {
+      componentSet(this: world.statTableStates, entityId: table, data: createStatTableState())
+    }
+  }
+  let spread: EntityId = nodeEntityFor(world: world, nodeId: "FrameSpread")
+  if componentHas(this: world.histogramStates, entityId: spread) {
+    componentSet(this: world.histogramStates, entityId: spread, data: createHistogramState())
+  }
+  let timeline: EntityId = nodeEntityFor(world: world, nodeId: "Timeline")
+  if componentHas(this: world.timelineStates, entityId: timeline) {
+    componentSet(this: world.timelineStates, entityId: timeline, data: createTimelineState())
+  }
+  let flame: EntityId = nodeEntityFor(world: world, nodeId: "Flame")
+  if componentHas(this: world.flameGraphStates, entityId: flame) {
+    componentSet(this: world.flameGraphStates, entityId: flame, data: createFlameGraphState())
   }
 }
