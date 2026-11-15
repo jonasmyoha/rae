@@ -6,10 +6,12 @@
 #   - a three-certificate chain made here (root -> intermediate -> leaf) verifies, and fails with
 #     one byte of the leaf changed, with its signature changed, at a time outside it, against
 #     another pinned root, and when the intermediate is not a CA;
-#   - Apple Root CA - G3 (appleRootCaG3.hex) parses: its name, P-384 key, dates and CA flag.
+#   - Apple Root CA - G3 (appleRootCaG3.hex) parses: its name, P-384 key, dates and CA flag, and
+#     its own signature verifies.
 import String
 open crypto/CryptoBytes
 open crypto/Der
+open crypto/Ecdsa
 open crypto/P256
 open crypto/Sha256
 open crypto/X509
@@ -47,7 +49,7 @@ func rfc6979() {
       )}"
     )
     var roundTrip: Bool = false
-    if let back: List(UInt8) = ecdsaSignatureFromDer(der: ecdsaSignatureToDer(signature: sample)) {
+    if let back: List(UInt8) = p256SignatureFromDer(der: ecdsaSignatureToDer(signature: sample)) {
       roundTrip = bytesEqual(a: back, b: sample)
     }
     log("DER round trip: {roundTrip}")
@@ -239,7 +241,8 @@ func appleRoot() {
     log(
       "  valid {root.notBefore} to {root.notAfter}, CA {root.isCa}, path length {root.pathLength}, {root.extensions.length} extensions"
     )
-    log("  checked against itself: {x509SignedBy(certificate: root, issuer: root)}")
+    let why: String = x509SignedBy(certificate: root, issuer: root)
+    log("  signs itself (P-384, SHA-384): {why.length() is 0} {why}")
   } else {
     log("  does not parse")
   }

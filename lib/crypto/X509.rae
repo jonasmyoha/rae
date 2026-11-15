@@ -10,13 +10,17 @@
 # not: revocation, name constraints, policies, and an app's own marker extensions (`extensions`
 # holds them, for the app to check).
 #
-# Signatures: ECDSA with SHA-256 over a P-256 key (crypto/P256). A link signed another way
-# (ECDSA with SHA-384 or a P-384 key, Apple's own CA certificates) is refused with that reason.
+# Signatures: ECDSA with SHA-256 or SHA-384 over a P-256 or P-384 key (crypto/P256, crypto/P384;
+# Apple's own CA certificates are P-384 keys signing with SHA-384). A link signed another way (RSA,
+# another curve) is refused with that reason.
 import String
 open crypto/CryptoBytes
 open crypto/Der
+open crypto/Ecdsa
 open crypto/P256
+open crypto/P384
 open crypto/Sha256
+open crypto/Sha512
 
 const x509EcdsaSha256: String = "1.2.840.10045.4.3.2"
 
@@ -362,12 +366,24 @@ func x509SignedBy(certificate: view X509Certificate, issuer: view X509Certificat
   if issuer.publicKeyAlgorithm is not x509EcPublicKey {
     ret "the issuer's key is not an EC key"
   }
-  if issuer.publicKeyCurve is not x509CurveP256 or certificate.signatureAlgorithm is not x509EcdsaSha256 {
-    ret "signed with {certificate.signatureAlgorithm} by a {issuer.publicKeyCurve} key: only ECDSA with SHA-256 on P-256 is checked"
+  var hash: List(UInt8) = {}
+  if certificate.signatureAlgorithm is x509EcdsaSha256 {
+    hash = sha256(bytes: certificate.tbs)
+  } else if certificate.signatureAlgorithm is x509EcdsaSha384 {
+    hash = sha384(bytes: certificate.tbs)
+  } else {
+    ret "signed with {certificate.signatureAlgorithm}: only ECDSA with SHA-256 or SHA-384 is checked"
   }
-  if not p256VerifyDer(
+  var curve: EcCurve = p256Curve()
+  if issuer.publicKeyCurve is x509CurveP384 {
+    curve = p384Curve()
+  } else if issuer.publicKeyCurve is not x509CurveP256 {
+    ret "the issuer's key is on {issuer.publicKeyCurve}: only P-256 and P-384 are checked"
+  }
+  if not ecdsaVerifyDer(
+    curve: curve
     publicKey: issuer.publicKey
-    hash: sha256(bytes: certificate.tbs)
+    hash: hash
     signature: certificate.signature
   ) {
     ret "the signature does not verify"

@@ -1,0 +1,69 @@
+# crypto/P384 — ECDSA on NIST P-384 (secp384r1), in Rae (crypto/Ecdsa's arithmetic, the curve's
+# constants from SEC 2 / FIPS 186-4): what verifies the certificates of a CA with a P-384 key (Apple
+# Root CA - G3 and its intermediates sign with ECDSA and SHA-384), and signs for tests. ES384 is
+# SHA-384 and the 96-byte r || s form.
+open crypto/Ecdsa
+open crypto/Sha512
+
+func p384Curve() ret EcCurve {
+  ret ecCurve(
+    p: "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"
+    n: "ffffffffffffffffffffffffffffffffffffffffffffffffc7634d81f4372ddf581a0db248b0a77aecec196accc52973"
+    b: "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef"
+    gx: "aa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7"
+    gy: "3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f"
+    size: 48
+  )
+}
+
+# Whether `signature` (96 bytes r || s) signs `hash` for `publicKey` (97 bytes 04 x y, or 96)
+func p384Verify(
+  publicKey: view List(UInt8)
+  hash: view List(UInt8)
+  signature: view List(UInt8)
+) ret Bool {
+  ret ecdsaVerify(
+    curve: p384Curve()
+    publicKey: publicKey
+    hash: hash
+    signature: signature
+  )
+}
+
+# The public key (97 bytes, 0x04 || x || y) of a private key (48 bytes, 1 .. n-1); none otherwise
+func p384PublicKey(privateKey: view List(UInt8)) ret opt List(UInt8) {
+  ret ecdsaPublicKey(curve: p384Curve(), privateKey: privateKey)
+}
+
+# The signature (96 bytes r || s) of `hash` with `privateKey` (48 bytes), its nonce RFC 6979's (HMAC
+# over the hash's function: SHA-384 for a 48-byte hash)
+func p384Sign(privateKey: view List(UInt8), hash: view List(UInt8)) ret List(UInt8) {
+  ret ecdsaSign(curve: p384Curve(), privateKey: privateKey, hash: hash)
+}
+
+# ES384 (JWS): SHA-384 of the message, signed or verified, the signature 96 bytes r || s
+func es384Sign(privateKey: view List(UInt8), message: view List(UInt8)) ret List(UInt8) {
+  ret p384Sign(privateKey: privateKey, hash: sha384(bytes: message))
+}
+
+func es384Verify(
+  publicKey: view List(UInt8)
+  message: view List(UInt8)
+  signature: view List(UInt8)
+) ret Bool {
+  ret p384Verify(publicKey: publicKey, hash: sha384(bytes: message), signature: signature)
+}
+
+# p384Verify with a DER signature
+func p384VerifyDer(
+  publicKey: view List(UInt8)
+  hash: view List(UInt8)
+  signature: view List(UInt8)
+) ret Bool {
+  ret ecdsaVerifyDer(
+    curve: p384Curve()
+    publicKey: publicKey
+    hash: hash
+    signature: signature
+  )
+}

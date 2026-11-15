@@ -1,0 +1,555 @@
+# crypto/Ecdsa — ECDSA over a short Weierstrass curve with a = -3 (NIST P-256 and P-384, crypto/P256
+# and crypto/P384), in Rae: the curve arithmetic, verifying, and signing with RFC 6979's
+# deterministic nonce. A curve is its field and group order (crypto/BigMod's Montgomery arithmetic),
+# b and the generator, and its size in bytes.
+#
+# A point is projective (X : Y : Z), the point at infinity (0 : 1 : 0). Addition is Renes, Costello
+# and Batina's complete formula for a = -3 (2015, algorithm 4): one formula for every pair of
+# points, doubling and infinity included, so no branch depends on a point. A secret scalar (a
+# private key, a nonce) multiplies with a Montgomery ladder whose two points swap with a mask; a
+# public one (verifying) with plain double-and-add.
+import Math
+open crypto/BigMod
+open crypto/CryptoBytes
+open crypto/CryptoRandom
+open crypto/Der
+open crypto/Sha256
+open crypto/Sha512
+
+type EcCurve {
+  field: BigModulus
+  order: BigModulus
+  # b, and the generator, in Montgomery form
+  b: List(Int)
+  gx: List(Int)
+  gy: List(Int)
+  # bytes in a coordinate and a scalar, and limbs in a number
+  size: Int
+  limbs: Int
+}
+
+type EcPoint {
+  x: List(Int)
+  y: List(Int)
+  z: List(Int)
+}
+
+func ecHex(text: view String) ret List(UInt8) {
+  if let bytes: List(UInt8) = bytesOfHex(hex: text) {
+    ret bytes
+  }
+  ret List(UInt8) {}
+}
+
+# A curve from its constants as hex (big-endian): p, n, b and the generator
+func ecCurve(
+  p: view String
+  n: view String
+  b: view String
+  gx: view String
+  gy: view String
+  size: view Int
+) ret EcCurve {
+  # 24-bit limbs, enough for the size's bits
+  let limbs: Int = (size * 8 + 23) / 24
+  let field: BigModulus = bigModulus(bytes: ecHex(text: p), limbs: limbs)
+  let order: BigModulus = bigModulus(bytes: ecHex(text: n), limbs: limbs)
+  ret EcCurve {
+    field: field
+    order: order
+    b: montIn(m: field, value: bigFromBytes(bytes: ecHex(text: b), limbs: limbs))
+    gx: montIn(m: field, value: bigFromBytes(bytes: ecHex(text: gx), limbs: limbs))
+    gy: montIn(m: field, value: bigFromBytes(bytes: ecHex(text: gy), limbs: limbs))
+    size: size
+    limbs: limbs
+  }
+}
+
+func ecInfinity(curve: view EcCurve) ret EcPoint {
+  ret EcPoint { x: bigZero(limbs: curve.limbs), y: curve.field.one, z: bigZero(limbs: curve.limbs) }
+}
+
+func ecGenerator(curve: view EcCurve) ret EcPoint {
+  ret EcPoint { x: curve.gx, y: curve.gy, z: curve.field.one }
+}
+
+# p + q, for any two points (Renes, Costello, Batina 2015, algorithm 4, a = -3)
+func ecAdd(curve: view EcCurve, p: view EcPoint, q: view EcPoint) ret EcPoint {
+  let f: view BigModulus = curve.field
+  var t0: List(Int) = montMul(m: f, a: p.x, b: q.x)
+  var t1: List(Int) = montMul(m: f, a: p.y, b: q.y)
+  var t2: List(Int) = montMul(m: f, a: p.z, b: q.z)
+  var t3: List(Int) = bigAddMod(m: f, a: p.x, b: p.y)
+  var t4: List(Int) = bigAddMod(m: f, a: q.x, b: q.y)
+  t3 = montMul(m: f, a: t3, b: t4)
+  t4 = bigAddMod(m: f, a: t0, b: t1)
+  t3 = bigSubMod(m: f, a: t3, b: t4)
+  t4 = bigAddMod(m: f, a: p.y, b: p.z)
+  var x3: List(Int) = bigAddMod(m: f, a: q.y, b: q.z)
+  t4 = montMul(m: f, a: t4, b: x3)
+  x3 = bigAddMod(m: f, a: t1, b: t2)
+  t4 = bigSubMod(m: f, a: t4, b: x3)
+  x3 = bigAddMod(m: f, a: p.x, b: p.z)
+  var y3: List(Int) = bigAddMod(m: f, a: q.x, b: q.z)
+  x3 = montMul(m: f, a: x3, b: y3)
+  y3 = bigAddMod(m: f, a: t0, b: t2)
+  y3 = bigSubMod(m: f, a: x3, b: y3)
+  var z3: List(Int) = montMul(m: f, a: curve.b, b: t2)
+  x3 = bigSubMod(m: f, a: y3, b: z3)
+  z3 = bigAddMod(m: f, a: x3, b: x3)
+  x3 = bigAddMod(m: f, a: x3, b: z3)
+  z3 = bigSubMod(m: f, a: t1, b: x3)
+  x3 = bigAddMod(m: f, a: t1, b: x3)
+  y3 = montMul(m: f, a: curve.b, b: y3)
+  t1 = bigAddMod(m: f, a: t2, b: t2)
+  t2 = bigAddMod(m: f, a: t1, b: t2)
+  y3 = bigSubMod(m: f, a: y3, b: t2)
+  y3 = bigSubMod(m: f, a: y3, b: t0)
+  t1 = bigAddMod(m: f, a: y3, b: y3)
+  y3 = bigAddMod(m: f, a: t1, b: y3)
+  t1 = bigAddMod(m: f, a: t0, b: t0)
+  t0 = bigAddMod(m: f, a: t1, b: t0)
+  t0 = bigSubMod(m: f, a: t0, b: t2)
+  t1 = montMul(m: f, a: t4, b: y3)
+  t2 = montMul(m: f, a: t0, b: y3)
+  y3 = montMul(m: f, a: x3, b: z3)
+  y3 = bigAddMod(m: f, a: y3, b: t2)
+  x3 = montMul(m: f, a: x3, b: t3)
+  x3 = bigSubMod(m: f, a: x3, b: t1)
+  z3 = montMul(m: f, a: t4, b: z3)
+  t1 = montMul(m: f, a: t3, b: t0)
+  z3 = bigAddMod(m: f, a: z3, b: t1)
+  ret EcPoint { x: x3, y: y3, z: z3 }
+}
+
+# `mask` all ones picks a, zero picks b
+func ecSelect(mask: view Int, a: view EcPoint, b: view EcPoint) ret EcPoint {
+  ret EcPoint {
+    x: bigSelect(mask: mask, a: a.x, b: b.x)
+    y: bigSelect(mask: mask, a: a.y, b: b.y)
+    z: bigSelect(mask: mask, a: a.z, b: b.z)
+  }
+}
+
+# scalar * point for a SECRET scalar (curve.size big-endian bytes): a Montgomery ladder over all
+# its bits,
+# the same additions whatever the bits are, the two points swapped with a mask
+func ecMultiplySecret(
+  curve: view EcCurve
+  scalar: view List(UInt8)
+  point: view EcPoint
+) ret EcPoint {
+  var low: EcPoint = ecInfinity(curve: curve)
+  var high: EcPoint = point
+  loop var i: Int = 0, i < curve.size, ++i {
+    let byte: Int = scalar.copyAtDefault(index: i) as Int
+    loop var bit: Int = 7, bit >= 0, --bit {
+      let mask: Int = -((byte shr bit) bitand 1)
+      let first: EcPoint = ecSelect(mask: mask, a: high, b: low)
+      let second: EcPoint = ecSelect(mask: mask, a: low, b: high)
+      let sum: EcPoint = ecAdd(curve: curve, p: first, q: second)
+      let doubled: EcPoint = ecAdd(curve: curve, p: first, q: first)
+      low = ecSelect(mask: mask, a: sum, b: doubled)
+      high = ecSelect(mask: mask, a: doubled, b: sum)
+    }
+  }
+  ret low
+}
+
+# a * G + b * point for PUBLIC scalars (verifying): double-and-add over both at once
+func ecMultiplyPublicTwo(
+  curve: view EcCurve
+  a: view List(UInt8)
+  b: view List(UInt8)
+  point: view EcPoint
+) ret EcPoint {
+  let generator: EcPoint = ecGenerator(curve: curve)
+  let both: EcPoint = ecAdd(curve: curve, p: generator, q: point)
+  var result: EcPoint = ecInfinity(curve: curve)
+  loop var i: Int = 0, i < curve.size, ++i {
+    let byteA: Int = a.copyAtDefault(index: i) as Int
+    let byteB: Int = b.copyAtDefault(index: i) as Int
+    loop var bit: Int = 7, bit >= 0, --bit {
+      result = ecAdd(curve: curve, p: result, q: result)
+      let bitA: Int = (byteA shr bit) bitand 1
+      let bitB: Int = (byteB shr bit) bitand 1
+      if bitA is 1 and bitB is 1 {
+        result = ecAdd(curve: curve, p: result, q: both)
+      } else if bitA is 1 {
+        result = ecAdd(curve: curve, p: result, q: generator)
+      } else if bitB is 1 {
+        result = ecAdd(curve: curve, p: result, q: point)
+      }
+    }
+  }
+  ret result
+}
+
+# The point's affine x and y as curve.size-byte strings; none for the point at infinity
+func ecAffine(curve: view EcCurve, point: view EcPoint) ret opt List(UInt8) {
+  if bigIsZero(value: point.z) {
+    ret none
+  }
+  let inverse: List(Int) = montInverse(m: curve.field, value: point.z)
+  let x: List(Int) = montOut(m: curve.field, value: montMul(m: curve.field, a: point.x, b: inverse))
+  let y: List(Int) = montOut(m: curve.field, value: montMul(m: curve.field, a: point.y, b: inverse))
+  var bytes: List(UInt8) = bigToBytes(value: x, byteCount: curve.size)
+  loop let byte: UInt8 in bigToBytes(value: y, byteCount: curve.size) {
+    bytes.add(value: byte)
+  }
+  ret bytes
+}
+
+# A public key (0x04 || x || y, or x || y) as a point on the curve; none when
+# it is not one (a coordinate past p, or not on the curve)
+func ecPointFromPublicKey(curve: view EcCurve, publicKey: view List(UInt8)) ret opt EcPoint {
+  var offset: Int = 0
+  if publicKey.length is curve.size * 2 + 1 and (publicKey.copyAtDefault(index: 0) as Int) is 4 {
+    offset = 1
+  } else if publicKey.length is not curve.size * 2 {
+    ret none
+  }
+  var xBytes: List(UInt8) = {}
+  var yBytes: List(UInt8) = {}
+  loop var i: Int = 0, i < curve.size, ++i {
+    xBytes.add(value: publicKey.copyAtDefault(index: offset + i))
+    yBytes.add(value: publicKey.copyAtDefault(index: offset + curve.size + i))
+  }
+  let x: List(Int) = bigFromBytes(bytes: xBytes, limbs: curve.limbs)
+  let y: List(Int) = bigFromBytes(bytes: yBytes, limbs: curve.limbs)
+  if not bigLess(a: x, b: curve.field.modulus) or not bigLess(a: y, b: curve.field.modulus) {
+    ret none
+  }
+  let f: view BigModulus = curve.field
+  let mx: List(Int) = montIn(m: f, value: x)
+  let my: List(Int) = montIn(m: f, value: y)
+  # y^2 = x^3 - 3x + b
+  let left: List(Int) = montMul(m: f, a: my, b: my)
+  let threeX: List(Int) = bigAddMod(m: f, a: bigAddMod(m: f, a: mx, b: mx), b: mx)
+  let right: List(Int) = bigAddMod(
+    m: f
+    a: bigSubMod(m: f, a: montMul(m: f, a: montMul(m: f, a: mx, b: mx), b: mx), b: threeX)
+    b: curve.b
+  )
+  if not bigEqual(a: left, b: right) {
+    ret none
+  }
+  ret EcPoint { x: mx, y: my, z: f.one }
+}
+
+# The hash's leftmost bits (as many as the order has) as a number below n
+func ecHashNumber(curve: view EcCurve, hash: view List(UInt8)) ret List(Int) {
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < Math.min(a: curve.size, b: hash.length), ++i {
+    bytes.add(value: hash.copyAtDefault(index: i))
+  }
+  let number: List(Int) = bigFromBytes(bytes: bytes, limbs: curve.limbs)
+  ret bigReduceOnce(m: curve.order, value: number, high: 0)
+}
+
+# A scalar from curve.size bytes when it is in 1 .. n-1
+func ecScalar(curve: view EcCurve, bytes: view List(UInt8)) ret opt List(Int) {
+  if bytes.length is not curve.size {
+    ret none
+  }
+  let value: List(Int) = bigFromBytes(bytes: bytes, limbs: curve.limbs)
+  if bigIsZero(value: value) or not bigLess(a: value, b: curve.order.modulus) {
+    ret none
+  }
+  ret value
+}
+
+# Whether curve.size bytes are a scalar in 1 .. n-1
+func ecInRange(curve: view EcCurve, bytes: view List(UInt8)) ret Bool {
+  if let unusedValue: List(Int) = ecScalar(curve: curve, bytes: bytes) {
+    ret true
+  }
+  ret false
+}
+
+# The first `count` bytes of `bytes` from `start`
+func ecPart(bytes: view List(UInt8), start: view Int, count: view Int) ret List(UInt8) {
+  var part: List(UInt8) = List.create(UInt8, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    part.add(value: bytes.copyAtDefault(index: start + i))
+  }
+  ret part
+}
+
+func ecConcat(a: view List(UInt8), b: view List(UInt8)) ret List(UInt8) {
+  var joined: List(UInt8) = List.create(UInt8, cap: a.length + b.length)
+  loop let byte: UInt8 in a {
+    joined.add(value: byte)
+  }
+  loop let byte: UInt8 in b {
+    joined.add(value: byte)
+  }
+  ret joined
+}
+
+# Whether `signature` (r || s, the curve's size each) signs `hash` for `publicKey`
+func ecdsaVerify(
+  curve: view EcCurve
+  publicKey: view List(UInt8)
+  hash: view List(UInt8)
+  signature: view List(UInt8)
+) ret Bool {
+  if signature.length is not curve.size * 2 {
+    ret false
+  }
+  var r: List(Int) = {}
+  var s: List(Int) = {}
+  if let value: List(Int) = ecScalar(
+    curve: curve
+    bytes: ecPart(bytes: signature, start: 0, count: curve.size)
+  ) {
+    r = value
+  } else {
+    ret false
+  }
+  if let value: List(Int) = ecScalar(
+    curve: curve
+    bytes: ecPart(bytes: signature, start: curve.size, count: curve.size)
+  ) {
+    s = value
+  } else {
+    ret false
+  }
+  var point: EcPoint = ecInfinity(curve: curve)
+  if let found: EcPoint = ecPointFromPublicKey(curve: curve, publicKey: publicKey) {
+    point = found
+  } else {
+    ret false
+  }
+  let order: view BigModulus = curve.order
+  let z: List(Int) = ecHashNumber(curve: curve, hash: hash)
+  let w: List(Int) = montInverse(m: order, value: montIn(m: order, value: s))
+  let u1: List(Int) = montOut(
+    m: order
+    value: montMul(m: order, a: montIn(m: order, value: z), b: w)
+  )
+  let u2: List(Int) = montOut(
+    m: order
+    value: montMul(m: order, a: montIn(m: order, value: r), b: w)
+  )
+  let sum: EcPoint = ecMultiplyPublicTwo(
+    curve: curve
+    a: bigToBytes(value: u1, byteCount: curve.size)
+    b: bigToBytes(value: u2, byteCount: curve.size)
+    point: point
+  )
+  if let affine: List(UInt8) = ecAffine(curve: curve, point: sum) {
+    let x: List(Int) = bigFromBytes(
+      bytes: ecPart(bytes: affine, start: 0, count: curve.size)
+      limbs: curve.limbs
+    )
+    ret bigEqual(a: bigReduceOnce(m: order, value: x, high: 0), b: r)
+  }
+  ret false
+}
+
+# The public key (0x04 || x || y) of a private key (the curve's size, 1 .. n-1); none otherwise
+func ecdsaPublicKey(curve: view EcCurve, privateKey: view List(UInt8)) ret opt List(UInt8) {
+  if not ecInRange(curve: curve, bytes: privateKey) {
+    ret none
+  }
+  let point: EcPoint = ecMultiplySecret(
+    curve: curve
+    scalar: privateKey
+    point: ecGenerator(curve: curve)
+  )
+  if let affine: List(UInt8) = ecAffine(curve: curve, point: point) {
+    ret ecConcat(a: List(UInt8) { 4 }, b: affine)
+  }
+  ret none
+}
+
+# A new private key from the system's secure random source
+func ecdsaNewPrivateKey(curve: view EcCurve) ret List(UInt8) {
+  loop var tries: Int = 0, tries < 64, ++tries {
+    let candidate: List(UInt8) = cryptoRandomBytes(count: curve.size)
+    if ecInRange(curve: curve, bytes: candidate) {
+      ret candidate
+    }
+  }
+  ret List(UInt8) {}
+}
+
+# HMAC with the hash function whose digest is `size` bytes (32 SHA-256, 48 SHA-384, 64 SHA-512)
+func ecHmac(size: view Int, key: view List(UInt8), message: view List(UInt8)) ret List(UInt8) {
+  if size is 48 {
+    ret hmacSha384(key: key, message: message)
+  }
+  if size is 64 {
+    ret hmacSha512(key: key, message: message)
+  }
+  ret hmacSha256(key: key, message: message)
+}
+
+# RFC 6979's nonce for `privateKey` and `hash`, with HMAC over the hash's own function (told by
+# its length), the `skip`-th candidate in 1 .. n-1
+func ecNonce(
+  curve: view EcCurve
+  privateKey: view List(UInt8)
+  hash: view List(UInt8)
+  skip: view Int
+) ret List(UInt8) {
+  let hashSize: Int = hash.length
+  let h1: List(UInt8) = bigToBytes(
+    value: ecHashNumber(curve: curve, hash: hash)
+    byteCount: curve.size
+  )
+  var v: List(UInt8) = List.create(UInt8, cap: hashSize)
+  loop var i: Int = 0, i < hashSize, ++i {
+    v.add(value: 1)
+  }
+  var k: List(UInt8) = zeroBytes(count: hashSize)
+  let keyAndHash: List(UInt8) = ecConcat(a: privateKey, b: h1)
+  k = ecHmac(
+    size: hashSize
+    key: k
+    message: ecConcat(a: ecConcat(a: v, b: List(UInt8) { 0 }), b: keyAndHash)
+  )
+  v = ecHmac(size: hashSize, key: k, message: v)
+  k = ecHmac(
+    size: hashSize
+    key: k
+    message: ecConcat(a: ecConcat(a: v, b: List(UInt8) { 1 }), b: keyAndHash)
+  )
+  v = ecHmac(size: hashSize, key: k, message: v)
+  var found: Int = 0
+  loop var round: Int = 0, round < 1000, ++round {
+    # T: as many HMAC outputs as the curve's size needs
+    var t: List(UInt8) = {}
+    loop t.length < curve.size {
+      v = ecHmac(size: hashSize, key: k, message: v)
+      t = ecConcat(a: t, b: v)
+    }
+    let candidate: List(UInt8) = ecPart(bytes: t, start: 0, count: curve.size)
+    if ecInRange(curve: curve, bytes: candidate) {
+      if found is skip {
+        ret candidate
+      }
+      found = found + 1
+    }
+    k = ecHmac(size: hashSize, key: k, message: ecConcat(a: v, b: List(UInt8) { 0 }))
+    v = ecHmac(size: hashSize, key: k, message: v)
+  }
+  ret List(UInt8) {}
+}
+
+# The signature (r || s, the curve's size each) of `hash` with `privateKey`, its nonce RFC 6979's
+# (HMAC over the hash's own function); empty for a private key out of range
+func ecdsaSign(
+  curve: view EcCurve
+  privateKey: view List(UInt8)
+  hash: view List(UInt8)
+) ret List(UInt8) {
+  var d: List(Int) = {}
+  if let value: List(Int) = ecScalar(curve: curve, bytes: privateKey) {
+    d = value
+  } else {
+    ret List(UInt8) {}
+  }
+  let order: view BigModulus = curve.order
+  let z: List(Int) = ecHashNumber(curve: curve, hash: hash)
+  loop var skip: Int = 0, skip < 8, ++skip {
+    let nonce: List(UInt8) = ecNonce(
+      curve: curve
+      privateKey: privateKey
+      hash: hash
+      skip: skip
+    )
+    let point: EcPoint = ecMultiplySecret(
+      curve: curve
+      scalar: nonce
+      point: ecGenerator(curve: curve)
+    )
+    if let affine: List(UInt8) = ecAffine(curve: curve, point: point) {
+      let x: List(Int) = bigFromBytes(
+        bytes: ecPart(bytes: affine, start: 0, count: curve.size)
+        limbs: curve.limbs
+      )
+      let r: List(Int) = bigReduceOnce(m: order, value: x, high: 0)
+      # s = (z + r d) / k mod n, in Montgomery form
+      let k: List(Int) = montIn(m: order, value: bigFromBytes(bytes: nonce, limbs: curve.limbs))
+      let rd: List(Int) = montMul(
+        m: order
+        a: montIn(m: order, value: r)
+        b: montIn(m: order, value: d)
+      )
+      let sum: List(Int) = bigAddMod(m: order, a: montIn(m: order, value: z), b: rd)
+      let s: List(Int) = montOut(
+        m: order
+        value: montMul(m: order, a: sum, b: montInverse(m: order, value: k))
+      )
+      if not bigIsZero(value: r) and not bigIsZero(value: s) {
+        ret ecConcat(
+          a: bigToBytes(value: r, byteCount: curve.size)
+          b: bigToBytes(value: s, byteCount: curve.size)
+        )
+      }
+    }
+  }
+  ret List(UInt8) {}
+}
+
+# A DER ECDSA signature (SEQUENCE { INTEGER r, INTEGER s }) as r || s, `size` bytes each; none
+# when it is not strict DER or a number is longer than `size` bytes
+func ecdsaSignatureFromDer(der: view List(UInt8), size: view Int) ret opt List(UInt8) {
+  if let sequence: DerItem = derReadWhole(bytes: der, tag: derSequence) {
+    if let parts: List(DerItem) = derChildren(bytes: der, item: sequence) {
+      if parts.length is not 2 {
+        ret none
+      }
+      var raw: List(UInt8) = {}
+      loop let part: view DerItem in parts {
+        if let magnitude: List(UInt8) = derPositiveInteger(bytes: der, item: part) {
+          if magnitude.length > size {
+            ret none
+          }
+          loop var i: Int = magnitude.length, i < size, ++i {
+            raw.add(value: 0)
+          }
+          loop let byte: UInt8 in magnitude {
+            raw.add(value: byte)
+          }
+        } else {
+          ret none
+        }
+      }
+      ret raw
+    }
+  }
+  ret none
+}
+
+# r || s (half the length each) as a DER ECDSA signature
+func ecdsaSignatureToDer(signature: view List(UInt8)) ret List(UInt8) {
+  let size: Int = signature.length / 2
+  ret derConstructed(
+    tag: derSequence
+    elements: {
+      derEncodePositive(magnitude: ecPart(bytes: signature, start: 0, count: size))
+      derEncodePositive(magnitude: ecPart(bytes: signature, start: size, count: size))
+    }
+  )
+}
+
+# ecdsaVerify with a DER signature
+func ecdsaVerifyDer(
+  curve: view EcCurve
+  publicKey: view List(UInt8)
+  hash: view List(UInt8)
+  signature: view List(UInt8)
+) ret Bool {
+  if let raw: List(UInt8) = ecdsaSignatureFromDer(der: signature, size: curve.size) {
+    ret ecdsaVerify(
+      curve: curve
+      publicKey: publicKey
+      hash: hash
+      signature: raw
+    )
+  }
+  ret false
+}

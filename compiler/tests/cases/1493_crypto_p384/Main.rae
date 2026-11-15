@@ -1,0 +1,193 @@
+# SHA-384 / SHA-512 (crypto/Sha512), ECDSA on P-384 (crypto/P384 over crypto/Ecdsa) and X.509 links
+# signed with SHA-384 by a P-384 key (crypto/X509), all in Rae:
+#   - FIPS 180 SHA-384 and SHA-512 of "abc", "" and the two-block message; RFC 4231
+#   HMAC-SHA-384/512;
+#   - RFC 6979 A.2.6: the P-384 key and its signatures with SHA-384 ("sample", "test"), SHA-256 (the
+#     nonce takes two HMAC outputs) and SHA-512 (the hash is cut to the curve's size), exactly;
+#   - Wycheproof's 504 P-384 / SHA-384 vectors (wycheproof384.txt) all answered right;
+#   - Apple's production App Store chain (appleChain.hex: the "Prod ECC" signing leaf, WWDR G6,
+#   Apple
+#     Root CA - G3) verifies against the pinned G3 at a date it is valid, and fails after the leaf
+#     expires and with one byte of the leaf changed.
+open crypto/CryptoBytes
+open crypto/Ecdsa
+open crypto/P384
+open crypto/Sha256
+open crypto/Sha512
+open crypto/X509
+
+func hex(text: view String) ret List(UInt8) {
+  if let bytes: List(UInt8) = bytesOfHex(hex: text) {
+    ret bytes
+  }
+  ret List(UInt8) {}
+}
+
+func hashes() {
+  let two: List(UInt8) = bytesOfText(
+    text: "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu"
+  )
+  log(
+    "SHA-384 abc: {hexOfBytes(bytes: sha384(bytes: bytesOfText(text: "abc"))) is "cb00753f45a35e8bb5a03d699ac65007272c32ab0eded1631a8b605a43ff5bed8086072ba1e7cc2358baeca134c825a7"}, empty: {hexOfBytes(
+      bytes: sha384(bytes: List(UInt8) {})
+    ) is "38b060a751ac96384cd9327eb1b1e36a21fdb71114be07434c0cc7bf63f6e1da274edebfe76f65fbd51ad2f14898b95b"}, two blocks: {hexOfBytes(
+      bytes: sha384(bytes: two)
+    ) is "09330c33f71147e83d192fc782cd1b4753111b173b3b05d22fa08086e3b0f712fcc7c71a557e2db966c3e9fa91746039"}"
+  )
+  log(
+    "SHA-512 abc: {hexOfBytes(bytes: sha512(bytes: bytesOfText(text: "abc"))) is "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f"}, two blocks: {hexOfBytes(
+      bytes: sha512(bytes: two)
+    ) is "8e959b75dae313da8cf4f72814fc143f8f7779c6eb9f7fa17299aeadb6889018501d289e4900f7e4331b99dec4b5433ac7d329eeb6dd26545e96e55b874be909"}"
+  )
+  let jefe: List(UInt8) = bytesOfText(text: "Jefe")
+  let question: List(UInt8) = bytesOfText(text: "what do ya want for nothing?")
+  var longKey: List(UInt8) = {}
+  loop var i: Int = 0, i < 131, ++i {
+    longKey.add(value: 170)
+  }
+  log(
+    "HMAC-SHA-384 RFC 4231 #2: {hexOfBytes(bytes: hmacSha384(key: jefe, message: question)) is "af45d2e376484031617f78d2b58a6b1b9c7ef464f5a01b47e42ec3736322445e8e2240ca5e69e2c78b3239ecfab21649"}, #6 (a key longer than a block): {hexOfBytes(
+      bytes: hmacSha384(
+        key: longKey
+        message: bytesOfText(text: "Test Using Larger Than Block-Size Key - Hash Key First")
+      )
+    ) is "4ece084485813e9088d2c63a041bc5b44f9ef1012a2b588f3cd11f05033ac4c60c2ef6ab4030fe8296248df163f44952"}, HMAC-SHA-512 #2: {hexOfBytes(
+      bytes: hmacSha512(key: jefe, message: question)
+    ) is "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737"}"
+  )
+}
+
+func rfc6979() {
+  let key: List(UInt8) = hex(
+    text: "6b9d3dad2e1b8c1c05b19875b6659f4de23c3b667bf297ba9aa47740787137d896d5724e4c70a825f872c9ea60d2edf5"
+  )
+  if let publicKey: List(UInt8) = p384PublicKey(privateKey: key) {
+    log(
+      "RFC 6979 A.2.6 public key: {hexOfBytes(bytes: publicKey) is "04ec3a4e415b4e19a4568618029f427fa5da9a8bc4ae92e02e06aae5286b300c64def8f0ea9055866064a254515480bc138015d9b72d7d57244ea8ef9ac0c621896708a59367f9dfb9f54ca84b3f1c9db1288b231c3ae0d4fe7344fd2533264720"}"
+    )
+    let sample: List(UInt8) = bytesOfText(text: "sample")
+    let sha384Sample: List(UInt8) = es384Sign(privateKey: key, message: sample)
+    log(
+      "SHA-384 \"sample\": {hexOfBytes(bytes: sha384Sample) is "94edbb92a5ecb8aad4736e56c691916b3f88140666ce9fa73d64c4ea95ad133c81a648152e44acf96e36dd1e80fabe4699ef4aeb15f178cea1fe40db2603138f130e740a19624526203b6351d0a3a94fa329c145786e679e7b82c71a38628ac8"}, \"test\": {hexOfBytes(
+        bytes: es384Sign(privateKey: key, message: bytesOfText(text: "test"))
+      ) is "8203b63d3c853e8d77227fb377bcf7b7b772e97892a80f36ab775d509d7a5feb0542a7f0812998da8f1dd3ca3cf023dbddd0760448d42d8a43af45af836fce4de8be06b485e9b61b827c2f13173923e06a739f040649a667bf3b828246baa5a5"}"
+    )
+    log(
+      "SHA-256 \"sample\": {hexOfBytes(
+        bytes: p384Sign(privateKey: key, hash: sha256(bytes: sample))
+      ) is "21b13d1e013c7fa1392d03c5f99af8b30c570c6f98d4ea8e354b63a21d3daa33bde1e888e63355d92fa2b3c36d8fb2cdf3aa443fb107745bf4bd77cb3891674632068a10ca67e3d45db2266fa7d1feebefdc63eccd1ac42ec0cb8668a4fa0ab0"}, SHA-512 \"sample\": {hexOfBytes(
+        bytes: p384Sign(privateKey: key, hash: sha512(bytes: sample))
+      ) is "ed0959d5880ab2d869ae7f6c2915c6d60f96507f9cb3e047c0046861da4a799cfe30f35cc900056d7c99cd7882433709512c8cceee3890a84058ce1e22dbc2198f42323ce8aca9135329f03c068e5112dc7cc3ef3446defceb01a45c2667fdd5"}"
+    )
+    log(
+      "it verifies: {es384Verify(publicKey: publicKey, message: sample, signature: sha384Sample)}, for another message: {es384Verify(
+        publicKey: publicKey
+        message: bytesOfText(text: "samplf")
+        signature: sha384Sample
+      )}"
+    )
+  }
+}
+
+func wycheproof() {
+  var valid: Int = 0
+  var invalid: Int = 0
+  var wrong: List(String) = {}
+  loop let line: view String in embedText(file: "wycheproof384.txt").split(sep: "\n") {
+    if line.length() > 0 and not line.startsWith(prefix: "#") {
+      let parts: List(String) = line.split(sep: " ")
+      var message: List(UInt8) = {}
+      if parts.copyAtDefault(index: 2) is not "-" {
+        message = hex(text: parts.copyAtDefault(index: 2))
+      }
+      var signature: List(UInt8) = {}
+      if parts.copyAtDefault(index: 3) is not "-" {
+        signature = hex(text: parts.copyAtDefault(index: 3))
+      }
+      let expected: Bool = parts.copyAtDefault(index: 4) is "valid"
+      let got: Bool = p384VerifyDer(
+        publicKey: hex(text: parts.copyAtDefault(index: 1))
+        hash: sha384(bytes: message)
+        signature: signature
+      )
+      if expected {
+        valid = valid + 1
+      } else {
+        invalid = invalid + 1
+      }
+      if got is not expected {
+        wrong.add(value: parts.copyAtDefault(index: 0))
+      }
+    }
+  }
+  log(
+    "Wycheproof P-384: {valid} valid and {invalid} invalid vectors, {wrong.length} answered wrongly {wrong}"
+  )
+}
+
+func chainResult(chain: view List(List(UInt8)), root: view List(UInt8), now: view Int) ret String {
+  let result: X509ChainResult = x509VerifyChain(chain: chain, pinnedRoot: root, now: now)
+  if result.ok {
+    ret "verifies"
+  }
+  ret "fails: {result.reason}"
+}
+
+func appleChain() {
+  # the file's three certificates, each after its "# name" line
+  var certificates: List(List(UInt8)) = {}
+  var current: String = ""
+  loop let line: view String in embedText(file: "appleChain.hex").split(sep: "\n") {
+    let trimmed: String = line.trim()
+    if trimmed.startsWith(prefix: "#") or trimmed.length() is 0 {
+      if current.length() > 0 {
+        certificates.add(value: hex(text: current))
+        current = ""
+      }
+    } else {
+      current = "{current}{trimmed}"
+    }
+  }
+  if current.length() > 0 {
+    certificates.add(value: hex(text: current))
+  }
+  if certificates.length is not 3 {
+    log("the Apple chain file has {certificates.length} certificates")
+    ret
+  }
+  let leaf: List(UInt8) = certificates.copyAtDefault(index: 0)
+  let root: List(UInt8) = certificates.copyAtDefault(index: 2)
+  log("Apple root SHA-256 {hexOfBytes(bytes: sha256(bytes: root))}")
+  if let parsed: X509Certificate = x509Parse(der: leaf) {
+    log(
+      "the leaf: \"{x509CommonName(certificate: parsed)}\", key {parsed.publicKeyCurve}, signed {parsed.signatureAlgorithm}, {parsed.notBefore} to {parsed.notAfter}, {parsed.extensions.length} extensions"
+    )
+  }
+  if let intermediate: X509Certificate = x509Parse(der: certificates.copyAtDefault(index: 1)) {
+    if let parsedRoot: X509Certificate = x509Parse(der: root) {
+      let why: String = x509SignedBy(certificate: intermediate, issuer: parsedRoot)
+      log("WWDR G6 signed by G3 (P-384, SHA-384): {why.length() is 0} {why}")
+      let rootWhy: String = x509SignedBy(certificate: parsedRoot, issuer: parsedRoot)
+      log("G3 signs itself: {rootWhy.length() is 0} {rootWhy}")
+    }
+  }
+  # 2025-11-01, as Apple's own library checks it, and 2028-01-01, after the leaf's end
+  log("the chain on 2025-11-01: {chainResult(chain: certificates, root: root, now: 1761962975)}")
+  log("on 2028-01-01: {chainResult(chain: certificates, root: root, now: 1830297600)}")
+  var changed: List(UInt8) = leaf
+  changed.set(index: 200, value: changed.copyAtDefault(index: 200) bitxor 1)
+  log(
+    "one byte of the leaf changed: {chainResult(
+      chain: { changed, certificates.copyAtDefault(index: 1), root }
+      root: root
+      now: 1761962975
+    )}"
+  )
+}
+
+func main() {
+  hashes()
+  rfc6979()
+  wycheproof()
+  appleChain()
+}

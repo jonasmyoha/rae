@@ -1,361 +1,39 @@
-# crypto/P256 — ECDSA on NIST P-256 (secp256r1), in Rae: verify (what a JWS ES256 signature, an
-# App Store transaction or a passkey needs) and sign with RFC 6979's deterministic nonce (so tests
-# can make their own keys and signatures, and a server can sign). ES256 is SHA-256 and the 64-byte
-# r || s form; DER signatures (X.509's) convert to and from it.
-#
-# The field and the group order are crypto/BigMod's Montgomery arithmetic. A point is projective
-# (X : Y : Z), the point at infinity (0 : 1 : 0). Addition is Renes, Costello and Batina's complete
-# formula for a = -3 (2015, algorithm 4): one formula for every pair of points, doubling and
-# infinity included, so no branch depends on a point. A secret scalar (a private key, a nonce)
-# multiplies with a Montgomery ladder whose two points swap with a mask; a public one (verifying)
-# with plain double-and-add.
-import Math
-open crypto/BigMod
-open crypto/CryptoBytes
-open crypto/CryptoRandom
-open crypto/Der
+# crypto/P256 — ECDSA on NIST P-256 (secp256r1), in Rae (crypto/Ecdsa's arithmetic): verify (a JWS
+# ES256 signature, an App Store transaction, a passkey) and sign with RFC 6979's deterministic nonce
+# (so tests can make their own keys and signatures, and a server can sign). ES256 is SHA-256 and the
+# 64-byte r || s form; DER signatures (X.509's) convert to and from it (ecdsaSignatureToDer,
+# p256SignatureFromDer).
+open crypto/Ecdsa
 open crypto/Sha256
 
-const p256Limbs: Int = 11
-
-type P256Curve {
-  field: BigModulus
-  order: BigModulus
-  # b, and the generator, in Montgomery form
-  b: List(Int)
-  gx: List(Int)
-  gy: List(Int)
-}
-
-type P256Point {
-  x: List(Int)
-  y: List(Int)
-  z: List(Int)
-}
-
-func p256Hex(text: view String) ret List(UInt8) {
-  if let bytes: List(UInt8) = bytesOfHex(hex: text) {
-    ret bytes
-  }
-  ret List(UInt8) {}
-}
-
-func p256Curve() ret P256Curve {
-  let field: BigModulus = bigModulus(
-    bytes: p256Hex(text: "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff")
-    limbs: p256Limbs
+func p256Curve() ret EcCurve {
+  ret ecCurve(
+    p: "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"
+    n: "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551"
+    b: "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"
+    gx: "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296"
+    gy: "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5"
+    size: 32
   )
-  let order: BigModulus = bigModulus(
-    bytes: p256Hex(text: "ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")
-    limbs: p256Limbs
-  )
-  let b: List(Int) = bigFromBytes(
-    bytes: p256Hex(text: "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b")
-    limbs: p256Limbs
-  )
-  let gx: List(Int) = bigFromBytes(
-    bytes: p256Hex(text: "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296")
-    limbs: p256Limbs
-  )
-  let gy: List(Int) = bigFromBytes(
-    bytes: p256Hex(text: "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5")
-    limbs: p256Limbs
-  )
-  ret P256Curve {
-    field: field
-    order: order
-    b: montIn(m: field, value: b)
-    gx: montIn(m: field, value: gx)
-    gy: montIn(m: field, value: gy)
-  }
 }
 
-func p256Infinity(curve: view P256Curve) ret P256Point {
-  ret P256Point { x: bigZero(limbs: p256Limbs), y: curve.field.one, z: bigZero(limbs: p256Limbs) }
-}
-
-func p256Generator(curve: view P256Curve) ret P256Point {
-  ret P256Point { x: curve.gx, y: curve.gy, z: curve.field.one }
-}
-
-# p + q, for any two points (Renes, Costello, Batina 2015, algorithm 4, a = -3)
-func p256Add(curve: view P256Curve, p: view P256Point, q: view P256Point) ret P256Point {
-  let f: view BigModulus = curve.field
-  var t0: List(Int) = montMul(m: f, a: p.x, b: q.x)
-  var t1: List(Int) = montMul(m: f, a: p.y, b: q.y)
-  var t2: List(Int) = montMul(m: f, a: p.z, b: q.z)
-  var t3: List(Int) = bigAddMod(m: f, a: p.x, b: p.y)
-  var t4: List(Int) = bigAddMod(m: f, a: q.x, b: q.y)
-  t3 = montMul(m: f, a: t3, b: t4)
-  t4 = bigAddMod(m: f, a: t0, b: t1)
-  t3 = bigSubMod(m: f, a: t3, b: t4)
-  t4 = bigAddMod(m: f, a: p.y, b: p.z)
-  var x3: List(Int) = bigAddMod(m: f, a: q.y, b: q.z)
-  t4 = montMul(m: f, a: t4, b: x3)
-  x3 = bigAddMod(m: f, a: t1, b: t2)
-  t4 = bigSubMod(m: f, a: t4, b: x3)
-  x3 = bigAddMod(m: f, a: p.x, b: p.z)
-  var y3: List(Int) = bigAddMod(m: f, a: q.x, b: q.z)
-  x3 = montMul(m: f, a: x3, b: y3)
-  y3 = bigAddMod(m: f, a: t0, b: t2)
-  y3 = bigSubMod(m: f, a: x3, b: y3)
-  var z3: List(Int) = montMul(m: f, a: curve.b, b: t2)
-  x3 = bigSubMod(m: f, a: y3, b: z3)
-  z3 = bigAddMod(m: f, a: x3, b: x3)
-  x3 = bigAddMod(m: f, a: x3, b: z3)
-  z3 = bigSubMod(m: f, a: t1, b: x3)
-  x3 = bigAddMod(m: f, a: t1, b: x3)
-  y3 = montMul(m: f, a: curve.b, b: y3)
-  t1 = bigAddMod(m: f, a: t2, b: t2)
-  t2 = bigAddMod(m: f, a: t1, b: t2)
-  y3 = bigSubMod(m: f, a: y3, b: t2)
-  y3 = bigSubMod(m: f, a: y3, b: t0)
-  t1 = bigAddMod(m: f, a: y3, b: y3)
-  y3 = bigAddMod(m: f, a: t1, b: y3)
-  t1 = bigAddMod(m: f, a: t0, b: t0)
-  t0 = bigAddMod(m: f, a: t1, b: t0)
-  t0 = bigSubMod(m: f, a: t0, b: t2)
-  t1 = montMul(m: f, a: t4, b: y3)
-  t2 = montMul(m: f, a: t0, b: y3)
-  y3 = montMul(m: f, a: x3, b: z3)
-  y3 = bigAddMod(m: f, a: y3, b: t2)
-  x3 = montMul(m: f, a: x3, b: t3)
-  x3 = bigSubMod(m: f, a: x3, b: t1)
-  z3 = montMul(m: f, a: t4, b: z3)
-  t1 = montMul(m: f, a: t3, b: t0)
-  z3 = bigAddMod(m: f, a: z3, b: t1)
-  ret P256Point { x: x3, y: y3, z: z3 }
-}
-
-# `mask` all ones picks a, zero picks b
-func p256Select(mask: view Int, a: view P256Point, b: view P256Point) ret P256Point {
-  ret P256Point {
-    x: bigSelect(mask: mask, a: a.x, b: b.x)
-    y: bigSelect(mask: mask, a: a.y, b: b.y)
-    z: bigSelect(mask: mask, a: a.z, b: b.z)
-  }
-}
-
-# scalar * point for a SECRET scalar (32 big-endian bytes): a Montgomery ladder over all 256 bits,
-# the same additions whatever the bits are, the two points swapped with a mask
-func p256MultiplySecret(
-  curve: view P256Curve
-  scalar: view List(UInt8)
-  point: view P256Point
-) ret P256Point {
-  var low: P256Point = p256Infinity(curve: curve)
-  var high: P256Point = point
-  loop var i: Int = 0, i < 32, ++i {
-    let byte: Int = scalar.copyAtDefault(index: i) as Int
-    loop var bit: Int = 7, bit >= 0, --bit {
-      let mask: Int = -((byte shr bit) bitand 1)
-      let first: P256Point = p256Select(mask: mask, a: high, b: low)
-      let second: P256Point = p256Select(mask: mask, a: low, b: high)
-      let sum: P256Point = p256Add(curve: curve, p: first, q: second)
-      let doubled: P256Point = p256Add(curve: curve, p: first, q: first)
-      low = p256Select(mask: mask, a: sum, b: doubled)
-      high = p256Select(mask: mask, a: doubled, b: sum)
-    }
-  }
-  ret low
-}
-
-# a * G + b * point for PUBLIC scalars (verifying): double-and-add over both at once
-func p256MultiplyPublicTwo(
-  curve: view P256Curve
-  a: view List(UInt8)
-  b: view List(UInt8)
-  point: view P256Point
-) ret P256Point {
-  let generator: P256Point = p256Generator(curve: curve)
-  let both: P256Point = p256Add(curve: curve, p: generator, q: point)
-  var result: P256Point = p256Infinity(curve: curve)
-  loop var i: Int = 0, i < 32, ++i {
-    let byteA: Int = a.copyAtDefault(index: i) as Int
-    let byteB: Int = b.copyAtDefault(index: i) as Int
-    loop var bit: Int = 7, bit >= 0, --bit {
-      result = p256Add(curve: curve, p: result, q: result)
-      let bitA: Int = (byteA shr bit) bitand 1
-      let bitB: Int = (byteB shr bit) bitand 1
-      if bitA is 1 and bitB is 1 {
-        result = p256Add(curve: curve, p: result, q: both)
-      } else if bitA is 1 {
-        result = p256Add(curve: curve, p: result, q: generator)
-      } else if bitB is 1 {
-        result = p256Add(curve: curve, p: result, q: point)
-      }
-    }
-  }
-  ret result
-}
-
-# The point's affine x and y as 32-byte strings; none for the point at infinity
-func p256Affine(curve: view P256Curve, point: view P256Point) ret opt List(UInt8) {
-  if bigIsZero(value: point.z) {
-    ret none
-  }
-  let inverse: List(Int) = montInverse(m: curve.field, value: point.z)
-  let x: List(Int) = montOut(m: curve.field, value: montMul(m: curve.field, a: point.x, b: inverse))
-  let y: List(Int) = montOut(m: curve.field, value: montMul(m: curve.field, a: point.y, b: inverse))
-  var bytes: List(UInt8) = bigToBytes(value: x, byteCount: 32)
-  loop let byte: UInt8 in bigToBytes(value: y, byteCount: 32) {
-    bytes.add(value: byte)
-  }
-  ret bytes
-}
-
-# A public key (65 bytes 0x04 || x || y, or 64 bytes x || y) as a point on the curve; none when
-# it is not one (a coordinate past p, or not on the curve)
-func p256PointFromPublicKey(curve: view P256Curve, publicKey: view List(UInt8)) ret opt P256Point {
-  var offset: Int = 0
-  if publicKey.length is 65 and (publicKey.copyAtDefault(index: 0) as Int) is 4 {
-    offset = 1
-  } else if publicKey.length is not 64 {
-    ret none
-  }
-  var xBytes: List(UInt8) = {}
-  var yBytes: List(UInt8) = {}
-  loop var i: Int = 0, i < 32, ++i {
-    xBytes.add(value: publicKey.copyAtDefault(index: offset + i))
-    yBytes.add(value: publicKey.copyAtDefault(index: offset + 32 + i))
-  }
-  let x: List(Int) = bigFromBytes(bytes: xBytes, limbs: p256Limbs)
-  let y: List(Int) = bigFromBytes(bytes: yBytes, limbs: p256Limbs)
-  if not bigLess(a: x, b: curve.field.modulus) or not bigLess(a: y, b: curve.field.modulus) {
-    ret none
-  }
-  let f: view BigModulus = curve.field
-  let mx: List(Int) = montIn(m: f, value: x)
-  let my: List(Int) = montIn(m: f, value: y)
-  # y^2 = x^3 - 3x + b
-  let left: List(Int) = montMul(m: f, a: my, b: my)
-  let threeX: List(Int) = bigAddMod(m: f, a: bigAddMod(m: f, a: mx, b: mx), b: mx)
-  let right: List(Int) = bigAddMod(
-    m: f
-    a: bigSubMod(m: f, a: montMul(m: f, a: montMul(m: f, a: mx, b: mx), b: mx), b: threeX)
-    b: curve.b
-  )
-  if not bigEqual(a: left, b: right) {
-    ret none
-  }
-  ret P256Point { x: mx, y: my, z: f.one }
-}
-
-# The hash's leftmost 256 bits as a number below n
-func p256HashNumber(curve: view P256Curve, hash: view List(UInt8)) ret List(Int) {
-  var bytes: List(UInt8) = {}
-  loop var i: Int = 0, i < Math.min(a: 32, b: hash.length), ++i {
-    bytes.add(value: hash.copyAtDefault(index: i))
-  }
-  let number: List(Int) = bigFromBytes(bytes: bytes, limbs: p256Limbs)
-  ret bigReduceOnce(m: curve.order, value: number, high: 0)
-}
-
-# A scalar from 32 bytes when it is in 1 .. n-1
-func p256Scalar(curve: view P256Curve, bytes: view List(UInt8)) ret opt List(Int) {
-  if bytes.length is not 32 {
-    ret none
-  }
-  let value: List(Int) = bigFromBytes(bytes: bytes, limbs: p256Limbs)
-  if bigIsZero(value: value) or not bigLess(a: value, b: curve.order.modulus) {
-    ret none
-  }
-  ret value
-}
-
-# Whether 32 bytes are a scalar in 1 .. n-1
-func p256InRange(curve: view P256Curve, bytes: view List(UInt8)) ret Bool {
-  if let unusedValue: List(Int) = p256Scalar(curve: curve, bytes: bytes) {
-    ret true
-  }
-  ret false
-}
-
-# Whether `signature` (64 bytes r || s) signs `hash` for `publicKey` (65 or 64 bytes)
+# Whether `signature` (64 bytes r || s) signs `hash` for `publicKey` (65 bytes 04 x y, or 64)
 func p256Verify(
   publicKey: view List(UInt8)
   hash: view List(UInt8)
   signature: view List(UInt8)
 ) ret Bool {
-  if signature.length is not 64 {
-    ret false
-  }
-  let curve: P256Curve = p256Curve()
-  var rBytes: List(UInt8) = {}
-  var sBytes: List(UInt8) = {}
-  loop var i: Int = 0, i < 32, ++i {
-    rBytes.add(value: signature.copyAtDefault(index: i))
-    sBytes.add(value: signature.copyAtDefault(index: 32 + i))
-  }
-  var r: List(Int) = {}
-  var s: List(Int) = {}
-  if let value: List(Int) = p256Scalar(curve: curve, bytes: rBytes) {
-    r = value
-  } else {
-    ret false
-  }
-  if let value: List(Int) = p256Scalar(curve: curve, bytes: sBytes) {
-    s = value
-  } else {
-    ret false
-  }
-  var point: P256Point = p256Infinity(curve: curve)
-  if let found: P256Point = p256PointFromPublicKey(curve: curve, publicKey: publicKey) {
-    point = found
-  } else {
-    ret false
-  }
-  let order: view BigModulus = curve.order
-  let z: List(Int) = p256HashNumber(curve: curve, hash: hash)
-  let w: List(Int) = montInverse(m: order, value: montIn(m: order, value: s))
-  let u1: List(Int) = montOut(
-    m: order
-    value: montMul(m: order, a: montIn(m: order, value: z), b: w)
+  ret ecdsaVerify(
+    curve: p256Curve()
+    publicKey: publicKey
+    hash: hash
+    signature: signature
   )
-  let u2: List(Int) = montOut(
-    m: order
-    value: montMul(m: order, a: montIn(m: order, value: r), b: w)
-  )
-  let sum: P256Point = p256MultiplyPublicTwo(
-    curve: curve
-    a: bigToBytes(value: u1, byteCount: 32)
-    b: bigToBytes(value: u2, byteCount: 32)
-    point: point
-  )
-  if let affine: List(UInt8) = p256Affine(curve: curve, point: sum) {
-    var xBytes: List(UInt8) = {}
-    loop var i: Int = 0, i < 32, ++i {
-      xBytes.add(value: affine.copyAtDefault(index: i))
-    }
-    let v: List(Int) = bigReduceOnce(
-      m: order
-      value: bigFromBytes(bytes: xBytes, limbs: p256Limbs)
-      high: 0
-    )
-    ret bigEqual(a: v, b: r)
-  }
-  ret false
 }
 
 # The public key (65 bytes, 0x04 || x || y) of a private key (32 bytes, 1 .. n-1); none otherwise
 func p256PublicKey(privateKey: view List(UInt8)) ret opt List(UInt8) {
-  let curve: P256Curve = p256Curve()
-  if not p256InRange(curve: curve, bytes: privateKey) {
-    ret none
-  }
-  let point: P256Point = p256MultiplySecret(
-    curve: curve
-    scalar: privateKey
-    point: p256Generator(curve: curve)
-  )
-  if let affine: List(UInt8) = p256Affine(curve: curve, point: point) {
-    var key: List(UInt8) = { 4 }
-    loop let byte: UInt8 in affine {
-      key.add(value: byte)
-    }
-    ret key
-  }
-  ret none
+  ret ecdsaPublicKey(curve: p256Curve(), privateKey: privateKey)
 }
 
 type P256KeyPair {
@@ -365,117 +43,18 @@ type P256KeyPair {
 
 # A new key pair from the system's secure random source
 func p256NewKeyPair() ret P256KeyPair {
-  let curve: P256Curve = p256Curve()
-  loop var tries: Int = 0, tries < 64, ++tries {
-    let candidate: List(UInt8) = cryptoRandomBytes(count: 32)
-    if p256InRange(curve: curve, bytes: candidate) {
-      if let publicKey: List(UInt8) = p256PublicKey(privateKey: candidate) {
-        ret P256KeyPair { privateKey: candidate, publicKey: publicKey }
-      }
-    }
+  let curve: EcCurve = p256Curve()
+  let privateKey: List(UInt8) = ecdsaNewPrivateKey(curve: curve)
+  if let publicKey: List(UInt8) = ecdsaPublicKey(curve: curve, privateKey: privateKey) {
+    ret P256KeyPair { privateKey: privateKey, publicKey: publicKey }
   }
   ret P256KeyPair { privateKey: {}, publicKey: {} }
 }
 
-func p256Concat(a: view List(UInt8), b: view List(UInt8)) ret List(UInt8) {
-  var joined: List(UInt8) = List.create(UInt8, cap: a.length + b.length)
-  loop let byte: UInt8 in a {
-    joined.add(value: byte)
-  }
-  loop let byte: UInt8 in b {
-    joined.add(value: byte)
-  }
-  ret joined
-}
-
-# RFC 6979's nonce for `privateKey` and `hash` (HMAC-SHA-256), the `skip`-th candidate in 1 .. n-1
-func p256Nonce(
-  curve: view P256Curve
-  privateKey: view List(UInt8)
-  hash: view List(UInt8)
-  skip: view Int
-) ret List(UInt8) {
-  let h1: List(UInt8) = bigToBytes(value: p256HashNumber(curve: curve, hash: hash), byteCount: 32)
-  var v: List(UInt8) = List.create(UInt8, cap: 32)
-  var k: List(UInt8) = zeroBytes(count: 32)
-  loop var i: Int = 0, i < 32, ++i {
-    v.add(value: 1)
-  }
-  let keyAndHash: List(UInt8) = p256Concat(a: privateKey, b: h1)
-  k = hmacSha256(key: k, message: p256Concat(a: p256Concat(a: v, b: { 0 }), b: keyAndHash))
-  v = hmacSha256(key: k, message: v)
-  k = hmacSha256(key: k, message: p256Concat(a: p256Concat(a: v, b: { 1 }), b: keyAndHash))
-  v = hmacSha256(key: k, message: v)
-  var found: Int = 0
-  loop var round: Int = 0, round < 1000, ++round {
-    v = hmacSha256(key: k, message: v)
-    if p256InRange(curve: curve, bytes: v) {
-      if found is skip {
-        ret v
-      }
-      found = found + 1
-    }
-    k = hmacSha256(key: k, message: p256Concat(a: v, b: { 0 }))
-    v = hmacSha256(key: k, message: v)
-  }
-  ret List(UInt8) {}
-}
-
-# The signature (64 bytes r || s) of `hash` with `privateKey` (32 bytes), its nonce RFC 6979's;
-# empty for a private key out of range
+# The signature (64 bytes r || s) of `hash` with `privateKey` (32 bytes), its nonce RFC 6979's (HMAC
+# over the hash's function: SHA-256 for a 32-byte hash); empty for a private key out of range
 func p256Sign(privateKey: view List(UInt8), hash: view List(UInt8)) ret List(UInt8) {
-  let curve: P256Curve = p256Curve()
-  var d: List(Int) = {}
-  if let value: List(Int) = p256Scalar(curve: curve, bytes: privateKey) {
-    d = value
-  } else {
-    ret List(UInt8) {}
-  }
-  let order: view BigModulus = curve.order
-  let z: List(Int) = p256HashNumber(curve: curve, hash: hash)
-  loop var skip: Int = 0, skip < 8, ++skip {
-    let nonce: List(UInt8) = p256Nonce(
-      curve: curve
-      privateKey: privateKey
-      hash: hash
-      skip: skip
-    )
-    let point: P256Point = p256MultiplySecret(
-      curve: curve
-      scalar: nonce
-      point: p256Generator(curve: curve)
-    )
-    if let affine: List(UInt8) = p256Affine(curve: curve, point: point) {
-      var xBytes: List(UInt8) = {}
-      loop var i: Int = 0, i < 32, ++i {
-        xBytes.add(value: affine.copyAtDefault(index: i))
-      }
-      let r: List(Int) = bigReduceOnce(
-        m: order
-        value: bigFromBytes(bytes: xBytes, limbs: p256Limbs)
-        high: 0
-      )
-      # s = (z + r d) / k mod n, in Montgomery form
-      let k: List(Int) = montIn(m: order, value: bigFromBytes(bytes: nonce, limbs: p256Limbs))
-      let rd: List(Int) = montMul(
-        m: order
-        a: montIn(m: order, value: r)
-        b: montIn(m: order, value: d)
-      )
-      let sum: List(Int) = bigAddMod(m: order, a: montIn(m: order, value: z), b: rd)
-      let s: List(Int) = montOut(
-        m: order
-        value: montMul(m: order, a: sum, b: montInverse(m: order, value: k))
-      )
-      if not bigIsZero(value: r) and not bigIsZero(value: s) {
-        ret p256Concat(
-          a: bigToBytes(value: r, byteCount: 32)
-          b: bigToBytes(value: s, byteCount: 32)
-        )
-      }
-    }
-  }
-  ret List(UInt8) {}
+  ret ecdsaSign(curve: p256Curve(), privateKey: privateKey, hash: hash)
 }
 
 # ES256 (JWS): SHA-256 of the message, signed or verified, the signature 64 bytes r || s
@@ -491,48 +70,9 @@ func es256Verify(
   ret p256Verify(publicKey: publicKey, hash: sha256(bytes: message), signature: signature)
 }
 
-# A DER ECDSA signature (SEQUENCE { INTEGER r, INTEGER s }) as 64 bytes r || s; none when it is not
-# strict DER or a number is longer than 32 bytes
-func ecdsaSignatureFromDer(der: view List(UInt8)) ret opt List(UInt8) {
-  if let sequence: DerItem = derReadWhole(bytes: der, tag: derSequence) {
-    if let parts: List(DerItem) = derChildren(bytes: der, item: sequence) {
-      if parts.length is not 2 {
-        ret none
-      }
-      var raw: List(UInt8) = {}
-      loop let part: view DerItem in parts {
-        if let magnitude: List(UInt8) = derPositiveInteger(bytes: der, item: part) {
-          if magnitude.length > 32 {
-            ret none
-          }
-          loop var i: Int = magnitude.length, i < 32, ++i {
-            raw.add(value: 0)
-          }
-          loop let byte: UInt8 in magnitude {
-            raw.add(value: byte)
-          }
-        } else {
-          ret none
-        }
-      }
-      ret raw
-    }
-  }
-  ret none
-}
-
-# 64 bytes r || s as a DER ECDSA signature
-func ecdsaSignatureToDer(signature: view List(UInt8)) ret List(UInt8) {
-  var r: List(UInt8) = {}
-  var s: List(UInt8) = {}
-  loop var i: Int = 0, i < 32, ++i {
-    r.add(value: signature.copyAtDefault(index: i))
-    s.add(value: signature.copyAtDefault(index: 32 + i))
-  }
-  ret derConstructed(
-    tag: derSequence
-    elements: { derEncodePositive(magnitude: r), derEncodePositive(magnitude: s) }
-  )
+# A DER signature as 64 bytes r || s; none when it is not strict DER or a number is too long
+func p256SignatureFromDer(der: view List(UInt8)) ret opt List(UInt8) {
+  ret ecdsaSignatureFromDer(der: der, size: 32)
 }
 
 # p256Verify with a DER signature
@@ -541,8 +81,10 @@ func p256VerifyDer(
   hash: view List(UInt8)
   signature: view List(UInt8)
 ) ret Bool {
-  if let raw: List(UInt8) = ecdsaSignatureFromDer(der: signature) {
-    ret p256Verify(publicKey: publicKey, hash: hash, signature: raw)
-  }
-  ret false
+  ret ecdsaVerifyDer(
+    curve: p256Curve()
+    publicKey: publicKey
+    hash: hash
+    signature: signature
+  )
 }
