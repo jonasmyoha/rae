@@ -176,6 +176,9 @@ for TARGET in "${TARGETS[@]}"; do
     # build time; under the suite a missing naga is an ERROR, never a silent
     # skip (docs/shaders-and-the-compiler.md). `cargo install naga-cli`.
     export RAE_SHADER_VALIDATE="${RAE_SHADER_VALIDATE:-require}"
+    # A specialization the discovery pass missed (registered only while a plain body was emitted)
+    # fails the build under the suite, so discovery stays complete (case 1490)
+    export RAE_LATE_SPECIALIZATIONS="${RAE_LATE_SPECIALIZATIONS:-error}"
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then

@@ -672,20 +672,48 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
              * to be walked too — otherwise a generic called only from an
              * `if let` head is never specialized and the C references a
              * function that was never emitted. */
-            case AST_STMT_IF: if (s->as.if_stmt.binding) discover_specializations_stmt_impl(ctx, s->as.if_stmt.binding); discover_specializations_expr_impl(ctx, s->as.if_stmt.condition); if (s->as.if_stmt.then_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.then_block->first); if (s->as.if_stmt.else_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.else_block->first); break;
-            case AST_STMT_LOOP: if (s->as.loop_stmt.init) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.init); if (s->as.loop_stmt.condition) discover_specializations_expr_impl(ctx, s->as.loop_stmt.condition); if (s->as.loop_stmt.increment) discover_specializations_expr_impl(ctx, s->as.loop_stmt.increment); if (s->as.loop_stmt.body) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.body->first); break;
+            /* A block's locals end with it: the count goes back when it closes. Kept, they filled
+             * the 256 slots in a long function (a fields() loop over 127 tables unrolls to 127
+             * blocks of two locals each), a later `let` was not recorded, and a call on it read
+             * an earlier block's local of the same name: the wrong specialization (an existing
+             * one), so the right one was registered only while the body was emitted. */
+            case AST_STMT_IF: {
+                size_t scope = ctx->local_count;
+                if (s->as.if_stmt.binding) discover_specializations_stmt_impl(ctx, s->as.if_stmt.binding);
+                discover_specializations_expr_impl(ctx, s->as.if_stmt.condition);
+                size_t then_scope = ctx->local_count;
+                if (s->as.if_stmt.then_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.then_block->first);
+                ctx->local_count = then_scope;
+                if (s->as.if_stmt.else_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.else_block->first);
+                ctx->local_count = scope;
+                break;
+            }
+            case AST_STMT_LOOP: {
+                size_t scope = ctx->local_count;
+                if (s->as.loop_stmt.init) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.init);
+                if (s->as.loop_stmt.condition) discover_specializations_expr_impl(ctx, s->as.loop_stmt.condition);
+                if (s->as.loop_stmt.increment) discover_specializations_expr_impl(ctx, s->as.loop_stmt.increment);
+                if (s->as.loop_stmt.body) discover_specializations_stmt_impl(ctx, s->as.loop_stmt.body->first);
+                ctx->local_count = scope;
+                break;
+            }
             case AST_STMT_RET: if (s->as.ret_stmt.values && s->as.ret_stmt.values->value) discover_specializations_expr_impl(ctx, s->as.ret_stmt.values->value); break;
             case AST_STMT_MATCH: {
                 if (s->as.match_stmt.subject) discover_specializations_expr_impl(ctx, s->as.match_stmt.subject);
                 for (const AstMatchCase* mc = s->as.match_stmt.cases; mc; mc = mc->next) {
+                    size_t scope = ctx->local_count;
                     if (mc->pattern) discover_specializations_expr_impl(ctx, mc->pattern);
                     if (mc->block) discover_specializations_stmt_impl(ctx, mc->block->first);
+                    ctx->local_count = scope;
                 }
                 break;
             }
             case AST_STMT_UNSAFE:
-                if (s->as.unsafe_stmt.block)
+                if (s->as.unsafe_stmt.block) {
+                    size_t scope = ctx->local_count;
                     discover_specializations_stmt_impl(ctx, s->as.unsafe_stmt.block->first);
+                    ctx->local_count = scope;
+                }
                 break;
             default: break;
         }

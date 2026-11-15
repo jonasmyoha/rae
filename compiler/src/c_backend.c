@@ -2406,6 +2406,23 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
   }
 }
 
+/* RAE_LATE_SPECIALIZATIONS=1: name every specialization a plain function's body registered while
+ * it was emitted, which discovery should have found before. They are prototyped in time (the body
+ * is buffered), so this only tells that discovery missed one (=error: the build fails). */
+static int g_late_specializations = 0;
+static void report_late_specializations(CompilerContext* ctx, size_t before, const AstFuncDecl* in) {
+  const char* mode = getenv("RAE_LATE_SPECIALIZATIONS");
+  if (!mode || !*mode || strcmp(mode, "0") == 0) return;
+  for (size_t i = before; i < ctx->specialized_func_count; i++) {
+    const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
+    if (f->is_extern) continue;
+    fprintf(stderr, "[late-specialization] %s while emitting %s\n",
+            rae_mangle_specialized_function(ctx, f, ctx->specialized_funcs[i].concrete_args),
+            rae_mangle_function(ctx, in));
+    g_late_specializations++;
+  }
+}
+
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
@@ -4822,7 +4839,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           char* body = NULL;
           size_t body_len = 0;
           FILE* body_out = open_memstream(&body, &body_len);
+          size_t before_body = ctx->specialized_func_count;
           emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
+          report_late_specializations(ctx, before_body, &d->as.func_decl);
           if (body_out) {
               fclose(body_out);
               emit_new_specialization_prototypes(ctx, module, &plain_prototyped, out);
@@ -4928,5 +4947,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   c_twins_free(ctx);
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
+  const char* late_mode = getenv("RAE_LATE_SPECIALIZATIONS");
+  if (late_mode && strcmp(late_mode, "error") == 0 && g_late_specializations > 0) {
+    fprintf(stderr, "error: specialization discovery missed %d specialization(s) (RAE_LATE_SPECIALIZATIONS=error)\n",
+            g_late_specializations);
+    return false;
+  }
   return exported;
 }
