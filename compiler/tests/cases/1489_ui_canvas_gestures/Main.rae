@@ -1,0 +1,338 @@
+# A canvas's gestures (ui/canvasGestureSystem), driven by scripted input, headless: the wheel with
+# the modifier and a trackpad pinch zoom about the pointer (a probe node under it stays within a
+# hundredth of a pixel), two fingers pan and zoom about their middle, the wheel alone pans, a drag
+# pans and coasts when let go and a tap stops it, and dragging a card snaps its edge onto another
+# card's edge (a guide shown) unless it is too far.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/CanvasComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/cameraSystem/CameraSystem
+open ui/canvasGestureSystem/CanvasGestureSystem
+open ui/inputSystem/HitIndexQuery
+open ui/layoutSystem/LayoutSystem
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  if not isNone(this: parent) {
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: parent
+    )
+  }
+  ret entityId
+}
+
+func card(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+) ret EntityId {
+  let entityId: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: parent
+    x: x
+    y: y
+    w: 100.0
+    h: 60.0
+  )
+  world.onClicks.componentSet(
+    entityId: entityId
+    data: { actionId: "card", actionIdDouble: "", actionIdTriple: "" }
+  )
+  world.canvasDraggables.componentSet(entityId: entityId, data: {})
+  ret entityId
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  hitIndexSync(world: world, uiSystems: uiSystems)
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems, gestures: view CanvasGestures) {
+  canvasGestureSystem(world: world, uiSystems: uiSystems, gestures: gestures)
+  place(world: world, uiSystems: uiSystems)
+}
+
+func at(uiSystems: view UiSystems, entityId: view EntityId) ret Vec2 {
+  ret componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId).position
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: Math.abs(value: value) * 100.0) as Int
+}
+
+# How far (hundredths of a pixel) the probe moved from the pointer after one frame of `gestures`
+func probeDrift(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  probe: view EntityId
+  gestures: view CanvasGestures
+) ret Int {
+  let before: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  var moved: CanvasGestures = gestures
+  moved.x = before.x
+  moved.y = before.y
+  step(world: world, uiSystems: uiSystems, gestures: moved)
+  let after: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  ret Math.max(a: hundredths(value: after.x - before.x), b: hundredths(value: after.y - before.y))
+}
+
+func zoomOf(world: view UiWorld, canvas: view EntityId) ret String {
+  let camera: view Camera2D = componentView(this: world.cameras, entityId: canvas)
+  let thousandths: Int = Math.round(x: camera.zoom * 1000.0) as Int
+  let fraction: Int = thousandths % 1000
+  var padded: String = "{fraction}"
+  if fraction < 10 {
+    padded = "00{fraction}"
+  } else if fraction < 100 {
+    padded = "0{fraction}"
+  }
+  ret "{thousandths / 1000}.{padded}"
+}
+
+func offsetOf(world: view UiWorld, canvas: view EntityId) ret String {
+  let camera: view Camera2D = componentView(this: world.cameras, entityId: canvas)
+  ret "{Math.round(x: camera.offsetX) as Int}, {Math.round(x: camera.offsetY) as Int}"
+}
+
+func main() ret Int {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: noEntity()
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+  )
+  # the canvas sits 50 points in, so its root is not at the screen's origin
+  let canvas: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: page
+    x: 50.0
+    y: 40.0
+    w: 700.0
+    h: 520.0
+  )
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  world.canvasControls.componentSet(entityId: canvas, data: {})
+  let a: EntityId = card(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 100.0
+    y: 100.0
+  )
+  let b: EntityId = card(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 300.0
+    y: 300.0
+  )
+  let probe: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 333.3
+    y: 222.2
+    w: 1.0
+    h: 1.0
+  )
+  place(world: world, uiSystems: uiSystems)
+  # zooms about the pointer (the probe's place)
+  log("wheel with the modifier, 3 notches: the probe moved {probeDrift(
+    world: world
+    uiSystems: uiSystems
+    probe: probe
+    gestures: { x: 0.0, y: 0.0, wheel: 3.0, zoomModifier: true }
+  )} hundredths of a pixel, zoom {zoomOf(world: world, canvas: canvas)}")
+  log("a trackpad pinch of 0.6: the probe moved {probeDrift(
+    world: world
+    uiSystems: uiSystems
+    probe: probe
+    gestures: { x: 0.0, y: 0.0, pinch: 0.6 }
+  )} hundredths, zoom {zoomOf(world: world, canvas: canvas)}")
+  log("zoomed in to 40 and back by pinches: {probeDrift(
+    world: world
+    uiSystems: uiSystems
+    probe: probe
+    gestures: { x: 0.0, y: 0.0, pinch: 50.0 }
+  )} and {probeDrift(
+    world: world
+    uiSystems: uiSystems
+    probe: probe
+    gestures: { x: 0.0, y: 0.0, pinch: 0.02 }
+  )} hundredths, zoom {zoomOf(world: world, canvas: canvas)}")
+  # two fingers: zoom about their middle, then pan with it
+  let middle: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: {
+      x: 0.0
+      y: 0.0
+      twoFingers: true
+      twoFingerX: middle.x
+      twoFingerY: middle.y
+      twoFingerScale: 1.5
+    }
+  )
+  let afterPinch: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: {
+      x: 0.0
+      y: 0.0
+      twoFingers: true
+      twoFingerX: middle.x + 30.0
+      twoFingerY: middle.y - 10.0
+    }
+  )
+  let afterMove: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  step(world: world, uiSystems: uiSystems, gestures: { x: 0.0, y: 0.0 })
+  log(
+    "two fingers spread 1.5 over the probe: it moved {hundredths(value: afterPinch.x - middle.x)} hundredths, zoom {zoomOf(
+      world: world
+      canvas: canvas
+    )}; then their middle moved 30, -10: the probe moved {Math.round(x: afterMove.x - afterPinch.x) as Int}, {Math.round(
+      x: afterMove.y - afterPinch.y
+    ) as Int}"
+  )
+  # back to zoom 1 at offset 0 for the rest
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  place(world: world, uiSystems: uiSystems)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: 400.0, y: 300.0, wheel: 1.0, wheelX: -0.5 }
+  )
+  log(
+    "the wheel alone, 1 down and half a notch left: offset {offsetOf(world: world, canvas: canvas)}"
+  )
+  # a drag on empty canvas: 10 frames of 12 points a frame, then let go: it coasts
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  place(world: world, uiSystems: uiSystems)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: 600.0, y: 500.0, down: true, pressed: true }
+  )
+  loop var i: Int = 1, i <= 10, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: 600.0 - (i as Float) * 12.0, y: 500.0, down: true }
+    )
+  }
+  log("dragged 120 points left: offset {offsetOf(world: world, canvas: canvas)}")
+  step(world: world, uiSystems: uiSystems, gestures: { x: 480.0, y: 500.0, released: true })
+  let letGo: Float = componentView(this: world.cameras, entityId: canvas).offsetX
+  loop var i: Int = 0, i < 5, ++i {
+    step(world: world, uiSystems: uiSystems, gestures: { x: 480.0, y: 500.0 })
+  }
+  let coasted: Float = componentView(this: world.cameras, entityId: canvas).offsetX
+  log(
+    "let go: it coasted {Math.round(x: letGo - coasted) as Int} points left in 5 frames, still coasting {componentView(
+      this: world.canvasControlStates
+      entityId: canvas
+    ).coasting}"
+  )
+  # a tap stops it
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: 480.0, y: 500.0, down: true, pressed: true }
+  )
+  step(world: world, uiSystems: uiSystems, gestures: { x: 480.0, y: 500.0, released: true })
+  let tapped: Float = componentView(this: world.cameras, entityId: canvas).offsetX
+  loop var i: Int = 0, i < 5, ++i {
+    step(world: world, uiSystems: uiSystems, gestures: { x: 480.0, y: 500.0 })
+  }
+  let afterTap: Float = componentView(this: world.cameras, entityId: canvas).offsetX
+  let drift: Int = hundredths(value: afterTap - tapped)
+  log(
+    "a tap: coasting {componentView(this: world.canvasControlStates, entityId: canvas).coasting}, moved {drift} hundredths after it"
+  )
+  # dragging card B: its left edge brought 3 points short of A's right edge snaps onto it
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  place(world: world, uiSystems: uiSystems)
+  let aRight: Float = at(uiSystems: uiSystems, entityId: a).x + 100.0
+  let bStart: Vec2 = at(uiSystems: uiSystems, entityId: b)
+  let grabX: Float = bStart.x + 50.0
+  let grabY: Float = bStart.y + 30.0
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: grabX, y: grabY, down: true, pressed: true }
+  )
+  # B's left to aRight + 3, and its top to A's top + 150 (no other edge near)
+  let toX: Float = grabX + (aRight + 3.0 - bStart.x)
+  let toY: Float = grabY + (at(uiSystems: uiSystems, entityId: a).y + 150.0 - bStart.y)
+  step(world: world, uiSystems: uiSystems, gestures: { x: toX, y: toY, down: true })
+  let state: view CanvasControlState = componentView(
+    this: world.canvasControlStates
+    entityId: canvas
+  )
+  var guide: String = "none"
+  if let x: view Float = state.guideX {
+    guide = "{Math.round(x: x) as Int}"
+  }
+  log(
+    "B dragged 3 points short of A's right edge: B's left at {Math.round(
+      x: at(uiSystems: uiSystems, entityId: b).x
+    ) as Int}, A's right at {Math.round(x: aRight) as Int}, the guide at x {guide}"
+  )
+  step(world: world, uiSystems: uiSystems, gestures: { x: toX + 20.0, y: toY, down: true })
+  var farGuide: String = "none"
+  let farState: view CanvasControlState = componentView(
+    this: world.canvasControlStates
+    entityId: canvas
+  )
+  if let x: view Float = farState.guideX {
+    farGuide = "{Math.round(x: x) as Int}"
+  }
+  log(
+    "20 points further: B's left at {Math.round(x: at(uiSystems: uiSystems, entityId: b).x) as Int}, the guide {farGuide}"
+  )
+  step(world: world, uiSystems: uiSystems, gestures: { x: toX + 20.0, y: toY, released: true })
+  let rect: view Rect = componentView(this: world.rects, entityId: b)
+  log(
+    "let go: B's Rect at {Math.round(x: rect.position.x) as Int}, {Math.round(x: rect.position.y) as Int}; the camera did not move: {offsetOf(
+      world: world
+      canvas: canvas
+    )}"
+  )
+  ret 0
+}

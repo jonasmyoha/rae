@@ -1,0 +1,535 @@
+# canvasGestureSystem — a canvas's gestures (ui/CanvasComponents) turned into its Camera2D and its
+# draggable nodes' places. Run it once a frame after updateUiInput, with canvasGesturesFrom(input,
+# canvasEntityId, deltaTime) (or a script's CanvasGestures), before the ui pipeline.
+#
+# Zooming about a point keeps the canvas point under it where it is on screen: with the camera's
+# root at `base` (its place without the camera's offset) and q the point in the root's units from
+# there, the new offset is q - (q - offset) * (new zoom / zoom).
+import Math
+import Sdl3
+open Keys
+open ecs/ComponentTable
+open ecs/Entity
+open ui/CanvasComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/inputSystem/HitIndexQuery
+open ui/inputSystem/InputSystem
+
+# A pan let go slower than this (screen points a second) does not coast, and coasting stops below
+# the second
+const canvasCoastStart: Float = 40.0
+
+const canvasCoastStop: Float = 8.0
+
+# A frame's gestures for the canvas node `canvasEntityId` from the ui input: the wheel when it was
+# routed to that node or to nothing (give the node a WheelTarget), Ctrl or Command held
+func canvasGesturesFrom(
+  input: view UiInput
+  canvasEntityId: view EntityId
+  deltaTime: view Float
+) ret CanvasGestures {
+  var wheel: Float = uiWheelFor(input: input, entityId: canvasEntityId)
+  var wheelX: Float = 0.0
+  if input.wheelTarget is canvasEntityId {
+    wheelX = input.wheelX
+  }
+  if wheel is 0.0 {
+    wheel = uiWheelUnclaimed(input: input)
+  }
+  ret CanvasGestures {
+    x: input.pointer.x
+    y: input.pointer.y
+    down: input.pointer.down
+    pressed: input.pointer.pressed
+    released: input.pointer.released
+    wheel: wheel
+    wheelX: wheelX
+    zoomModifier: Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui) or Sdl3.isKeyDown(
+      key: keyLCtrl
+    ) or Sdl3.isKeyDown(key: keyRCtrl)
+    pinch: input.pinch
+    twoFingers: input.twoFingers
+    twoFingerX: input.twoFingerX
+    twoFingerY: input.twoFingerY
+    twoFingerScale: input.twoFingerScale
+    deltaTime: deltaTime
+  }
+}
+
+# Where the camera's root is without the camera, and the scale of what holds it
+type CanvasBase {
+  x: Float = 0.0
+  y: Float = 0.0
+  parentScale: Float = 1.0
+}
+
+func canvasBase(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret CanvasBase {
+  if not componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
+    ret CanvasBase {}
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  var lastZoom: Float = 1.0
+  if componentHas(this: world.transforms, entityId: entityId) {
+    let fx: view TransformFx = componentView(this: world.transforms, entityId: entityId)
+    if fx.scaleX is not 0.0 {
+      lastZoom = fx.scaleX
+    }
+  }
+  let parentScale: Float = transform.scale.x / lastZoom
+  var lastOffset: Vec2 = { x: 0.0, y: 0.0 }
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
+    lastOffset = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId).delta
+  }
+  ret CanvasBase {
+    x: transform.position.x - lastOffset.x * parentScale
+    y: transform.position.y - lastOffset.y * parentScale
+    parentScale: parentScale
+  }
+}
+
+# `camera` zoomed by `factor` (kept within the controls' range) about screen point (x, y)
+func canvasZoomAbout(
+  camera: mod Camera2D
+  controls: view CanvasControls
+  base: view CanvasBase
+  factor: view Float
+  x: view Float
+  y: view Float
+) {
+  let zoom: Float = Math.max(
+    a: controls.minZoom
+    b: Math.min(a: controls.maxZoom, b: camera.zoom * factor)
+  )
+  if zoom is camera.zoom or camera.zoom <= 0.0 {
+    ret
+  }
+  let ratio: Float = zoom / camera.zoom
+  let qx: Float = (x - base.x) / base.parentScale
+  let qy: Float = (y - base.y) / base.parentScale
+  camera.offsetX = qx - (qx - camera.offsetX) * ratio
+  camera.offsetY = qy - (qy - camera.offsetY) * ratio
+  camera.zoom = zoom
+}
+
+# `camera` moved by (dx, dy) screen points
+func canvasPanBy(
+  camera: mod Camera2D
+  base: view CanvasBase
+  dx: view Float
+  dy: view Float
+) {
+  camera.offsetX = camera.offsetX + dx / base.parentScale
+  camera.offsetY = camera.offsetY + dy / base.parentScale
+}
+
+# The canvas's draggable node a press on `hitEntityId` takes (it or an ancestor inside the canvas),
+# or noEntity()
+func canvasDraggableAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvasEntityId: view EntityId
+  hitEntityId: view EntityId
+) ret EntityId {
+  var at: EntityId = hitEntityId
+  loop var depth: Int = 0, depth < 256 and not isNone(this: at) and at is not canvasEntityId, ++depth {
+    if componentHas(this: world.canvasDraggables, entityId: at) {
+      ret at
+    }
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+      ret noEntity()
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret noEntity()
+}
+
+# A press at (x, y) is on the canvas: on nothing clickable inside its box, or on a node inside it
+func canvasTakesPress(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvasEntityId: view EntityId
+  base: view CanvasBase
+  hitEntityId: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if not isNone(this: hitEntityId) {
+    ret hitWithin(uiSystems: uiSystems, entityId: hitEntityId, ancestorEntityId: canvasEntityId)
+  }
+  if not componentHas(this: uiSystems.layout.computedRects, entityId: canvasEntityId) {
+    ret true
+  }
+  let size: Vec2 = componentView(this: uiSystems.layout.computedRects, entityId: canvasEntityId).size
+  ret x >= base.x and y >= base.y and x <= base.x + size.x * base.parentScale and y <= base.y + size.y * base.parentScale
+}
+
+# The shift (screen points) that snaps a box moving to `low`..`high` along one axis onto the
+# nearest edge of another node in the band across it (the screen) within `distance` (0 when none),
+# and that edge
+type CanvasSnap {
+  shift: Float = 0.0
+  edge: opt Float = none
+}
+
+func canvasSnapX(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  low: view Float
+  high: view Float
+  top: view Float
+  bottom: view Float
+  distance: view Float
+  draggedEntityId: view EntityId
+) ret CanvasSnap {
+  var snap: CanvasSnap = {}
+  var best: Float = distance + 1.0
+  loop let side: Float in List(Float) { low, high } {
+    if let edge: Float = hitIndexNearestEdgeX(
+      world: world
+      uiSystems: uiSystems
+      x: side
+      top: top
+      bottom: bottom
+      distance: distance
+      excludedEntityId: draggedEntityId
+    ) {
+      if Math.abs(value: edge - side) < best {
+        best = Math.abs(value: edge - side)
+        snap = CanvasSnap { shift: edge - side, edge: edge }
+      }
+    }
+  }
+  ret snap
+}
+
+func canvasSnapY(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  low: view Float
+  high: view Float
+  left: view Float
+  right: view Float
+  distance: view Float
+  draggedEntityId: view EntityId
+) ret CanvasSnap {
+  var snap: CanvasSnap = {}
+  var best: Float = distance + 1.0
+  loop let side: Float in List(Float) { low, high } {
+    if let edge: Float = hitIndexNearestEdgeY(
+      world: world
+      uiSystems: uiSystems
+      y: side
+      left: left
+      right: right
+      distance: distance
+      excludedEntityId: draggedEntityId
+    ) {
+      if Math.abs(value: edge - side) < best {
+        best = Math.abs(value: edge - side)
+        snap = CanvasSnap { shift: edge - side, edge: edge }
+      }
+    }
+  }
+  ret snap
+}
+
+# The dragged node moved with the pointer from where the press began, its edges snapped
+func canvasDragStep(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  state: mod CanvasControlState
+  controls: view CanvasControls
+  gestures: view CanvasGestures
+) {
+  let entityId: EntityId = state.dragEntityId
+  if not componentHas(this: world.rects, entityId: entityId) or not componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  ) {
+    ret
+  }
+  let scale: Float = Math.max(
+    a: 0.000001
+    b: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId).scale.x
+  )
+  var dx: Float = gestures.x - state.pressX
+  var dy: Float = gestures.y - state.pressY
+  state.guideX = none
+  state.guideY = none
+  var snaps: Bool = controls.snapDistance > 0.0
+  if componentHas(this: world.canvasDraggables, entityId: entityId) {
+    snaps = snaps and componentView(this: world.canvasDraggables, entityId: entityId).snaps
+  }
+  if snaps {
+    hitIndexSync(world: world, uiSystems: uiSystems)
+    # where the box would be on screen: its place when the drag began, moved by the pointer
+    let size: Vec2 = componentView(this: world.rects, entityId: entityId).size
+    let current: Vec2 = componentView(this: world.rects, entityId: entityId).position
+    if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
+      let startLeft: Float = rect.x - (current.x - state.startX) * scale
+      let startTop: Float = rect.y - (current.y - state.startY) * scale
+      let width: Float = size.x * scale
+      let height: Float = size.y * scale
+      # an edge lines up with any other node's edge on screen, above or beside it (alignment guides)
+      var screenW: Float = world.layoutW
+      var screenH: Float = world.layoutH
+      if screenW <= 0.0 or screenH <= 0.0 {
+        screenW = 1280.0
+        screenH = 800.0
+      }
+      let snapX: CanvasSnap = canvasSnapX(
+        world: world
+        uiSystems: uiSystems
+        low: startLeft + dx
+        high: startLeft + dx + width
+        top: 0.0
+        bottom: screenH
+        distance: controls.snapDistance
+        draggedEntityId: entityId
+      )
+      dx = dx + snapX.shift
+      state.guideX = snapX.edge
+      let snapY: CanvasSnap = canvasSnapY(
+        world: world
+        uiSystems: uiSystems
+        low: startTop + dy
+        high: startTop + dy + height
+        left: 0.0
+        right: screenW
+        distance: controls.snapDistance
+        draggedEntityId: entityId
+      )
+      dy = dy + snapY.shift
+      state.guideY = snapY.edge
+    }
+  }
+  let place: Vec2 = { x: state.startX + dx / scale, y: state.startY + dy / scale }
+  let rect: view Rect = componentView(this: world.rects, entityId: entityId)
+  if rect.position.x is not place.x or rect.position.y is not place.y {
+    world.rects.componentMod(entityId: entityId).position = place
+  }
+}
+
+# One canvas's frame
+func canvasGestureStep(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  gestures: view CanvasGestures
+) {
+  if not componentHas(this: world.cameras, entityId: entityId) {
+    ret
+  }
+  if not componentHas(this: world.canvasControlStates, entityId: entityId) {
+    world.canvasControlStates.componentSet(entityId: entityId, data: {})
+  }
+  let controls: CanvasControls = canvasControlsOf(world: world, entityId: entityId)
+  let base: CanvasBase = canvasBase(world: world, uiSystems: uiSystems, entityId: entityId)
+  var camera: Camera2D = {}
+  if let known: Camera2D = componentCopy(this: world.cameras, entityId: entityId) {
+    camera = known
+  }
+  var state: CanvasControlState = {}
+  if let known: CanvasControlState = componentCopy(
+    this: world.canvasControlStates
+    entityId: entityId
+  ) {
+    state = known
+  }
+  let deltaTime: Float = Math.max(a: 0.0001, b: gestures.deltaTime)
+  # a press stops a coasting pan (a tap), and begins a pan or a node's drag
+  if gestures.pressed {
+    state.coasting = false
+    state.velocityX = 0.0
+    state.velocityY = 0.0
+    let hit: EntityId = uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: gestures.x
+      y: gestures.y
+    )
+    if canvasTakesPress(
+      world: world
+      uiSystems: uiSystems
+      canvasEntityId: entityId
+      base: base
+      hitEntityId: hit
+      x: gestures.x
+      y: gestures.y
+    ) {
+      let dragged: EntityId = canvasDraggableAt(
+        world: world
+        uiSystems: uiSystems
+        canvasEntityId: entityId
+        hitEntityId: hit
+      )
+      if not isNone(this: dragged) and componentHas(this: world.rects, entityId: dragged) {
+        state.dragEntityId = dragged
+        state.pressX = gestures.x
+        state.pressY = gestures.y
+        let place: Vec2 = componentView(this: world.rects, entityId: dragged).position
+        state.startX = place.x
+        state.startY = place.y
+      } else {
+        state.panning = true
+      }
+      state.lastX = gestures.x
+      state.lastY = gestures.y
+    }
+  }
+  # two fingers pan by their middle and zoom about it; one pointer's pan waits
+  if gestures.twoFingers {
+    state.panning = false
+    if state.twoFingersDown {
+      canvasPanBy(
+        camera: camera
+        base: base
+        dx: gestures.twoFingerX - state.fingersX
+        dy: gestures.twoFingerY - state.fingersY
+      )
+    }
+    if gestures.twoFingerScale is not 1.0 {
+      canvasZoomAbout(
+        camera: camera
+        controls: controls
+        base: base
+        factor: gestures.twoFingerScale
+        x: gestures.twoFingerX
+        y: gestures.twoFingerY
+      )
+    }
+    state.twoFingersDown = true
+    state.fingersX = gestures.twoFingerX
+    state.fingersY = gestures.twoFingerY
+  } else {
+    state.twoFingersDown = false
+  }
+  if gestures.down and state.panning {
+    let dx: Float = gestures.x - state.lastX
+    let dy: Float = gestures.y - state.lastY
+    canvasPanBy(
+      camera: camera
+      base: base
+      dx: dx
+      dy: dy
+    )
+    # the pan's speed, smoothed over the last few frames
+    state.velocityX = state.velocityX * 0.5 + dx / deltaTime * 0.5
+    state.velocityY = state.velocityY * 0.5 + dy / deltaTime * 0.5
+  }
+  if gestures.down and not isNone(this: state.dragEntityId) {
+    canvasDragStep(
+      world: world
+      uiSystems: uiSystems
+      state: state
+      controls: controls
+      gestures: gestures
+    )
+  }
+  state.lastX = gestures.x
+  state.lastY = gestures.y
+  if gestures.released {
+    if state.panning {
+      state.coasting = Math.sqrt(
+        x: state.velocityX * state.velocityX + state.velocityY * state.velocityY
+      ) >= canvasCoastStart
+    }
+    state.panning = false
+    state.dragEntityId = noEntity()
+    state.guideX = none
+    state.guideY = none
+  }
+  if state.coasting and not gestures.down {
+    canvasPanBy(
+      camera: camera
+      base: base
+      dx: state.velocityX * deltaTime
+      dy: state.velocityY * deltaTime
+    )
+    let keep: Float = Math.exp(x: 0.0 - controls.friction * deltaTime)
+    state.velocityX = state.velocityX * keep
+    state.velocityY = state.velocityY * keep
+    if Math.sqrt(x: state.velocityX * state.velocityX + state.velocityY * state.velocityY) < canvasCoastStop {
+      state.coasting = false
+      state.velocityX = 0.0
+      state.velocityY = 0.0
+    }
+  }
+  # the wheel: with the modifier it zooms about the pointer, without it pans
+  if gestures.wheel is not 0.0 or gestures.wheelX is not 0.0 {
+    if gestures.zoomModifier {
+      canvasZoomAbout(
+        camera: camera
+        controls: controls
+        base: base
+        factor: Math.pow(base: controls.wheelZoom, exp: gestures.wheel)
+        x: gestures.x
+        y: gestures.y
+      )
+    } else {
+      canvasPanBy(
+        camera: camera
+        base: base
+        dx: gestures.wheelX * controls.wheelPan
+        dy: gestures.wheel * controls.wheelPan
+      )
+    }
+  }
+  # a trackpad's pinch zooms about the pointer
+  if gestures.pinch is not 1.0 and gestures.pinch > 0.0 {
+    canvasZoomAbout(
+      camera: camera
+      controls: controls
+      base: base
+      factor: gestures.pinch
+      x: gestures.x
+      y: gestures.y
+    )
+  }
+  # written only when it changed, so a still canvas leaves the camera's table alone
+  var changed: Bool = true
+  if let known: Camera2D = componentCopy(this: world.cameras, entityId: entityId) {
+    changed = known.zoom is not camera.zoom or known.offsetX is not camera.offsetX or known.offsetY is not camera.offsetY
+  }
+  if changed {
+    world.cameras.componentSet(entityId: entityId, data: camera)
+  }
+  world.canvasControlStates.componentSet(entityId: entityId, data: state)
+}
+
+func canvasControlsOf(world: view UiWorld, entityId: view EntityId) ret CanvasControls {
+  if let controls: CanvasControls = componentCopy(this: world.canvasControls, entityId: entityId) {
+    ret controls
+  }
+  ret CanvasControls {}
+}
+
+# Every canvas's frame, from this frame's gestures
+func canvasGestureSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  gestures: view CanvasGestures
+) {
+  var canvases: List(EntityId) = {}
+  loop var i: Int = 0, i < componentCount(this: world.canvasControls), ++i {
+    canvases.add(value: componentEntityAt(this: world.canvasControls, i: i))
+  }
+  loop let entityId: view EntityId in canvases {
+    canvasGestureStep(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      gestures: gestures
+    )
+  }
+}

@@ -651,9 +651,31 @@ func hitIndexInRect(
   ret hits
 }
 
+# `entityId` is `ancestorEntityId` or inside it
+func hitWithin(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  ancestorEntityId: view EntityId
+) ret Bool {
+  if isNone(this: ancestorEntityId) {
+    ret false
+  }
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if at is ancestorEntityId {
+      ret true
+    }
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+      ret false
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret false
+}
+
 # Snapping: the screen x of the clickable nodes' left or right edge nearest to `x`, within
 # `distance`, among the nodes that reach rows `top`..`bottom`, `excludedEntityId` (the node being
-# dragged) left out; none when no edge is that near
+# dragged) and what is inside it left out; none when no edge is that near
 func hitIndexNearestEdgeX(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -674,7 +696,7 @@ func hitIndexNearestEdgeX(
     bottom: bottom
   ) {
     let entityId: EntityId = uiSystems.hitIndex.entries.copyAtDefault(index: at).entityId
-    if entityId is not excludedEntityId {
+    if not hitWithin(uiSystems: uiSystems, entityId: entityId, ancestorEntityId: excludedEntityId) {
       if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
         if rect.y <= bottom and rect.y + rect.h >= top {
           loop let edge: Float in List(Float) { rect.x, rect.x + rect.w } {
@@ -713,7 +735,7 @@ func hitIndexNearestEdgeY(
     bottom: y + distance
   ) {
     let entityId: EntityId = uiSystems.hitIndex.entries.copyAtDefault(index: at).entityId
-    if entityId is not excludedEntityId {
+    if not hitWithin(uiSystems: uiSystems, entityId: entityId, ancestorEntityId: excludedEntityId) {
       if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
         if rect.x <= right and rect.x + rect.w >= left {
           loop let edge: Float in List(Float) { rect.y, rect.y + rect.h } {

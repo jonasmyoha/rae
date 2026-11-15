@@ -159,6 +159,15 @@ func removeComponentByName(world: mod UiWorld, entityId: view EntityId, name: vi
     componentRemove(this: world.paintCaches, entityId: entityId)
     ret
   }
+  if name is "CanvasControls" {
+    componentRemove(this: world.canvasControls, entityId: entityId)
+    componentRemove(this: world.canvasControlStates, entityId: entityId)
+    ret
+  }
+  if name is "CanvasDraggable" {
+    componentRemove(this: world.canvasDraggables, entityId: entityId)
+    ret
+  }
   if name is "RadialGradientFill" {
     componentRemove(this: world.radialGradientFills, entityId: entityId)
     ret

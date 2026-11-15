@@ -4810,12 +4810,25 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  RaeTask* __t = __a->__task; free(__a); rae_task_complete(__t);\n  return 1;\n}\n");
   }
 
-  // Bodies for non-generic functions
+  // Bodies for non-generic functions, each buffered like a specialization's body: a body that
+  // registers a specialization first (a generic call inside a fields() loop the discovery pass did
+  // not reach) gets its prototype before it, not after (example 121's inspector called
+  // addDefaultComponent<Children> before its prototype once UiWorld had 127 tables)
+  size_t plain_prototyped = ctx->specialized_func_count;
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       progress_work(EMIT_STAGE_PLAIN_BODIES_LO, EMIT_STAGE_PLAIN_BODIES_HI, i, ctx->all_decl_count);
       if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
-          emit_function(ctx, module, &d->as.func_decl, out);
+          char* body = NULL;
+          size_t body_len = 0;
+          FILE* body_out = open_memstream(&body, &body_len);
+          emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
+          if (body_out) {
+              fclose(body_out);
+              emit_new_specialization_prototypes(ctx, module, &plain_prototyped, out);
+              if (body) fwrite(body, 1, body_len, out);
+              free(body);
+          }
       }
   }
 

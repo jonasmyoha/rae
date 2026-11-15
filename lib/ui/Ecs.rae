@@ -15,6 +15,7 @@ open ui/ChartComponents
 open ui/PlaneComponents
 open ui/WireComponents
 open ui/PaintCacheComponents
+open ui/CanvasComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -147,6 +148,10 @@ type UiWorld {
   wireDatas: ComponentTable(WireData)
   # a subtree drawn from a cached picture while it all fits on screen (ui/PaintCacheComponents)
   paintCaches: ComponentTable(PaintCache)
+  # a canvas's gestures (ui/CanvasComponents): its settings, its state, the nodes it can drag
+  canvasControls: ComponentTable(CanvasControls)
+  canvasControlStates: ComponentTable(CanvasControlState)
+  canvasDraggables: ComponentTable(CanvasDraggable)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -380,6 +385,9 @@ func createUiWorld() ret UiWorld {
     wireSets: ComponentTable.create(Wires)
     wireDatas: ComponentTable.create(WireData)
     paintCaches: ComponentTable.create(PaintCache)
+    canvasControls: ComponentTable.create(CanvasControls)
+    canvasControlStates: ComponentTable.create(CanvasControlState)
+    canvasDraggables: ComponentTable.create(CanvasDraggable)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)

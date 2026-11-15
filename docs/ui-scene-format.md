@@ -1282,3 +1282,34 @@ does not animate: a hover or a motion inside it shows when the picture is drawn 
 the nodes themselves 8 ms. The pop where the picture gives way to the nodes, the same camera drawn
 both ways: a mean of 0.01 of 255 when the picture was drawn at that zoom, 0.48 when it was drawn
 at 0.7 of it and scaled up. Case 1487 checks the rules without a GPU.
+
+## 41. `CanvasControls` and `CanvasDraggable`: a canvas's gestures
+
+Put `CanvasControls` (and a `WheelTarget`, so the wheel comes to it) on the node that holds the
+`Camera2D`, and `CanvasDraggable` (with an `OnClick`, so the hit test finds it) on the nodes a drag
+should move:
+
+```json
+"Canvas": { "Rect": { ... }, "Camera2D": {}, "CanvasControls": { "snapDistance": 6 }, "WheelTarget": {} }
+"Clip":   { "Rect": { ... }, "OnClick": { "actionId": "clip.pick" }, "CanvasDraggable": {} }
+```
+
+Each frame, after `updateUiInput`, the app runs
+`canvasGestureSystem(world, uiSystems, canvasGesturesFrom(input, canvasEntityId, deltaTime))`
+(lib/ui/canvasGestureSystem); a test passes its own `CanvasGestures`.
+
+- A trackpad's pinch, and the wheel with Ctrl or Command held, zoom about the pointer
+  (`wheelZoom` a notch, within `minZoom`..`maxZoom`); the canvas point under the pointer stays
+  where it is. Two fingers on a touch screen zoom about their middle and pan with it.
+- The wheel without the modifier pans (`wheelPan` points a notch, down and sideways).
+- A drag on the canvas (on nothing clickable inside its box, or on a node of it that is not
+  draggable) pans it. Let go while moving, it coasts and slows (`friction`); a tap stops it.
+- A drag on a `CanvasDraggable` node moves its `Rect`. Its left or right edge snaps onto the
+  nearest left or right edge of another clickable node on screen within `snapDistance` points,
+  and its top or bottom the same way (ui/HitIndex's nearest-edge queries; what is inside the
+  dragged node does not count). A guide line is drawn across the screen where they meet
+  (lib/ui/renderSystem/RenderCanvasGuides).
+
+Case 1489 drives each gesture with scripted input: the zooms leave the point under the pointer
+within a hundredth of a pixel, the pans move by what they should, a released drag coasts and a
+tap stops it, and a dragged card snaps onto another's edge 3 points away but not 23.

@@ -1,0 +1,71 @@
+# ui/CanvasComponents — the gestures of a canvas (ui/canvasGestureSystem), on the node that holds
+# its Camera2D: pinch to zoom about the fingers (a trackpad's pinch, two fingers on a touch screen),
+# the wheel with Ctrl or Command held to zoom about the pointer (without it the wheel pans), a drag
+# on the canvas to pan and inertia when it is let go (a tap stops it), and dragging a node that has
+# `CanvasDraggable` (and an OnClick, so the hit test finds it), its edges snapping to the other
+# clickable nodes' edges (ui/HitIndex) with a guide line drawn where they meet.
+open ecs/Entity
+
+type CanvasControls {
+  minZoom: Float = 0.01
+  maxZoom: Float = 50.0
+  # zoom change per wheel notch with the modifier held (1.1 = 10 % a notch)
+  wheelZoom: Float = 1.1
+  # how far a wheel notch without the modifier pans, in screen points
+  wheelPan: Float = 40.0
+  # how fast inertia dies away (its speed shrinks by e every 1 / friction seconds)
+  friction: Float = 4.0
+  # how close an edge snaps, in screen points (0: no snapping)
+  snapDistance: Float = 6.0
+}
+
+# A node the canvas's drag moves (its Rect), rather than panning the canvas
+type CanvasDraggable {
+  # its edges snap to the other nodes' edges
+  snaps: Bool = true
+}
+
+# A frame's input for the canvas, from UiInput (canvasGesturesFrom) or a script
+type CanvasGestures {
+  x: Float
+  y: Float
+  down: Bool = false
+  pressed: Bool = false
+  released: Bool = false
+  # wheel notches this frame, down and sideways, and whether Ctrl or Command is held
+  wheel: Float = 0.0
+  wheelX: Float = 0.0
+  zoomModifier: Bool = false
+  # a trackpad pinch's scale change this frame (1: none)
+  pinch: Float = 1.0
+  # two fingers on a touch screen: their middle and how much their spread grew (1: none)
+  twoFingers: Bool = false
+  twoFingerX: Float = 0.0
+  twoFingerY: Float = 0.0
+  twoFingerScale: Float = 1.0
+  deltaTime: Float = 0.016666668
+}
+
+# The system's state on the canvas node (not saved)
+type CanvasControlState {
+  panning: Bool = false
+  lastX: Float = 0.0
+  lastY: Float = 0.0
+  # the pan's speed, screen points a second: measured while dragging, then inertia
+  velocityX: Float = 0.0
+  velocityY: Float = 0.0
+  coasting: Bool = false
+  # two fingers: where their middle was last frame
+  twoFingersDown: Bool = false
+  fingersX: Float = 0.0
+  fingersY: Float = 0.0
+  # a node being dragged: it, where the press began, and its Rect then
+  dragEntityId: EntityId = noEntity()
+  pressX: Float = 0.0
+  pressY: Float = 0.0
+  startX: Float = 0.0
+  startY: Float = 0.0
+  # the snapping guides shown this frame (screen x of a vertical one, y of a horizontal one)
+  guideX: opt Float = none
+  guideY: opt Float = none
+}
