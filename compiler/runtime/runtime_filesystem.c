@@ -466,43 +466,79 @@ rae_String rae_ext_rae_str_f64_ptr(const double* v) {
   return rae_ext_rae_str_f64(*v);
 }
 
-/* JSON number formatting for the .raescene writer: the SHORTEST decimal that
- * round-trips the 32-bit float (through double->float on reload via strtod).
- * `%g` defaults to 6 significant digits, so an authored 47.710842 saved as
- * "47.7108" reloaded as a DIFFERENT value and repeated save cycles eroded
- * coordinates. Try increasing precision and keep the shortest string whose
- * `(float)strtod(...)` equals the original; normal coordinates never reach
- * scientific notation. */
-rae_String rae_ext_json_number(float v) {
-  double d = (double)v;
-  char best[40]; int best_len = -1;
-  for (int prec = 1; prec <= 9; prec++) {
-    char tmp[40];
-    int len = snprintf(tmp, sizeof tmp, "%.*g", prec, d);
-    if (len > 0 && len < (int)sizeof tmp && (float)strtod(tmp, NULL) == v
-        && (best_len < 0 || len < best_len)) {
-      best_len = len; memcpy(best, tmp, (size_t)len + 1);
-    }
+/* JSON number text: the SHORTEST decimal that reads back to the same value (a Float through
+ * float, a Float64 through double), laid out as JavaScript's Number.prototype.toString does:
+ * a whole number below 1e21 as plain digits ("260", not "2.6e+02"), plain decimals from 1e-6
+ * ("0.00001"), an exponent only beyond ("1e-7", "1e+21", "1.7976931348623157e+308"). `%g` (six
+ * significant digits) wrote -12.000001 as -12 and 1/3 as 0.333333, so a value did not survive
+ * a save and a reload. NaN and the infinities are not JSON numbers: they are written null.
+ * `out` holds at least 48 bytes; the length is returned. */
+int rae_json_number_text(double v, int single, char* out) {
+  if (v != v || v > 1.7976931348623157e308 || v < -1.7976931348623157e308) {
+    memcpy(out, "null", 5);
+    return 4;
   }
-  if (best_len < 0) best_len = snprintf(best, sizeof best, "%.9g", d);
-  return rae_str_from_buf_impl((uint8_t*)best, best_len, RAE_SITE_FLOAT_TO_STR);
+  if (v == 0.0) {
+    if (signbit(v)) { memcpy(out, "-0", 3); return 2; }
+    memcpy(out, "0", 2);
+    return 1;
+  }
+  /* the fewest significant digits that read back to the same value */
+  char sci[48];
+  int max_prec = single ? 9 : 17;
+  for (int prec = 1; prec <= max_prec; prec++) {
+    snprintf(sci, sizeof sci, "%.*e", prec - 1, v);
+    double back = strtod(sci, NULL);
+    if (single ? ((float)back == (float)v) : (back == v)) break;
+  }
+  /* "-d.ddde+XX": the digits (trailing zeros dropped) and the decimal exponent */
+  int negative = sci[0] == '-';
+  const char* p = sci + (negative ? 1 : 0);
+  char digits[24]; int k = 0;
+  while (*p && *p != 'e') {
+    if (*p >= '0' && *p <= '9' && k < 23) digits[k++] = *p;
+    p++;
+  }
+  while (k > 1 && digits[k - 1] == '0') k--;
+  int exponent = (*p == 'e') ? atoi(p + 1) : 0;
+  int n = exponent + 1; /* the value is 0.digits x 10^n */
+  int len = 0;
+  if (negative) out[len++] = '-';
+  if (k <= n && n <= 21) {
+    for (int i = 0; i < k; i++) out[len++] = digits[i];
+    for (int i = k; i < n; i++) out[len++] = '0';
+  } else if (0 < n && n <= 21) {
+    for (int i = 0; i < n; i++) out[len++] = digits[i];
+    out[len++] = '.';
+    for (int i = n; i < k; i++) out[len++] = digits[i];
+  } else if (-6 < n && n <= 0) {
+    out[len++] = '0'; out[len++] = '.';
+    for (int i = 0; i < -n; i++) out[len++] = '0';
+    for (int i = 0; i < k; i++) out[len++] = digits[i];
+  } else {
+    out[len++] = digits[0];
+    if (k > 1) {
+      out[len++] = '.';
+      for (int i = 1; i < k; i++) out[len++] = digits[i];
+    }
+    len += snprintf(out + len, 16, "e%c%d", n - 1 >= 0 ? '+' : '-', n - 1 >= 0 ? n - 1 : 1 - n);
+  }
+  out[len] = 0;
+  return len;
 }
 
-/* The same for a double (lib/Json jbNumber64): the shortest of %.1g .. %.17g
- * that strtod reads back to the same double, so an epoch time in ms or any
- * Float64 survives a save and reload unchanged. */
+/* lib/Json's number writers (jbNumber, jbNumber64): the .raescene writer and any JSON a program
+ * builds, through the one formatter above */
+rae_String rae_ext_json_number(float v) {
+  char text[48];
+  int len = rae_json_number_text((double)v, 1, text);
+  return rae_str_from_buf_impl((uint8_t*)text, len, RAE_SITE_FLOAT_TO_STR);
+}
+
 rae_String rae_ext_json_number64(double v) {
-  char best[40]; int best_len = -1;
-  for (int prec = 1; prec <= 17; prec++) {
-    char tmp[40];
-    int len = snprintf(tmp, sizeof tmp, "%.*g", prec, v);
-    if (len > 0 && len < (int)sizeof tmp && strtod(tmp, NULL) == v) {
-      best_len = len; memcpy(best, tmp, (size_t)len + 1);
-      break;
-    }
-  }
-  if (best_len < 0) best_len = snprintf(best, sizeof best, "%.17g", v);
-  return rae_str_from_buf_impl((uint8_t*)best, best_len, RAE_SITE_FLOAT_TO_STR);
+  char text[48];
+  int len = rae_json_number_text(v, 0, text);
+  return rae_str_from_buf_impl((uint8_t*)text, len, RAE_SITE_FLOAT_TO_STR);
 }
 
 /* Float (f32) views. Formatting promotes to double, so the shared f64

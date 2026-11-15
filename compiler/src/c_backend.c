@@ -3399,7 +3399,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                   fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
                   fprintf(out, "  else rae_jout_text(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else if (opt_struct && (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32"))) {
-                  fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%g\", (double)this->%.*s.value);\n", nl, nd, nl, nd, nl, nd);
+                  fprintf(out, "  if (this->%.*s.has) { rae_jout_text(&__out, \"\\\"%.*s\\\": \"); rae_jout_number(&__out, (double)this->%.*s.value, %d); }\n", nl, nd, nl, nd, nl, nd, str_eq_cstr(base, "Float64") ? 0 : 1);
                   fprintf(out, "  else rae_jout_text(&__out, \"\\\"%.*s\\\": null\");\n", nl, nd);
               } else if (opt_struct && str_eq_cstr(base, "Bool")) {
                   fprintf(out, "  if (this->%.*s.has) rae_jout_printf(&__out, \"\\\"%.*s\\\": %%s\", this->%.*s.value ? \"true\" : \"false\");\n", nl, nd, nl, nd, nl, nd);
@@ -3417,8 +3417,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%lld\", (long long)this->%.*s);\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
           } else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) {
-              fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%g\", this->%.*s);\n",
-                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
+              fprintf(out, "  rae_jout_text(&__out, \"\\\"%.*s\\\": \"); rae_jout_number(&__out, (double)this->%.*s, %d);\n",
+                  (int)f->name.len, f->name.data, (int)f->name.len, f->name.data, str_eq_cstr(base, "Float64") ? 0 : 1);
           } else if (str_eq_cstr(base, "Bool")) {
               fprintf(out, "  rae_jout_printf(&__out, \"\\\"%.*s\\\": %%s\", this->%.*s ? \"true\" : \"false\");\n",
                   (int)f->name.len, f->name.data, (int)f->name.len, f->name.data);
@@ -3466,7 +3466,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               } else if (eString) {
                   fprintf(out, "    rae_jscan_put_string(&__out, __e);\n");
               } else if (eFloat) {
-                  fprintf(out, "    rae_jout_printf(&__out, \"%%g\", (double)__e);\n");
+                  fprintf(out, "    rae_jout_number(&__out, (double)__e, %d);\n", str_eq_cstr(eb, "Float64") ? 0 : 1);
               } else if (eBool) {
                   fprintf(out, "    rae_jout_printf(&__out, \"%%s\", __e ? \"true\" : \"false\");\n");
               } else {

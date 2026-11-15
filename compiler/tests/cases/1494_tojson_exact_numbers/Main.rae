@@ -1,0 +1,101 @@
+# The derived toJson writes a Float or Float64 as the shortest text that reads back to the same
+# value (fromJson gives it back exactly: equal, which for a finite number is the same bits, and -0
+# written as -0), whole numbers as integers and no exponent where plain digits are as short: 1/3,
+# -12.000001, 1e-7, 1e20, 260, the largest and smallest finite values, in plain, optional and list
+# fields; and lib/Json's jbNumber64 writes 260 as 260.
+import Json
+import String
+
+type Doubles {
+  third: Float64
+  close: Float64
+  tiny: Float64
+  huge: Float64
+  whole: Float64
+  largest: Float64
+  smallest: Float64
+  normalSmallest: Float64
+  negativeZero: Float64
+  maybe: opt Float64
+  list: List(Float64)
+}
+
+type Singles {
+  third: Float
+  close: Float
+  tiny: Float
+  huge: Float
+  whole: Float
+  largest: Float
+  smallest: Float
+  maybe: opt Float
+  list: List(Float)
+}
+
+func sameDoubles(a: view Doubles, b: view Doubles) ret Bool {
+  var same: Bool = a.third is b.third and a.close is b.close and a.tiny is b.tiny and a.huge is b.huge
+  same = same and a.whole is b.whole and a.largest is b.largest and a.smallest is b.smallest
+  same = same and a.normalSmallest is b.normalSmallest and a.negativeZero is b.negativeZero
+  same = same and a.list.length is b.list.length
+  loop var i: Int = 0, i < a.list.length, ++i {
+    same = same and a.list.copyAtDefault(index: i) is b.list.copyAtDefault(index: i)
+  }
+  if let x: view Float64 = a.maybe {
+    if let y: view Float64 = b.maybe {
+      same = same and x is y
+    } else {
+      same = false
+    }
+  }
+  ret same
+}
+
+func main() {
+  let one: Float64 = 1.0
+  let three: Float64 = 3.0
+  let doubles: Doubles = {
+    third: one / three
+    close: -12.000001
+    tiny: 0.0000001
+    huge: 100000000000000000000.0
+    whole: 260.0
+    largest: "1.7976931348623157e308".toFloat64()
+    smallest: "5e-324".toFloat64()
+    normalSmallest: "2.2250738585072014e-308".toFloat64()
+    negativeZero: -0.0
+    maybe: 0.1
+    list: { 0.1, 0.2, 0.30000000000000004, -1.5 }
+  }
+  let text: String = doubles.toJson()
+  log(text)
+  let back: Doubles = Doubles.fromJson(json: text)
+  log("Float64 fields back with the same bits: {sameDoubles(a: doubles, b: back)}")
+  let singleOne: Float = 1.0
+  let singleThree: Float = 3.0
+  let singles: Singles = {
+    third: singleOne / singleThree
+    close: -12.000001
+    tiny: 0.0000001
+    huge: 100000000000000000000.0
+    whole: 260.0
+    largest: "3.4028235e38".toFloat()
+    smallest: "1e-45".toFloat()
+    maybe: 0.1
+    list: { 0.1, 16777216.0, -2.5 }
+  }
+  let singleText: String = singles.toJson()
+  log(singleText)
+  let singleBack: Singles = Singles.fromJson(json: singleText)
+  var same: Bool = singles.third is singleBack.third and singles.close is singleBack.close and singles.tiny is singleBack.tiny
+  same = same and singles.huge is singleBack.huge and singles.whole is singleBack.whole and singles.largest is singleBack.largest
+  same = same and singles.smallest is singleBack.smallest and singleBack.list.length is 3
+  loop var i: Int = 0, i < singles.list.length, ++i {
+    same = same and singles.list.copyAtDefault(index: i) is singleBack.list.copyAtDefault(index: i)
+  }
+  log("Float fields back the same: {same}")
+  log(
+    "lib/Json jbNumber64: {Json.jbNumber64(value: 260.0)} {Json.jbNumber64(value: 0.00001)} {Json.jbNumber64(
+      value: "1e21".toFloat64()
+    )}, jbNumber: {Json.jbNumber(value: 47.710842)}"
+  )
+}
