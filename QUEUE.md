@@ -17,7 +17,10 @@ Anything worth keeping goes above the start marker.
 SUMU writes `[queued]` and `[>claude]` / `[>codex]`. The agent writes the
 outcome, in the same commit as the work: `[x]` done, `[postponed]`, or
 `[failed]` / `[question]` — both stop the queue, with the question after
-`QUESTION:` in the line body. Never put a started task back to `[ ]`.
+`QUESTION:` in the line body.
+Never put the task you are running back to `[ ]` when you stop it. An earlier
+`[postponed]` task whose blocker is gone is reopened by changing its own line
+back to `[ ]` (keep its `#id`), never by copying it into a new task.
 
 File a new task as `- [ ] the task text`; SUMU mints the `#id`, so never
 guess one. Line order is the queue order.
