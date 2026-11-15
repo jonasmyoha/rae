@@ -1,7 +1,11 @@
 # Minimal deferred-scene HUD, backed by the shared DebugOverlay widget.
 # Create the renderer with createDeferredRendererWithUi; update before camera
 # input, then draw at RenderTag.uiOverlay. The renderer handles presentation.
+# Its dialog's "Performance" row opens the perf HUD (ui/PerfHud); the HUD's
+# threads and its save button read this HUD's own profiler, which records only
+# while the perf HUD is open.
 import Gpu2d
+import Profile
 open Gpu2dCanvas
 import SdfText
 open ui/DebugOverlay
@@ -9,6 +13,7 @@ open ui/DebugOverlay
 type DebugHud {
   debugOverlay: DebugOverlay
   font: SdfFont
+  profiler: Profiler
 }
 
 func createDebugHud(fontBase: view String) ret DebugHud {
@@ -23,11 +28,14 @@ func createDebugHud(fontBase: view String) ret DebugHud {
       jsonPath: "{fontBase}.mtsdf.json"
       rawAtlasPath: "{fontBase}.mtsdf.raw"
     )
+    profiler: Profile.createProfiler()
   }
 }
 
 # A visible dialog owns input until dismissed; the dismissing press is consumed.
 func updateDebugHud(debugHud: mod DebugHud, now: copy Float64, rendered: copy Bool) ret Bool {
+  let unusedWritten: Bool = Profile.tick(profiler: debugHud.profiler)
+  debugOverlayPerf(debugOverlay: debugHud.debugOverlay, profiler: debugHud.profiler)
   let tookPointer: Bool = updateDebugOverlay(
     debugOverlay: debugHud.debugOverlay
     screenW: Gpu2d.designWidth()

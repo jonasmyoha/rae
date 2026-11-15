@@ -366,6 +366,7 @@ func updateWalkerClimate(app: mod WalkerApp) {
 # ----- per-frame timing + resize -------------------------------------------
 func beginWalkerFrame(app: mod WalkerApp) {
   Profile.tick(profiler: app.profiler)
+  debugOverlayPerf(debugOverlay: app.inputSystem.dbg, profiler: app.profiler)
   app.frame.resized = resizeUiToWindow(
     world: app.inputSystem.world
     uiSystems: app.inputSystem.uiSystems
@@ -884,7 +885,9 @@ func updateWalkerApp(app: mod WalkerApp) {
   # Bodies still moving (a toppling stack, a character in the air) are an
   # animation source too; the venue's static body is never awake
   let physicsAwake: Bool = physicsCounters(physics: app.physicsSystem.physics).awakeBodyCount > 0 or characterMoved
-  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false
+  var needsRender: Bool = app.characterSystem.playing or transitionActive or settingsChanged or cameraMoved or characterMoved or terrainWrapped or splashesAlive or physicsAwake or hadUiEvents or logChanged or resized or scrolled or app.frame.renderedOnce is false or debugOverlayAnimating(
+    debugOverlay: app.inputSystem.dbg
+  )
   if app.frame.taaSettleFrames > 0 or app.renderSystem.ab.active {
     needsRender = true  # TAA: only meaningful with it on. RAE_AB: a skipped frame is a wait.
   }

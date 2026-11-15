@@ -9,6 +9,7 @@ open ui/textFieldSystem/TextFieldSystem
 open FileWatch
 open HotReload
 import Gpu2d
+open ui/DebugOverlay
 
 # Frame phase 0 — the wait policy. Decides how long to block for OS events
 # (busy-render while interacting / animating / loading, one frame while
@@ -57,7 +58,9 @@ func frameWaitSystem(
   # every frame as fast as the machine allows (no FPS cap). Playback alone
   # stays on the throttled 60Hz path so a playing song doesn't peg a core.
   # Idle → blocking event-wait (~0% CPU).
-  tick.busyAnimating = animationInFlight(world: world, uiSystems: uiSystems) or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
+  tick.busyAnimating = animationInFlight(world: world, uiSystems: uiSystems) or debugOverlayAnimating(
+    debugOverlay: session.debugOverlay
+  ) or tick.scrollAnimating or session.lastHoverAnimDirty or session.assetsLoading or uiPointerButtonDown(
     button: mouseButtonLeft
   )
   # Busy-render is `animating` with a zero-length frame, so the shared policy

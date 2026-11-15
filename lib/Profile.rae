@@ -75,6 +75,9 @@ type Profiler {
   # log (a link from RAE_PERF_LIVE does; one a program started reads its own numbers)
   live: opt PerfLive = none
   liveLogs: Bool = false
+  # a rolling capture (startRolling): no end, nothing written by itself; its window is the last
+  # seconds, saved on request (saveRecent)
+  rolling: Bool = false
 }
 
 func idlePerfSettings() ret PerfSettings {
@@ -105,9 +108,58 @@ func capturing(profiler: view Profiler) ret Bool {
 # Begin a capture of `seconds`, writing to `outPath` when it ends. The hub's window is
 # allocated up front so recording never allocates.
 func startCapture(profiler: mod Profiler, seconds: view Float, outPath: view String) {
+  startCaptureWindow(
+    profiler: profiler
+    seconds: seconds
+    windowSeconds: seconds.toInt() + 2
+    outPath: outPath
+  )
+}
+
+# A capture with no end that keeps the last `seconds` (the perf HUD's, ui/PerfHud): tick never
+# stops it and nothing is written unless saveRecent asks; profileDiscard ends it
+func startRolling(profiler: mod Profiler, seconds: view Float) {
+  startCaptureWindow(
+    profiler: profiler
+    seconds: seconds
+    windowSeconds: seconds.toInt()
+    outPath: ""
+  )
+  profiler.rolling = true
+}
+
+# The capture's window, its last `seconds` at most, as a capture file (.raeperf) at `path`
+func saveRecent(profiler: mod Profiler, path: view String, seconds: view Float) ret Bool {
+  if profiler.capturing is false {
+    ret false
+  }
+  profiler.hub.perfFrame()
+  let hub: view PerfHub = profiler.hub
+  var startNs: Int = Math.max(
+    a: profiler.startNs
+    b: nowNs() - (seconds * 1000.0).toInt() * 1000000
+  )
+  if hub.perfWritten() > hub.perfOldest() {
+    startNs = Math.max(a: startNs, b: hub.perfEventAt(number: hub.perfOldest()).time)
+  }
+  let file: PerfFile = perfFileOf(hub: hub, startNs: startNs)
+  let ok: Bool = perfWriteFile(file: file, path: path)
+  if ok {
+    log("profile: wrote the last {seconds.toInt()} s to {path}")
+  } else {
+    log("profile: FAILED to write {path}")
+  }
+  ret ok
+}
+
+func startCaptureWindow(
+  profiler: mod Profiler
+  seconds: view Float
+  windowSeconds: view Int
+  outPath: view String
+) {
   unsafe {
     profileDiscard(profiler: profiler)
-    let windowSeconds: Int = rae_float_to_int(f: seconds) + 2
     let settings: PerfSettings = {
       windowSeconds: windowSeconds
       windowEvents: profMaxEvents
@@ -462,7 +514,7 @@ func tick(profiler: mod Profiler) ret Bool {
   if let live: mod PerfLive = profiler.live {
     perfLiveStep(live: live, hub: profiler.hub)
   }
-  if nowNs() < profiler.endNs {
+  if profiler.rolling or nowNs() < profiler.endNs {
     ret false
   }
   ret profileStop(profiler: profiler)
@@ -487,6 +539,11 @@ func profileStop(profiler: mod Profiler) ret Bool {
   if profiler.capturing is false {
     ret false
   }
+  # a rolling capture (the perf HUD's) writes only when asked (saveRecent)
+  if profiler.rolling {
+    profileDiscard(profiler: profiler)
+    ret false
+  }
   profiler.hub.perfFrame()
   let ok: Bool = write(profiler: profiler, path: profiler.outPath)
   profileDiscard(profiler: profiler)
@@ -506,6 +563,7 @@ func profileDiscard(profiler: mod Profiler) {
   }
   profiler.live = none
   profiler.capturing = false
+  profiler.rolling = false
   profiler.hub.freePerfHub()
   profiler.hub = createPerfHub(settings: idlePerfSettings())
   profiler.mainRing = none

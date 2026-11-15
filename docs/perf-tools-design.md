@@ -448,6 +448,32 @@ The debug overlay's button opens it. It sits over the app's own UI and costs not
 It replaces the fps and memory readouts of `DebugOverlay` (they become its first row) and works
 in 3D apps (`app3d/DebugHud`) and UI apps alike.
 
+Done in Rae 0.3.145 (perf step 11): `ui/PerfHud` (its numbers) and `ui/PerfHudDraw` (its panel),
+opened by the debug overlay dialog's "Performance" row (or `RAE_PERF_HUD=1` at launch), drawn
+where the readouts were, immediate-mode like the overlay. Closed, nothing of it runs and the
+readouts are as before (the 106 and 121 gates are unchanged).
+- The frame graph is the canvas's `FramePacer` split, which the HUD turns on while open: per
+  frame the CPU's own work (blue) and the rest (orange: the drawable, the present, the wait for
+  the GPU), one column per 2 points holding its slowest frame, against the screen's refresh
+  budget. The main thread's bar is the same split over the last half second.
+- An app passes its `Profiler` once a frame after `Profile.tick` (`debugOverlayPerf`): while the
+  HUD is open it starts a rolling capture of the last 10 s when none runs (`Profile.startRolling`:
+  no end, nothing written by itself; a `profileStop` at exit discards it) and ends it on close.
+  The HUD reads the new events each frame: on each lane that is a thread (not the GPU's) the time
+  inside a zone is busy and inside a wait waiting; every counter ending in " share %" (the
+  audio block's `audio.render share %`, a recorder's `<name> max share %`) is shown with its
+  largest of the half second. The save button writes the window as a `.raeperf`
+  (`Profile.saveRecent`, `perf-<seconds>.raeperf` in the working folder: an iPhone app's
+  Documents).
+- Rule breaks are `lib/Realtime`'s guard count since the HUD opened (`RAE_REALTIME_CHECK=1`);
+  memory is the resident size, the live buffers, their bytes and Strings, and the allocations
+  between two of the HUD's draws (its own drawing left out).
+- Wired in 106, 121 and the walkers (`lib/app3d`: 136, 137, 143, 148); `app3d/DebugHud` (140,
+  141) owns a profiler for it. An app that idles feeds `debugOverlayAnimating` into its loop's
+  animating flag, so the graph moves while the HUD is open. Case 1475 checks the numbers from
+  events at known times; `checks/perfHud` paints it over a busy pool and saves a capture that
+  reads back.
+
 ### 8.2 Rae Perf (the viewer app)
 
 A new example with the next free number, `<n>_perfViewer`. It is runnable from devtools'

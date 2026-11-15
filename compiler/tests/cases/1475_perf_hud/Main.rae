@@ -1,0 +1,216 @@
+# The perf HUD's numbers (ui/PerfHud, docs/perf-tools-design.md §8.1), from events written at
+# known times: a lane's time inside a zone is busy and inside a wait waiting, over the period; the
+# main thread's lane and a GPU lane are left out (the main thread's split is the frame pacer's);
+# a counter whose name ends in " share %" is kept with its largest value; a frame from the pacer
+# goes into the graph and the main thread's bar; and a press on the save button asks for a save.
+# The times are nanoseconds after the hub's start (older ones would be past its window).
+open perf/Perf
+open gpu/FramePacer
+open ui/PerfHud
+
+func write(
+  hub: mod PerfHub
+  base: view Int
+  ring: view PerfRing
+  kind: view PerfKind
+  name: view String
+  time: view Int
+  value: view Int
+) {
+  let perfName: PerfName = hub.perfName(name: name)
+  perfWriteAt(
+    ring: ring
+    kind: kind
+    name: perfName
+    time: base + time
+    value: value
+    extra: 0
+  )
+}
+
+func permille(share: view Float) ret Int {
+  ret (share * 1000.0 + 0.5).toInt()
+}
+
+func main() {
+  var hub: PerfHub = createPerfHub(settings: defaultPerfSettings())
+  let base: Int = hub.frameStartNs
+  let mainRing: PerfRing = hub.perfThreadRing(name: "CPU main loop")
+  let worker: PerfRing = hub.perfThreadRing(name: "worker 1")
+  let gpu: PerfRing = hub.perfThreadRing(name: "GPU passes")
+  let audio: PerfRing = hub.perfThreadRing(name: "audio render")
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.zoneBegin
+    name: "update"
+    time: 1000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.zoneEnd
+    name: "update"
+    time: 9000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.counter
+    name: "audio.render share %"
+    time: 2000000
+    value: 40
+  )
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.counter
+    name: "audio.render share %"
+    time: 3000000
+    value: 70
+  )
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.counter
+    name: "audio.render share %"
+    time: 4000000
+    value: 55
+  )
+  write(
+    hub: hub
+    base: base
+    ring: mainRing
+    kind: PerfKind.counter
+    name: "mem.buffers"
+    time: 4000000
+    value: 12
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneBegin
+    name: "chunk"
+    time: 1000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.zoneEnd
+    name: "chunk"
+    time: 4000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.waitBegin
+    name: "Task.get"
+    time: 5000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: worker
+    kind: PerfKind.waitEnd
+    name: "Task.get"
+    time: 7000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: gpu
+    kind: PerfKind.zoneBegin
+    name: "shadow"
+    time: 1000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: gpu
+    kind: PerfKind.zoneEnd
+    name: "shadow"
+    time: 8000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: audio
+    kind: PerfKind.zoneBegin
+    name: "block"
+    time: 2000000
+    value: 0
+  )
+  write(
+    hub: hub
+    base: base
+    ring: audio
+    kind: PerfKind.zoneEnd
+    name: "block"
+    time: 3000000
+    value: 0
+  )
+  hub.perfFrame()
+
+  var perfHud: PerfHud = createPerfHud()
+  setPerfHudOpen(perfHud: perfHud, open: true)
+  perfHudPeriod(perfHud: perfHud, now: 1.0, nowNanoseconds: base)
+  perfHudScan(
+    perfHud: perfHud
+    hub: hub
+    captureStartNs: 1
+    mainRing: mainRing.index
+  )
+  var pacer: FramePacer = createFramePacer()
+  pacer.frameStart = 1.2
+  pacer.lastFrameSeconds = 0.010
+  pacer.lastCpuSeconds = 0.004
+  perfHudSampleFrame(perfHud: perfHud, pacer: pacer)
+  perfHudSampleFrame(perfHud: perfHud, pacer: pacer)
+  log("graph frames: {perfHud.sampleCount} (the same frame twice counts once)")
+  perfHudPeriod(perfHud: perfHud, now: 1.3, nowNanoseconds: base + 5000000)
+  log("bars before the half second is over: {perfHud.bars.length}")
+  perfHudPeriod(perfHud: perfHud, now: 1.5, nowNanoseconds: base + 10000000)
+  loop let bar: view PerfHudBar in perfHud.bars {
+    log(
+      "{bar.name}: busy {permille(share: bar.busy)}, waiting {permille(share: bar.waiting)} per mille"
+    )
+  }
+  loop let share: view PerfHudShare in perfHud.shares {
+    log("{share.name}: last {share.last}, largest {share.shownLargest}")
+  }
+  perfHud.panelX = 10.0
+  perfHud.panelY = 10.0
+  perfHud.panelW = 300.0
+  perfHud.panelH = 200.0
+  perfHud.saveX = 20.0
+  perfHud.saveY = 170.0
+  perfHud.saveW = 100.0
+  perfHud.saveH = 26.0
+  let outside: Bool = perfHudPress(perfHud: perfHud, px: 400.0, py: 50.0)
+  let onPanel: Bool = perfHudPress(perfHud: perfHud, px: 200.0, py: 50.0)
+  log(
+    "press outside: {outside}, on the panel: {onPanel}, save asked {perfHud.saveRequested} (no profiler)"
+  )
+  perfHud.fed = true
+  let onSave: Bool = perfHudPress(perfHud: perfHud, px: 50.0, py: 180.0)
+  log("press on save: {onSave}, save asked {perfHud.saveRequested}")
+  setPerfHudOpen(perfHud: perfHud, open: false)
+  log("closed: press taken {perfHudPress(perfHud: perfHud, px: 200.0, py: 50.0)}")
+  hub.freePerfHub()
+}

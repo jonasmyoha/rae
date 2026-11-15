@@ -1,0 +1,489 @@
+# The perf HUD (docs/perf-tools-design.md §8.1): a panel the debug overlay's dialog opens
+# ("Performance"), over the app's own UI. It shows the frame times of the last 5 s against the
+# screen's refresh budget, split into the CPU's own work and the wait for the GPU and the display;
+# a bar per thread (busy, waiting, idle); the share of its period the audio block takes, and the
+# real-time rule breaks; memory and the allocations of a frame; and a button that saves the last
+# 10 s as a .raeperf capture file (lib/perf/PerfFile; on a phone the app's Documents folder, its
+# working folder).
+#
+# NOTHING WHILE CLOSED. Closed, the HUD draws nothing and computes nothing: the debug overlay's
+# fps and memory readouts are drawn as before, and no recorder runs for it. Opening it turns on
+# the frame pacer's split (gpu/FramePacer) and, when the app passes its Profiler to
+# perfHudStep, starts a rolling capture of the last 10 s (Profile.startRolling) unless one is
+# already running; closing it ends what it started.
+#
+# WHERE EACH NUMBER COMES FROM.
+# - The frames: the canvas's FramePacer, read when the overlay draws (perfHudSampleFrame): a
+#   frame's time, the CPU's own work in it, and the rest (the drawable, the present, the wait for
+#   the GPU). The main thread's bar is the same split over the last half second.
+# - The other threads: the capture's events (perfHudScan, after Profile.tick): on each lane the
+#   time inside a zone is busy and inside a wait (Task.get, a Signal, a lock, a channel) waiting.
+#   A lane a GPU writes (the passes, Metal's command buffers) is not a thread and is left out.
+# - The audio block: every capture counter whose name ends in " share %" (audio/AudioCapture's
+#   `audio.render share %`, a lib/Realtime recorder's `<name> max share %`): its last value and
+#   the largest of the last half second.
+# - Rule breaks: lib/Realtime's guard count (RAE_REALTIME_CHECK=1), since the HUD opened.
+# - Memory: the process's resident size, the live buffers, their bytes and the live Strings
+#   (these two under RAE_MEM_STATS=1), and the allocations between two of the HUD's draws, on
+#   every thread and on this one (the HUD's own drawing left out).
+import Math
+import Realtime
+import String
+import Sys
+import Profile
+open perf/Perf
+open gpu/FramePacer
+open gpu/FramePacing
+
+# The graph's length, and the room for its frames (240 Hz for 5 s, and more)
+const perfHudGraphSeconds: Float64 = 5.0
+
+const perfHudSampleSlots: Int = 1536
+
+# How often the thread bars and the shares are worked out again
+const perfHudPeriodSeconds: Float64 = 0.5
+
+# What the save button keeps
+const perfHudSaveSeconds: Float = 10.0
+
+# A lane of the capture as the HUD follows it
+type PerfHudLane {
+  ring: Int
+  name: String
+  zoneDepth: Int = 0
+  waitDepth: Int = 0
+  sinceNs: Int = 0
+  busyNs: Int = 0
+  waitNs: Int = 0
+}
+
+# A thread's bar: its shares of the last period, 0 .. 1
+type PerfHudBar {
+  name: String
+  busy: Float
+  waiting: Float
+}
+
+# A share counter: its last value and the largest of the period, in percent
+type PerfHudShare {
+  nameId: Int
+  name: String
+  last: Int = 0
+  largest: Int = 0
+  shownLargest: Int = 0
+}
+
+type PerfHud {
+  open: Bool = false
+  # the app passes its profiler (perfHudStep): threads, the audio share and saving work
+  fed: Bool = false
+  # the HUD started the capture it reads (and ends it when closed)
+  ownsCapture: Bool = false
+  # the capture scanned (its start) and the next event to read
+  captureStartNs: Int = 0
+  nextEvent: Int = 0
+  mainRing: Int = -1
+  lanes: List(PerfHudLane)
+  # per name id: 0 not looked at yet, 1 a share counter, 2 something else
+  nameKinds: List(Int)
+  shares: List(PerfHudShare)
+  # the frames: when each started (the pacer's clock, seconds), its time and the CPU's own work in
+  # it (ms), and the allocations of the frame before it (every thread)
+  sampleTimes: List(Float64)
+  sampleFrameMs: List(Float)
+  sampleCpuMs: List(Float)
+  sampleAllocations: List(Int)
+  sampleHead: Int = 0
+  sampleCount: Int = 0
+  lastFrameStart: Float64 = 0.0
+  # the pacer's own measuring before the HUD turned it on
+  measuring: Bool = false
+  measureBefore: Bool = false
+  # the period the bars are worked out over, and the main thread's split in it
+  periodStart: Float64 = 0.0
+  periodStartNs: Int = 0
+  mainBusySeconds: Float64 = 0.0
+  mainWaitSeconds: Float64 = 0.0
+  bars: List(PerfHudBar)
+  # the allocations after the HUD's last draw, and of the frame since
+  allocationsAfterDraw: Int = -1
+  threadAllocationsAfterDraw: Int = -1
+  frameAllocations: Int = 0
+  frameThreadAllocations: Int = 0
+  ruleBreaksAtOpen: Int = 0
+  # the save button: asked for, and what came of the last one
+  saveRequested: Bool = false
+  saveMessage: String = ""
+  savedPath: String = ""
+  # where the panel and its button were drawn last (for the pointer)
+  panelX: Float = 0.0
+  panelY: Float = 0.0
+  panelW: Float = 0.0
+  panelH: Float = 0.0
+  saveX: Float = 0.0
+  saveY: Float = 0.0
+  saveW: Float = 0.0
+  saveH: Float = 0.0
+}
+
+func createPerfHud() ret PerfHud {
+  var times: List(Float64) = List.create(Float64, cap: perfHudSampleSlots)
+  times.addDefaults(count: perfHudSampleSlots)
+  var frameMs: List(Float) = List.create(Float, cap: perfHudSampleSlots)
+  frameMs.addDefaults(count: perfHudSampleSlots)
+  var cpuMs: List(Float) = List.create(Float, cap: perfHudSampleSlots)
+  cpuMs.addDefaults(count: perfHudSampleSlots)
+  var allocations: List(Int) = List.create(Int, cap: perfHudSampleSlots)
+  allocations.addDefaults(count: perfHudSampleSlots)
+  ret PerfHud {
+    lanes: {}
+    nameKinds: {}
+    shares: {}
+    sampleTimes: times
+    sampleFrameMs: frameMs
+    sampleCpuMs: cpuMs
+    sampleAllocations: allocations
+    bars: {}
+  }
+}
+
+# Open or close it. Opening starts its numbers afresh.
+func setPerfHudOpen(perfHud: mod PerfHud, open: view Bool) {
+  if open is perfHud.open {
+    ret
+  }
+  perfHud.open = open
+  if open {
+    perfHud.sampleHead = 0
+    perfHud.sampleCount = 0
+    perfHud.lastFrameStart = 0.0
+    perfHud.periodStart = 0.0
+    perfHud.mainBusySeconds = 0.0
+    perfHud.mainWaitSeconds = 0.0
+    perfHud.bars = {}
+    perfHud.lanes = {}
+    perfHud.shares = {}
+    perfHud.nameKinds = {}
+    perfHud.captureStartNs = 0
+    perfHud.allocationsAfterDraw = -1
+    perfHud.threadAllocationsAfterDraw = -1
+    perfHud.ruleBreaksAtOpen = Math.max(a: 0, b: Realtime.realtimeCheckCount())
+    perfHud.saveMessage = ""
+  }
+}
+
+# The screen's refresh budget in milliseconds (60 Hz when the screen does not say)
+func perfHudBudgetMs() ret Float {
+  var milliHz: Int = 0
+  unsafe {
+    milliHz = nativeRefreshMilliHz()
+  }
+  if milliHz <= 0 {
+    milliHz = 60000
+  }
+  ret 1000000.0 / milliHz.toFloat()
+}
+
+# ---- the frames (when the overlay draws, with the canvas's pacer) ------------------------------
+
+# The pacer measures its split while the HUD is open, as it does under RAE_FRAME_TIMING or
+# RAE_PROFILE; closed, it is put back
+func perfHudPacer(perfHud: mod PerfHud, pacer: mod FramePacer) {
+  if perfHud.open and not perfHud.measuring {
+    perfHud.measureBefore = pacer.measure
+    pacer.measure = true
+    perfHud.measuring = true
+  } else if not perfHud.open and perfHud.measuring {
+    pacer.measure = perfHud.measureBefore
+    perfHud.measuring = false
+  }
+}
+
+# The allocations since the HUD's last draw, read before it draws (its own left out)
+func perfHudCountAllocations(perfHud: mod PerfHud) {
+  let all: Int = Sys.allocationCount()
+  let thread: Int = Sys.threadAllocationCount()
+  if perfHud.allocationsAfterDraw >= 0 {
+    perfHud.frameAllocations = all - perfHud.allocationsAfterDraw
+    perfHud.frameThreadAllocations = thread - perfHud.threadAllocationsAfterDraw
+  }
+}
+
+# After the HUD drew: where the next frame's allocations are counted from
+func perfHudDrawn(perfHud: mod PerfHud) {
+  perfHud.allocationsAfterDraw = Sys.allocationCount()
+  perfHud.threadAllocationsAfterDraw = Sys.threadAllocationCount()
+}
+
+# A frame the pacer finished since the last draw goes into the graph and the main thread's split
+func perfHudSampleFrame(perfHud: mod PerfHud, pacer: view FramePacer) {
+  if pacer.frameStart <= 0.0 or pacer.lastFrameSeconds <= 0.0 {
+    ret
+  }
+  if pacer.frameStart is perfHud.lastFrameStart {
+    ret
+  }
+  perfHud.lastFrameStart = pacer.frameStart
+  let frameMs: Float = (pacer.lastFrameSeconds * 1000.0) as Float
+  let cpuMs: Float = Math.min(
+    a: frameMs
+    b: Math.max(a: 0.0, b: (pacer.lastCpuSeconds * 1000.0) as Float)
+  )
+  perfHud.sampleTimes.set(index: perfHud.sampleHead, value: pacer.frameStart)
+  perfHud.sampleFrameMs.set(index: perfHud.sampleHead, value: frameMs)
+  perfHud.sampleCpuMs.set(index: perfHud.sampleHead, value: cpuMs)
+  perfHud.sampleAllocations.set(index: perfHud.sampleHead, value: perfHud.frameAllocations)
+  perfHud.sampleHead = (perfHud.sampleHead + 1) % perfHudSampleSlots
+  perfHud.sampleCount = Math.min(a: perfHud.sampleCount + 1, b: perfHudSampleSlots)
+  perfHud.mainBusySeconds = perfHud.mainBusySeconds + (cpuMs / 1000.0) as Float64
+  perfHud.mainWaitSeconds = perfHud.mainWaitSeconds + ((frameMs - cpuMs) / 1000.0) as Float64
+}
+
+# The `age`th newest frame (0 the newest): its slot
+func perfHudSlot(perfHud: view PerfHud, age: view Int) ret Int {
+  ret (perfHud.sampleHead - 1 - age + perfHudSampleSlots * 2) % perfHudSampleSlots
+}
+
+# ---- the threads, from the capture (after Profile.tick) ----------------------------------------
+func perfHudLaneIsThread(name: view String) ret Bool {
+  ret not name.startsWith(prefix: "GPU") and not name.startsWith(prefix: "Metal")
+}
+
+# The lane following ring `ring`, made on its first event
+func perfHudLaneIndex(perfHud: mod PerfHud, hub: view PerfHub, ring: view Int) ret Int {
+  loop var i: Int = 0, i < perfHud.lanes.length, ++i {
+    if let lane: view PerfHudLane = perfHud.lanes.viewAt(index: i) {
+      if lane.ring is ring {
+        ret i
+      }
+    }
+  }
+  perfHud.lanes.add(
+    value: PerfHudLane { ring: ring, name: hub.ringNames.copyAtDefault(index: ring) }
+  )
+  ret perfHud.lanes.length - 1
+}
+
+# Counter `nameId` is a share counter (its name ends in " share %")
+func perfHudIsShare(perfHud: mod PerfHud, hub: view PerfHub, nameId: view Int) ret Bool {
+  loop perfHud.nameKinds.length <= nameId {
+    perfHud.nameKinds.add(value: 0)
+  }
+  var kind: Int = perfHud.nameKinds.copyAtDefault(index: nameId)
+  if kind is 0 {
+    kind = 2
+    if hub.perfNameText(nameId: nameId).endsWith(suffix: " share %") {
+      kind = 1
+    }
+    perfHud.nameKinds.set(index: nameId, value: kind)
+  }
+  ret kind is 1
+}
+
+func perfHudShareValue(
+  perfHud: mod PerfHud
+  hub: view PerfHub
+  nameId: view Int
+  value: view Int
+) {
+  loop var i: Int = 0, i < perfHud.shares.length, ++i {
+    if let share: mod PerfHudShare = perfHud.shares.modAt(index: i) {
+      if share.nameId is nameId {
+        share.last = value
+        share.largest = Math.max(a: share.largest, b: value)
+        ret
+      }
+    }
+  }
+  perfHud.shares.add(value: PerfHudShare {
+    nameId: nameId
+    name: hub.perfNameText(nameId: nameId)
+    last: value
+    largest: value
+    shownLargest: value
+  })
+}
+
+# One event on a lane: the time since the lane's last event is busy inside a zone, waiting inside
+# a wait
+func perfHudLaneEvent(lane: mod PerfHudLane, event: view PerfEvent) {
+  if lane.sinceNs > 0 and event.time > lane.sinceNs {
+    let spent: Int = event.time - lane.sinceNs
+    if lane.waitDepth > 0 {
+      lane.waitNs = lane.waitNs + spent
+    } else if lane.zoneDepth > 0 {
+      lane.busyNs = lane.busyNs + spent
+    }
+  }
+  if event.time > lane.sinceNs {
+    lane.sinceNs = event.time
+  }
+  if event.kind is PerfKind.zoneBegin {
+    lane.zoneDepth = lane.zoneDepth + 1
+  } else if event.kind is PerfKind.zoneEnd {
+    lane.zoneDepth = Math.max(a: 0, b: lane.zoneDepth - 1)
+  } else if event.kind is PerfKind.waitBegin {
+    lane.waitDepth = lane.waitDepth + 1
+  } else if event.kind is PerfKind.waitEnd {
+    lane.waitDepth = Math.max(a: 0, b: lane.waitDepth - 1)
+  }
+}
+
+# The hub's events since the last scan: each thread lane's busy and waiting time, and the share
+# counters. `mainRing` is left out (the main thread's split is the pacer's). A new capture starts
+# the lanes afresh.
+func perfHudScan(
+  perfHud: mod PerfHud
+  hub: view PerfHub
+  captureStartNs: view Int
+  mainRing: view Int
+) {
+  if perfHud.captureStartNs is not captureStartNs {
+    perfHud.captureStartNs = captureStartNs
+    perfHud.nextEvent = hub.perfOldest()
+    perfHud.lanes = {}
+    perfHud.shares = {}
+    perfHud.nameKinds = {}
+  }
+  perfHud.mainRing = mainRing
+  var number: Int = Math.max(a: perfHud.nextEvent, b: hub.perfOldest())
+  let end: Int = hub.perfWritten()
+  loop number < end {
+    let event: PerfEvent = hub.perfEventAt(number: number)
+    let ring: Int = hub.perfEventRing(number: number)
+    if event.kind is PerfKind.counter {
+      let nameId: Int = event.nameId as Int
+      if perfHud.perfHudIsShare(hub: hub, nameId: nameId) {
+        perfHud.perfHudShareValue(hub: hub, nameId: nameId, value: event.value)
+      }
+    } else if ring is not mainRing and event.kind is not PerfKind.gpuSpan and event.kind is not PerfKind.mark and event.kind is not PerfKind.flow {
+      # read in place: a copy of the lane's name would be an allocation per event
+      if let laneName: view String = hub.ringNames.viewAt(index: ring) {
+        if perfHudLaneIsThread(name: laneName) {
+          let index: Int = perfHud.perfHudLaneIndex(hub: hub, ring: ring)
+          if let lane: mod PerfHudLane = perfHud.lanes.modAt(index: index) {
+            perfHudLaneEvent(lane: lane, event: event)
+          }
+        }
+      }
+    }
+    number = number + 1
+  }
+  perfHud.nextEvent = end
+  # a named thread's lane gets its name once the thread claimed it
+  loop var i: Int = 0, i < perfHud.lanes.length, ++i {
+    if let lane: mod PerfHudLane = perfHud.lanes.modAt(index: i) {
+      if let name: view String = hub.ringNames.viewAt(index: lane.ring) {
+        if lane.name is not name {
+          lane.name = name
+        }
+      }
+    }
+  }
+}
+
+# Each half second (`now` the pacer's clock, `nowNanoseconds` nowNs): the bars and the shares'
+# largest of the period, and the next period begun
+func perfHudPeriod(perfHud: mod PerfHud, now: view Float64, nowNanoseconds: view Int) {
+  if perfHud.periodStart <= 0.0 {
+    perfHud.periodStart = now
+    perfHud.periodStartNs = nowNanoseconds
+    ret
+  }
+  let elapsed: Float64 = now - perfHud.periodStart
+  if elapsed < perfHudPeriodSeconds {
+    ret
+  }
+  var bars: List(PerfHudBar) = {}
+  bars.add(
+    value: PerfHudBar {
+      name: "main"
+      busy: perfHudShareOf(part: perfHud.mainBusySeconds, whole: elapsed)
+      waiting: perfHudShareOf(part: perfHud.mainWaitSeconds, whole: elapsed)
+    }
+  )
+  let elapsedNs: Float64 = Math.max(a: 1, b: nowNanoseconds - perfHud.periodStartNs) as Float64
+  loop var i: Int = 0, i < perfHud.lanes.length, ++i {
+    if let lane: mod PerfHudLane = perfHud.lanes.modAt(index: i) {
+      bars.add(
+        value: PerfHudBar {
+          name: lane.name
+          busy: perfHudShareOf(part: lane.busyNs as Float64, whole: elapsedNs)
+          waiting: perfHudShareOf(part: lane.waitNs as Float64, whole: elapsedNs)
+        }
+      )
+      lane.busyNs = 0
+      lane.waitNs = 0
+    }
+  }
+  perfHud.bars = bars
+  loop var i: Int = 0, i < perfHud.shares.length, ++i {
+    if let share: mod PerfHudShare = perfHud.shares.modAt(index: i) {
+      share.shownLargest = share.largest
+      share.largest = share.last
+    }
+  }
+  perfHud.periodStart = now
+  perfHud.periodStartNs = nowNanoseconds
+  perfHud.mainBusySeconds = 0.0
+  perfHud.mainWaitSeconds = 0.0
+}
+
+# `part` of `whole` as a share from 0 to 1
+func perfHudShareOf(part: view Float64, whole: view Float64) ret Float {
+  if whole <= 0.0 {
+    ret 0.0
+  }
+  ret Math.min(a: 1.0, b: Math.max(a: 0.0, b: (part / whole) as Float))
+}
+
+# ---- the app's profiler (once a frame, after Profile.tick) --------------------------------------
+
+# Open, the HUD reads the profiler's capture (starting a rolling one of the last 10 s when none
+# runs) and saves it when its button was pressed; closed, it ends the capture it started and
+# does nothing else
+func perfHudStep(perfHud: mod PerfHud, profiler: mod Profiler) {
+  perfHud.fed = true
+  if not perfHud.open {
+    if perfHud.ownsCapture {
+      Profile.profileDiscard(profiler: profiler)
+      perfHud.ownsCapture = false
+    }
+    ret
+  }
+  if not Profile.capturing(profiler: profiler) {
+    Profile.startRolling(profiler: profiler, seconds: perfHudSaveSeconds)
+    perfHud.ownsCapture = true
+  }
+  var mainRing: Int = -1
+  if let ring: view PerfRing = profiler.mainRing {
+    mainRing = ring.index
+  }
+  perfHud.perfHudScan(hub: profiler.hub, captureStartNs: profiler.startNs, mainRing: mainRing)
+  if perfHud.saveRequested {
+    perfHud.saveRequested = false
+    let path: String = "perf-{nowMs() / 1000}.raeperf"
+    if Profile.saveRecent(profiler: profiler, path: path, seconds: perfHudSaveSeconds) {
+      perfHud.saveMessage = "saved {path}"
+      perfHud.savedPath = path
+    } else {
+      perfHud.saveMessage = "could not save {path}"
+    }
+  }
+}
+
+# The pointer pressed at (`px`, `py`) while the HUD is open: true when it was on the panel (the
+# save button asks for a save)
+func perfHudPress(perfHud: mod PerfHud, px: view Float, py: view Float) ret Bool {
+  if not perfHud.open or perfHud.panelW <= 0.0 {
+    ret false
+  }
+  if px < perfHud.panelX or px > perfHud.panelX + perfHud.panelW or py < perfHud.panelY or py > perfHud.panelY + perfHud.panelH {
+    ret false
+  }
+  if px >= perfHud.saveX and px <= perfHud.saveX + perfHud.saveW and py >= perfHud.saveY and py <= perfHud.saveY + perfHud.saveH and perfHud.fed {
+    perfHud.saveRequested = true
+    perfHud.saveMessage = "saving"
+  }
+  ret true
+}

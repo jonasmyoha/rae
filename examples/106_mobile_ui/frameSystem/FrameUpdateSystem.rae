@@ -8,6 +8,7 @@ open ui/animationSystem/AnimationSystem
 open ecs/Event
 open ui/UiSystems
 open ui/buttonSystem/ButtonHoverScale
+open ui/DebugOverlay
 
 # Frame phase 2 — update. The data sync (the playback clock, the Spotify
 # mirror and the asset loaders update state; the observation pass translates
@@ -39,8 +40,10 @@ func frameUpdateSystem(
   )
   session.assetsLoading = dataSync.assetsLoading
 
-  # Something moving (a hero among it) keeps the frames coming
-  tick.animating = animationInFlight(world: world, uiSystems: uiSystems)
+  # Something moving (a hero among it), or the open perf HUD, keeps the frames coming
+  tick.animating = animationInFlight(world: world, uiSystems: uiSystems) or debugOverlayAnimating(
+    debugOverlay: session.debugOverlay
+  )
 
   # Re-run layout + transform if any tracked component changed since last
   # frame (scroll handlers mutate Offset in place). Both short-circuit when

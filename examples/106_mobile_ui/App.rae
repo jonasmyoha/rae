@@ -8,6 +8,7 @@ open ecs/Schedule
 open ecs/Event
 open ui/EventLoop
 open ui/LogOverlay
+open ui/DebugOverlay
 # Mobile-UI demo entrypoint. The actual work — scene loading, world
 # building, screen routing — lives in sibling `.rae` files in this same
 # directory, which Rae auto-imports because they share the project
@@ -114,6 +115,7 @@ func runAppFrame(run: mod AppRun) ret Bool {
     run.frame = createWorldFrame(world: run.world, uiSystems: run.app.uiSystems)
   }
   let unusedWritten: Bool = Profile.tick(profiler: run.app.profiler)
+  debugOverlayPerf(debugOverlay: run.session.debugOverlay, profiler: run.app.profiler)
   publishCanvas2dTimingCounters(
     timing: run.app.textureRegistry.canvas.gpuTiming
     profiler: run.app.profiler

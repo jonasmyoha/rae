@@ -1,0 +1,530 @@
+# The perf HUD's panel (ui/PerfHud), drawn straight to gpu2d like the debug overlay that opens
+# it: its first row the fps and memory readouts, then the frame graph of the last 5 s (each
+# frame's CPU work in blue and its wait for the GPU and the display in orange, the refresh budget
+# as a red line), a bar per thread (busy green, waiting orange, idle gray), the share counters
+# and the real-time rule breaks, memory and allocations, and the save button.
+import Math
+import Realtime
+import Sys
+import Gpu2d
+import Gpu2dText
+import SdfText
+open Gpu2dCanvas
+open ui/PerfHud
+
+const perfHudFill: Int = 0xFA181820
+
+const perfHudBorder: Int = 0x60FFBF00
+
+const perfHudAmber: Int = 0xFFFFBF00
+
+const perfHudText: Int = 0xFFDDDDE4
+
+const perfHudDim: Int = 0xFF8A8A96
+
+const perfHudCpu: Int = 0xFF4E79A7
+
+const perfHudGpu: Int = 0xFFF28E2B
+
+const perfHudBusy: Int = 0xFF59A14F
+
+const perfHudIdle: Int = 0xFF34343E
+
+const perfHudRed: Int = 0xFFE15759
+
+const perfHudGraphFill: Int = 0xFF101016
+
+# The panel's width in points
+const perfHudWidthPoints: Float = 380.0
+
+func perfHudWidth(scale: view Float) ret Float {
+  ret perfHudWidthPoints * scale
+}
+
+# `value` with one decimal
+func perfHudTenths(value: view Float) ret String {
+  let tenths: Int = (Math.max(a: 0.0, b: value) * 10.0 + 0.5).toInt()
+  ret "{tenths / 10}.{tenths % 10}"
+}
+
+func perfHudMegabytes(bytes: view Int) ret String {
+  ret perfHudTenths(value: bytes.toFloat() / 1048576.0)
+}
+
+func perfHudLine(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  text: view String
+  x: view Float
+  y: view Float
+  sizePx: view Float
+  color: view Int
+) {
+  let unusedWidth: Float = Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: text
+    x: x
+    y: y
+    sizePx: sizePx
+    color: color
+  )
+}
+
+# The frames of the last 5 s, one column per 2 points (the slowest frame of the column), against
+# the budget; returns the height used
+func drawPerfHudGraph(
+  perfHud: view PerfHud
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  x: view Float
+  y: view Float
+  width: view Float
+  scale: view Float
+  now: view Float64
+) ret Float {
+  let height: Float = 90.0 * scale
+  let budgetMs: Float = perfHudBudgetMs()
+  let columnWidth: Float = 2.0 * scale
+  let columns: Int = Math.max(a: 1, b: (width / columnWidth).toInt())
+  var frameMs: List(Float) = List.create(Float, cap: columns)
+  frameMs.addDefaults(count: columns)
+  var cpuMs: List(Float) = List.create(Float, cap: columns)
+  cpuMs.addDefaults(count: columns)
+  var slowest: Float = 0.0
+  var lastFrameMs: Float = 0.0
+  var lastCpuMs: Float = 0.0
+  var mostAllocations: Int = 0
+  let since: Float64 = now - perfHudGraphSeconds
+  loop var age: Int = 0, age < perfHud.sampleCount, ++age {
+    let slot: Int = perfHud.perfHudSlot(age: age)
+    let time: Float64 = perfHud.sampleTimes.copyAtDefault(index: slot)
+    if time < since {
+      break
+    }
+    let frame: Float = perfHud.sampleFrameMs.copyAtDefault(index: slot)
+    let cpu: Float = perfHud.sampleCpuMs.copyAtDefault(index: slot)
+    if age is 0 {
+      lastFrameMs = frame
+      lastCpuMs = cpu
+    }
+    mostAllocations = Math.max(
+      a: mostAllocations
+      b: perfHud.sampleAllocations.copyAtDefault(index: slot)
+    )
+    let column: Int = Math.min(
+      a: columns - 1
+      b: (((time - since) / perfHudGraphSeconds) as Float * columns.toFloat()).toInt()
+    )
+    if column >= 0 and frame > frameMs.copyAtDefault(index: column) {
+      frameMs.set(index: column, value: frame)
+      cpuMs.set(index: column, value: cpu)
+    }
+    slowest = Math.max(a: slowest, b: frame)
+  }
+  let top: Float = Math.max(a: budgetMs * 2.0, b: slowest * 1.1)
+  let textSize: Float = 12.0 * scale
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "frame {perfHudTenths(value: lastFrameMs)} ms: CPU {perfHudTenths(value: lastCpuMs)}, GPU and display {perfHudTenths(
+      value: lastFrameMs - lastCpuMs
+    )}"
+    x: x
+    y: y + textSize
+    sizePx: textSize
+    color: perfHudText
+  )
+  let graphY: Float = y + textSize + 6.0 * scale
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: x
+    y: graphY
+    w: width
+    h: height
+    color: perfHudGraphFill
+  )
+  let bottom: Float = graphY + height
+  loop var column: Int = 0, column < columns, ++column {
+    let frame: Float = frameMs.copyAtDefault(index: column)
+    if frame > 0.0 {
+      let cpu: Float = cpuMs.copyAtDefault(index: column)
+      let frameHeight: Float = Math.min(a: height, b: frame / top * height)
+      let cpuHeight: Float = Math.min(a: frameHeight, b: cpu / top * height)
+      let columnX: Float = x + column.toFloat() * columnWidth
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: columnX
+        y: bottom - frameHeight
+        w: columnWidth
+        h: frameHeight - cpuHeight
+        color: perfHudGpu
+      )
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: columnX
+        y: bottom - cpuHeight
+        w: columnWidth
+        h: cpuHeight
+        color: perfHudCpu
+      )
+    }
+  }
+  # the budget's label sits in the graph's top corner, where the bars rarely reach
+  let budgetY: Float = bottom - budgetMs / top * height
+  Gpu2d.drawLine(
+    canvas: canvas
+    x0: x
+    y0: budgetY
+    x1: x + width
+    y1: budgetY
+    thickness: 1.0 * scale
+    color: perfHudRed
+  )
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "budget {perfHudTenths(value: budgetMs)} ms ({(1000.0 / budgetMs + 0.5).toInt()} Hz)"
+    x: x + 4.0 * scale
+    y: graphY + 12.0 * scale
+    sizePx: 11.0 * scale
+    color: perfHudRed
+  )
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "{perfHudTenths(value: top)} ms"
+    x: x + width - 60.0 * scale
+    y: graphY + 12.0 * scale
+    sizePx: 11.0 * scale
+    color: perfHudDim
+  )
+  ret textSize + 6.0 * scale + height
+}
+
+# A bar per thread: busy, waiting, idle; returns the height used
+func drawPerfHudThreads(
+  perfHud: view PerfHud
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  x: view Float
+  y: view Float
+  width: view Float
+  scale: view Float
+) ret Float {
+  let textSize: Float = 12.0 * scale
+  let rowHeight: Float = 16.0 * scale
+  let labelWidth: Float = 110.0 * scale
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "threads: busy, waiting, idle (last 0.5 s)"
+    x: x
+    y: y + textSize
+    sizePx: textSize
+    color: perfHudText
+  )
+  var rowY: Float = y + textSize + 6.0 * scale
+  let barWidth: Float = width - labelWidth
+  loop let bar: view PerfHudBar in perfHud.bars {
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: bar.name
+      x: x
+      y: rowY + textSize - 1.0 * scale
+      sizePx: 11.0 * scale
+      color: perfHudDim
+    )
+    let barX: Float = x + labelWidth
+    let barHeight: Float = rowHeight - 4.0 * scale
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: barX
+      y: rowY
+      w: barWidth
+      h: barHeight
+      color: perfHudIdle
+    )
+    let busyWidth: Float = barWidth * bar.busy
+    let waitWidth: Float = Math.min(a: barWidth - busyWidth, b: barWidth * bar.waiting)
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: barX
+      y: rowY
+      w: busyWidth
+      h: barHeight
+      color: perfHudBusy
+    )
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: barX + busyWidth
+      y: rowY
+      w: waitWidth
+      h: barHeight
+      color: perfHudGpu
+    )
+    rowY = rowY + rowHeight
+  }
+  ret rowY - y
+}
+
+# The share counters (the audio block's share of its period) and the rule breaks, memory and
+# allocations; returns the height used
+func drawPerfHudNumbers(
+  perfHud: view PerfHud
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  x: view Float
+  y: view Float
+  rssKb: view Int
+  scale: view Float
+) ret Float {
+  let textSize: Float = 12.0 * scale
+  let lineHeight: Float = 17.0 * scale
+  var lineY: Float = y + textSize
+  if perfHud.fed {
+    if perfHud.shares.length is 0 {
+      perfHudLine(
+        canvas: canvas
+        font: font
+        text: "audio: no block shares recorded"
+        x: x
+        y: lineY
+        sizePx: textSize
+        color: perfHudDim
+      )
+      lineY = lineY + lineHeight
+    }
+    loop let share: view PerfHudShare in perfHud.shares {
+      var color: Int = perfHudText
+      if share.shownLargest >= 100 {
+        color = perfHudRed
+      }
+      perfHudLine(
+        canvas: canvas
+        font: font
+        text: "{share.name}: {share.last} (most {share.shownLargest})"
+        x: x
+        y: lineY
+        sizePx: textSize
+        color: color
+      )
+      lineY = lineY + lineHeight
+    }
+  }
+  let ruleBreaks: Int = Realtime.realtimeCheckCount()
+  if ruleBreaks < 0 {
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: "real-time rule breaks: not checked (RAE_REALTIME_CHECK=1)"
+      x: x
+      y: lineY
+      sizePx: textSize
+      color: perfHudDim
+    )
+  } else {
+    let since: Int = ruleBreaks - perfHud.ruleBreaksAtOpen
+    var color: Int = perfHudText
+    if since > 0 {
+      color = perfHudRed
+    }
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: "real-time rule breaks: {since} since opened ({ruleBreaks} in all)"
+      x: x
+      y: lineY
+      sizePx: textSize
+      color: color
+    )
+  }
+  lineY = lineY + lineHeight
+  var memory: String = "memory: {perfHudTenths(value: rssKb.toFloat() / 1024.0)} MB, {Sys.liveBufferCount()} buffers"
+  let bufferBytes: Int = Sys.liveBufferBytes()
+  if bufferBytes >= 0 {
+    memory = "{memory} ({perfHudMegabytes(bytes: bufferBytes)} MB)"
+  }
+  let strings: Int = Sys.liveStringCount()
+  if strings >= 0 {
+    memory = "{memory}, {strings} Strings"
+  }
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: memory
+    x: x
+    y: lineY
+    sizePx: textSize
+    color: perfHudText
+  )
+  lineY = lineY + lineHeight
+  var mostAllocations: Int = 0
+  loop var age: Int = 0, age < perfHud.sampleCount, ++age {
+    mostAllocations = Math.max(
+      a: mostAllocations
+      b: perfHud.sampleAllocations.copyAtDefault(index: perfHud.perfHudSlot(age: age))
+    )
+  }
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "allocations a frame: {perfHud.frameAllocations} ({perfHud.frameThreadAllocations} on this thread), most {mostAllocations}"
+    x: x
+    y: lineY
+    sizePx: textSize
+    color: perfHudText
+  )
+  lineY = lineY + lineHeight
+  ret lineY - y - textSize + 4.0 * scale
+}
+
+# The panel's height: the same rows drawPerfHud draws
+func perfHudHeight(perfHud: view PerfHud, scale: view Float) ret Float {
+  var points: Float = 40.0 + 12.0 + 6.0 + 90.0 + 10.0
+  var numberLines: Int = 3
+  if perfHud.fed {
+    points = points + 12.0 + 6.0 + 16.0 * perfHud.bars.length.toFloat() + 6.0 + 26.0
+    numberLines = numberLines + Math.max(a: 1, b: perfHud.shares.length)
+  } else {
+    points = points + 22.0
+  }
+  ret (points + 17.0 * numberLines.toFloat() + 4.0 + 12.0) * scale
+}
+
+# The panel at (`x`, `y`), `headline` (the fps and memory readouts) in its first row; `now` the
+# pacer's clock. Keeps where it drew the panel and its button, for perfHudPress.
+func drawPerfHud(
+  perfHud: mod PerfHud
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  x: view Float
+  y: view Float
+  width: view Float
+  scale: view Float
+  now: view Float64
+  headline: view String
+  rssKb: view Int
+) {
+  let pad: Float = 12.0 * scale
+  let inner: Float = width - pad * 2.0
+  let height: Float = perfHudHeight(perfHud: perfHud, scale: scale)
+  if height > 0.0 {
+    Gpu2d.drawBox(
+      canvas: canvas
+      x: x
+      y: y
+      w: width
+      h: height
+      radius: 10.0 * scale
+      fill: perfHudFill
+      borderWidth: 1.0 * scale
+      border: perfHudBorder
+    )
+  }
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: "Performance"
+    x: x + pad
+    y: y + 26.0 * scale
+    sizePx: 16.0 * scale
+    color: perfHudAmber
+  )
+  let headlineSize: Float = 14.0 * scale
+  perfHudLine(
+    canvas: canvas
+    font: font
+    text: headline
+    x: x + width - pad - Gpu2dText.measureText(font: font, text: headline, sizePx: headlineSize)
+    y: y + 26.0 * scale
+    sizePx: headlineSize
+    color: perfHudAmber
+  )
+  var rowY: Float = y + 40.0 * scale
+  rowY = rowY + drawPerfHudGraph(
+    perfHud: perfHud
+    canvas: canvas
+    font: font
+    x: x + pad
+    y: rowY
+    width: inner
+    scale: scale
+    now: now
+  ) + 10.0 * scale
+  if perfHud.fed {
+    rowY = rowY + drawPerfHudThreads(
+      perfHud: perfHud
+      canvas: canvas
+      font: font
+      x: x + pad
+      y: rowY
+      width: inner
+      scale: scale
+    ) + 6.0 * scale
+  } else {
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: "threads, audio and saving: the app passes no profiler"
+      x: x + pad
+      y: rowY + 12.0 * scale
+      sizePx: 12.0 * scale
+      color: perfHudDim
+    )
+    rowY = rowY + 22.0 * scale
+  }
+  rowY = rowY + drawPerfHudNumbers(
+    perfHud: perfHud
+    canvas: canvas
+    font: font
+    x: x + pad
+    y: rowY
+    rssKb: rssKb
+    scale: scale
+  )
+  perfHud.saveW = 0.0
+  if perfHud.fed {
+    let buttonWidth: Float = 130.0 * scale
+    let buttonHeight: Float = 26.0 * scale
+    Gpu2d.drawBox(
+      canvas: canvas
+      x: x + pad
+      y: rowY
+      w: buttonWidth
+      h: buttonHeight
+      radius: 6.0 * scale
+      fill: perfHudAmber
+      borderWidth: 0.0
+      border: 0x00000000
+    )
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: "Save last 10 s"
+      x: x + pad + 12.0 * scale
+      y: rowY + 18.0 * scale
+      sizePx: 13.0 * scale
+      color: 0xFF101014
+    )
+    perfHudLine(
+      canvas: canvas
+      font: font
+      text: perfHud.saveMessage
+      x: x + pad + buttonWidth + 10.0 * scale
+      y: rowY + 18.0 * scale
+      sizePx: 12.0 * scale
+      color: perfHudText
+    )
+    perfHud.saveX = x + pad
+    perfHud.saveY = rowY
+    perfHud.saveW = buttonWidth
+    perfHud.saveH = buttonHeight
+    rowY = rowY + buttonHeight
+  }
+  perfHud.panelX = x
+  perfHud.panelY = y
+  perfHud.panelW = width
+  perfHud.panelH = rowY + pad - y
+}

@@ -439,6 +439,7 @@ func runApp(app: mod App) ret Int {
 
   loop not Gpu2d.pollClose() {
     let unusedWritten: Bool = Profile.tick(profiler: app.profiler)
+    debugOverlayPerf(debugOverlay: app.debugOverlay, profiler: app.profiler)
     publishCanvas2dTimingCounters(timing: app.canvas.gpuTiming, profiler: app.profiler)
     Profile.zoneBegin(profiler: app.profiler, name: "update")
     let resized: Bool = Gpu2d.windowResized()
@@ -646,7 +647,9 @@ func runApp(app: mod App) ret Int {
       clock: effectTime
       input: input
     )
-    animating = animating or animationInFlight(world: app.world, uiSystems: app.uiSystems)
+    animating = animating or animationInFlight(world: app.world, uiSystems: app.uiSystems) or debugOverlayAnimating(
+      debugOverlay: app.debugOverlay
+    )
     if animating {
       changed = true
     }

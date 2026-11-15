@@ -1,0 +1,134 @@
+# The perf HUD (ui/PerfHud, docs/perf-tools-design.md §8.1), painted over a frame loop that keeps
+# the pool's workers busy: the debug overlay opens it, the app passes its profiler, and after
+# 2 s the HUD has frames in its graph, a bar for the main thread and for each worker that ran a
+# chunk, and its save button writes the last 10 s as a .raeperf that reads back. Closing it ends
+# the capture it started.
+#
+#   RAE_GPU2D_SCREENSHOT=/tmp/perfHud.bmp compiler/bin/rae run checks/perfHud/Main.rae
+#
+# Exit 0 when all of that holds.
+import Gpu2d
+import Profile
+import Sys
+open Gpu2dCanvas
+open perf/PerfFile
+open ui/DebugOverlay
+open ui/PerfHud
+open app3d/UiShell
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func spin(rounds: copy Int) ret Int {
+  var value: Int = 1
+  loop var i: Int = 0, i < rounds, ++i {
+    value = (value * 31 + i) % 1000003
+  }
+  ret value
+}
+
+func fail(text: view String) ret Int {
+  log("PERF HUD FAILED: {text}")
+  ret 1
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "Perf HUD check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  var profiler: Profiler = Profile.createProfiler()
+  var debugOverlay: DebugOverlay = createDebugOverlay(
+    button: true
+    fps: true
+    memory: true
+    heartbeat: false
+  )
+  setPerfHudOpen(perfHud: debugOverlay.perfHud, open: true)
+  var results: List(Int) = {}
+  results.addDefaults(count: 32)
+  let started: Int = nowMs()
+  var frames: Int = 0
+  var saveAsked: Bool = false
+  loop not Gpu2d.pollClose() and nowMs() - started < 2500 {
+    parallelLoop var i: Int = 0, i < 32, ++i {
+      results.set(index: i, value: spin(rounds: 20000 + i))
+    }
+    let unusedTook: Bool = updateDebugOverlay(
+      debugOverlay: debugOverlay
+      screenW: designW.toFloat()
+      screenH: designH.toFloat()
+      now: Gpu2d.nowSeconds()
+      didRealWork: true
+    )
+    if nowMs() - started > 2000 and not saveAsked {
+      debugOverlay.perfHud.saveRequested = true
+      saveAsked = true
+    }
+    let unusedWritten: Bool = Profile.tick(profiler: profiler)
+    debugOverlayPerf(debugOverlay: debugOverlay, profiler: profiler)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.12
+      g: 0.14
+      b: 0.18
+      a: 1.0
+    )
+    drawDebugOverlay(
+      debugOverlay: debugOverlay
+      canvas: canvas
+      font: gpuUi.textFont
+      didRealWork: true
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let perfHud: view PerfHud = debugOverlay.perfHud
+  let samples: Int = perfHud.sampleCount
+  let bars: Int = perfHud.bars.length
+  var workerBusy: Bool = false
+  loop let bar: view PerfHudBar in perfHud.bars {
+    if bar.name.startsWith(prefix: "worker") and bar.busy > 0.0 {
+      workerBusy = true
+    }
+  }
+  let savedPath: String = perfHud.savedPath
+  let capturingOpen: Bool = Profile.capturing(profiler: profiler)
+  setPerfHudOpen(perfHud: debugOverlay.perfHud, open: false)
+  debugOverlayPerf(debugOverlay: debugOverlay, profiler: profiler)
+  let capturingClosed: Bool = Profile.capturing(profiler: profiler)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  log(
+    "frames {frames}, graph frames {samples}, bars {bars}, a worker busy {workerBusy}, saved {savedPath.length() > 0}, capture while open {capturingOpen}, after closing {capturingClosed}"
+  )
+  if samples < 10 {
+    ret fail(text: "the graph has {samples} frames")
+  }
+  if bars < 2 or not workerBusy {
+    ret fail(text: "no worker's bar shows its work")
+  }
+  if not capturingOpen or capturingClosed {
+    ret fail(text: "the HUD's capture did not follow it open and closed")
+  }
+  if savedPath.length() is 0 {
+    ret fail(text: "the save button wrote nothing: {perfHud.saveMessage}")
+  }
+  if let file: PerfFile = perfReadFile(path: savedPath) {
+    let unusedDeleted: Bool = Sys.delete(path: savedPath)
+    if file.blocks.length is 0 {
+      ret fail(text: "the saved capture has no events")
+    }
+    log("saved capture: {file.blocks.length} blocks, {file.tables.threads.length} lanes")
+  } else {
+    ret fail(text: "the saved capture does not read back")
+  }
+  log("PERF HUD OK")
+  ret 0
+}
