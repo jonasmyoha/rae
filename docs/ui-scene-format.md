@@ -1067,3 +1067,35 @@ scene.
 Case 1472 checks the keys, the rects, the hit test, the click, the wheel and the drag, and a
 million spans; `checks/uiTimeline` paints one (`RAE_HEADLESS_FRAMES=10
 RAE_GPU2D_SCREENSHOT=/tmp/timeline.bmp compiler/bin/rae run checks/uiTimeline/Main.rae`).
+
+## 34. `FlameGraph` and `Histogram`
+
+Two more charts of the same kind as the `Timeline` (section 33): the scene authors the look, the
+app fills an unsaved state in code, a system once a frame after `updateUiInput` gives the node its
+state and handles a click, and the drawing is over the node's own fill, clipped to its box.
+
+```json
+"Flame":  { "Rect": { "x": 0, "y": 0, "w": 760, "h": 200 },
+            "FlameGraph": { "rowHeight": 24, "actionId": "flame.pick" } },
+"Spread": { "Rect": { "x": 0, "y": 0, "w": 760, "h": 240 },
+            "Histogram": { "budget": 16, "barGap": 2, "actionId": "histogram.pick" } }
+```
+
+- `FlameGraph` (lib/ui/flameGraphSystem, `flameGraphSystem(world, uiSystems, input)`): a call
+  tree's totals as nested bars. The focused node is the top row, as wide as the chart; each child
+  is under its parent, as wide as its share of the parent's total, left to right in the order
+  added. `rowHeight` (default 18) is one row; `actionId` is sent when a click selects a bar. A click
+  on a bar zooms into it, a click on the focus zooms back out to its parent. The app adds nodes with
+  `flameAddNode(state:, parent:, name:, total:)` (node 0 is the root, "all") or whole call paths
+  with `flameAddSample(state:, path:, value:)`, which adds `value` to the root and every node on the
+  path, making the nodes on first use. A bar under half a pixel is not drawn, nor anything under it.
+- `Histogram` (lib/ui/histogramSystem, `histogramSystem(world, uiSystems, input)`): buckets of
+  values as bars, each as wide as its range and as high as its count against the largest, with a
+  red line at `budget` (the app's unit; 0 for none) and lines at the 50th, 95th and 99.9th
+  percentiles, read from the buckets straight across within one (`histogramPercentile(state:,
+  perMille:)`). `barGap` (default 1) is the space between bars; `actionId` is sent when a click
+  selects a bucket. The app sets the buckets with `histogramSetBuckets(state:, edges:, counts:)`
+  (one more edge than counts, rising; anything else is refused).
+
+Case 1473 checks both charts' keys, layout, hit tests and clicks; `checks/uiFlameHistogram` paints
+them.

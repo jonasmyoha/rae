@@ -55,3 +55,51 @@ type TimelineState {
   dragViewEnd: Int = 0
   dragMoved: Bool = false
 }
+
+# A flame graph (ui/flameGraphSystem): a call tree's totals as nested bars, the focused node as
+# wide as the chart on the top row, each child under its parent as wide as its share of the
+# parent's total. A click on a bar zooms into it (it becomes the focus), a click on the focus
+# zooms back out to its parent; either selects the bar and sends `actionId` (when set).
+type FlameGraph {
+  rowHeight: Float = 18.0
+  actionId: String = ""
+}
+
+# One node of the tree: its parent (-1 for the root), its name (an index into the state's
+# names), its total (the app's unit: time, samples, bytes), its depth, and its first child and
+# next sibling (-1 none), in the order they were added
+type FlameNode {
+  parent: Int
+  nameId: Int
+  total: Int
+  depth: Int
+  firstChild: Int = -1
+  lastChild: Int = -1
+  nextSibling: Int = -1
+}
+
+type FlameGraphState {
+  # node 0 is the root ("all"), made with the state
+  nodes: List(FlameNode)
+  names: List(String)
+  focus: Int = 0
+  selected: Int = -1
+  pressed: Bool = false
+}
+
+# A histogram (ui/histogramSystem): buckets of values as bars, with a line at the `budget`
+# (the app's unit; 0 for none) and lines at the 50th, 95th and 99.9th percentiles the buckets
+# give. A click selects the bucket under it and sends `actionId` (when set).
+type Histogram {
+  budget: Float = 0.0
+  barGap: Float = 1.0
+  actionId: String = ""
+}
+
+# The buckets: bucket i counts the values from edges[i] to edges[i + 1]
+type HistogramState {
+  edges: List(Float)
+  counts: List(Int)
+  selected: Int = -1
+  pressed: Bool = false
+}

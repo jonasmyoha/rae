@@ -120,7 +120,11 @@ func paintTimelineG(
       h: rect.h
       color: timelineSpanColor(nameId: rect.nameId)
     )
-    if rect.span >= 0 and rect.w > 48.0 {
+    if rect.span >= 0 and rect.w > 48.0 and Gpu2dText.measureText(
+      font: res.textFont
+      text: state.names.copyAtDefault(index: rect.nameId)
+      sizePx: rect.h * 0.7
+    ) + 6.0 <= rect.w {
       Gpu2dText.drawText(
         canvas: canvas
         font: res.textFont

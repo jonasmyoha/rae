@@ -1,0 +1,263 @@
+# The FlameGraph and Histogram charts (ui/ChartComponents, ui/flameGraphSystem,
+# ui/histogramSystem): their scene keys load and the systems give the nodes their state; a call
+# tree built from samples lays out as nested bars in proportion, the hit test finds a bar, a click
+# zooms into it and a click on the focus zooms back out; a histogram's bars, its budget line and
+# its p50/p95/p99.9 lines are where its buckets say, the hit test finds a bucket and a click
+# selects it. `\{`/`\}` keep the JSON braces literal.
+open ui/Ecs
+open ui/Components
+open ui/ChartComponents
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/Transform
+open ui/layoutSystem/LayoutSystem
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+open ui/flameGraphSystem/FlameGraphSystem
+open ui/histogramSystem/HistogramSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func chartScene() ret String {
+  var s: String = ""
+  s = s.concat(other: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{")
+  s = s.concat(
+    other: "\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":400\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Children\":[\"Flame\",\"Spread\"]\},"
+  )
+  s = s.concat(
+    other: "\"Flame\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"FlameGraph\":\{\"rowHeight\":20,\"actionId\":\"flame.pick\"\}\},"
+  )
+  s = s.concat(
+    other: "\"Spread\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1000,\"h\":200\},\"Histogram\":\{\"budget\":16,\"actionId\":\"histogram.pick\"\}\}"
+  )
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+}
+
+func step(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+  pressed: view Bool
+) ret Bool {
+  frameAdvance(this: rig.world.uiActions)
+  rig.input.pointer.x = x
+  rig.input.pointer.y = y
+  rig.input.pointer.released = rig.input.pointer.down and down is false
+  rig.input.pointer.pressed = pressed
+  rig.input.pointer.down = down
+  let flame: Bool = flameGraphSystem(world: rig.world, uiSystems: rig.uiSystems, input: rig.input)
+  let spread: Bool = histogramSystem(world: rig.world, uiSystems: rig.uiSystems, input: rig.input)
+  ret flame or spread
+}
+
+# A click: a press, then a release at the same place
+func click(rig: mod Rig, x: view Float, y: view Float) ret Bool {
+  let unusedPress: Bool = step(
+    rig: rig
+    x: x
+    y: y
+    down: true
+    pressed: true
+  )
+  ret step(
+    rig: rig
+    x: x
+    y: y
+    down: false
+    pressed: false
+  )
+}
+
+func actions(world: view UiWorld) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(this: world.uiActions), ++i {
+    text = "{text} {eventAt(this: world.uiActions, i: i).actionId}"
+  }
+  ret text
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func main() {
+  var rig: Rig = { world: createUiWorld(), uiSystems: createUiSystems(), input: createUiInput() }
+  rig.world.layoutW = 1000.0
+  rig.world.layoutH = 400.0
+  let unusedRoot: EntityId = loadScene(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    scene: parseScene(source: chartScene())
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  let unusedFirst: Bool = step(
+    rig: rig
+    x: 0.0
+    y: 0.0
+    down: false
+    pressed: false
+  )
+  let flameId: EntityId = entityOf(world: rig.world, nodeId: "Flame")
+  let spreadId: EntityId = entityOf(world: rig.world, nodeId: "Spread")
+  let flameView: view FlameGraph = componentView(this: rig.world.flameGraphs, entityId: flameId)
+  let flame: FlameGraph = flameView
+  let histogramView: view Histogram = componentView(this: rig.world.histograms, entityId: spreadId)
+  let histogram: Histogram = histogramView
+  log(
+    "scene keys: flame row {flame.rowHeight} action {flame.actionId}; histogram budget {histogram.budget} action {histogram.actionId}; states made {componentHas(
+      this: rig.world.flameGraphStates
+      entityId: flameId
+    )} {componentHas(this: rig.world.histogramStates, entityId: spreadId)}"
+  )
+
+  # a call tree from samples: frame{update{physics 30, ai 10} 40, render 50} 90, and idle 10
+  let tree: mod FlameGraphState = componentMod(this: rig.world.flameGraphStates, entityId: flameId)
+  flameAddSample(state: tree, path: List(String) { "frame", "update", "physics" }, value: 30)
+  flameAddSample(state: tree, path: List(String) { "frame", "update", "ai" }, value: 10)
+  flameAddSample(state: tree, path: List(String) { "frame", "render" }, value: 50)
+  flameAddSample(state: tree, path: List(String) { "idle" }, value: 10)
+  let flameBox: TimelineBox = { x: 0.0, y: 0.0, w: 1000.0, h: 200.0 }
+  var bars: String = ""
+  loop let rect: FlameRect in flameVisible(flame: flame, state: tree, box: flameBox) {
+    bars = "{bars} [{tree.names.copyAtDefault(index: rect.nameId)} x {rect.x.toInt()} w {rect.w.toInt()} y {rect.y.toInt()}]"
+  }
+  log("flame bars:{bars}")
+  log("hit (200, 50): {tree.names.copyAtDefault(index: tree.nodes.copyAtDefault(index: flameHit(
+    flame: flame
+    state: tree
+    box: flameBox
+    x: 200.0
+    y: 50.0
+  )).nameId)}; (950, 30): {tree.names.copyAtDefault(index: tree.nodes.copyAtDefault(index: flameHit(
+    flame: flame
+    state: tree
+    box: flameBox
+    x: 950.0
+    y: 30.0
+  )).nameId)}; below the tree: {flameHit(
+    flame: flame
+    state: tree
+    box: flameBox
+    x: 950.0
+    y: 50.0
+  )}")
+
+  # a click on "update" (row 2) zooms into it; its bars then fill the width
+  let zoomed: Bool = click(rig: rig, x: 200.0, y: 50.0)
+  let afterZoom: view FlameGraphState = componentView(
+    this: rig.world.flameGraphStates
+    entityId: flameId
+  )
+  var zoomedBars: String = ""
+  loop let rect: FlameRect in flameVisible(flame: flame, state: afterZoom, box: flameBox) {
+    zoomedBars = "{zoomedBars} [{afterZoom.names.copyAtDefault(index: rect.nameId)} x {rect.x.toInt()} w {rect.w.toInt()}]"
+  }
+  log(
+    "click into update: changed {zoomed}, focus {afterZoom.names.copyAtDefault(
+      index: afterZoom.nodes.copyAtDefault(index: afterZoom.focus).nameId
+    )}, bars:{zoomedBars}, actions:{actions(world: rig.world)}"
+  )
+  # a click on the focus (now the top row) goes back out to its parent
+  let unusedOut: Bool = click(rig: rig, x: 500.0, y: 10.0)
+  let afterOut: view FlameGraphState = componentView(
+    this: rig.world.flameGraphStates
+    entityId: flameId
+  )
+  log(
+    "click on the focus: focus {afterOut.names.copyAtDefault(
+      index: afterOut.nodes.copyAtDefault(index: afterOut.focus).nameId
+    )}"
+  )
+
+  # a histogram of frame times: 10 buckets of 2 ms from 0 to 20 ms
+  let spread: mod HistogramState = componentMod(this: rig.world.histogramStates, entityId: spreadId)
+  let set: Bool = histogramSetBuckets(
+    state: spread
+    edges: List(Float) {
+      0.0
+      2.0
+      4.0
+      6.0
+      8.0
+      10.0
+      12.0
+      14.0
+      16.0
+      18.0
+      20.0
+    }
+    counts: List(Int) {
+      0
+      0
+      0
+      100
+      600
+      200
+      60
+      30
+      8
+      2
+    }
+  )
+  let refused: Bool = histogramSetBuckets(
+    spread
+    edges: List(Float) { 0.0, 1.0 }
+    counts: List(Int) { 1, 2 }
+  )
+  log(
+    "buckets set {set}, a wrong set refused {not refused}; p50 {(histogramPercentile(
+      state: spread
+      perMille: 500
+    ) * 100.0).toInt()} p95 {(histogramPercentile(state: spread, perMille: 950) * 100.0).toInt()} p99.9 {(histogramPercentile(
+      state: spread
+      perMille: 999
+    ) * 100.0).toInt()} (hundredths of a ms)"
+  )
+  let spreadBox: TimelineBox = { x: 0.0, y: 200.0, w: 1000.0, h: 200.0 }
+  var shown: String = ""
+  loop let bar: HistogramBar in histogramBars(histogram: histogram, state: spread, box: spreadBox) {
+    shown = "{shown} [{bar.bucket} x {bar.x.toInt()} h {bar.h.toInt()}]"
+  }
+  log("bars:{shown}")
+  var lines: String = ""
+  loop let line: HistogramLine in histogramLines(
+    histogram: histogram
+    state: spread
+    box: spreadBox
+  ) {
+    lines = "{lines} [{line.label} at {line.x.toInt()}]"
+  }
+  log("lines:{lines}")
+  log("hit x 450: bucket {histogramHit(
+    state: spread
+    box: spreadBox
+    x: 450.0
+    y: 300.0
+  )}; outside: {histogramHit(
+    state: spread
+    box: spreadBox
+    x: 450.0
+    y: 100.0
+  )}")
+  let selected: Bool = click(rig: rig, x: 450.0, y: 300.0)
+  log(
+    "click: changed {selected}, selected {componentView(
+      this: rig.world.histogramStates
+      entityId: spreadId
+    ).selected}, actions:{actions(world: rig.world)}"
+  )
+}

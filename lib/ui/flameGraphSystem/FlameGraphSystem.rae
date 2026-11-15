@@ -1,0 +1,267 @@
+# ui/flameGraphSystem — the FlameGraph chart (ui/ChartComponents, docs/perf-tools-design.md §6):
+# its tree (flameAddNode, flameAddSample), the bars it shows (flameVisible), what is under a point
+# (flameHit), and the system that turns a click into a zoom and a selection. The drawing is
+# ui/renderSystem/RenderFlameGraph.
+#
+# The focused node is the top row, as wide as the chart; each child is under its parent, as wide
+# as its share of the parent's total, left to right in the order added. A bar narrower than half a
+# pixel is not drawn and neither is anything under it, so the cost is the bars that show.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+
+# One bar to draw: a node of the tree
+type FlameRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  node: Int
+  nameId: Int
+}
+
+func createFlameGraphState() ret FlameGraphState {
+  var state: FlameGraphState = { nodes: {}, names: {} }
+  state.names.add(value: "all")
+  state.nodes.add(value: FlameNode { parent: -1, nameId: 0, total: 0, depth: 0 })
+  ret state
+}
+
+func flameName(state: mod FlameGraphState, name: view String) ret Int {
+  loop var i: Int = 0, i < state.names.length, ++i {
+    if state.names.copyAtDefault(index: i) is name {
+      ret i
+    }
+  }
+  state.names.add(value: name)
+  ret state.names.length - 1
+}
+
+# A child of `parent` with its own `total`; its index (-1 for no such parent)
+func flameAddNode(
+  state: mod FlameGraphState
+  parent: view Int
+  name: view String
+  total: view Int
+) ret Int {
+  if parent < 0 or parent >= state.nodes.length {
+    ret -1
+  }
+  let nameId: Int = flameName(state: state, name: name)
+  let index: Int = state.nodes.length
+  let depth: Int = state.nodes.copyAtDefault(index: parent).depth + 1
+  state.nodes.add(value: FlameNode { parent: parent, nameId: nameId, total: total, depth: depth })
+  let previous: Int = state.nodes.copyAtDefault(index: parent).lastChild
+  if previous < 0 {
+    state.nodes.modAt(index: parent).firstChild = index
+  } else {
+    state.nodes.modAt(index: previous).nextSibling = index
+  }
+  state.nodes.modAt(index: parent).lastChild = index
+  ret index
+}
+
+# The child of `parent` named `nameId`, or -1
+func flameChildNamed(state: view FlameGraphState, parent: view Int, nameId: view Int) ret Int {
+  var child: Int = state.nodes.copyAtDefault(index: parent).firstChild
+  loop child >= 0 {
+    let node: FlameNode = state.nodes.copyAtDefault(index: child)
+    if node.nameId is nameId {
+      ret child
+    }
+    child = node.nextSibling
+  }
+  ret -1
+}
+
+# A sample: `value` added to the root and to every node along `path` (outermost first), the nodes
+# made the first time a path reaches them; how call stacks become a flame graph
+func flameAddSample(state: mod FlameGraphState, path: view List(String), value: view Int) {
+  state.nodes.modAt(index: 0).total = state.nodes.copyAtDefault(index: 0).total + value
+  var at: Int = 0
+  loop let name: view String in path {
+    let nameId: Int = flameName(state: state, name: name)
+    var child: Int = flameChildNamed(state: state, parent: at, nameId: nameId)
+    if child < 0 {
+      child = flameAddNode(
+        state: state
+        parent: at
+        name: name
+        total: 0
+      )
+    }
+    state.nodes.modAt(index: child).total = state.nodes.copyAtDefault(index: child).total + value
+    at = child
+  }
+}
+
+# The bars that show: the focus and what is under it, each at least half a pixel wide and above
+# the box's bottom
+func flameVisible(
+  flame: view FlameGraph
+  state: view FlameGraphState
+  box: view TimelineBox
+) ret List(FlameRect) {
+  var rects: List(FlameRect) = {}
+  if state.focus < 0 or state.focus >= state.nodes.length {
+    ret rects
+  }
+  let focusDepth: Int = state.nodes.copyAtDefault(index: state.focus).depth
+  # a stack of nodes still to place, with their left edge and width
+  var nodes: List(Int) = {}
+  var lefts: List(Float) = {}
+  var widths: List(Float) = {}
+  nodes.add(value: state.focus)
+  lefts.add(value: box.x)
+  widths.add(value: box.w)
+  loop nodes.length > 0 {
+    let last: Int = nodes.length - 1
+    let index: Int = nodes.copyAtDefault(index: last)
+    let left: Float = lefts.copyAtDefault(index: last)
+    let width: Float = widths.copyAtDefault(index: last)
+    nodes.removeAt(index: last)
+    lefts.removeAt(index: last)
+    widths.removeAt(index: last)
+    let node: FlameNode = state.nodes.copyAtDefault(index: index)
+    let row: Int = node.depth - focusDepth
+    let y: Float = box.y + (row as Float) * flame.rowHeight
+    if y + flame.rowHeight > box.y + box.h {
+      continue
+    }
+    rects.add(value: FlameRect {
+      x: left
+      y: y
+      w: width
+      h: flame.rowHeight - 1.0
+      node: index
+      nameId: node.nameId
+    })
+    if node.total <= 0 {
+      continue
+    }
+    var cursor: Float = left
+    var child: Int = node.firstChild
+    loop child >= 0 {
+      let inner: FlameNode = state.nodes.copyAtDefault(index: child)
+      let share: Float = width * (inner.total as Float) / (node.total as Float)
+      if share >= 0.5 {
+        nodes.add(value: child)
+        lefts.add(value: cursor)
+        widths.add(value: share)
+      }
+      cursor = cursor + share
+      child = inner.nextSibling
+    }
+  }
+  ret rects
+}
+
+# The node whose bar is under (x, y), or -1
+func flameHit(
+  flame: view FlameGraph
+  state: view FlameGraphState
+  box: view TimelineBox
+  x: view Float
+  y: view Float
+) ret Int {
+  if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h or state.focus < 0 {
+    ret -1
+  }
+  let row: Int = ((y - box.y) / flame.rowHeight) as Int
+  var at: Int = state.focus
+  var left: Float = box.x
+  var width: Float = box.w
+  loop var level: Int = 0, level < row, ++level {
+    let node: FlameNode = state.nodes.copyAtDefault(index: at)
+    if node.total <= 0 {
+      ret -1
+    }
+    var cursor: Float = left
+    var found: Int = -1
+    var child: Int = node.firstChild
+    loop child >= 0 and found < 0 {
+      let inner: FlameNode = state.nodes.copyAtDefault(index: child)
+      let share: Float = width * (inner.total as Float) / (node.total as Float)
+      if x >= cursor and x < cursor + share {
+        found = child
+        left = cursor
+        width = share
+      }
+      cursor = cursor + share
+      child = inner.nextSibling
+    }
+    if found < 0 {
+      ret -1
+    }
+    at = found
+  }
+  ret at
+}
+
+# A click on node `node`: into it, or (the focus itself) back out to its parent
+func flameClick(state: mod FlameGraphState, node: view Int) {
+  if node < 0 {
+    ret
+  }
+  state.selected = node
+  if node is state.focus {
+    let parent: Int = state.nodes.copyAtDefault(index: node).parent
+    if parent >= 0 {
+      state.focus = parent
+    }
+  } else {
+    state.focus = node
+  }
+}
+
+# Once a frame after updateUiInput: every FlameGraph gets its state (the root only, until the app
+# fills it), and a click zooms and selects (sending the action). True when the focus or the
+# selection changed.
+func flameGraphSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.flameGraphs), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.flameGraphs, i: i)
+    if componentHas(this: world.flameGraphStates, entityId: entityId) is false {
+      componentSet(this: world.flameGraphStates, entityId: entityId, data: createFlameGraphState())
+    }
+    if let box: TimelineBox = timelineBoxOf(uiSystems: uiSystems, entityId: entityId) {
+      let flameView: view FlameGraph = componentView(this: world.flameGraphs, entityId: entityId)
+      let flame: FlameGraph = flameView
+      let state: mod FlameGraphState = componentMod(
+        this: world.flameGraphStates
+        entityId: entityId
+      )
+      let inside: Bool = input.pointer.x >= box.x and input.pointer.x < box.x + box.w and input.pointer.y >= box.y and input.pointer.y < box.y + box.h
+      if input.pointer.pressed and inside {
+        state.pressed = true
+      }
+      if state.pressed and input.pointer.released {
+        state.pressed = false
+        let node: Int = flameHit(
+          flame: flame
+          state: state
+          box: box
+          x: input.pointer.x
+          y: input.pointer.y
+        )
+        if node >= 0 {
+          flameClick(state: state, node: node)
+          changed = true
+          if flame.actionId.length() > 0 {
+            eventSend(
+              this: world.uiActions
+              value: UiAction { entityId: entityId, actionId: "{flame.actionId}" }
+            )
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}

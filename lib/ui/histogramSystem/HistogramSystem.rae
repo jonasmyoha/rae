@@ -1,0 +1,252 @@
+# ui/histogramSystem — the Histogram chart (ui/ChartComponents, docs/perf-tools-design.md §6): its
+# buckets (histogramSetBuckets), the percentiles they give (histogramPercentile), the bars and
+# lines it shows (histogramBars, histogramLines), what is under a point (histogramHit), and the
+# system that turns a click into a selection. The drawing is ui/renderSystem/RenderHistogram.
+#
+# The values run left to right from the first bucket's lower edge to the last one's upper edge, so
+# a bucket is as wide as its range; a bar is as high as its count against the largest count.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/inputSystem/InputSystem
+open ui/timelineSystem/TimelineSystem
+
+type HistogramBar {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  bucket: Int
+  count: Int
+}
+
+enum HistogramLineKind { budget, p50, p95, p999 }
+
+# A line across the chart at `value`, `x` on screen
+type HistogramLine {
+  kind: HistogramLineKind
+  value: Float
+  x: Float
+  label: String
+}
+
+func createHistogramState() ret HistogramState {
+  ret HistogramState { edges: {}, counts: {} }
+}
+
+# The buckets: `counts.length + 1` edges, rising; false (and nothing kept) otherwise
+func histogramSetBuckets(
+  state: mod HistogramState
+  edges: view List(Float)
+  counts: view List(Int)
+) ret Bool {
+  if edges.length is not counts.length + 1 or counts.length is 0 {
+    ret false
+  }
+  loop var i: Int = 1, i < edges.length, ++i {
+    if edges.copyAtDefault(index: i) <= edges.copyAtDefault(index: i - 1) {
+      ret false
+    }
+  }
+  state.edges = edges
+  state.counts = counts
+  if state.selected >= counts.length {
+    state.selected = -1
+  }
+  ret true
+}
+
+func histogramTotal(state: view HistogramState) ret Int {
+  var total: Int = 0
+  loop let count: Int in state.counts {
+    total = total + count
+  }
+  ret total
+}
+
+# The value below which `perMille` thousandths of the counted values fall (500 the median, 999 the
+# 99.9th percentile), straight across within its bucket; 0 with no values
+func histogramPercentile(state: view HistogramState, perMille: view Int) ret Float {
+  let total: Int = histogramTotal(state: state)
+  if total is 0 {
+    ret 0.0
+  }
+  let target: Float = (total as Float) * (perMille as Float) / 1000.0
+  var before: Int = 0
+  loop var i: Int = 0, i < state.counts.length, ++i {
+    let count: Int = state.counts.copyAtDefault(index: i)
+    if count > 0 and (before + count) as Float >= target {
+      let lower: Float = state.edges.copyAtDefault(index: i)
+      let upper: Float = state.edges.copyAtDefault(index: i + 1)
+      ret lower + (upper - lower) * (target - (before as Float)) / (count as Float)
+    }
+    before = before + count
+  }
+  ret state.edges.copyAtDefault(index: state.edges.length - 1)
+}
+
+func histogramX(state: view HistogramState, box: view TimelineBox, value: view Float) ret Float {
+  let low: Float = state.edges.copyAtDefault(index: 0)
+  let high: Float = state.edges.copyAtDefault(index: state.edges.length - 1)
+  ret box.x + box.w * (value - low) / (high - low)
+}
+
+func histogramBars(
+  histogram: view Histogram
+  state: view HistogramState
+  box: view TimelineBox
+) ret List(HistogramBar) {
+  var bars: List(HistogramBar) = {}
+  if state.counts.length is 0 {
+    ret bars
+  }
+  var most: Int = 1
+  loop let count: Int in state.counts {
+    if count > most {
+      most = count
+    }
+  }
+  loop var i: Int = 0, i < state.counts.length, ++i {
+    let count: Int = state.counts.copyAtDefault(index: i)
+    if count > 0 {
+      let x0: Float = histogramX(state: state, box: box, value: state.edges.copyAtDefault(index: i))
+      let x1: Float = histogramX(
+        state: state
+        box: box
+        value: state.edges.copyAtDefault(index: i + 1)
+      )
+      let height: Float = box.h * (count as Float) / (most as Float)
+      var width: Float = x1 - x0 - histogram.barGap
+      if width < 1.0 {
+        width = 1.0
+      }
+      bars.add(value: HistogramBar {
+        x: x0
+        y: box.y + box.h - height
+        w: width
+        h: height
+        bucket: i
+        count: count
+      })
+    }
+  }
+  ret bars
+}
+
+# The budget's line (when it is set and inside the range) and the three percentiles'
+func histogramLines(
+  histogram: view Histogram
+  state: view HistogramState
+  box: view TimelineBox
+) ret List(HistogramLine) {
+  var lines: List(HistogramLine) = {}
+  if state.counts.length is 0 {
+    ret lines
+  }
+  let low: Float = state.edges.copyAtDefault(index: 0)
+  let high: Float = state.edges.copyAtDefault(index: state.edges.length - 1)
+  if histogram.budget > low and histogram.budget <= high {
+    lines.add(
+      value: HistogramLine {
+        kind: HistogramLineKind.budget
+        value: histogram.budget
+        x: histogramX(state: state, box: box, value: histogram.budget)
+        label: "budget"
+      }
+    )
+  }
+  if histogramTotal(state: state) > 0 {
+    let p50: Float = histogramPercentile(state: state, perMille: 500)
+    let p95: Float = histogramPercentile(state: state, perMille: 950)
+    let p999: Float = histogramPercentile(state: state, perMille: 999)
+    lines.add(
+      value: HistogramLine {
+        kind: HistogramLineKind.p50
+        value: p50
+        x: histogramX(state: state, box: box, value: p50)
+        label: "p50"
+      }
+    )
+    lines.add(
+      value: HistogramLine {
+        kind: HistogramLineKind.p95
+        value: p95
+        x: histogramX(state: state, box: box, value: p95)
+        label: "p95"
+      }
+    )
+    lines.add(
+      value: HistogramLine {
+        kind: HistogramLineKind.p999
+        value: p999
+        x: histogramX(state: state, box: box, value: p999)
+        label: "p99.9"
+      }
+    )
+  }
+  ret lines
+}
+
+# The bucket whose range is under x (anywhere in the chart's height), or -1
+func histogramHit(
+  state: view HistogramState
+  box: view TimelineBox
+  x: view Float
+  y: view Float
+) ret Int {
+  if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h or state.counts.length is 0 {
+    ret -1
+  }
+  loop var i: Int = 0, i < state.counts.length, ++i {
+    if x < histogramX(state: state, box: box, value: state.edges.copyAtDefault(index: i + 1)) {
+      ret i
+    }
+  }
+  ret state.counts.length - 1
+}
+
+# Once a frame after updateUiInput: every Histogram gets its state (empty until the app sets its
+# buckets), and a click selects the bucket under it (sending the action). True when the selection
+# changed.
+func histogramSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.histograms), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.histograms, i: i)
+    if componentHas(this: world.histogramStates, entityId: entityId) is false {
+      componentSet(this: world.histogramStates, entityId: entityId, data: createHistogramState())
+    }
+    if let box: TimelineBox = timelineBoxOf(uiSystems: uiSystems, entityId: entityId) {
+      let histogramView: view Histogram = componentView(this: world.histograms, entityId: entityId)
+      let histogram: Histogram = histogramView
+      let state: mod HistogramState = componentMod(this: world.histogramStates, entityId: entityId)
+      let inside: Bool = input.pointer.x >= box.x and input.pointer.x < box.x + box.w and input.pointer.y >= box.y and input.pointer.y < box.y + box.h
+      if input.pointer.pressed and inside {
+        state.pressed = true
+      }
+      if state.pressed and input.pointer.released {
+        state.pressed = false
+        let bucket: Int = histogramHit(
+          state: state
+          box: box
+          x: input.pointer.x
+          y: input.pointer.y
+        )
+        if bucket is not state.selected {
+          state.selected = bucket
+          changed = true
+          if bucket >= 0 and histogram.actionId.length() > 0 {
+            eventSend(
+              this: world.uiActions
+              value: UiAction { entityId: entityId, actionId: "{histogram.actionId}" }
+            )
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}
