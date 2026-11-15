@@ -62,6 +62,8 @@ type PerfCapture {
   counters: List(PerfCounterSeries)
   # when each frame started ("frame start" marks), in order
   frameStarts: List(Int)
+  # where a split capture (perf/PerfSplit) skips time: no frame spans one
+  gaps: List(Int) = {}
 }
 
 # The open zones of a lane while its events are read
@@ -199,6 +201,8 @@ func perfReadLane(capture: mod PerfCapture, events: view List(PerfEvent), lane: 
       })
       if capture.names.copyAtDefault(index: nameId) is "frame start" {
         capture.frameStarts.add(value: event.time)
+      } else if capture.names.copyAtDefault(index: nameId) is "capture gap" {
+        capture.gaps.add(value: event.time)
       }
     } else if event.kind is PerfKind.counter {
       let index: Int = perfCounterIndex(capture: capture, nameId: nameId)
@@ -247,15 +251,36 @@ func perfCaptureOf(file: view PerfFile) ret PerfCapture {
   ret capture
 }
 
-# The time between frames, in nanoseconds (one fewer than the frames)
+# A frame: when it started and how long until the next one began
+type PerfFrame {
+  start: Int
+  length: Int
+}
+
+# Every frame with a next one, but those a gap of a split capture falls in
+func perfFrames(capture: view PerfCapture) ret List(PerfFrame) {
+  var frames: List(PerfFrame) = {}
+  loop var i: Int = 1, i < capture.frameStarts.length, ++i {
+    let start: Int = capture.frameStarts.copyAtDefault(index: i - 1)
+    let end: Int = capture.frameStarts.copyAtDefault(index: i)
+    var spansGap: Bool = false
+    loop let gap: Int in capture.gaps {
+      if gap > start and gap <= end {
+        spansGap = true
+      }
+    }
+    if not spansGap {
+      frames.add(value: PerfFrame { start: start, length: end - start })
+    }
+  }
+  ret frames
+}
+
+# The time between frames, in nanoseconds (the gaps of a split capture left out)
 func perfFrameIntervals(capture: view PerfCapture) ret List(Int) {
   var intervals: List(Int) = {}
-  loop var i: Int = 1, i < capture.frameStarts.length, ++i {
-    intervals.add(
-      value: capture.frameStarts.copyAtDefault(index: i) - capture.frameStarts.copyAtDefault(
-        index: i - 1
-      )
-    )
+  loop let frame: view PerfFrame in perfFrames(capture: capture) {
+    intervals.add(value: frame.length)
   }
   ret intervals
 }

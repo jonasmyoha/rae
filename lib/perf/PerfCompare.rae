@@ -1,0 +1,99 @@
+# perf/PerfCompare — what changed between two captures, zone by zone (docs/perf-tools-design.md
+# §8.2): each zone's mean, p95 and spread in both (zones are matched by name; their ids differ
+# between files), the change of its mean, and that change measured two ways: against the larger
+# spread (how it compares with one frame's scatter) and against the standard error of the two
+# means (sqrt(spreadA^2/countA + spreadB^2/countB): how sure the change is, from all the frames).
+# The list is sorted by the second: a zone that scatters widely frame to frame can still have
+# moved for certain over a hundred frames, and that is what a comparison is for.
+import Math
+open perf/PerfCapture
+
+type PerfZoneChange {
+  name: String
+  countA: Int = 0
+  countB: Int = 0
+  meanA: Int = 0
+  meanB: Int = 0
+  p95A: Int = 0
+  p95B: Int = 0
+  spreadA: Int = 0
+  spreadB: Int = 0
+  # the mean's change, B less A (ns)
+  changeNs: Int = 0
+  # the change in spreads: changeNs over the larger spread (1 µs at least)
+  inSpreads: Float = 0.0
+  # the change in standard errors of the means (a zone in one capture only: 0)
+  inErrors: Float = 0.0
+}
+
+func perfChangeIndex(changes: view List(PerfZoneChange), name: view String) ret Int {
+  loop var i: Int = 0, i < changes.length, ++i {
+    if let change: view PerfZoneChange = changes.viewAt(index: i) {
+      if change.name is name {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# Every zone of `a` (on `lanesA`) and of `b` (on `lanesB`; an empty list is every lane), with its
+# change, largest change against its noise first
+func perfCompareZones(
+  a: view PerfCapture
+  lanesA: view List(Int)
+  b: view PerfCapture
+  lanesB: view List(Int)
+) ret List(PerfZoneChange) {
+  var changes: List(PerfZoneChange) = {}
+  loop let stat: view PerfZoneStat in perfZoneStats(capture: a, lanes: lanesA) {
+    changes.add(value: PerfZoneChange {
+      name: stat.name
+      countA: stat.count
+      meanA: stat.meanNs
+      p95A: stat.p95Ns
+      spreadA: stat.spreadNs
+    })
+  }
+  loop let stat: view PerfZoneStat in perfZoneStats(capture: b, lanes: lanesB) {
+    var at: Int = perfChangeIndex(changes: changes, name: stat.name)
+    if at < 0 {
+      changes.add(value: PerfZoneChange { name: stat.name })
+      at = changes.length - 1
+    }
+    if let change: mod PerfZoneChange = changes.modAt(index: at) {
+      change.countB = stat.count
+      change.meanB = stat.meanNs
+      change.p95B = stat.p95Ns
+      change.spreadB = stat.spreadNs
+    }
+  }
+  loop var i: Int = 0, i < changes.length, ++i {
+    if let change: mod PerfZoneChange = changes.modAt(index: i) {
+      change.changeNs = change.meanB - change.meanA
+      let noise: Int = Math.max(a: 1000, b: Math.max(a: change.spreadA, b: change.spreadB))
+      change.inSpreads = change.changeNs as Float / noise as Float
+      if change.countA > 0 and change.countB > 0 {
+        let spreadA: Float = change.spreadA as Float
+        let spreadB: Float = change.spreadB as Float
+        let error: Float = Math.sqrt(
+          x: spreadA * spreadA / change.countA as Float + spreadB * spreadB / change.countB as Float
+        )
+        change.inErrors = change.changeNs as Float / Math.max(a: 1000.0, b: error)
+      }
+    }
+  }
+  # largest |inErrors| first (an insertion sort: a few hundred zones at most)
+  loop var i: Int = 1, i < changes.length, ++i {
+    var j: Int = i
+    loop j > 0 and Math.abs(value: changes.copyAtDefault(index: j - 1).inErrors) < Math.abs(
+      value: changes.copyAtDefault(index: j).inErrors
+    ) {
+      let earlier: PerfZoneChange = changes.copyAtDefault(index: j - 1)
+      changes.set(index: j - 1, value: changes.copyAtDefault(index: j))
+      changes.set(index: j, value: earlier)
+      j = j - 1
+    }
+  }
+  ret changes
+}

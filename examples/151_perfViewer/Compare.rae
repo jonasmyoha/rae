@@ -1,0 +1,103 @@
+# The Compare view: every zone of the program's own threads in both captures (lib/perf/
+# PerfCompare), its mean, p95 and spread in each and the mean's change, largest against its noise
+# first: its change in standard errors of the two means ("certainty"; a few or more is the
+# program's,
+# not chance), beside its change in the larger spread (against one frame's scatter).
+import Math
+open perf/PerfCapture
+open perf/PerfCompare
+open ui/ChartComponents
+open ui/statTableSystem/StatTableSystem
+open Viewer
+
+func signedMicroseconds(nanoseconds: view Int) ret String {
+  if nanoseconds < 0 {
+    ret "-{microseconds(nanoseconds: -nanoseconds)}"
+  }
+  ret "+{microseconds(nanoseconds: nanoseconds)}"
+}
+
+func spreadsText(inSpreads: view Float) ret String {
+  let tenths: Int = (Math.abs(value: inSpreads) * 10.0 + 0.5).toInt()
+  var sign: String = "+"
+  if inSpreads < 0.0 {
+    sign = "-"
+  }
+  ret "{sign}{tenths / 10}.{tenths % 10}"
+}
+
+func compareColumn(
+  state: mod StatTableState
+  title: view String
+  width: view Float
+  numeric: view Bool
+) {
+  let unusedColumn: Int = statAddColumn(
+    state: state
+    title: title
+    width: width
+    numeric: numeric
+  )
+}
+
+func fillCompareTable(state: mod StatTableState, a: view PerfCapture, b: view PerfCapture) {
+  let titles: List(String) = {
+    "zone"
+    "mean A us"
+    "mean B us"
+    "change us"
+    "in spreads"
+    "certainty"
+    "p95 A"
+    "p95 B"
+    "spread A"
+    "spread B"
+  }
+  loop var i: Int = 0, i < titles.length, ++i {
+    var width: Float = 100.0
+    if i is 0 {
+      width = 248.0
+    }
+    compareColumn(
+      state: state
+      title: titles.copyAtDefault(index: i)
+      width: width
+      numeric: i > 0
+    )
+  }
+  let changes: List(PerfZoneChange) = perfCompareZones(
+    a: a
+    lanesA: threadLanes(capture: a)
+    b: b
+    lanesB: threadLanes(capture: b)
+  )
+  loop let change: view PerfZoneChange in changes {
+    let unusedRow: Int = statAddRow(
+      state: state
+      texts: List(String) {
+        change.name
+        microseconds(nanoseconds: change.meanA)
+        microseconds(nanoseconds: change.meanB)
+        signedMicroseconds(nanoseconds: change.changeNs)
+        spreadsText(inSpreads: change.inSpreads)
+        spreadsText(inSpreads: change.inErrors)
+        microseconds(nanoseconds: change.p95A)
+        microseconds(nanoseconds: change.p95B)
+        microseconds(nanoseconds: change.spreadA)
+        microseconds(nanoseconds: change.spreadB)
+      }
+      values: List(Float) {
+        0.0
+        change.meanA as Float
+        change.meanB as Float
+        change.changeNs as Float
+        Math.abs(value: change.inSpreads)
+        Math.abs(value: change.inErrors)
+        change.p95A as Float
+        change.p95B as Float
+        change.spreadA as Float
+        change.spreadB as Float
+      }
+    )
+  }
+}

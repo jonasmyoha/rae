@@ -287,6 +287,13 @@ Each case is judged against the two baselines beside it, so a slow drift such as
 cancels. Those were real numbers, and that run's baselines moved by up to 1.8 ms: separate launches
 cannot see a saving of that size.
 
+`RAE_AB_HOLD_SECONDS=<s>` holds each phase that long instead (its first third skipped, at most 3 s).
+Under a capture (`RAE_PROFILE=1 RAE_PERF_OUT=run.raeperf`) each frame records its setting
+(`ab.case`: 0 the baselines, n the n-th case), and the capture is also written split by it,
+`run-baseline.raeperf` and `run-<case>.raeperf` beside the whole (perf/PerfSplit). The viewer
+(`examples/151_perfViewer`) opens the whole as two captures, the baselines against the first case,
+and its Compare view lists each zone's change, most certain first.
+
 | switch | what stops |
 |---|---|
 | `shadows` | the whole shadow pass (the lighting still samples the last shadow maps) |

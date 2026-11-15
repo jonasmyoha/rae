@@ -8,7 +8,23 @@ button (the debug overlay's Performance row).
 compiler/bin/rae run examples/151_perfViewer/Main.rae                         # the walker sample
 RAE_PERF_OPEN=capture.raeperf compiler/bin/rae run examples/151_perfViewer/Main.rae
 RAE_PERF_VIEW=timeline compiler/bin/rae run examples/151_perfViewer/Main.rae  # open on a view
+RAE_PERF_COMPARE=other.raeperf compiler/bin/rae run examples/151_perfViewer/Main.rae  # compare
+RAE_PERF_OPEN=examples/151_perfViewer/assets/ab-walker.raeperf RAE_PERF_VIEW=compare \
+  compiler/bin/rae run examples/151_perfViewer/Main.rae                          # an RAE_AB run
 ```
+
+## Comparing two captures
+
+With a second capture every view shows both, each series, lane, flame root and row marked " A" or
+" B", and the Compare tab lists every zone of the program's own threads: its mean in each, the
+change, the change in spreads (against one frame's scatter), the change in standard errors of the
+two means ("certainty": a few or more is the program's, not chance), p95 and spread in each,
+most certain first (`lib/perf/PerfCompare`, case 1478).
+
+B is the file `RAE_PERF_COMPARE` names, or, when the opened capture is of an `RAE_AB` run, its
+settings: the baselines are A and the first case B (`lib/perf/PerfSplit` splits it by the run's
+`ab.case` counter; `lib/Profile` also writes the split files beside `RAE_PERF_OUT`, see
+docs/profiling.md).
 
 The tabs choose the view:
 
@@ -31,7 +47,8 @@ case 1477); `Viewer.rae` puts them into the `lib/ui` chart widgets laid out in
 
 `assets/walker.raeperf` is 1.5 s of example 143 (the walker in the forest) headless on a Mac:
 its systems and passes, the Metal command buffers, memory and GPU counters.
-`assets/ui.raeperf` is 2 s of example 106 (the mobile UI). Both are in Git LFS. To record one
+`assets/ui.raeperf` is 2 s of example 106 (the mobile UI). `assets/ab-walker.raeperf` is 143 under
+`RAE_AB="ssao" RAE_AB_HOLD_SECONDS=3` (a baseline, ssao off, a baseline: 9 s). All are in Git LFS. To record one
 again:
 
 ```sh
@@ -46,10 +63,10 @@ gate expects in `compiler/tools/run_examples.sh`.
 ## The gate
 
 `RAE_EXAMPLE_FILTER=151_perfViewer make -C compiler test-examples` renders each view of the
-walker sample for 10 headless frames and compares it with `references/<view>.png`.
+walker sample, and the Compare view of the A/B sample, for 10 headless frames and compares each
+with `references/<view>.png`.
 
 ## Not yet
 
-Live programs (`RAE_PERF_LIVE`), folders of captures, comparing two captures (and `RAE_AB` runs as
-two), the threads' critical path, the audio render plan's nodes and an iPad run are queued in
+Live programs (`RAE_PERF_LIVE`), folders of captures, the threads' critical path, the audio render plan's nodes and an iPad run are queued in
 QUEUE.md.

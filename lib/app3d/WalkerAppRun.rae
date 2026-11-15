@@ -349,8 +349,10 @@ func walkerRunFrameEnd(app: mod WalkerApp) {
   uiFrameEnd(world: app.inputSystem.world, uiSystems: app.inputSystem.uiSystems)
 }
 
-# The shutdown
+# The shutdown. A capture still running (RAE_PROFILE, a run that ended before its seconds, as
+# RAE_AB's does) writes what it has.
 func walkerRunEnd(app: mod WalkerApp) {
+  let unusedWritten: Bool = Profile.profileStop(profiler: app.profiler)
   # A networked session: what its desync check found, then leave it
   if let walkerNet: mod WalkerNet = app.walkerNet {
     log(

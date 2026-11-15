@@ -36,6 +36,7 @@ open perf/GpuClock
 open perf/PerfFile
 open perf/PerfChrome
 open perf/PerfLive
+open perf/PerfSplit
 
 # Cap the event window so a runaway capture can't exhaust memory. 300k events is
 # ~30s at 60fps with ~160 zones/frame; past it the oldest events are let go
@@ -600,6 +601,9 @@ func write(profiler: view Profiler, path: view String) ret Bool {
     } else {
       log("profile: FAILED to write the capture file {perfOut}")
     }
+    if Sys.getEnv(name: "RAE_AB").length() > 0 {
+      writeAbCaptures(file: file, perfOut: perfOut)
+    }
   }
   let first: Int = hub.perfOldest()
   let dropped: Int = hub.perfDropped()
@@ -609,4 +613,25 @@ func write(profiler: view Profiler, path: view String) ret Bool {
     )
   }
   ret ok
+}
+
+# Under RAE_AB, a capture file per setting beside `perfOut` (`<name>-baseline.raeperf`,
+# `<name>-<case>.raeperf`): the capture split by app3d/AbTest's `ab.case` counter
+func writeAbCaptures(file: view PerfFile, perfOut: view String) {
+  var stem: String = "{perfOut}"
+  if stem.endsWith(suffix: ".raeperf") {
+    stem = stem.sub(start: 0, len: stem.length() - 8)
+  }
+  loop let split: view PerfFileSplit in perfFileSplitByCounter(
+    file: file
+    counter: "ab.case"
+    markPrefix: "ab case "
+  ) {
+    let path: String = "{stem}-{perfFileSafeName(name: split.name)}.raeperf"
+    if perfWriteFile(file: split.file, path: path) {
+      log("profile: wrote the {split.name} setting's capture file {path}")
+    } else {
+      log("profile: FAILED to write {path}")
+    }
+  }
 }

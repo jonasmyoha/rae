@@ -505,6 +505,18 @@ example gate compares each view of the sample with a reference picture. Live pro
 comparing two captures (and `RAE_AB`), the critical path and the audio plan's nodes are the next
 steps (QUEUE.md); an iPad run waits for a person.
 
+Rae 0.3.149 (step 12b): the viewer compares two captures. B is `RAE_PERF_COMPARE`'s file, or,
+when A is a capture of an `RAE_AB` run, its settings: `app3d/AbTest` writes `ab.case` each frame
+and a mark naming each setting, `perf/PerfSplit` splits a capture file by a counter (a "capture
+gap" mark where a run of the value ends, so no frame spans two runs), and `lib/Profile` writes the
+split files beside `RAE_PERF_OUT`. Every view shows both, marked " A" and " B"; a ninth, Compare,
+lists every zone of the program's threads (`perf/PerfCompare`): each capture's mean, p95 and
+spread, the change of the mean, the change in spreads (against one frame's scatter) and in
+standard errors of the means ("certainty"), sorted by certainty: a zone that scatters widely
+frame to frame can still have moved for certain over a hundred frames. Case 1478; the gate adds
+the Compare view of the A/B sample (`assets/ab-walker.raeperf`, 143 with `RAE_AB="ssao"`,
+`RAE_AB_HOLD_SECONDS=3`).
+
 ### 8.3 Headless reports and budgets
 
 - **The report:** `rae perf report capture.raeperf` (or a Rae program under `tools/`) prints the

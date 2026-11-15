@@ -1972,12 +1972,19 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           # Rae Perf (docs/perf-tools-design.md §8.2): each of its eight views of the walker sample
           # capture (assets/walker.raeperf), 10 headless frames, compared with its reference picture
           # (references/<view>.png; tools/references.sh writes them), and the capture read whole
+          # and the Compare view of the A/B sample (assets/ab-walker.raeperf: its baseline and ssao)
           PERF_OK=1
-          for PERF_VIEW in frames timeline flame threads gpu audio memory systems; do
+          for PERF_VIEW in frames timeline flame threads gpu audio memory systems compare; do
             SCREENSHOT="$TMP_OUT/perf-$PERF_VIEW.bmp"
-            if ! (cd .. && RAE_PERF_VIEW="$PERF_VIEW" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+            PERF_CAPTURE="examples/151_perfViewer/assets/walker.raeperf"
+            PERF_LINE="$PERF_VIEW: 29 frames, 4318 spans, 64 counters, charts filled true"
+            if [ "$PERF_VIEW" = compare ]; then
+              PERF_CAPTURE="examples/151_perfViewer/assets/ab-walker.raeperf"
+              PERF_LINE="compare: 205 frames, 32223 spans, 63 counters, charts filled true"
+            fi
+            if ! (cd .. && RAE_PERF_OPEN="$PERF_CAPTURE" RAE_PERF_VIEW="$PERF_VIEW" RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
                perl -e 'alarm shift; exec @ARGV or die $!' 60 "$TMP_OUT/app") > "$TMP_OUT/render-$PERF_VIEW.log" 2>&1 \
-               || ! grep -q "\[perfViewer\] $PERF_VIEW: 29 frames, 4318 spans, 64 counters, charts filled true" "$TMP_OUT/render-$PERF_VIEW.log" \
+               || ! grep -q "\[perfViewer\] $PERF_LINE" "$TMP_OUT/render-$PERF_VIEW.log" \
                || ! python3 tools/assert_bmp_diff.py "$SCREENSHOT" "../examples/151_perfViewer/references/$PERF_VIEW.png" \
                   --skip-size-mismatch > "$TMP_OUT/diff-$PERF_VIEW.log" 2>&1; then
               PERF_OK=0
@@ -1986,7 +1993,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
             fi
           done
           if [ "$PERF_OK" = 1 ]; then
-            echo "PASS: $EXAMPLE_NAME (eight views of the walker capture match their references: frames, timeline, flame graph, threads, GPU, audio, memory, systems)"
+            echo "PASS: $EXAMPLE_NAME (eight views of the walker capture and the A/B capture's Compare view match their references)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (perf viewer views)"

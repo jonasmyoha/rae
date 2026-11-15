@@ -1,0 +1,329 @@
+# The viewer's captures and its charts: one capture (A), or two (A and B) to compare. B is the file
+# RAE_PERF_COMPARE names, or, when A is a capture of an RAE_AB run, A's settings split apart
+# (lib/perf/PerfSplit by app3d/AbTest's `ab.case`): the baselines as A and the first case as B.
+# With two, every view shows both, each series, lane, flame root and row marked " A" or " B", and
+# the Compare view sets them against each other.
+import Math
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open perf/PerfFile
+open perf/PerfCapture
+open perf/PerfSplit
+open ui/ChartComponents
+open ui/Ecs
+open ui/lineGraphSystem/LineGraphSystem
+open ui/timelineSystem/TimelineSystem
+open Viewer
+open Compare
+
+# The captures shown, and the view
+type PerfViewer {
+  path: String
+  header: PerfFileHeader
+  capture: PerfCapture
+  shown: String
+  filled: Bool = false
+  # the second capture, and what A and B are ("baseline", a case's switches, or a file)
+  compare: opt PerfCapture = none
+  comparePath: String = ""
+  compareHeader: PerfFileHeader = PerfFileHeader {
+    format: 0
+    program: ""
+    machine: ""
+    raeVersion: ""
+    startNs: 0
+    startEpochMs: 0
+  }
+  labelA: String = ""
+  labelB: String = ""
+}
+
+# The capture at `path`, and the one to compare it with: the file at `comparePath`, or else the
+# settings of an RAE_AB capture; none when `path` does not read
+func openViewer(path: view String, comparePath: view String) ret opt PerfViewer {
+  if let file: PerfFile = perfReadFile(path: path) {
+    var viewer: PerfViewer = {
+      path: "{path}"
+      header: file.header
+      capture: perfCaptureOf(file: file)
+      shown: "frames"
+    }
+    if comparePath.length() > 0 {
+      if let second: PerfFile = perfReadFile(path: comparePath) {
+        viewer.compare = perfCaptureOf(file: second)
+        viewer.compareHeader = second.header
+        viewer.comparePath = "{comparePath}"
+        viewer.labelA = "A"
+        viewer.labelB = "B"
+      } else {
+        log("[perfViewer] could not read {comparePath}: showing {path} alone")
+      }
+      ret viewer
+    }
+    let splits: List(PerfFileSplit) = perfFileSplitByCounter(
+      file: file
+      counter: "ab.case"
+      markPrefix: "ab case "
+    )
+    if splits.length >= 2 {
+      viewer.capture = perfCaptureOf(file: splits.copyAtDefault(index: 0).file)
+      viewer.compare = perfCaptureOf(file: splits.copyAtDefault(index: 1).file)
+      viewer.compareHeader = file.header
+      viewer.comparePath = "{path}"
+      viewer.labelA = splits.copyAtDefault(index: 0).name
+      viewer.labelB = splits.copyAtDefault(index: 1).name
+    }
+    ret viewer
+  }
+  ret none
+}
+
+func comparing(viewer: view PerfViewer) ret Bool {
+  ret viewer.compare is not none
+}
+
+# A capture's line: the program, its machine, its length and what it holds, and its file
+func summaryLine(
+  header: view PerfFileHeader
+  capture: view PerfCapture
+  label: view String
+  path: view String
+) ret String {
+  var program: String = header.program
+  if program.length() is 0 {
+    program = "a program"
+  }
+  var lead: String = ""
+  if label.length() > 0 {
+    lead = "{label}: "
+  }
+  ret "{lead}{program} on {header.machine}: {milliseconds(
+    nanoseconds: capture.endNs - capture.startNs
+  )} ms, {capture.frameStarts.length} frames, {perfLaneUses(capture: capture).length} lanes, {capture.spans.length} spans, {capture.counters.length} counters   {path}"
+}
+
+func summaryOf(viewer: view PerfViewer) ret String {
+  var label: String = ""
+  if comparing(viewer: viewer) {
+    label = "A ({viewer.labelA})"
+  }
+  ret summaryLine(
+    header: viewer.header
+    capture: viewer.capture
+    label: label
+    path: viewer.path
+  )
+}
+
+func compareSummaryOf(viewer: view PerfViewer) ret String {
+  if let second: view PerfCapture = viewer.compare {
+    ret summaryLine(
+      header: viewer.compareHeader
+      capture: second
+      label: "B ({viewer.labelB})"
+      path: viewer.comparePath
+    )
+  }
+  ret ""
+}
+
+func compareNoteOf(viewer: view PerfViewer) ret String {
+  if comparing(viewer: viewer) {
+    ret "A is {viewer.labelA}, B is {viewer.labelB}. Each zone's mean in both and its change, most certain first: certainty is the change in standard errors of the means (a few or more is real), in spreads against one frame's scatter."
+  }
+  ret "One capture: open a second with RAE_PERF_COMPARE=<file>, or a capture of an RAE_AB run (its baseline and first case become A and B)."
+}
+
+# Every chart filled once each has its state (the chart systems give a node one on its first
+# frame); true when they were
+func fillCharts(world: mod UiWorld, viewer: view PerfViewer) ret Bool {
+  let frameGraph: EntityId = nodeEntityFor(world: world, nodeId: "FrameGraph")
+  if not componentHas(this: world.lineGraphStates, entityId: frameGraph) {
+    ret false
+  }
+  var tagA: String = ""
+  var end: Int = viewer.capture.endNs - viewer.capture.startNs
+  if comparing(viewer: viewer) {
+    tagA = " A"
+  }
+  fillCapture(
+    world: world
+    capture: viewer.capture
+    tag: tagA
+    first: true
+  )
+  if let second: view PerfCapture = viewer.compare {
+    fillCapture(
+      world: world
+      capture: second
+      tag: " B"
+      first: false
+    )
+    end = Math.max(a: end, b: second.endNs - second.startNs)
+    let table: EntityId = nodeEntityFor(world: world, nodeId: "CompareTable")
+    if componentHas(this: world.statTableStates, entityId: table) {
+      fillCompareTable(
+        state: componentMod(this: world.statTableStates, entityId: table)
+        a: viewer.capture
+        b: second
+      )
+    }
+  }
+  showSpan(world: world, end: end)
+  ret true
+}
+
+# One capture into every view; the frame spread and the Systems table are the first capture's
+# (the Compare view sets the zones side by side)
+func fillCapture(
+  world: mod UiWorld
+  capture: view PerfCapture
+  tag: view String
+  first: view Bool
+) {
+  let frameGraph: EntityId = nodeEntityFor(world: world, nodeId: "FrameGraph")
+  if componentHas(this: world.lineGraphStates, entityId: frameGraph) {
+    fillFrameGraph(
+      state: componentMod(this: world.lineGraphStates, entityId: frameGraph)
+      capture: capture
+      tag: tag
+    )
+  }
+  let spread: EntityId = nodeEntityFor(world: world, nodeId: "FrameSpread")
+  if first and componentHas(this: world.histogramStates, entityId: spread) {
+    fillFrameSpread(
+      state: componentMod(this: world.histogramStates, entityId: spread)
+      capture: capture
+    )
+  }
+  let timeline: EntityId = nodeEntityFor(world: world, nodeId: "Timeline")
+  if componentHas(this: world.timelineStates, entityId: timeline) {
+    fillTimeline(
+      state: componentMod(this: world.timelineStates, entityId: timeline)
+      capture: capture
+      tag: tag
+    )
+  }
+  let flame: EntityId = nodeEntityFor(world: world, nodeId: "Flame")
+  if componentHas(this: world.flameGraphStates, entityId: flame) {
+    fillFlame(
+      state: componentMod(this: world.flameGraphStates, entityId: flame)
+      capture: capture
+      tag: tag
+    )
+  }
+  fillTables(
+    world: world
+    capture: capture
+    tag: tag
+    first: first
+  )
+  fillGraphs(world: world, capture: capture, tag: tag)
+}
+
+func fillTables(
+  world: mod UiWorld
+  capture: view PerfCapture
+  tag: view String
+  first: view Bool
+) {
+  let threads: EntityId = nodeEntityFor(world: world, nodeId: "ThreadTable")
+  if componentHas(this: world.statTableStates, entityId: threads) {
+    fillThreads(
+      state: componentMod(this: world.statTableStates, entityId: threads)
+      capture: capture
+      tag: tag
+    )
+  }
+  let gpu: EntityId = nodeEntityFor(world: world, nodeId: "GpuTable")
+  if componentHas(this: world.statTableStates, entityId: gpu) {
+    fillZoneTable(
+      state: componentMod(this: world.statTableStates, entityId: gpu)
+      capture: capture
+      lanes: perfLanesNamed(capture: capture, prefixes: gpuLanePrefixes())
+      tag: tag
+    )
+  }
+  let audio: EntityId = nodeEntityFor(world: world, nodeId: "AudioTable")
+  if componentHas(this: world.statTableStates, entityId: audio) {
+    fillZoneTable(
+      state: componentMod(this: world.statTableStates, entityId: audio)
+      capture: capture
+      lanes: perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
+      tag: tag
+    )
+  }
+  let systems: EntityId = nodeEntityFor(world: world, nodeId: "SystemTable")
+  if first and componentHas(this: world.statTableStates, entityId: systems) {
+    fillZoneTable(
+      state: componentMod(this: world.statTableStates, entityId: systems)
+      capture: capture
+      lanes: threadLanes(capture: capture)
+      tag: tag
+    )
+  }
+}
+
+func fillGraphs(world: mod UiWorld, capture: view PerfCapture, tag: view String) {
+  let gpu: EntityId = nodeEntityFor(world: world, nodeId: "GpuGraph")
+  if componentHas(this: world.lineGraphStates, entityId: gpu) {
+    fillGpuGraph(
+      state: componentMod(this: world.lineGraphStates, entityId: gpu)
+      capture: capture
+      tag: tag
+    )
+  }
+  let audio: EntityId = nodeEntityFor(world: world, nodeId: "AudioGraph")
+  if componentHas(this: world.lineGraphStates, entityId: audio) {
+    fillAudioGraph(
+      state: componentMod(this: world.lineGraphStates, entityId: audio)
+      capture: capture
+      tag: tag
+    )
+  }
+  let memory: EntityId = nodeEntityFor(world: world, nodeId: "MemoryGraph")
+  if componentHas(this: world.lineGraphStates, entityId: memory) {
+    fillMemoryGraph(
+      state: componentMod(this: world.lineGraphStates, entityId: memory)
+      capture: capture
+      tag: tag
+    )
+  }
+  let allocations: EntityId = nodeEntityFor(world: world, nodeId: "AllocationGraph")
+  if componentHas(this: world.lineGraphStates, entityId: allocations) {
+    fillAllocationGraph(
+      state: componentMod(this: world.lineGraphStates, entityId: allocations)
+      capture: capture
+      tag: tag
+    )
+  }
+}
+
+# Every graph and the timeline show 0 .. `end`, the longer capture's length
+func showSpan(world: mod UiWorld, end: view Int) {
+  loop let nodeId: view String in List(String) {
+    "FrameGraph"
+    "GpuGraph"
+    "AudioGraph"
+    "MemoryGraph"
+    "AllocationGraph"
+  } {
+    let graph: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+    if componentHas(this: world.lineGraphStates, entityId: graph) {
+      lineShow(
+        state: componentMod(this: world.lineGraphStates, entityId: graph)
+        start: 0
+        end: end
+      )
+    }
+  }
+  let timeline: EntityId = nodeEntityFor(world: world, nodeId: "Timeline")
+  if componentHas(this: world.timelineStates, entityId: timeline) {
+    timelineShow(
+      state: componentMod(this: world.timelineStates, entityId: timeline)
+      start: 0
+      end: end
+    )
+  }
+}

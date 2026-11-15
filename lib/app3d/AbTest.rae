@@ -10,6 +10,8 @@
 # nothing is active, and the frame reads a few false Bools. The rules are pure: the app hands in
 # frame times and reads `test.off`.
 import Math
+import Profile
+import Sys
 open Sky
 
 const abHoldSeconds: Float = 9.0
@@ -61,6 +63,11 @@ type AbTest {
   cloudsHidden: Bool = false
   keptCover: Float = 0.0
   keptCirrus: Float = 0.0
+  # the setting last written to a capture (abRecord)
+  recordedCase: Int = -2
+  # how long each phase is held and how much of its start is skipped (abSetHold)
+  holdSeconds: Float = abHoldSeconds
+  skipSeconds: Float = abSkipSeconds
 }
 
 # Sets the switch called `name` in `off`; false for no such switch
@@ -104,6 +111,17 @@ func abPhaseCount(test: view AbTest) ret Int {
   ret test.cases.length * 2 + 1
 }
 
+# Each phase held `seconds` (RAE_AB_HOLD_SECONDS; 9 by default), its first third skipped up to the
+# usual 3 s: a short hold makes a small capture of a run (perf/PerfSplit), a long one steadier
+# numbers. Not positive: the defaults stay.
+func abSetHold(test: mod AbTest, seconds: view Float) {
+  if seconds <= 0.0 {
+    ret
+  }
+  test.holdSeconds = seconds
+  test.skipSeconds = Math.min(a: abSkipSeconds, b: seconds / 3.0)
+}
+
 func createAbTest(text: view String) ret AbTest {
   var test: AbTest = {
     active: false
@@ -140,10 +158,14 @@ func createAbTest(text: view String) ret AbTest {
     }
   }
   test.active = test.cases.length > 0
+  abSetHold(test: test, seconds: Sys.getEnv(name: "RAE_AB_HOLD_SECONDS").toFloat())
   if test.active {
-    log(
-      "[ab] {test.cases.length} cases, {abPhaseCount(test: test)} phases of {abHoldSeconds.toInt()} s"
-    )
+    let tenths: Int = (test.holdSeconds * 10.0 + 0.5).toInt()
+    var hold: String = "{tenths / 10}"
+    if tenths % 10 is not 0 {
+      hold = "{hold}.{tenths % 10}"
+    }
+    log("[ab] {test.cases.length} cases, {abPhaseCount(test: test)} phases of {hold} s")
   }
   ret test
 }
@@ -196,11 +218,11 @@ func abUpdate(test: mod AbTest, deltaTime: view Float) {
     ret
   }
   test.phaseSeconds = test.phaseSeconds + deltaTime
-  if test.phaseSeconds > abSkipSeconds {
+  if test.phaseSeconds > test.skipSeconds {
     test.measuredSeconds = test.measuredSeconds + deltaTime
     test.measuredFrames = test.measuredFrames + 1
   }
-  if test.phaseSeconds < abHoldSeconds {
+  if test.phaseSeconds < test.holdSeconds {
     ret
   }
   var average: Float = 0.0
@@ -240,5 +262,38 @@ func abHideClouds(test: mod AbTest, sky: mod Sky) {
     sky.cloudCover = test.keptCover
     sky.cloudCirrus = test.keptCirrus
     test.cloudsHidden = false
+  }
+}
+
+# The setting this frame measures: 0 a baseline, n the n-th case, -1 none (RAE_AB unset, over, or
+# the first seconds of a phase, which are skipped)
+func abCaseNow(test: view AbTest) ret Int {
+  if test.active is false or test.done or test.phaseSeconds <= test.skipSeconds {
+    ret -1
+  }
+  if test.phase % 2 is 0 {
+    ret 0
+  }
+  ret test.phase / 2 + 1
+}
+
+# The frame's setting into a capture (lib/Profile, while one runs): a counter `ab.case` each frame
+# (abCaseNow), and a mark "ab case <n>: <name>" when it changes, so a capture can be split into
+# one per setting (perf/PerfSplit; lib/Profile writes them beside RAE_PERF_OUT)
+func abRecord(test: mod AbTest, profiler: mod Profiler) {
+  if test.active is false or not Profile.capturing(profiler: profiler) {
+    ret
+  }
+  let setting: Int = abCaseNow(test: test)
+  Profile.counter(profiler: profiler, name: "ab.case", value: setting)
+  if setting is not test.recordedCase {
+    test.recordedCase = setting
+    if setting >= 0 {
+      Profile.mark(
+        profiler: profiler
+        name: "ab case {setting}: {abPhaseName(test: test, phase: test.phase)}"
+        extra: setting
+      )
+    }
   }
 }

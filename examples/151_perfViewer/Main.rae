@@ -10,6 +10,11 @@
 #   compiler/bin/rae run examples/151_perfViewer/Main.rae                 # the walker sample
 #   RAE_PERF_OPEN=capture.raeperf compiler/bin/rae run examples/151_perfViewer/Main.rae
 #   RAE_PERF_VIEW=timeline ...                                            # open on a view
+#   RAE_PERF_COMPARE=other.raeperf ...                                    # compare with another
+#
+# A second capture (RAE_PERF_COMPARE, or the settings of an RAE_AB run's capture) shows in every
+# view beside the first, marked A and B, and in a ninth, Compare: every zone's change against its
+# noise (Charts.rae, Compare.rae).
 #
 # The layout is assets/Viewer.raescene; the numbers are lib/perf/PerfCapture's, put into the lib/ui
 # chart widgets by Viewer.rae.
@@ -41,6 +46,7 @@ open ui/statTableSystem/StatTableSystem
 open ui/timelineSystem/TimelineSystem
 open Gpu2dCanvas
 open Viewer
+open Charts
 
 const designW: Int = 1280
 
@@ -59,6 +65,7 @@ func viewKeys() ret List(String) {
     "audio"
     "memory"
     "systems"
+    "compare"
   }
 }
 
@@ -73,6 +80,7 @@ func viewNodeNames() ret List(String) {
     "Audio"
     "Memory"
     "Systems"
+    "Compare"
   }
 }
 
@@ -94,27 +102,6 @@ func tabOf(key: view String) ret String {
   ret "Tab{viewNodeName(key: key)}"
 }
 
-# The capture shown, and the view
-type PerfViewer {
-  path: String
-  header: PerfFileHeader
-  capture: PerfCapture
-  shown: String
-  filled: Bool = false
-}
-
-func openCapture(path: view String) ret opt PerfViewer {
-  if let file: PerfFile = perfReadFile(path: path) {
-    ret PerfViewer {
-      path: "{path}"
-      header: file.header
-      capture: perfCaptureOf(file: file)
-      shown: "frames"
-    }
-  }
-  ret none
-}
-
 # Show view `key`: its page on, the others off, its tab lit
 func showView(world: mod UiWorld, viewer: mod PerfViewer, key: view String) {
   viewer.shown = "{key}"
@@ -133,114 +120,6 @@ func showView(world: mod UiWorld, viewer: mod PerfViewer, key: view String) {
   }
 }
 
-func summaryOf(viewer: view PerfViewer) ret String {
-  let capture: view PerfCapture = viewer.capture
-  var program: String = viewer.header.program
-  if program.length() is 0 {
-    program = "a program"
-  }
-  ret "{program} on {viewer.header.machine}: {milliseconds(
-    nanoseconds: capture.endNs - capture.startNs
-  )} ms, {capture.frameStarts.length} frames, {perfLaneUses(capture: capture).length} lanes, {capture.spans.length} spans, {capture.counters.length} counters   {viewer.path}"
-}
-
-# Every chart filled once each has its state (the chart systems give a node one on its first
-# frame); true when they were
-func fillCharts(world: mod UiWorld, viewer: view PerfViewer) ret Bool {
-  let capture: view PerfCapture = viewer.capture
-  let frameGraph: EntityId = nodeEntityFor(world: world, nodeId: "FrameGraph")
-  if not componentHas(this: world.lineGraphStates, entityId: frameGraph) {
-    ret false
-  }
-  fillFrameGraph(
-    state: componentMod(this: world.lineGraphStates, entityId: frameGraph)
-    capture: capture
-  )
-  let spread: EntityId = nodeEntityFor(world: world, nodeId: "FrameSpread")
-  if componentHas(this: world.histogramStates, entityId: spread) {
-    fillFrameSpread(
-      state: componentMod(this: world.histogramStates, entityId: spread)
-      capture: capture
-    )
-  }
-  let timeline: EntityId = nodeEntityFor(world: world, nodeId: "Timeline")
-  if componentHas(this: world.timelineStates, entityId: timeline) {
-    fillTimeline(
-      state: componentMod(this: world.timelineStates, entityId: timeline)
-      capture: capture
-    )
-  }
-  let flame: EntityId = nodeEntityFor(world: world, nodeId: "Flame")
-  if componentHas(this: world.flameGraphStates, entityId: flame) {
-    fillFlame(state: componentMod(this: world.flameGraphStates, entityId: flame), capture: capture)
-  }
-  fillTables(world: world, capture: capture)
-  fillGraphs(world: world, capture: capture)
-  ret true
-}
-
-func fillTables(world: mod UiWorld, capture: view PerfCapture) {
-  let threads: EntityId = nodeEntityFor(world: world, nodeId: "ThreadTable")
-  if componentHas(this: world.statTableStates, entityId: threads) {
-    fillThreads(
-      state: componentMod(this: world.statTableStates, entityId: threads)
-      capture: capture
-    )
-  }
-  let gpu: EntityId = nodeEntityFor(world: world, nodeId: "GpuTable")
-  if componentHas(this: world.statTableStates, entityId: gpu) {
-    fillZoneTable(
-      state: componentMod(this: world.statTableStates, entityId: gpu)
-      capture: capture
-      lanes: perfLanesNamed(capture: capture, prefixes: gpuLanePrefixes())
-    )
-  }
-  let audio: EntityId = nodeEntityFor(world: world, nodeId: "AudioTable")
-  if componentHas(this: world.statTableStates, entityId: audio) {
-    fillZoneTable(
-      state: componentMod(this: world.statTableStates, entityId: audio)
-      capture: capture
-      lanes: perfLanesNamed(capture: capture, prefixes: audioLanePrefixes())
-    )
-  }
-  let systems: EntityId = nodeEntityFor(world: world, nodeId: "SystemTable")
-  if componentHas(this: world.statTableStates, entityId: systems) {
-    fillZoneTable(
-      state: componentMod(this: world.statTableStates, entityId: systems)
-      capture: capture
-      lanes: threadLanes(capture: capture)
-    )
-  }
-}
-
-func fillGraphs(world: mod UiWorld, capture: view PerfCapture) {
-  let gpu: EntityId = nodeEntityFor(world: world, nodeId: "GpuGraph")
-  if componentHas(this: world.lineGraphStates, entityId: gpu) {
-    fillGpuGraph(state: componentMod(this: world.lineGraphStates, entityId: gpu), capture: capture)
-  }
-  let audio: EntityId = nodeEntityFor(world: world, nodeId: "AudioGraph")
-  if componentHas(this: world.lineGraphStates, entityId: audio) {
-    fillAudioGraph(
-      state: componentMod(this: world.lineGraphStates, entityId: audio)
-      capture: capture
-    )
-  }
-  let memory: EntityId = nodeEntityFor(world: world, nodeId: "MemoryGraph")
-  if componentHas(this: world.lineGraphStates, entityId: memory) {
-    fillMemoryGraph(
-      state: componentMod(this: world.lineGraphStates, entityId: memory)
-      capture: capture
-    )
-  }
-  let allocations: EntityId = nodeEntityFor(world: world, nodeId: "AllocationGraph")
-  if componentHas(this: world.lineGraphStates, entityId: allocations) {
-    fillAllocationGraph(
-      state: componentMod(this: world.lineGraphStates, entityId: allocations)
-      capture: capture
-    )
-  }
-}
-
 # The charts' input and drawing state, once a frame; true when one changed
 func chartSystems(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
   let timeline: Bool = timelineSystem(world: world, uiSystems: uiSystems, input: input)
@@ -256,7 +135,8 @@ func main() ret Int {
   if path.length() is 0 {
     path = "{assets}walker.raeperf"
   }
-  if var viewer: PerfViewer = openCapture(path: path) {
+  let comparePath: String = Sys.getEnv(name: "RAE_PERF_COMPARE")
+  if var viewer: PerfViewer = openViewer(path: path, comparePath: comparePath) {
     ret runViewer(viewer: viewer)
   }
   log("[perfViewer] could not read {path}")
@@ -287,6 +167,8 @@ func runViewer(viewer: mod PerfViewer) ret Int {
   }
   loadScene(world: world, uiSystems: uiSystems, scene: scene)
   setNodeText(world: world, nodeId: "Summary", value: summaryOf(viewer: viewer))
+  setNodeText(world: world, nodeId: "SummaryCompare", value: compareSummaryOf(viewer: viewer))
+  setNodeText(world: world, nodeId: "CompareNote", value: compareNoteOf(viewer: viewer))
   setNodeText(world: world, nodeId: "AudioNote", value: audioNote(capture: viewer.capture))
   var startView: String = Sys.getEnv(name: "RAE_PERF_VIEW")
   if startView.length() is 0 {

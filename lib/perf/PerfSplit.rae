@@ -1,0 +1,189 @@
+# perf/PerfSplit — a capture file split by a counter's value into one file per value: the events
+# from each of the counter's samples to the next go to the file of its value (none for a negative
+# one). RAE_AB writes `ab.case` each frame (app3d/AbTest: 0 the baselines, n the n-th case, -1 a
+# phase's first seconds), so its one capture becomes a capture per setting, and a mark
+# "ab case <n>: <name>" names each. A zone cut by a change of value loses its other end; the
+# readers (perf/PerfCapture) drop an end they never saw begin, and a begin they never see end. Where
+# a run of the value ends, the file gets a mark "capture gap" on its first lane, so a reader does
+# not take the time between two runs for a frame.
+import Math
+import String
+open perf/Perf
+open perf/PerfFile
+
+type PerfFileSplit {
+  value: Int
+  name: String
+  file: PerfFile
+}
+
+# The id of `name` in the file's names, or -1
+func perfFileNameId(file: view PerfFile, name: view String) ret Int {
+  loop var i: Int = 0, i < file.tables.names.length, ++i {
+    if let known: view String = file.tables.names.viewAt(index: i) {
+      if known is name {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The counter's samples, in order of time
+type PerfCounterSteps {
+  times: List(Int)
+  values: List(Int)
+}
+
+func perfCounterSteps(file: view PerfFile, nameId: view Int) ret PerfCounterSteps {
+  var steps: PerfCounterSteps = { times: {}, values: {} }
+  loop let block: view PerfFileBlock in file.blocks {
+    loop let event: view PerfEvent in block.events {
+      if event.kind is PerfKind.counter and event.nameId as Int is nameId {
+        # in order of time (one thread writes it; kept sorted if not)
+        var at: Int = steps.times.length
+        loop at > 0 and steps.times.copyAtDefault(index: at - 1) > event.time {
+          at = at - 1
+        }
+        steps.times.insert(index: at, value: event.time)
+        steps.values.insert(index: at, value: event.value)
+      }
+    }
+  }
+  ret steps
+}
+
+# The counter's value at `time`: its last sample at or before it (-1 before the first)
+func perfStepValue(steps: view PerfCounterSteps, time: view Int) ret Int {
+  var low: Int = 0
+  var high: Int = steps.times.length - 1
+  var found: Int = -1
+  loop low <= high {
+    let middle: Int = (low + high) / 2
+    if steps.times.copyAtDefault(index: middle) <= time {
+      found = middle
+      low = middle + 1
+    } else {
+      high = middle - 1
+    }
+  }
+  if found < 0 {
+    ret -1
+  }
+  ret steps.values.copyAtDefault(index: found)
+}
+
+# The name a mark "<prefix><value>: <name>" gives `value`, or "<value>"
+func perfSplitName(file: view PerfFile, prefix: view String, value: view Int) ret String {
+  let wanted: String = "{prefix}{value}: "
+  loop let name: view String in file.tables.names {
+    if name.startsWith(prefix: wanted) {
+      ret name.sub(start: wanted.length(), len: name.length() - wanted.length())
+    }
+  }
+  ret "{value}"
+}
+
+# `file` split by counter `counter`'s values (0 and up), in the order of the values; a value's
+# name from the marks "<markPrefix><value>: <name>". None when the file has no such counter.
+func perfFileSplitByCounter(
+  file: view PerfFile
+  counter: view String
+  markPrefix: view String
+) ret List(PerfFileSplit) {
+  var splits: List(PerfFileSplit) = {}
+  let nameId: Int = perfFileNameId(file: file, name: counter)
+  if nameId < 0 {
+    ret splits
+  }
+  let steps: PerfCounterSteps = perfCounterSteps(file: file, nameId: nameId)
+  var values: List(Int) = {}
+  loop let value: Int in steps.values {
+    if value >= 0 and not values.contains(value: value) {
+      values.add(value: value)
+    }
+  }
+  values.sort()
+  loop let value: Int in values {
+    var blocks: List(PerfFileBlock) = {}
+    loop let block: view PerfFileBlock in file.blocks {
+      var events: List(PerfEvent) = {}
+      var first: Int = 0
+      var last: Int = 0
+      loop let event: view PerfEvent in block.events {
+        if perfStepValue(steps: steps, time: event.time) is value {
+          if events.length is 0 {
+            first = event.time
+          }
+          last = Math.max(a: last, b: event.time)
+          events.add(value: event)
+        }
+      }
+      if events.length > 0 {
+        blocks.add(
+          value: PerfFileBlock {
+            info: PerfBlockInfo {
+              thread: block.info.thread
+              firstNs: first
+              lastNs: last
+              count: events.length
+            }
+            events: events
+          }
+        )
+      }
+    }
+    # the gaps: each time the value changes away from this one
+    var tables: PerfFileTables = file.tables
+    tables.names.add(value: "capture gap")
+    let gapId: Int = tables.names.length - 1
+    var gaps: List(PerfEvent) = {}
+    loop var i: Int = 0, i + 1 < steps.values.length, ++i {
+      if steps.values.copyAtDefault(index: i) is value and steps.values.copyAtDefault(index: i + 1) is not value {
+        gaps.add(value: PerfEvent {
+          time: steps.times.copyAtDefault(index: i + 1)
+          value: 0
+          kind: PerfKind.mark
+          nameId: gapId as Int32
+          extra: 0
+        })
+      }
+    }
+    if gaps.length > 0 {
+      blocks.add(
+        value: PerfFileBlock {
+          info: PerfBlockInfo {
+            thread: 0
+            firstNs: gaps.copyAtDefault(index: 0).time
+            lastNs: gaps.copyAtDefault(index: gaps.length - 1).time
+            count: gaps.length
+          }
+          events: gaps
+        }
+      )
+    }
+    splits.add(
+      value: PerfFileSplit {
+        value: value
+        name: perfSplitName(file: file, prefix: markPrefix, value: value)
+        file: PerfFile { header: file.header, tables: tables, blocks: blocks }
+      }
+    )
+  }
+  ret splits
+}
+
+# `name` made safe for a file name: letters and digits kept, anything else a "-"
+func perfFileSafeName(name: view String) ret String {
+  var safe: String = ""
+  loop var i: Int = 0, i < name.length(), ++i {
+    let byte: Int = name.byteAt(index: i) as Int
+    let letter: Bool = (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
+    if letter {
+      safe = "{safe}{name.sub(start: i, len: 1)}"
+    } else if not safe.endsWith(suffix: "-") {
+      safe = "{safe}-"
+    }
+  }
+  ret safe
+}

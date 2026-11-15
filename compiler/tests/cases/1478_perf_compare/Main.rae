@@ -1,0 +1,181 @@
+# perf/PerfSplit and perf/PerfCompare from a capture laid out like an RAE_AB run's: `ab.case` is 0
+# (the baseline) for 10 ms, 1 (the case) for 10 ms, 0 again for 10 ms, with marks naming the two.
+# A frame starts every 2 ms with a zone "work" (1 ms under the baseline, 3 ms under the case, a
+# little different each frame) and a zone "steady" (0.5 ms always). The split gives a file per
+# setting, named by the marks, the baseline's two runs with a gap no frame spans; the comparison
+# puts "work" first, two milliseconds slower, far outside its noise, and "steady" unchanged.
+open perf/Perf
+open perf/PerfFile
+open perf/PerfSplit
+open perf/PerfCapture
+open perf/PerfCompare
+
+func write(
+  hub: mod PerfHub
+  base: view Int
+  ring: view PerfRing
+  kind: view PerfKind
+  name: view String
+  time: view Int
+  value: view Int
+) {
+  let perfName: PerfName = hub.perfName(name: name)
+  perfWriteAt(
+    ring: ring
+    kind: kind
+    name: perfName
+    time: base + time
+    value: value
+    extra: 0
+  )
+}
+
+func tenths(value: view Float) ret String {
+  let scaled: Int = (value * 10.0 + 0.5).toInt()
+  ret "{scaled / 10}.{scaled % 10}"
+}
+
+func main() {
+  var hub: PerfHub = createPerfHub(settings: defaultPerfSettings())
+  let base: Int = hub.frameStartNs
+  let main: PerfRing = hub.perfThreadRing(name: "CPU main loop")
+  write(
+    hub: hub
+    base: base
+    ring: main
+    kind: PerfKind.mark
+    name: "ab case 0: baseline"
+    time: 0
+    value: 0
+  )
+  loop var frame: Int = 0, frame < 15, ++frame {
+    let at: Int = frame * 2000000
+    var setting: Int = 0
+    if at >= 10000000 and at < 20000000 {
+      setting = 1
+    }
+    if at is 10000000 {
+      write(
+        hub: hub
+        base: base
+        ring: main
+        kind: PerfKind.mark
+        name: "ab case 1: forest,grass"
+        time: at
+        value: 0
+      )
+    }
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.counter
+      name: "ab.case"
+      time: at
+      value: setting
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.mark
+      name: "frame start"
+      time: at + 1
+      value: 0
+    )
+    let work: Int = 1000000 + setting * 2000000 + (frame % 3) * 50000
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "work"
+      time: at + 10
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneEnd
+      name: "work"
+      time: at + 10 + work
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneBegin
+      name: "steady"
+      time: at + 10 + work + 10
+      value: 0
+    )
+    write(
+      hub: hub
+      base: base
+      ring: main
+      kind: PerfKind.zoneEnd
+      name: "steady"
+      time: at + 10 + work + 10 + 500000
+      value: 0
+    )
+  }
+  hub.perfFrame()
+  let bytes: List(UInt8) = perfFileBytes(file: perfFileOf(hub: hub, startNs: base))
+  if let file: PerfFile = perfFileFromBytes(bytes: bytes) {
+    let splits: List(PerfFileSplit) = perfFileSplitByCounter(
+      file: file
+      counter: "ab.case"
+      markPrefix: "ab case "
+    )
+    log("settings: {splits.length}")
+    loop let split: view PerfFileSplit in splits {
+      let capture: PerfCapture = perfCaptureOf(file: split.file)
+      let intervals: List(Int) = perfFrameIntervals(capture: capture)
+      var longest: Int = 0
+      loop let interval: Int in intervals {
+        if interval > longest {
+          longest = interval
+        }
+      }
+      log(
+        "  {split.value} \"{split.name}\" (file name {perfFileSafeName(name: split.name)}): {capture.frameStarts.length} frames, {intervals.length} intervals, the longest {longest / 1000} us, {capture.gaps.length} gaps, {capture.spans.length} spans"
+      )
+    }
+    let baseline: PerfCapture = perfCaptureOf(file: splits.copyAtDefault(index: 0).file)
+    let changed: PerfCapture = perfCaptureOf(file: splits.copyAtDefault(index: 1).file)
+    loop let change: view PerfZoneChange in perfCompareZones(
+      a: baseline
+      lanesA: List(Int) {}
+      b: changed
+      lanesB: List(Int) {}
+    ) {
+      log(
+        "  {change.name}: {change.countA} and {change.countB} spans, mean {change.meanA / 1000} -> {change.meanB / 1000} us ({change.changeNs / 1000}), spreads {change.spreadA / 1000} and {change.spreadB / 1000}, in spreads {tenths(
+          value: change.inSpreads
+        )}, certainty {tenths(value: change.inErrors)}"
+      )
+    }
+  } else {
+    log("the capture did not read back")
+  }
+  let missing: List(PerfFileSplit) = perfFileSplitByCounter(
+    file: PerfFile {
+      header: PerfFileHeader {
+        format: 1
+        program: ""
+        machine: ""
+        raeVersion: ""
+        startNs: 0
+        startEpochMs: 0
+      }
+      tables: PerfFileTables { names: {}, threads: {}, ruleBreakEntries: {}, ruleBreakDetails: {} }
+      blocks: {}
+    }
+    counter: "ab.case"
+    markPrefix: "ab case "
+  )
+  log("a capture with no such counter: {missing.length} settings")
+  hub.freePerfHub()
+}

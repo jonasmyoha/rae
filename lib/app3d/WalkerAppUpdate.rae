@@ -380,6 +380,7 @@ func beginWalkerFrame(app: mod WalkerApp) {
   # hand the time a switch saves back as resolution.
   if app.renderSystem.ab.active {
     abUpdate(test: app.renderSystem.ab, deltaTime: deltaTime)
+    abRecord(test: app.renderSystem.ab, profiler: app.profiler)
   } else {
     # NO CLAMP before DRS: the scale controller reacts to the true frame time.
     updateRenderScale(drs: app.renderSystem.drs, deltaTime: deltaTime, profiler: app.profiler)
