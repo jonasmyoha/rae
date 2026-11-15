@@ -68,8 +68,10 @@ result as JSON in the shape of the Rae types, which `StoreKit.rae` reads with `T
 One lock guards the request table, the transactions seen (so `finish` can find one by id) and the
 queue of updates.
 
-Not yet: an iOS app build compiling the Swift glue into the app (`tools/ios` compiles a package's
-C sources today).
+On iOS the pack's `sourcesDevice` is the same Swift file: `tools/ios/gen-ios.sh` compiles a
+package's `.swift` device sources into the app (its CMake project then enables Swift, and Xcode
+links the Swift runtime and StoreKit). From iOS 17 a purchase is confirmed in the app's active
+scene (`purchase(confirmIn:)`).
 
 ## Testing without an App Store account
 
@@ -81,10 +83,14 @@ bundle id and StoreKit answers `invalidApp`; `SKTestSession` outside XCTest abor
 from `/System/Library/Frameworks`), and in `swift test` or an `xcodebuild test` of a package (a
 test no app hosts) StoreKit refuses to save the configuration (`SKInternalErrorDomain` 4).
 
-So there are two checks:
+So there are these checks:
 
 - `checks/storeKit` (in `checks/run.sh`): on a Mac, a products, an entitlements and a finish
   request start, finish and are read back, and the updates listener starts. No purchase.
+- `bash checks/storeKit/simulator.sh`: the same program as an iOS app in the iOS Simulator
+  (`gen-ios.sh` with `RAE_IOS_SDK=iphonesimulator`, an unsigned build, `simctl` install and launch,
+  the verdict read from the app's `Documents/rae.log`). StoreKit there answers the products
+  request with no products and no error.
 - `bash checks/storeKitPurchase/run.sh` (a Mac with Xcode, about 20 s): the purchase test. It
   compiles `checks/storeKitPurchase/Purchase.rae` (which takes the package by its tag) with the
   Rae runtime into a static library, its `main` renamed `rae_program_main`, and writes an Xcode
@@ -96,5 +102,5 @@ So there are two checks:
   the product), finds it among the current entitlements, finishes it and buys the consumable
   twice (two transactions).
 
-The iOS Simulator run waits for the glue's iOS build (QUEUE.md: the Swift glue in an iOS app
-build).
+The purchase test runs on the Mac only: in the iOS Simulator `SKTestSession` needs the same kind of
+app-hosted test, with the app built by `gen-ios.sh`.

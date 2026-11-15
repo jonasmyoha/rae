@@ -7,6 +7,8 @@ import Foundation
 import StoreKit
 #if os(macOS)
 import AppKit
+#elseif os(iOS)
+import UIKit
 #endif
 
 struct ProductJson: Encodable {
@@ -193,9 +195,9 @@ public func raeStoreKitProducts(_ ids: UnsafePointer<UInt8>?, _ length: Int64) -
   }
 }
 
-// product.purchase(), on macOS 15.2 and later confirmed in the app's key (or main, or first) window
-// when it has one: StoreKit refuses a Mac purchase with no window to show its sheet in
-// (invalidPresentationContext). Both run on the main actor, so the app's main thread must run its
+// product.purchase(), confirmed where the app is shown: on macOS 15.2 and later in its key (or
+// main, or first) window when it has one (StoreKit refuses a Mac purchase with no window to show
+// its sheet in: invalidPresentationContext), on iOS 17 and later in its active scene. Both run on the main actor, so the app's main thread must run its
 // event loop while a purchase waits.
 func raePurchase(_ product: Product) async throws -> Product.PurchaseResult {
   #if os(macOS)
@@ -205,6 +207,16 @@ func raePurchase(_ product: Product) async throws -> Product.PurchaseResult {
     }
     if let window = window {
       return try await product.purchase(confirmIn: window)
+    }
+  }
+  #elseif os(iOS)
+  if #available(iOS 17.0, *) {
+    let scene: UIScene? = await MainActor.run {
+      UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive }
+        ?? UIApplication.shared.connectedScenes.first
+    }
+    if let scene = scene {
+      return try await product.purchase(confirmIn: scene)
     }
   }
   #endif
