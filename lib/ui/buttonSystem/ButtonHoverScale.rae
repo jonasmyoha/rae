@@ -90,7 +90,9 @@ func buttonHoverScaleUpdate(
     var velocity: Float = hs.velocity
     var token: MotionToken = {}
     var springs: Bool = false
-    if hs.motion.length() > 0 {
+    # at rest on its target there is nothing to step, so no motion to look up (a token is Strings)
+    let atRest: Bool = hs.current is target and hs.target is target and velocity is 0.0
+    if hs.motion.length() > 0 and not atRest {
       if let named: MotionToken = themeMotion(theme: world.theme.resolved, name: hs.motion) {
         token = named
         springs = named.kind is MotionKind.spring

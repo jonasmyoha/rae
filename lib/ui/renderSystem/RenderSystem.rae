@@ -259,6 +259,61 @@ func paintShapeG(
   )
 }
 
+# A `mat:` icon's glyph in its box: the em box centered, or its measured ink centered with
+# OpticalAlign
+func paintIconGlyph(
+  world: view UiWorld
+  entityId: view EntityId
+  glyph: view String
+  box: view PaintBox
+  tint: view RgbaColor
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if glyph.length() is 0 {
+    ret
+  }
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
+  var sz: Float = drawW
+  if drawH < sz {
+    sz = drawH
+  }
+  # Center the em-box glyph in the rect; baseline sits ~size above the bottom.
+  var gx: Float = drawX + (drawW - sz) / 2.0
+  var gy: Float = drawY + (drawH - sz) / 2.0 + sz
+  if componentHas(this: world.opticalAligns, entityId: entityId) {
+    let oa: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
+    if oa.enabled {
+      let bounds: SdfTextBounds = visualBoundsAt(
+        world: world
+        entityId: entityId
+        text: glyph
+        isIcon: true
+        sizePx: sz
+        res: res
+      )
+      if oa.centerX {
+        gx = drawX + drawW / 2.0 - (bounds.left + bounds.right) / 2.0 + oa.bias.x
+      }
+      if oa.centerY {
+        gy = drawY + drawH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + oa.bias.y
+      }
+    }
+  }
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: res.iconFont
+    text: glyph
+    x: gx
+    y: gy
+    sizePx: sz
+    color: g2dColor(color: tint)
+  )
+}
+
 # Sprites: `mat:<name>` icons draw as a Material-atlas glyph; other keys
 # (album covers etc.) draw via the gpu2d image-key registry. Unregistered keys
 # fall back to a tinted chip so layout still reads.
@@ -290,46 +345,37 @@ func paintSpriteG(
   let drawY: Float = box.y
   let matPrefix: String = "mat:"
   if sp.textureKey.startsWith(prefix: matPrefix) {
+    # the glyph visualBoundsSystem measured for this key, when it did: building it again (the
+    # name cut from the key, its codepoint's UTF-8) was two Strings per icon per frame
+    if componentHas(this: world.visualBounds, entityId: entityId) {
+      let measured: view VisualBounds = componentView(this: world.visualBounds, entityId: entityId)
+      if measured.measuredIcon and measured.measuredKey is sp.textureKey {
+        paintIconGlyph(
+          world: world
+          entityId: entityId
+          glyph: measured.measuredText
+          box: box
+          tint: tint
+          res: res
+          canvas: canvas
+        )
+        ret
+      }
+    }
     let nameLen: Int = sp.textureKey.length() - matPrefix.length()
     let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
     let glyph: String = iconText(name: name)
     if glyph.length() is 0 {
       ret
     }
-    var sz: Float = drawW
-    if drawH < sz {
-      sz = drawH
-    }
-    # Center the em-box glyph in the rect; baseline sits ~size above the bottom.
-    var gx: Float = drawX + (drawW - sz) / 2.0
-    var gy: Float = drawY + (drawH - sz) / 2.0 + sz
-    if componentHas(this: world.opticalAligns, entityId: entityId) {
-      let oa: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
-      if oa.enabled {
-        let bounds: SdfTextBounds = visualBoundsAt(
-          world: world
-          entityId: entityId
-          text: glyph
-          isIcon: true
-          sizePx: sz
-          res: res
-        )
-        if oa.centerX {
-          gx = drawX + drawW / 2.0 - (bounds.left + bounds.right) / 2.0 + oa.bias.x
-        }
-        if oa.centerY {
-          gy = drawY + drawH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + oa.bias.y
-        }
-      }
-    }
-    Gpu2dText.drawText(
+    paintIconGlyph(
+      world: world
+      entityId: entityId
+      glyph: glyph
+      box: box
+      tint: tint
+      res: res
       canvas: canvas
-      font: res.iconFont
-      text: glyph
-      x: gx
-      y: gy
-      sizePx: sz
-      color: g2dColor(color: tint)
     )
     ret
   }

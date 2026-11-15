@@ -323,6 +323,30 @@ func scrollRootSystem(world: mod UiWorld, uiSystems: mod UiSystems, memory: mod 
   let n: Int = componentCount(this: world.scrollRoots)
   loop var i: Int = 0, i < n, ++i {
     let entityId: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    # a root already seeded: its page's id is read where it is (a copy each frame was a String
+    # per root)
+    if componentHas(this: world.scrollStates, entityId: entityId) {
+      let pageRootEntityId: EntityId = pageRootOf(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+      )
+      let state: view ScrollState = componentView(this: world.scrollStates, entityId: entityId)
+      if isNone(this: pageRootEntityId) {
+        if state.y is not recallScroll(memory: memory, pageId: "") {
+          rememberScroll(memory: memory, pageId: "", position: state.y)
+        }
+      } else {
+        let pageRoot: view PageRoot = componentView(
+          this: world.pageRoots
+          entityId: pageRootEntityId
+        )
+        if state.y is not recallScroll(memory: memory, pageId: pageRoot.id) {
+          rememberScroll(memory: memory, pageId: pageRoot.id, position: state.y)
+        }
+      }
+      continue
+    }
     let pageId: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
     if componentHas(this: world.scrollStates, entityId: entityId) is false {
       let position: Float = recallScroll(memory: memory, pageId: pageId)

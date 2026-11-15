@@ -185,16 +185,45 @@ func offsetDiffers(world: view UiWorld, entityId: view EntityId, wantOffset: vie
 }
 
 # ----- per-visual apply (mod borrow only when a check said "differs")
+# The style's sprite key for the state differs from the sprite's, compared in place (the key is
+# built only for a change: building it to compare was a String per styled node per frame)
+func styleSpriteKeyChanges(
+  world: view UiWorld
+  entityId: view EntityId
+  selected: view Bool
+) ret Bool {
+  let style: view StateStyle = componentView(this: world.stateStyles, entityId: entityId)
+  if selected {
+    ret spriteKeyDiffers(world: world, entityId: entityId, wantKey: style.spriteKeySelected)
+  }
+  ret spriteKeyDiffers(world: world, entityId: entityId, wantKey: style.spriteKey)
+}
+
+func styleTextStyleChanges(
+  world: view UiWorld
+  entityId: view EntityId
+  selected: view Bool
+) ret Bool {
+  let style: view StateStyle = componentView(this: world.stateStyles, entityId: entityId)
+  if selected {
+    ret textStyleDiffers(world: world, entityId: entityId, wantStyle: style.textStyleSelected)
+  }
+  ret textStyleDiffers(world: world, entityId: entityId, wantStyle: style.textStyle)
+}
+
 func applySpriteStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
-  var wantKey: String = styleWantSpriteKey(world: world, entityId: entityId, selected: selected)
   let wantTint: RgbaColor = styleWantTint(world: world, entityId: entityId, selected: selected)
-  let keyChange: Bool = spriteKeyDiffers(world: world, entityId: entityId, wantKey: wantKey)
+  let keyChange: Bool = styleSpriteKeyChanges(world: world, entityId: entityId, selected: selected)
   var tintChange: Bool = false
   if styleHasTint(world: world, entityId: entityId) {
     tintChange = spriteTintDiffers(world: world, entityId: entityId, wantTint: wantTint)
   }
   if keyChange is false and tintChange is false {
     ret
+  }
+  var wantKey: String = ""
+  if keyChange {
+    wantKey = styleWantSpriteKey(world: world, entityId: entityId, selected: selected)
   }
   let sp: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
   if keyChange {
@@ -210,10 +239,10 @@ func applySpriteStyle(world: mod UiWorld, entityId: view EntityId, selected: vie
 }
 
 func applyTextStyle(world: mod UiWorld, entityId: view EntityId, selected: view Bool) {
-  var wantStyle: String = styleWantTextStyle(world: world, entityId: entityId, selected: selected)
-  if textStyleDiffers(world: world, entityId: entityId, wantStyle: wantStyle) is false {
+  if styleTextStyleChanges(world: world, entityId: entityId, selected: selected) is false {
     ret
   }
+  var wantStyle: String = styleWantTextStyle(world: world, entityId: entityId, selected: selected)
   let t: mod Text = componentMod(this: world.texts, entityId: entityId)
   t.styleId = own wantStyle
 }

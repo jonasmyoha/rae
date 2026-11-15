@@ -283,8 +283,10 @@ func builtInMotion(name: view String) ret opt MotionToken {
 # The motion called `name`: the theme's first (the nearest declaration wins), else a built-in
 func themeMotion(theme: view ResolvedTheme, name: view String) ret opt MotionToken {
   loop var i: Int = 0, i < theme.motionNames.length, ++i {
-    if theme.motionNames.copyAtFallback(index: i, fallback: "") is name {
-      ret theme.motionTokens.copyAt(index: i)
+    if let motionName: view String = theme.motionNames.viewAt(index: i) {
+      if motionName is name {
+        ret theme.motionTokens.copyAt(index: i)
+      }
     }
   }
   ret builtInMotion(name: name)

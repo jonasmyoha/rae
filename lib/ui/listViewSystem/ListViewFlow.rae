@@ -214,10 +214,12 @@ func listViewSyncFlow(
       let sceneRow: Bool = sceneId.length() > 0 and sceneRegistryHas(reg: scenes, key: sceneId)
       listViewApplyFlowRow(
         world: world
+        uiSystems: uiSystems
         rowRoot: rowRoot
         lv: lv
         distinct: distinct
         row: row
+        dataIndex: d
         sceneRow: sceneRow
       )
       d = d + 1
@@ -299,22 +301,39 @@ func listViewSyncFlow(
   }
 }
 
-# Apply a flow row's bindings (no positioning: the container's Layout does that).
+# Apply a flow row's bindings (no positioning: the container's Layout does that); a row still
+# bound to the same data row of the same list and data (ListRowBound) keeps them as they are.
 func listViewApplyFlowRow(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   rowRoot: view EntityId
   lv: view ListView
   distinct: view List(String)
   row: view ListViewRow
+  dataIndex: view Int
   sceneRow: view Bool
 ) {
   unsafe {
+    let bound: ListRowBound = {
+      dataIndex: dataIndex
+      dataGeneration: componentTableGeneration(this: world.listViewDatas)
+      listGeneration: componentTableGeneration(this: world.listViews)
+    }
+    if componentHas(this: uiSystems.listRows.rowsBound, entityId: rowRoot) {
+      let last: view ListRowBound = componentView(
+        this: uiSystems.listRows.rowsBound
+        entityId: rowRoot
+      )
+      if last.dataIndex is bound.dataIndex and last.dataGeneration is bound.dataGeneration and last.listGeneration is bound.listGeneration {
+        ret
+      }
+    }
     let bn: Int = lv.bindings.length
     if sceneRow {
       var sb: Int = 0
       loop sb < bn {
         let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: sb)
-        listViewApplySceneBinding(
+        let unusedFound: Bool = listViewApplySceneBinding(
           world: world
           rowRoot: rowRoot
           binding: binding
@@ -322,6 +341,7 @@ func listViewApplyFlowRow(
         )
         sb = sb + 1
       }
+      componentSet(this: uiSystems.listRows.rowsBound, entityId: rowRoot, data: bound)
       ret
     }
     var kids: List(EntityId) = List.create(EntityId, cap: distinct.length)
@@ -349,5 +369,6 @@ func listViewApplyFlowRow(
       }
       b = b + 1
     }
+    componentSet(this: uiSystems.listRows.rowsBound, entityId: rowRoot, data: bound)
   }
 }

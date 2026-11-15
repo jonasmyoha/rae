@@ -24,13 +24,14 @@ func refreshVisualBounds(
   text: view String
   sizePx: view Float
   isIcon: view Bool
+  key: view String
   res: view Gpu2dUi
 ) {
   if componentHas(this: world.visualBounds, entityId: entityId) {
     let cur: view VisualBounds = componentView(this: world.visualBounds, entityId: entityId)
     if cur.measuredIcon is isIcon {
       if cur.measuredSize is sizePx {
-        if cur.measuredText is text {
+        if cur.measuredText is text and cur.measuredKey is key {
           ret
         }
       }
@@ -60,6 +61,7 @@ func refreshVisualBounds(
     measuredText: own keyText
     measuredSize: sizePx
     measuredIcon: isIcon
+    measuredKey: "{key}"
   }
   componentSet(this: world.visualBounds, entityId: entityId, data: own vb)
 }
@@ -89,6 +91,7 @@ func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view
         text: t.text
         sizePx: size
         isIcon: false
+        key: ""
         res: res
       )
     }
@@ -99,7 +102,12 @@ func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.sprites, i: i)
     let sp: view Sprite = queryViewAt(table: world.sprites, denseIndex: i)
-    if sp.textureKey.startsWith(prefix: matPrefix) {
+    if sp.textureKey.startsWith(prefix: matPrefix) and not visualBoundsIconCurrent(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      key: sp.textureKey
+    ) {
       let nameLen: Int = sp.textureKey.length() - matPrefix.length()
       let name: String = sp.textureKey.sub(start: matPrefix.length(), len: nameLen)
       let glyph: String = iconText(name: name)
@@ -111,12 +119,31 @@ func visualBoundsSystem(world: mod UiWorld, uiSystems: view UiSystems, res: view
           text: glyph
           sizePx: sz
           isIcon: true
+          key: sp.textureKey
           res: res
         )
       }
     }
     i = i + 1
   }
+}
+
+# An icon whose bounds were measured from this same key at its current size: nothing to build
+func visualBoundsIconCurrent(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  key: view String
+) ret Bool {
+  if componentHas(this: world.visualBounds, entityId: entityId) is false {
+    ret false
+  }
+  let current: view VisualBounds = componentView(this: world.visualBounds, entityId: entityId)
+  ret current.measuredIcon and current.measuredKey is key and current.measuredSize is iconGlyphSize(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  )
 }
 
 # The on-screen glyph size the icon paint path uses: min of the

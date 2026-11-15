@@ -263,17 +263,18 @@ func textFieldViewSystem(world: mod UiWorld, textFieldSystem: mod TextFieldSyste
       continue
     }
     let field: view TextField = componentView(this: world.textFields, entityId: fieldEntityId)
-    var shown: String = "{field.text}"
-    var styleId: String = "{field.textStyleId}"
-    if field.text.length() is 0 and field.focused is false {
-      shown = "{field.placeholder}"
-      styleId = "{field.placeholderStyleId}"
-    }
     if field.focused {
       textFieldSystem.caretLineEntityId = line
     }
-    let current: view Text = componentView(this: world.texts, entityId: line)
-    if current.text is not shown or current.styleId is not styleId {
+    # compared in place first: building the shown text and style to compare was two Strings per
+    # field per frame
+    if not textFieldLineCurrent(world: world, field: field, line: line) {
+      var shown: String = "{field.text}"
+      var styleId: String = "{field.textStyleId}"
+      if field.text.length() is 0 and field.focused is false {
+        shown = "{field.placeholder}"
+        styleId = "{field.placeholderStyleId}"
+      }
       let text: mod Text = componentMod(this: world.texts, entityId: line)
       text.text = shown
       text.styleId = styleId
@@ -281,6 +282,20 @@ func textFieldViewSystem(world: mod UiWorld, textFieldSystem: mod TextFieldSyste
     }
   }
   ret changed
+}
+
+# The field's line already shows what it should: its text in its style, or the placeholder in the
+# placeholder's style when it is empty and not focused
+func textFieldLineCurrent(
+  world: view UiWorld
+  field: view TextField
+  line: view EntityId
+) ret Bool {
+  let current: view Text = componentView(this: world.texts, entityId: line)
+  if field.text.length() is 0 and field.focused is false {
+    ret current.text is field.placeholder and current.styleId is field.placeholderStyleId
+  }
+  ret current.text is field.text and current.styleId is field.textStyleId
 }
 
 # The caret shows in the first half of each blink from `caretEpoch`. True

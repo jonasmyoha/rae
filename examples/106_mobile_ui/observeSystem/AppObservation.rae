@@ -89,8 +89,14 @@ func appSourcesRevision(
     sum = sum + state.bottomSheet.epoch
   }
   if hasSource(sources: sources, flag: sourceCollection) {
-    let key: String = "{state.currentAlbumStem}|{state.currentTrackIndex}|{state.viewingPlaylist}|{state.currentPlaylistId}"
-    sum = sum + key.hash()
+    # the parts hashed in place: a key String built from them was an allocation every frame
+    # (mixed in UInt64, which wraps)
+    var mixed: UInt64 = (state.currentAlbumStem.hash() as UInt64) * 31 + (state.currentPlaylistId.hash() as UInt64)
+    mixed = mixed * 1000003 + (state.currentTrackIndex as UInt64)
+    if state.viewingPlaylist {
+      mixed = mixed + 7919
+    }
+    sum = sum + (mixed as Int)
   }
   if hasSource(sources: sources, flag: sourceSettings) and state.settings.roundedAlbumCovers {
     sum = sum + 1

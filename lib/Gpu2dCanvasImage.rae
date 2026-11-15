@@ -181,7 +181,8 @@ func canvasRegisterImageKey(canvas: mod Gpu2dCanvas, key: copy String, handle: c
 
 func canvasImageHandleForKey(canvas: view Gpu2dCanvas, key: view String) ret Int {
   loop var i: Int = 0, i < canvas.imageKeys.length, ++i {
-    if let existing: String = canvas.imageKeys.copyAt(index: i) {
+    # read in place: a copy of each key was a String per key per image drawn
+    if let existing: view String = canvas.imageKeys.viewAt(index: i) {
       if existing is key {
         if let handle: Int = canvas.imageKeyHandles.copyAt(index: i) {
           ret handle
@@ -602,7 +603,6 @@ func imageFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
     clearImageQueue(canvas: canvas)
     ret
   }
-  let bytes: List(UInt8) = List.create(UInt8, cap: imageUniformFloats * 4)
   loop var i: Int = 0, i < canvas.imageCommandHandles.length, ++i {
     var handle: Int = 0
     if let known: Int = canvas.imageCommandHandles.copyAt(index: i) {

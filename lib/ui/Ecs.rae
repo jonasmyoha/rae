@@ -515,6 +515,26 @@ func nodeEntityId(world: view UiWorld, index: view Int) ret EntityId {
 # Walk Parent up from `entityId` until we hit a `PageRoot`, then return
 # its id. Returns an empty string when no ancestor is a page root —
 # callers should treat that as "no page" / unscoped.
+# The page root `entityId` is under (itself included), or no entity: pageOf without the copy of
+# the page's id
+func pageRootOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret EntityId {
+  var current: EntityId = entityId
+  loop true {
+    if componentHas(this: world.pageRoots, entityId: current) {
+      ret current
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: current) is false {
+      ret noEntity()
+    }
+    current = componentView(this: uiSystems.hierarchy.parents, entityId: current).parent
+  }
+  ret noEntity()
+}
+
 func pageOf(
   world: view UiWorld
   uiSystems: view UiSystems

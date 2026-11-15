@@ -97,7 +97,7 @@ func listViewDistinctNodeIds(lv: view ListView) ret List(String) {
       var seen: Bool = false
       var j: Int = 0
       loop j < out.length {
-        if let existing: String = out.copyAt(index: j) {
+        if let existing: view String = out.viewAt(index: j) {
           if existing is b.nodeId {
             seen = true
           }
@@ -117,7 +117,7 @@ func listViewDistinctNodeIds(lv: view ListView) ret List(String) {
 func listViewNodeSlot(distinct: view List(String), nodeId: view String) ret opt Int {
   var i: Int = 0
   loop i < distinct.length {
-    if let existing: String = distinct.copyAt(index: i) {
+    if let existing: view String = distinct.viewAt(index: i) {
       if existing is nodeId {
         ret i
       }
@@ -325,7 +325,7 @@ func listViewApplySceneBinding(
   rowRoot: view EntityId
   binding: view ListViewBinding
   row: view ListViewRow
-) {
+) ret Bool {
   let raw: String = listRowValue(row: row, key: binding.itemField)
   let value: String = "{binding.prefix}{raw}{binding.suffix}"
   let page: String = listViewRowPage(rowRoot: rowRoot)
@@ -333,7 +333,7 @@ func listViewApplySceneBinding(
   if let found: Int = findNodeInPage(world: world, pageId: page, nodeId: binding.nodeId) {
     index = found
   } else {
-    ret
+    ret false
   }
   let target: EntityId = nodeEntityId(world: world, index: index)
   if listViewSceneBindingCurrent(
@@ -342,7 +342,7 @@ func listViewApplySceneBinding(
     binding: binding
     value: value
   ) {
-    ret
+    ret true
   }
   let override: SceneOverride = {
     nodeId: "{binding.nodeId}"
@@ -351,6 +351,7 @@ func listViewApplySceneBinding(
     valueString: value
   }
   applyOverride(world: world, entityId: target, override: override)
+  ret true
 }
 
 # Build one pooled row entity. Sub-scene rows mount the item scene onto the
@@ -408,13 +409,17 @@ func listViewBuildRow(
   ret rowRoot
 }
 
-# Re-point a pooled row at data row `row`, positioned at content-Y `topY`.
+# Re-point a pooled row at data row `row` (number `dataIndex`), positioned at content-Y `topY`.
+# A row still bound to the same data row of the same list and data (ListRowBound) keeps its
+# bindings as they are.
 func listViewApplyRow(
   world: mod UiWorld
+  uiSystems: mod UiSystems
   rowRoot: view EntityId
   lv: view ListView
   distinct: view List(String)
   row: view ListViewRow
+  dataIndex: view Int
   topY: view Float
   sceneRow: view Bool
 ) {
@@ -428,12 +433,28 @@ func listViewApplyRow(
       let off: Offset = { delta: Vec2 { x: 0.0, y: topY } }
       componentSet(this: world.offsets, entityId: rowRoot, data: off)
     }
+    let bound: ListRowBound = {
+      dataIndex: dataIndex
+      dataGeneration: componentTableGeneration(this: world.listViewDatas)
+      listGeneration: componentTableGeneration(this: world.listViews)
+    }
+    if componentHas(this: uiSystems.listRows.rowsBound, entityId: rowRoot) {
+      let last: view ListRowBound = componentView(
+        this: uiSystems.listRows.rowsBound
+        entityId: rowRoot
+      )
+      if last.dataIndex is bound.dataIndex and last.dataGeneration is bound.dataGeneration and last.listGeneration is bound.listGeneration {
+        ret
+      }
+    }
     if sceneRow {
+      # a binding whose node this row's scene lacks (another kind of tile) has nothing to write;
+      # the scene is mounted when the row is built, so that stays so
       let sn: Int = lv.bindings.length
       var sb: Int = 0
       loop sb < sn {
         let binding: ListViewBinding = rae_ext_rae_buf_get(buf: lv.bindings.data, index: sb)
-        listViewApplySceneBinding(
+        let unusedFound: Bool = listViewApplySceneBinding(
           world: world
           rowRoot: rowRoot
           binding: binding
@@ -441,6 +462,7 @@ func listViewApplyRow(
         )
         sb = sb + 1
       }
+      componentSet(this: uiSystems.listRows.rowsBound, entityId: rowRoot, data: bound)
       ret
     }
     # Snapshot this row's child ids (distinct-order) so binding writes don't
@@ -471,6 +493,7 @@ func listViewApplyRow(
       }
       b = b + 1
     }
+    componentSet(this: uiSystems.listRows.rowsBound, entityId: rowRoot, data: bound)
   }
 }
 
@@ -645,10 +668,12 @@ func listViewSyncEntity(
       let topY: Float = dataIdx.toFloat() * pitch
       listViewApplyRow(
         world: world
+        uiSystems: uiSystems
         rowRoot: rowRoot
         lv: lv
         distinct: distinct
         row: row
+        dataIndex: dataIdx
         topY: topY
         sceneRow: sceneRow
       )
@@ -694,6 +719,107 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
   ret "{index}"
 }
 
+# What a list's last reconcile saw (ListSyncSeen): the same again means its rows already show its
+# data at its scroll, so the pass (its definition copied, each row's key and value built and
+# matched) is not run. Read after the pass, so a pass that moved rows runs once more and rests.
+func listSyncSeenNow(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  scenes: view SceneRegistry
+) ret ListSyncSeen {
+  var scrollY: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: entityId) {
+    scrollY = componentView(this: world.scrollStates, entityId: entityId).y
+  }
+  ret ListSyncSeen {
+    listGeneration: componentTableGeneration(this: world.listViews)
+    dataGeneration: componentTableGeneration(this: world.listViewDatas)
+    childrenGeneration: componentTableGeneration(this: world.childrens)
+    leaving: componentCount(this: world.leavings)
+    motionGeneration: componentTableGeneration(this: world.listReorderDrags) + componentTableGeneration(
+      this: uiSystems.animation.listMotions
+    )
+    rowSize: listViewFlowRowSize(
+      world: world
+      uiSystems: uiSystems
+      listEntityId: entityId
+      lv: componentView(this: world.listViews, entityId: entityId)
+    )
+    scrollY: scrollY
+    scenes: scenes.ids.length
+  }
+}
+
+func listSyncSeenSame(a: view ListSyncSeen, b: view ListSyncSeen) ret Bool {
+  ret a.listGeneration is b.listGeneration and a.dataGeneration is b.dataGeneration and a.childrenGeneration is b.childrenGeneration and a.leaving is b.leaving and a.motionGeneration is b.motionGeneration and a.rowSize.x is b.rowSize.x and a.rowSize.y is b.rowSize.y and a.scrollY is b.scrollY and a.scenes is b.scenes
+}
+
+# One ListView reconciled (flow or windowed), unless nothing it reads changed since it last was
+# and no list change is waiting
+func listViewSyncChanged(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  scenes: view SceneRegistry
+) {
+  if not listViewNeedsSync(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    scenes: scenes
+  ) {
+    ret
+  }
+  if componentView(this: world.listViews, entityId: entityId).mode is ListViewMode.flow {
+    listViewSyncFlow(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      scenes: scenes
+    )
+  } else {
+    listViewSyncEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      scenes: scenes
+    )
+  }
+  let seen: ListSyncSeen = listSyncSeenNow(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    scenes: scenes
+  )
+  componentSet(this: uiSystems.listRows.listsSeen, entityId: entityId, data: seen)
+}
+
+# The list changed since its last reconcile, or has had none, or a list change waits
+func listViewNeedsSync(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  scenes: view SceneRegistry
+) ret Bool {
+  if componentHas(this: world.listChanges, entityId: entityId) {
+    ret true
+  }
+  if not componentHas(this: uiSystems.listRows.listsSeen, entityId: entityId) {
+    ret true
+  }
+  let now: ListSyncSeen = listSyncSeenNow(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    scenes: scenes
+  )
+  ret not listSyncSeenSame(
+    a: componentView(this: uiSystems.listRows.listsSeen, entityId: entityId)
+    b: now
+  )
+}
+
 # Virtualise every ListView in the world (#945). Run after input/scroll,
 # before layout, so the current window's rows are laid out this frame.
 # `scenes` supplies the item sub-scenes (`ListView.itemSceneId`); pass an empty
@@ -701,6 +827,19 @@ func listViewRowKeyOf(lv: view ListView, row: view ListViewRow, index: view Int)
 func listViewSystem(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) pub {
   unsafe {
     let n: Int = componentCount(this: world.listViews)
+    # Nothing to do (the idle frame): no list changed, and nothing is collected
+    var anyChanged: Bool = false
+    loop var l: Int = 0, l < n and not anyChanged, ++l {
+      anyChanged = listViewNeedsSync(
+        world: world
+        uiSystems: uiSystems
+        entityId: componentEntityAt(this: world.listViews, i: l)
+        scenes: scenes
+      )
+    }
+    if not anyChanged {
+      ret
+    }
     # Collect entity ids first: syncing mutates childrens/entities, which must
     # not alias the listViews table iteration.
     var entities: List(EntityId) = List.create(EntityId, cap: n)
@@ -712,22 +851,12 @@ func listViewSystem(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view S
     var e: Int = 0
     loop e < entities.length {
       let entityId: EntityId = rae_ext_rae_buf_get(buf: entities.data, index: e)
-      let lv: view ListView = componentView(this: world.listViews, entityId: entityId)
-      if lv.mode is ListViewMode.flow {
-        listViewSyncFlow(
-          world: world
-          uiSystems: uiSystems
-          entityId: entityId
-          scenes: scenes
-        )
-      } else {
-        listViewSyncEntity(
-          world: world
-          uiSystems: uiSystems
-          entityId: entityId
-          scenes: scenes
-        )
-      }
+      listViewSyncChanged(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        scenes: scenes
+      )
       e = e + 1
     }
   }

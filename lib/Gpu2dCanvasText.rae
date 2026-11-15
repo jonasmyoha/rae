@@ -344,20 +344,22 @@ func textFlushAtlas(
     ai: ai
     glyphs: count
   )
-  var batch: Gpu2dTextAtlas = emptyTextAtlas()
-  if let known: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
-    batch = own known
-  }
+  # The batch is read where it is: copying it out (and an empty one made first) was five Lists a
+  # flush, every frame
   let strideBytes: Int = textGlyphFloats * 4
   var uploaded: Bool = false
-  unsafe {
-    uploaded = writeBufferFromPtr(
-      resources: resources
-      id: glyphs
-      offset: 0
-      data: batch.glyphs.data
-      size: count * strideBytes
-    )
+  var textureView: TextureViewId = noTextureViewId()
+  if let batch: view Gpu2dTextAtlas = canvas.textAtlases.viewAt(index: ai) {
+    textureView = batch.textureView
+    unsafe {
+      uploaded = writeBufferFromPtr(
+        resources: resources
+        id: glyphs
+        offset: 0
+        data: batch.glyphs.data
+        size: count * strideBytes
+      )
+    }
   }
   if uploaded {
     # One bind group per same-clip run (#1003): the run's rounded-clip uniform
@@ -365,15 +367,17 @@ func textFlushAtlas(
     # the same SDF and not only by the scissor bbox.
     var runStart: Int = 0
     loop runStart < count {
-      let clip: Int = textClipAt(atlas: batch, i: runStart)
-      var runEnd: Int = runStart + 1
-      loop runEnd < count and textClipAt(atlas: batch, i: runEnd) is clip {
-        runEnd = runEnd + 1
-      }
+      let clip: Int = textClipOf(canvas: canvas, ai: ai, i: runStart)
+      let runEnd: Int = textRunEnd(
+        canvas: canvas
+        ai: ai
+        start: runStart
+        count: count
+      )
       var entries: List(ResourceRef) = List.create(ResourceRef, cap: 5)
       entries.add(value: bufferRef(id: canvas.viewport))
       entries.add(value: bufferRef(id: glyphs))
-      entries.add(value: textureViewRef(id: batch.textureView))
+      entries.add(value: textureViewRef(id: textureView))
       entries.add(value: samplerRef(id: canvas.imageSampler))
       entries.add(
         value: bufferRef(id: clipUniformFor(canvas: canvas, resources: resources, clip: clip))
@@ -401,7 +405,33 @@ func textFlushAtlas(
       runStart = runEnd
     }
   }
-  batch.glyphs.clear()
-  batch.glyphClips.clear()
-  canvas.textAtlases.set(index: ai, value: own batch)
+  if let batch: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
+    batch.glyphs.clear()
+    batch.glyphClips.clear()
+  }
+}
+
+# Glyph `i`'s clip in atlas `ai`'s batch
+func textClipOf(canvas: view Gpu2dCanvas, ai: view Int, i: view Int) ret Int {
+  if let batch: view Gpu2dTextAtlas = canvas.textAtlases.viewAt(index: ai) {
+    ret textClipAt(atlas: batch, i: i)
+  }
+  ret 0
+}
+
+# The end of the run of glyphs from `start` that share its clip
+func textRunEnd(
+  canvas: view Gpu2dCanvas
+  ai: view Int
+  start: view Int
+  count: view Int
+) ret Int {
+  var runEnd: Int = start + 1
+  if let batch: view Gpu2dTextAtlas = canvas.textAtlases.viewAt(index: ai) {
+    let clip: Int = textClipAt(atlas: batch, i: start)
+    loop runEnd < count and textClipAt(atlas: batch, i: runEnd) is clip {
+      runEnd = runEnd + 1
+    }
+  }
+  ret runEnd
 }

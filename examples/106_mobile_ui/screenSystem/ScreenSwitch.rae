@@ -35,7 +35,10 @@ type ScreenSwitchResult {
   newScreen: Screen
   newScrollTarget: EntityId
   cachedTrackDurMs: Int
+  # the album stem now, set only when it changed (albumStemChanged): a copy of the same stem every
+  # frame was an allocation for nothing
   cachedAlbumStem: String
+  albumStemChanged: Bool = false
   cachedTrackIndex: Int
   switching: Bool
 }
@@ -66,13 +69,11 @@ func handleScreenSwitch(
     newScreen: currentScreen
     newScrollTarget: scrollTarget
     cachedTrackDurMs: cachedTrackDurMs
-    cachedAlbumStem: "{cachedAlbumStem}"
+    cachedAlbumStem: ""
     cachedTrackIndex: cachedTrackIndex
     switching: false
   }
 
-  let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
-  let incomingPageId: String = pageIdForScreen(screen: nextScreen)
   let stemChangedNow: Bool = appState.currentAlbumStem is cachedAlbumStem is false
   let trackChangedNow: Bool = appState.currentTrackIndex is not cachedTrackIndex
 
@@ -98,6 +99,7 @@ func handleScreenSwitch(
       let activeTrackNow1: Track = trackAt(album: activeAlbumNow1, idx: appState.currentTrackIndex)
       result.cachedTrackDurMs = activeTrackNow1.durationMs
       result.cachedAlbumStem = "{appState.currentAlbumStem}"
+      result.albumStemChanged = true
       result.cachedTrackIndex = appState.currentTrackIndex
       # No re-mount: the album/player pages stayed mounted and active, so the
       # scroll target is unchanged (a stem change reset its offset above).
@@ -110,6 +112,10 @@ func handleScreenSwitch(
     ret result
   }
 
+  # the pages' ids only now: building them (the router's table) every frame was most of an idle
+  # frame's allocations here
+  let outgoingPageId: String = pageIdForScreen(screen: currentScreen)
+  let incomingPageId: String = pageIdForScreen(screen: nextScreen)
   # A page whose row asks for a fresh mount on entry is re-mounted at the
   # top; no page does today — the lists and the "Recently played" section
   # follow their data in place (ScreenPage.refreshOnEntry).
@@ -170,6 +176,7 @@ func handleScreenSwitch(
     let activeTrackNow: Track = trackAt(album: activeAlbumNow, idx: appState.currentTrackIndex)
     result.cachedTrackDurMs = activeTrackNow.durationMs
     result.cachedAlbumStem = "{appState.currentAlbumStem}"
+    result.albumStemChanged = true
     result.cachedTrackIndex = appState.currentTrackIndex
     let trackDurSec2: Float = result.cachedTrackDurMs.toFloat() / 1000.0
     if trackDurSec2 > 0.0 {

@@ -1,0 +1,132 @@
+# A ListView whose data, definition and scroll did not change allocates nothing in listViewSystem
+# (windowed and flow): its rows remember what they were bound to (ListRowBound) and the list what
+# its last reconcile saw (ListSyncSeen), so an idle frame builds no Strings. New data, a scroll and
+# a changed definition still reach the rows.
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/layoutSystem/LayoutSystem
+open ui/listViewSystem/ListViewSystem
+
+type Fixture {
+  world: UiWorld
+  uiSystems: UiSystems
+  scenes: SceneRegistry
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func setKeys(fixture: mod Fixture, listEntityId: view EntityId, keys: view String) {
+  var rows: List(ListViewRow) = List.create(ListViewRow, cap: 8)
+  loop var i: Int = 0, i < keys.length(), ++i {
+    var names: List(String) = List.create(String, cap: 1)
+    names.add(value: "id")
+    var values: List(String) = List.create(String, cap: 1)
+    values.add(value: keys.sub(start: i, len: 1))
+    rows.add(value: ListViewRow { keys: own names, values: own values })
+  }
+  componentSet(
+    this: fixture.world.listViewDatas
+    entityId: listEntityId
+    data: ListViewData { rows: own rows }
+  )
+}
+
+func frame(fixture: mod Fixture) {
+  listViewSystem(world: fixture.world, uiSystems: fixture.uiSystems, scenes: fixture.scenes)
+  layoutSystem(world: fixture.world, uiSystems: fixture.uiSystems)
+}
+
+# The labels of a list's rows, in child order
+func labels(fixture: view Fixture, listEntityId: view EntityId) ret String {
+  var out: String = ""
+  let children: view Children = componentView(this: fixture.world.childrens, entityId: listEntityId)
+  loop let rowEntityId: view EntityId in children.ids {
+    if let index: Int = findNodeInPage(
+      world: fixture.world
+      pageId: "listRow{rowEntityId.index}"
+      nodeId: "Label"
+    ) {
+      out = "{out}{componentView(
+        this: fixture.world.texts
+        entityId: nodeEntityId(world: fixture.world, index: index)
+      ).text}"
+    } else {
+      out = "{out}?"
+    }
+  }
+  ret out
+}
+
+# listViewSystem's allocations over `frames` frames
+func listAllocations(fixture: mod Fixture, frames: view Int) ret Int {
+  let before: Int = Sys.threadAllocationCount()
+  loop var i: Int = 0, i < frames, ++i {
+    listViewSystem(world: fixture.world, uiSystems: fixture.uiSystems, scenes: fixture.scenes)
+  }
+  ret Sys.threadAllocationCount() - before
+}
+
+func main() {
+  var registry: SceneRegistry = createSceneRegistry()
+  var rowScene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Row\",\"nodes\":\{\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":30\},\"Children\":[\"Label\"]\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":30\},\"Text\":\{\"text\":\"x\"\}\}\}\}"
+  )
+  rowScene.sceneId = "RowScene"
+  registerScene(reg: registry, key: "RowScene", scene: own rowScene)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let unusedPage: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"List\",\"Grid\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"ListView\":\{\"itemSceneId\":\"RowScene\",\"itemKeyField\":\"id\",\"itemHeight\":30,\"itemGap\":10,\"visibleItemCount\":3,\"overscanRows\":1,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\},\"Grid\":\{\"Rect\":\{\"x\":0,\"y\":200,\"w\":400,\"h\":200\},\"ListView\":\{\"mode\":\"Flow\",\"itemKeyField\":\"id\",\"itemSceneId\":\"RowScene\",\"itemWidth\":100,\"itemHeight\":30,\"bindings\":[\{\"nodeId\":\"Label\",\"component\":\"Text\",\"field\":\"text\",\"itemField\":\"id\"\}]\}\}\}\}"
+    )
+  )
+  var fixture: Fixture = { world: own world, uiSystems: own uiSystems, scenes: own registry }
+  let listEntityId: EntityId = nodeOf(world: fixture.world, nodeId: "List")
+  let gridEntityId: EntityId = nodeOf(world: fixture.world, nodeId: "Grid")
+  setKeys(fixture: fixture, listEntityId: listEntityId, keys: "abcdefghij")
+  setKeys(fixture: fixture, listEntityId: gridEntityId, keys: "pqrs")
+  loop var i: Int = 0, i < 3, ++i {
+    frame(fixture: fixture)
+  }
+  log(
+    "list: {labels(fixture: fixture, listEntityId: listEntityId)}, grid: {labels(
+      fixture: fixture
+      listEntityId: gridEntityId
+    )}"
+  )
+  log("unchanged, 10 frames: {listAllocations(fixture: fixture, frames: 10)} allocations")
+
+  setKeys(fixture: fixture, listEntityId: gridEntityId, keys: "pqxs")
+  frame(fixture: fixture)
+  log("grid data changed: {labels(fixture: fixture, listEntityId: gridEntityId)}")
+  frame(fixture: fixture)
+  log("then unchanged again: {listAllocations(fixture: fixture, frames: 10)} allocations")
+
+  let state: ScrollState = { y: -80.0, velocity: 0.0 }
+  componentSet(this: fixture.world.scrollStates, entityId: listEntityId, data: state)
+  frame(fixture: fixture)
+  frame(fixture: fixture)
+  log("list scrolled two rows: {labels(fixture: fixture, listEntityId: listEntityId)}")
+  log("then unchanged again: {listAllocations(fixture: fixture, frames: 10)} allocations")
+
+  let definition: mod ListView = componentMod(this: fixture.world.listViews, entityId: listEntityId)
+  definition.visibleItemCount = 2
+  frame(fixture: fixture)
+  log("list shows fewer rows: {labels(fixture: fixture, listEntityId: listEntityId)}")
+}

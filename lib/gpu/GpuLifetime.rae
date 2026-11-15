@@ -433,12 +433,14 @@ func beginRecording(resources: view GpuResources) ret opt Recording {
     if encoder is webgpuNull() {
       ret none
     }
+    # room for a frame's uses up front: a 2D frame records about a hundred, and growing from 8
+    # was several allocations a frame
     ret Recording {
       managerTag: resources.managerTag
       encoder: encoder
-      useKinds: List.create(Int, cap: 8)
-      useSlots: List.create(Int, cap: 8)
-      useGenerations: List.create(Int, cap: 8)
+      useKinds: List.create(Int, cap: 256)
+      useSlots: List.create(Int, cap: 256)
+      useGenerations: List.create(Int, cap: 256)
     }
   }
 }
