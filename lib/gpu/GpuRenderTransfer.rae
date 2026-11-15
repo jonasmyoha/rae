@@ -628,4 +628,64 @@ func writeTexture(
   }
 }
 
+# Uploads an RGBA8 image of `width` x `height` pixels (rows packed, `width * 4` bytes each) into
+# the region of a manager texture whose top-left corner is (`x`, `y`): one cell of an atlas, a
+# thumbnail among many. The region must lie inside the texture, the texture must be CopyDst, and
+# `bytes` must hold at least the region's pixels (the first `width * height` are written, so the top
+# rows of a taller image fit a shorter cell); false (nothing written) otherwise.
+func writeTextureRegion(
+  resources: view GpuResources
+  texture: view TextureId
+  x: view Int
+  y: view Int
+  width: view Int
+  height: view Int
+  bytes: view List(UInt8)
+) ret Bool {
+  if isValidTexture(resources: resources, id: texture) is false {
+    ret false
+  }
+  if x < 0 or y < 0 or width < 1 or height < 1 {
+    ret false
+  }
+  if x + width > textureWidth(resources: resources, id: texture) {
+    ret false
+  }
+  if y + height > textureHeight(resources: resources, id: texture) {
+    ret false
+  }
+  if bytes.length < width * height * 4 {
+    ret false
+  }
+  unsafe {
+    let handle: Ptr = slotHandle(table: resources.textures, slot: texture.slot)
+    if hasUsageFlag(usage: wgpuTextureGetUsage(texture: handle), flag: WGPUTextureUsage_CopyDst) is false {
+      ret false
+    }
+    let destination: WGPUTexelCopyTextureInfo = {
+      texture: handle
+      origin: { x: x as UInt32, y: y as UInt32, z: 0 }
+      aspect: WGPUTextureAspect_All
+    }
+    let layout: WGPUTexelCopyBufferLayout = {
+      bytesPerRow: (width * 4) as UInt32
+      rowsPerImage: height as UInt32
+    }
+    let extent: WGPUExtent3D = {
+      width: width as UInt32
+      height: height as UInt32
+      depthOrArrayLayers: 1
+    }
+    wgpuQueueWriteTexture(
+      queue: webgpuQueue()
+      destination: destination
+      data: bytes.data
+      dataSize: (width * height * 4) as UInt64
+      dataLayout: layout
+      writeSize: extent
+    )
+  }
+  ret true
+}
+
 # ----- a render pass held open across many in-pass draws (#915) ---------

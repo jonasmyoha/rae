@@ -1,0 +1,322 @@
+# Hardware check for gpu/GpuRenderTransfer's writeTextureRegion: a 64x64 RGBA8 texture is written
+# in four 32x32 regions of four colors (an atlas of four cells), copied to a buffer and read back,
+# and every pixel is compared to its region's color. Then the refusals: a region past the texture's
+# edge, a negative origin, a byte list shorter than the region and a texture that is not CopyDst
+# write
+# nothing. Exit code 0 = every check passed.
+import Sdl3
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+
+# A GPU wait: tries, each a blocking device poll, not a spin count (see checks/readRequest)
+const checkWaitTries: Int = 1000
+
+const atlasSize: Int = 64
+
+const cellSize: Int = 32
+
+# bytes per row of the read-back image: 64 pixels of 4 bytes, already a multiple of 256
+const readbackRow: Int = 256
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
+func awaitSubmission(resources: mod GpuResources, id: view SubmissionId) ret Int {
+  var status: Int = 0
+  var tries: Int = 0
+  loop status is 0 and tries < checkWaitTries {
+    status = pollSubmission(resources: resources, id: id)
+    if status is 0 {
+      checkWaitForGpu()
+    }
+    tries = tries + 1
+  }
+  ret status
+}
+
+func awaitReadback(resources: mod GpuResources, id: view ReadbackId) ret Int {
+  var status: Int = 0
+  var tries: Int = 0
+  loop status is 0 and tries < checkWaitTries {
+    status = pollReadback(resources: resources, id: id)
+    if status is 0 {
+      checkWaitForGpu()
+    }
+    tries = tries + 1
+  }
+  ret status
+}
+
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  if let value: UInt8 = bytes.copyAt(index: index) {
+    ret value as Int
+  }
+  ret -1
+}
+
+type Rgba {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+# The color of cell `cell` (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right)
+func cellColor(cell: view Int) ret Rgba {
+  if cell is 0 {
+    ret Rgba { r: 255, g: 0, b: 0, a: 255 }
+  }
+  if cell is 1 {
+    ret Rgba { r: 0, g: 255, b: 0, a: 255 }
+  }
+  if cell is 2 {
+    ret Rgba { r: 0, g: 0, b: 255, a: 255 }
+  }
+  ret Rgba { r: 255, g: 255, b: 0, a: 128 }
+}
+
+# `count` pixels of one color, packed RGBA8
+func solidPixels(color: view Rgba, count: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: count * 4)
+  var i: Int = 0
+  loop i < count {
+    bytes.add(value: color.r as UInt8)
+    bytes.add(value: color.g as UInt8)
+    bytes.add(value: color.b as UInt8)
+    bytes.add(value: color.a as UInt8)
+    i = i + 1
+  }
+  ret bytes
+}
+
+func writeCells(resources: view GpuResources, texture: view TextureId) ret Bool {
+  var cell: Int = 0
+  loop cell < 4 {
+    let pixels: List(UInt8) = solidPixels(color: cellColor(cell: cell), count: cellSize * cellSize)
+    if writeTextureRegion(
+      resources: resources
+      texture: texture
+      x: (cell % 2) * cellSize
+      y: (cell / 2) * cellSize
+      width: cellSize
+      height: cellSize
+      bytes: pixels
+    ) is false {
+      log("FAIL: writeTextureRegion refused cell {cell}")
+      ret false
+    }
+    cell = cell + 1
+  }
+  ret true
+}
+
+# Every pixel of the read-back atlas is its cell's color.
+func pixelsMatch(bytes: view List(UInt8)) ret Bool {
+  var row: Int = 0
+  loop row < atlasSize {
+    var column: Int = 0
+    loop column < atlasSize {
+      let cell: Int = (row / cellSize) * 2 + column / cellSize
+      let expected: Rgba = cellColor(cell: cell)
+      let base: Int = row * readbackRow + column * 4
+      if byteAt(bytes: bytes, index: base) is not expected.r or byteAt(
+        bytes: bytes
+        index: base + 1
+      ) is not expected.g or byteAt(bytes: bytes, index: base + 2) is not expected.b or byteAt(
+        bytes: bytes
+        index: base + 3
+      ) is not expected.a {
+        log(
+          "FAIL: pixel {column},{row} of cell {cell} = {byteAt(bytes: bytes, index: base)},{byteAt(
+            bytes: bytes
+            index: base + 1
+          )},{byteAt(bytes: bytes, index: base + 2)},{byteAt(bytes: bytes, index: base + 3)}"
+        )
+        ret false
+      }
+      column = column + 1
+    }
+    row = row + 1
+  }
+  ret true
+}
+
+# Copies the texture to `buffer`, reads it back and compares the pixels.
+func readBackAndCompare(
+  resources: mod GpuResources
+  texture: view TextureId
+  buffer: view BufferId
+) ret Bool {
+  let size: Int = readbackRow * atlasSize
+  if var recording: Recording = beginRecording(resources: resources) {
+    if recordCopyTextureToBuffer(
+      recording: recording
+      resources: resources
+      texture: texture
+      buffer: buffer
+      bytesPerRow: readbackRow
+    ) is false {
+      log("FAIL: texture copy refused")
+      ret false
+    }
+    if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+      if awaitSubmission(resources: resources, id: submission) is not 1 {
+        log("FAIL: submission did not complete")
+        ret false
+      }
+      retireSubmission(resources: resources, id: submission)
+      if let read: ReadbackId = startReadback(
+        resources: resources
+        buffer: buffer
+        offset: 0
+        size: size
+      ) {
+        if awaitReadback(resources: resources, id: read) is not 1 {
+          log("FAIL: readback did not complete")
+          ret false
+        }
+        var bytes: List(UInt8) = List.create(UInt8, cap: size)
+        var i: Int = 0
+        loop i < size {
+          bytes.add(value: 0)
+          i = i + 1
+        }
+        if copyReadback(resources: resources, id: read, destination: bytes) is false {
+          log("FAIL: copyReadback")
+          ret false
+        }
+        retireReadback(resources: resources, id: read)
+        ret pixelsMatch(bytes: bytes)
+      }
+    }
+  }
+  log("FAIL: recording setup")
+  ret false
+}
+
+# Regions that do not fit, a wrong byte count and a texture without CopyDst are refused.
+func refusals(resources: mod GpuResources, texture: view TextureId) ret Bool {
+  let cellPixels: List(UInt8) = solidPixels(color: cellColor(cell: 0), count: cellSize * cellSize)
+  if writeTextureRegion(
+    resources: resources
+    texture: texture
+    x: 40
+    y: 0
+    width: cellSize
+    height: cellSize
+    bytes: cellPixels
+  ) {
+    log("FAIL: a region past the right edge was written")
+    ret false
+  }
+  if writeTextureRegion(
+    resources: resources
+    texture: texture
+    x: 0
+    y: 33
+    width: cellSize
+    height: cellSize
+    bytes: cellPixels
+  ) {
+    log("FAIL: a region past the bottom edge was written")
+    ret false
+  }
+  if writeTextureRegion(
+    resources: resources
+    texture: texture
+    x: -1
+    y: 0
+    width: cellSize
+    height: cellSize
+    bytes: cellPixels
+  ) {
+    log("FAIL: a negative origin was written")
+    ret false
+  }
+  if writeTextureRegion(
+    resources: resources
+    texture: texture
+    x: 0
+    y: 0
+    width: 64
+    height: 32
+    bytes: cellPixels
+  ) {
+    log("FAIL: a byte list shorter than the region was written")
+    ret false
+  }
+  if let readOnly: TextureId = createTexture(
+    resources: resources
+    width: atlasSize
+    height: atlasSize
+    format: WGPUTextureFormat_RGBA8Unorm
+    usage: WGPUTextureUsage_CopySrc
+  ) {
+    if writeTextureRegion(
+      resources: resources
+      texture: readOnly
+      x: 0
+      y: 0
+      width: cellSize
+      height: cellSize
+      bytes: cellPixels
+    ) {
+      log("FAIL: a texture without CopyDst was written")
+      ret false
+    }
+    ret true
+  }
+  log("FAIL: creating the CopySrc-only texture")
+  ret false
+}
+
+func main() ret Int {
+  var booted: Int = 0
+  unsafe {
+    booted = webgpuBootstrap()
+  }
+  if booted is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 8) {
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: atlasSize
+      height: atlasSize
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_CopyDst + WGPUTextureUsage_CopySrc
+    ) {
+      if let buffer: BufferId = createBuffer(
+        resources: resources
+        size: readbackRow * atlasSize
+        usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+      ) {
+        if writeCells(resources: resources, texture: texture) is false {
+          ret 1
+        }
+        if readBackAndCompare(resources: resources, texture: texture, buffer: buffer) is false {
+          ret 1
+        }
+        log("four 32x32 regions written into a 64x64 texture and read back OK")
+        if refusals(resources: resources, texture: texture) is false {
+          ret 1
+        }
+        log("out-of-bounds, short and non-CopyDst regions refused OK")
+        ret 0
+      }
+    }
+    log("FAIL: setup")
+    ret 1
+  }
+  log("FAIL: manager creation")
+  ret 1
+}
