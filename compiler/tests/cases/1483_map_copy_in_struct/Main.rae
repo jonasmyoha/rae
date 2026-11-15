@@ -1,0 +1,52 @@
+# A struct holding a StringMap and an IntMap, copied into another struct literal (a deep copy into a
+# fresh local), then filled far past its capacity. The copy's maps must grow: their isGrowing guard
+# was not copied and held stack garbage, so `set` never grew them and looped forever once full
+# (found by checks/uiPlaneView, a UiWorld copied into a struct). The original stays as it was.
+open collections/StringMap
+open collections/IntMap
+
+type Holder {
+  names: StringMap(Int)
+  numbers: IntMap(String)
+  count: Int = 0
+}
+
+type Rig {
+  holder: Holder
+  tag: Int = 0
+}
+
+func main() ret Int {
+  var holder: Holder = {
+    names: StringMap.create(Int, cap: 4)
+    numbers: IntMap.create(String, cap: 4)
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    holder.names.set(k: "a{i}", value: i)
+    holder.numbers.set(k: i, value: "n{i}")
+  }
+  var rig: Rig = { holder: holder }
+  loop var i: Int = 0, i < 200, ++i {
+    rig.holder.names.set(k: "key{i}", value: i)
+    rig.holder.numbers.set(k: 100 + i, value: "v{i}")
+  }
+  var sum: Int = 0
+  loop var i: Int = 0, i < 200, ++i {
+    if let value: Int = rig.holder.names.get(k: "key{i}") {
+      sum = sum + value
+    }
+  }
+  log("copy: {rig.holder.names.length} names, {rig.holder.numbers.length} numbers, sum {sum}")
+  if let first: Int = rig.holder.names.get(k: "a1") {
+    log("copy keeps a1: {first}")
+  }
+  if let text: String = rig.holder.numbers.get(k: 299) {
+    log("copy 299: {text}")
+  }
+  log(
+    "original: {holder.names.length} names, {holder.numbers.length} numbers, has key5 {holder.names.get(
+      k: "key5"
+    ) is not none}"
+  )
+  ret 0
+}

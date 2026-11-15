@@ -4466,6 +4466,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       // Entry struct: rae_StringMapEntry_<V> { k: rae_String, value: V, occupied: rae_Bool }
       // or rae_IntMapEntry_<V> { k: int64_t, value: V, occupied: rae_Bool }
       const char* entry_struct = (e->kind == 1) ? "rae_StringMapEntry" : "rae_IntMapEntry";
+      // Every scalar field first (length, cap, and isGrowing, the guard that keeps `set` from
+      // growing the map while it grows). The copy lands in an uninitialized local, so a field
+      // copied by name only left isGrowing as stack garbage: `set` then never grew the map, it
+      // filled up, and its probe looped forever. The buffer is replaced below.
+      fprintf(out, "  *dst = *src;\n");
       fprintf(out, "  dst->length = src->length;\n");
       fprintf(out, "  dst->cap = src->cap;\n");
       fprintf(out, "  if (src->cap > 0) {\n");
