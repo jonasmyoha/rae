@@ -30,6 +30,7 @@
 #include "rae_audio.h"
 
 #include <stdio.h>
+#include <sys/types.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -376,6 +377,28 @@ int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count) {
   if (!file) return 0;
   size_t wrote = fwrite(bytes, 1, (size_t)count, file);
   return (fclose(file) == 0 && wrote == (size_t)count) ? 1 : 0;
+}
+
+/* A file written in steps (audio/WavWriter): open, write, seek, close, remove; one stdio call
+ * each, the handle a FILE* as an integer (0: none). */
+int64_t rae_audio_out_open(uint8_t* path_z) {
+  return (int64_t)(intptr_t)fopen((const char*)path_z, "wb");
+}
+
+int64_t rae_audio_out_write(int64_t file, uint8_t* bytes, int64_t count) {
+  return file ? (int64_t)fwrite(bytes, 1, (size_t)count, (FILE*)(intptr_t)file) : 0;
+}
+
+int64_t rae_audio_out_seek(int64_t file, int64_t offset) {
+  return file ? (int64_t)fseeko((FILE*)(intptr_t)file, (off_t)offset, SEEK_SET) : -1;
+}
+
+int64_t rae_audio_out_close(int64_t file) {
+  return file ? (int64_t)fclose((FILE*)(intptr_t)file) : -1;
+}
+
+int64_t rae_audio_remove_file(uint8_t* path_z) {
+  return (int64_t)remove((const char*)path_z);
 }
 
 int64_t rae_audio_file_size(uint8_t* path_z) {

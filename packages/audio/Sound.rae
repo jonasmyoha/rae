@@ -278,6 +278,143 @@ func addText(bytes: mod List(UInt8), text: view String) {
   }
 }
 
+# A WAV file's sample format: 16-bit or 24-bit PCM, or 32-bit float
+enum WavFormat { pcm16, pcm24, float32 }
+
+func wavBytesPerSample(format: view WavFormat) ret Int {
+  if format is WavFormat.pcm16 {
+    ret 2
+  }
+  if format is WavFormat.pcm24 {
+    ret 3
+  }
+  ret 4
+}
+
+# The 44-byte header of a WAV file whose data is `dataBytes` long
+func addWavHeader(
+  bytes: mod List(UInt8)
+  format: view WavFormat
+  channels: view Int
+  sampleRate: view Int
+  dataBytes: view Int
+) {
+  let bytesPerSample: Int = wavBytesPerSample(format: format)
+  addText(bytes: bytes, text: "RIFF")
+  addUInt32(bytes: bytes, value: 36 + dataBytes)
+  addText(bytes: bytes, text: "WAVEfmt ")
+  addUInt32(bytes: bytes, value: 16)
+  if format is WavFormat.float32 {
+    addUInt16(bytes: bytes, value: 3)
+  } else {
+    addUInt16(bytes: bytes, value: 1)
+  }
+  addUInt16(bytes: bytes, value: channels)
+  addUInt32(bytes: bytes, value: sampleRate)
+  addUInt32(bytes: bytes, value: sampleRate * channels * bytesPerSample)
+  addUInt16(bytes: bytes, value: channels * bytesPerSample)
+  addUInt16(bytes: bytes, value: bytesPerSample * 8)
+  addText(bytes: bytes, text: "data")
+  addUInt32(bytes: bytes, value: dataBytes)
+}
+
+# TPDF dither for integer samples: off by default, so a file holds exactly the rounded samples.
+# On, each sample gets triangular noise of +/-1 step (two uniform draws) before rounding, from a
+# generator seeded by `state`, so a render dithers the same way every time.
+type WavDither {
+  enabled: Bool = false
+  state: Int = 12345
+}
+
+# A uniform draw in [0, 1) (a 31-bit linear congruential step)
+func ditherDraw(dither: mod WavDither) ret Float64 {
+  dither.state = (dither.state * 1103515245 + 12345) bitand 2147483647
+  ret (dither.state as Float64) / 2147483648.0
+}
+
+# `value` (-1 .. 1) as a `scale`-step integer sample: rounded half away from zero and clipped to
+# -scale .. scale - 1 (so +1 is the largest sample); NaN is 0
+func wavIntegerSample(value: view Float, scale: view Float64, dither: mod WavDither) ret Int {
+  var scaled: Float64 = (value as Float64) * scale
+  if dither.enabled {
+    scaled = scaled + ditherDraw(dither: dither) + ditherDraw(dither: dither) - 1.0
+  }
+  if scaled is not scaled {
+    ret 0
+  }
+  let top: Int = (scale as Int) - 1
+  if scaled >= scale {
+    ret top
+  }
+  if scaled <= -scale {
+    ret -(scale as Int)
+  }
+  var rounded: Int = 0
+  if scaled >= 0.0 {
+    rounded = (scaled + 0.5) as Int
+  } else {
+    rounded = -((0.5 - scaled) as Int)
+  }
+  if rounded > top {
+    ret top
+  }
+  ret rounded
+}
+
+# One sample in `format`, little-endian, onto `bytes`
+func addWavSample(
+  bytes: mod List(UInt8)
+  value: view Float
+  format: view WavFormat
+  dither: mod WavDither
+) {
+  if format is WavFormat.float32 {
+    addUInt32(bytes: bytes, value: floatBits(value: value))
+    ret
+  }
+  if format is WavFormat.pcm16 {
+    addUInt16(
+      bytes: bytes
+      value: wavIntegerSample(value: value, scale: 32768.0, dither: dither) bitand 65535
+    )
+    ret
+  }
+  let sample: Int = wavIntegerSample(value: value, scale: 8388608.0, dither: dither) bitand 16777215
+  addUInt16(bytes: bytes, value: sample bitand 65535)
+  bytes.add(value: ((sample shr 16) bitand 255) as UInt8)
+}
+
+# A WAV file of `frameCount` interleaved frames in `format` (TPDF dither for an integer format
+# when `dither`)
+func encodeWav(
+  samples: view Buffer(Float)
+  frameCount: view Int
+  channels: view Int
+  sampleRate: view Int
+  format: view WavFormat
+  dither: view Bool
+) ret List(UInt8) {
+  let dataBytes: Int = frameCount * channels * wavBytesPerSample(format: format)
+  var bytes: List(UInt8) = List.create(UInt8, cap: 44 + dataBytes)
+  addWavHeader(
+    bytes: bytes
+    format: format
+    channels: channels
+    sampleRate: sampleRate
+    dataBytes: dataBytes
+  )
+  var noise: WavDither = { enabled: dither }
+  loop var i: Int = 0, i < frameCount * channels, ++i {
+    addWavSample(
+      bytes: bytes
+      value: sampleAt(samples: samples, index: i)
+      format: format
+      dither: noise
+    )
+  }
+  ret bytes
+}
+
 # A 32-bit float WAV file of `frameCount` interleaved frames
 func encodeWav(
   samples: view Buffer(Float)
@@ -285,24 +422,39 @@ func encodeWav(
   channels: view Int
   sampleRate: view Int
 ) ret List(UInt8) {
-  let dataSize: Int = frameCount * channels * 4
-  var bytes: List(UInt8) = List.create(UInt8, cap: 44 + dataSize)
-  addText(bytes: bytes, text: "RIFF")
-  addUInt32(bytes: bytes, value: 36 + dataSize)
-  addText(bytes: bytes, text: "WAVEfmt ")
-  addUInt32(bytes: bytes, value: 16)
-  addUInt16(bytes: bytes, value: 3)
-  addUInt16(bytes: bytes, value: channels)
-  addUInt32(bytes: bytes, value: sampleRate)
-  addUInt32(bytes: bytes, value: sampleRate * channels * 4)
-  addUInt16(bytes: bytes, value: channels * 4)
-  addUInt16(bytes: bytes, value: 32)
-  addText(bytes: bytes, text: "data")
-  addUInt32(bytes: bytes, value: dataSize)
-  loop var i: Int = 0, i < frameCount * channels, ++i {
-    addUInt32(bytes: bytes, value: floatBits(value: sampleAt(samples: samples, index: i)))
+  ret encodeWav(
+    samples: samples
+    frameCount: frameCount
+    channels: channels
+    sampleRate: sampleRate
+    format: WavFormat.float32
+    dither: false
+  )
+}
+
+# Write a WAV file in `format` (TPDF dither for an integer format when `dither`); answers
+# whether it was written
+func writeWavFile(
+  path: view String
+  samples: view Buffer(Float)
+  frameCount: view Int
+  channels: view Int
+  sampleRate: view Int
+  format: view WavFormat
+  dither: view Bool
+) ret Bool {
+  var bytes: List(UInt8) = encodeWav(
+    samples: samples
+    frameCount: frameCount
+    channels: channels
+    sampleRate: sampleRate
+    format: format
+    dither: dither
+  )
+  var pathZ: List(UInt8) = pathBytesZ(path: path)
+  unsafe {
+    ret rae_audio_write_file(pathZ: pathZ.data, bytes: bytes.data, count: bytes.length()) is 1
   }
-  ret bytes
 }
 
 # Write a 32-bit float WAV file; answers whether it was written
@@ -313,14 +465,13 @@ func writeWavFile(
   channels: view Int
   sampleRate: view Int
 ) ret Bool {
-  var bytes: List(UInt8) = encodeWav(
+  ret writeWavFile(
+    path: path
     samples: samples
     frameCount: frameCount
     channels: channels
     sampleRate: sampleRate
+    format: WavFormat.float32
+    dither: false
   )
-  var pathZ: List(UInt8) = pathBytesZ(path: path)
-  unsafe {
-    ret rae_audio_write_file(pathZ: pathZ.data, bytes: bytes.data, count: bytes.length()) is 1
-  }
 }

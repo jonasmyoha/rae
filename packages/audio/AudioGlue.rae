@@ -69,6 +69,24 @@ func rae_audio_write_file(
   count: Int
 ) blocking unsafe extern("rae_audio_write_file") ret Int
 
+# A file written in steps (audio/WavWriter): the handle is a FILE* as an Int (0: none); write
+# answers the bytes written, seek, close and remove 0 when they worked
+func rae_audio_out_open(pathZ: Buffer(UInt8)) blocking unsafe extern("rae_audio_out_open") ret Int
+
+func rae_audio_out_write(
+  file: Int
+  bytes: Buffer(UInt8)
+  count: Int
+) blocking unsafe extern("rae_audio_out_write") ret Int
+
+func rae_audio_out_seek(file: Int, offset: Int) blocking unsafe extern("rae_audio_out_seek") ret Int
+
+func rae_audio_out_close(file: Int) blocking unsafe extern("rae_audio_out_close") ret Int
+
+func rae_audio_remove_file(
+  pathZ: Buffer(UInt8)
+) blocking unsafe extern("rae_audio_remove_file") ret Int
+
 func rae_audio_session_available() unsafe extern("rae_audio_session_available") ret Int
 
 func rae_audio_session_configure(

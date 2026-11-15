@@ -1,0 +1,196 @@
+# audio/WavWriter — a WAV file written as it renders (docs/audio-design.md §7.3): an export or a
+# recorder hands it blocks of interleaved frames instead of holding the whole sound in memory.
+#
+#     var writer: WavWriter = openWavWriter(
+#       path: "mix.wav"
+#       channels: 2
+#       sampleRate: 48000
+#       format: WavFormat.pcm24
+#       dither: false
+#     )
+#     loop rendering { writeWavFrames(writer: writer, samples: block, frameCount: 512) }
+#     if not closeWavWriter(writer: writer) { log(writer.error) }
+#
+# The header is written first with sizes of 0 and its sizes are written on close, so a file
+# that was never closed is not a valid WAV; abandonWavWriter (a canceled export) closes and
+# deletes it, and so does a writer dropped while still open. Samples are converted as
+# encodeWav does (audio/Sound): float exact, integers rounded and clipped, TPDF dither on when
+# asked. Writing touches the disk: never on the audio thread.
+open audio/AudioGlue
+open audio/Sound
+
+# A RIFF file's sizes are 32-bit: the data may be at most this long
+const wavMaxDataBytes: Int = 4294967295 - 36
+
+type WavWriter {
+  path: String
+  # the open file (0: closed, or never opened)
+  file: Int = 0
+  channels: Int
+  sampleRate: Int
+  format: WavFormat
+  noise: WavDither
+  framesWritten: Int = 0
+  dataBytes: Int = 0
+  # "" while all is well, else what went wrong
+  error: String = ""
+  # one block's bytes, kept to be filled again
+  block: List(UInt8)
+}
+
+# A writer on `path` (the file is created, or emptied, now); its `error` says why when it could
+# not be opened
+func openWavWriter(
+  path: view String
+  channels: view Int
+  sampleRate: view Int
+  format: view WavFormat
+  dither: view Bool
+) ret WavWriter {
+  var writer: WavWriter = {
+    path: "{path}"
+    channels: channels
+    sampleRate: sampleRate
+    format: format
+    noise: { enabled: dither }
+    block: {}
+  }
+  if channels < 1 or sampleRate < 1 {
+    writer.error = "a WAV file needs a channel and a sample rate"
+    ret writer
+  }
+  var pathZ: List(UInt8) = pathBytesZ(path: path)
+  unsafe {
+    writer.file = rae_audio_out_open(pathZ: pathZ.data)
+  }
+  if writer.file is 0 {
+    writer.error = "cannot write {path}"
+    ret writer
+  }
+  addWavHeader(
+    bytes: writer.block
+    format: format
+    channels: channels
+    sampleRate: sampleRate
+    dataBytes: 0
+  )
+  if not writeWavBlock(writer: writer) {
+    abandonWavWriter(writer: writer)
+    writer.error = "cannot write {path}"
+  }
+  ret writer
+}
+
+# The bytes in `writer.block`, appended to the file (and the block emptied)
+func writeWavBlock(writer: mod WavWriter) ret Bool {
+  var wrote: Int = 0
+  unsafe {
+    wrote = rae_audio_out_write(
+      file: writer.file
+      bytes: writer.block.data
+      count: writer.block.length()
+    )
+  }
+  let complete: Bool = wrote is writer.block.length()
+  writer.block.clear()
+  ret complete
+}
+
+# Append `frameCount` interleaved frames (frameCount * channels samples); false, with `error`
+# set, when the writer is closed, the data would not fit a WAV file or the disk refused
+func writeWavFrames(
+  writer: mod WavWriter
+  samples: view Buffer(Float)
+  frameCount: view Int
+) ret Bool {
+  if writer.file is 0 {
+    if writer.error.length() is 0 {
+      writer.error = "the WAV writer is closed"
+    }
+    ret false
+  }
+  if frameCount <= 0 {
+    ret true
+  }
+  let sampleCount: Int = frameCount * writer.channels
+  let bytes: Int = sampleCount * wavBytesPerSample(format: writer.format)
+  if writer.dataBytes + bytes > wavMaxDataBytes {
+    writer.error = "{writer.path} would be longer than a WAV file can be (4 GB)"
+    ret false
+  }
+  loop var i: Int = 0, i < sampleCount, ++i {
+    addWavSample(
+      bytes: writer.block
+      value: sampleAt(samples: samples, index: i)
+      format: writer.format
+      dither: writer.noise
+    )
+  }
+  if not writeWavBlock(writer: writer) {
+    writer.error = "cannot write {writer.path}"
+    ret false
+  }
+  writer.framesWritten = writer.framesWritten + frameCount
+  writer.dataBytes = writer.dataBytes + bytes
+  ret true
+}
+
+# A little-endian 32-bit value at `offset` in the open file
+func writeWavSize(writer: mod WavWriter, offset: view Int, value: view Int) ret Bool {
+  var seeked: Int = -1
+  unsafe {
+    seeked = rae_audio_out_seek(file: writer.file, offset: offset)
+  }
+  if seeked is not 0 {
+    ret false
+  }
+  addUInt32(bytes: writer.block, value: value)
+  ret writeWavBlock(writer: writer)
+}
+
+# Write the header's sizes and close the file; false (and the file deleted) when that failed
+func closeWavWriter(writer: mod WavWriter) ret Bool {
+  if writer.file is 0 {
+    ret false
+  }
+  let sized: Bool = writeWavSize(writer: writer, offset: 4, value: 36 + writer.dataBytes) and writeWavSize(
+    writer: writer
+    offset: 40
+    value: writer.dataBytes
+  )
+  var closed: Int = -1
+  unsafe {
+    closed = rae_audio_out_close(file: writer.file)
+  }
+  writer.file = 0
+  if not sized or closed is not 0 {
+    writer.error = "cannot finish {writer.path}"
+    removeWavFile(path: writer.path)
+    ret false
+  }
+  ret true
+}
+
+func removeWavFile(path: view String) {
+  var pathZ: List(UInt8) = pathBytesZ(path: path)
+  unsafe {
+    let removed: Int = rae_audio_remove_file(pathZ: pathZ.data)
+  }
+}
+
+# Stop without finishing: close the file and delete it (a canceled export leaves no file)
+func abandonWavWriter(writer: mod WavWriter) {
+  if writer.file is 0 {
+    ret
+  }
+  unsafe {
+    let closed: Int = rae_audio_out_close(file: writer.file)
+  }
+  writer.file = 0
+  removeWavFile(path: writer.path)
+}
+
+# A writer dropped while still open was never finished: its file is deleted
+func drop(this: mod WavWriter) {
+  abandonWavWriter(writer: this)
+}

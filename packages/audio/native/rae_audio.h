@@ -99,6 +99,13 @@ int64_t rae_audio_read_file(uint8_t* path_z, uint8_t* into, int64_t count);
 
 /* Write `count` bytes to a file (the capture WAV). 1 on success. */
 int64_t rae_audio_write_file(uint8_t* path_z, uint8_t* bytes, int64_t count);
+/* A file written in steps (audio/WavWriter): the handle is a FILE* as an integer, 0 for none;
+ * write answers the bytes written, seek, close and remove 0 when they worked */
+int64_t rae_audio_out_open(uint8_t* path_z);
+int64_t rae_audio_out_write(int64_t file, uint8_t* bytes, int64_t count);
+int64_t rae_audio_out_seek(int64_t file, int64_t offset);
+int64_t rae_audio_out_close(int64_t file);
+int64_t rae_audio_remove_file(uint8_t* path_z);
 
 /* Now Playing (MPNowPlayingInfoCenter) and the remote commands
  * (MPRemoteCommandCenter), on macOS and iOS; elsewhere set / enable answer 0.

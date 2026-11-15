@@ -609,6 +609,20 @@ ran.
 All C decoders are vendored in the package (`packages/audio/native/`) with
 their own license files (the copyright rule), behind the Rae API (§13 D1).
 
+WAV is also written in Rae (`audio/Sound`, `audio/WavWriter`), as 16-bit or
+24-bit PCM or 32-bit float (`WavFormat.pcm16`, `pcm24`, `float32`).
+`encodeWav` / `writeWavFile` take a whole `Buffer(Float)`; a `WavWriter`
+(`openWavWriter`, `writeWavFrames`, `closeWavWriter`) takes blocks of
+interleaved frames as a render or a recorder makes them, so a long export is
+never held in memory. Its header is written first with sizes of 0 and the sizes
+on close; `abandonWavWriter`, and dropping a writer that is still open, close
+and delete the file, so a canceled export leaves none. Integer samples are
+rounded half away from zero and clipped to the format's range (+1 is the
+largest sample, 1 - 2^-15 at 16 bits); TPDF dither (+/-1 step of triangular
+noise from a seeded generator, the same every run) is optional and off by
+default, so a file holds exactly the rounded samples. The file shims behind the
+writer (`rae_audio_out_*`) are one stdio call each.
+
 ### 7.4 Resampling
 
 A sound at 44.1 kHz on a 48 kHz device, a varispeed play, a pitch change in a
