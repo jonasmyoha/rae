@@ -1,14 +1,15 @@
 # BackdropBlur (ui/BackdropComponents, lib/Gpu2dCanvasBackdrop.rae): three frosted tiles over black
 # and white stripes, from the scene alone, through the real pipeline. The frame is written as a BMP
-# (RAE_GPU2D_SCREENSHOT, set here when it is not) and read back: across a tile the stripes are
-# blurred to an even gray, outside one they stay black and white, and the three tiles of one layer
-# took one blurred copy of the frame. Then the copy across frames: the stripes stand still but for
-# one move at frame 10, and a box moves on top of the tiles every frame. A frame keeps the last
-# one's copy when nothing under the tiles changed, so only the first two frames (no signature yet)
-# and frame 10 blur. Exit 0 when all of that holds.
+# (RAE_GPU2D_SCREENSHOT; a file in the temp folder when it is not set) and read back: across a tile
+# the stripes are blurred to an even gray, outside one they stay black and white, and the three
+# tiles of one layer took one blurred copy of the frame. Then the copy across frames: the stripes
+# stand still but for one move at frame 10, and a box moves on top of the tiles every frame. A
+# frame keeps the last one's copy when nothing under the tiles changed, so only the first two
+# frames (no signature yet) and frame 10 blur. Exit 0 when all of that holds.
 #
-#   RAE_GPU2D_SCREENSHOT=/tmp/backdrop.bmp RAE_HEADLESS_FRAMES=20 \
-#     compiler/bin/rae run checks/backdropBlur/Main.rae
+#   compiler/bin/rae run checks/backdropBlur/Main.rae
+#
+# RAE_HEADLESS_FRAMES defaults to 20 here; both can be set to keep the picture somewhere else.
 import Gpu2d
 import Sys
 open app3d/UiShell
@@ -82,12 +83,19 @@ func spreadWidth(text: view String) ret Int {
 }
 
 func main() ret Int {
+  # The frame to read back, and a run that ends by itself: given, or set here before the window
+  # opens (the runtime reads both then), so `bash checks/run.sh` runs it as it is
   var shot: String = Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT")
   if shot.length() is 0 {
-    log(
-      "set RAE_GPU2D_SCREENSHOT and RAE_HEADLESS_FRAMES (checks/run.sh does): nothing to read back"
-    )
-    ret 1
+    var folder: String = Sys.getEnv(name: "TMPDIR")
+    if folder.length() is 0 {
+      folder = "/tmp"
+    }
+    shot = "{folder}/rae-backdropBlur.bmp"
+    let unusedShotSet: Bool = Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: shot)
+  }
+  if Sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() is 0 {
+    let unusedFramesSet: Bool = Sys.setEnv(name: "RAE_HEADLESS_FRAMES", value: "20")
   }
   Gpu2d.initWindow(width: designW, height: designH, title: "Backdrop blur check")
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
