@@ -5,6 +5,9 @@
 // of the JWS beyond StoreKit's own verification result, which is passed on as `verified`.
 import Foundation
 import StoreKit
+#if os(macOS)
+import AppKit
+#endif
 
 struct ProductJson: Encodable {
   let id: String
@@ -190,6 +193,24 @@ public func raeStoreKitProducts(_ ids: UnsafePointer<UInt8>?, _ length: Int64) -
   }
 }
 
+// product.purchase(), on macOS 15.2 and later confirmed in the app's key (or main, or first) window
+// when it has one: StoreKit refuses a Mac purchase with no window to show its sheet in
+// (invalidPresentationContext). Both run on the main actor, so the app's main thread must run its
+// event loop while a purchase waits.
+func raePurchase(_ product: Product) async throws -> Product.PurchaseResult {
+  #if os(macOS)
+  if #available(macOS 15.2, *) {
+    let window: NSWindow? = await MainActor.run {
+      NSApplication.shared.keyWindow ?? NSApplication.shared.mainWindow ?? NSApplication.shared.windows.first
+    }
+    if let window = window {
+      return try await product.purchase(confirmIn: window)
+    }
+  }
+  #endif
+  return try await product.purchase()
+}
+
 @_cdecl("rae_storekit_purchase")
 public func raeStoreKitPurchase(_ productId: UnsafePointer<UInt8>?, _ length: Int64) -> Int64 {
   let id = raeText(productId, length)
@@ -198,7 +219,7 @@ public func raeStoreKitPurchase(_ productId: UnsafePointer<UInt8>?, _ length: In
       guard let product = try await Product.products(for: [id]).first else {
         return RaeStore.encode(PurchaseJson(outcome: "failed", transactions: [], error: "no product \(id)"))
       }
-      switch try await product.purchase() {
+      switch try await raePurchase(product) {
       case .success(let verification):
         return RaeStore.encode(PurchaseJson(
           outcome: "purchased", transactions: [RaeStore.transactionJson(verification)], error: ""))
@@ -226,21 +247,41 @@ public func raeStoreKitEntitlements() -> Int64 {
   }
 }
 
+// Whether StoreKit still lists the transaction as unfinished
+func raeUnfinished(_ transactionId: Int64) async -> Bool {
+  for await verification in Transaction.unfinished {
+    if Int64(bitPattern: verification.unsafePayloadValue.id) == transactionId { return true }
+  }
+  return false
+}
+
+// transaction.finish(), done when StoreKit no longer lists it as unfinished: finish() returns
+// before StoreKit's store has it (a consumable bought again in that moment came back as the same
+// transaction), and in StoreKit's test environment a finish was at times not kept at all, so it is
+// called again (it is safe to repeat) every 100 ms until the transaction is gone, for up to 2 s
 @_cdecl("rae_storekit_finish")
 public func raeStoreKitFinish(_ transactionId: Int64) -> Int64 {
   return RaeStore.shared.start {
-    if let transaction = RaeStore.shared.kept(transactionId) {
-      await transaction.finish()
-      return RaeStore.encode(FinishJson(finished: true, error: ""))
+    var found = RaeStore.shared.kept(transactionId)
+    if found == nil {
+      for await verification in Transaction.unfinished {
+        if Int64(bitPattern: verification.unsafePayloadValue.id) == transactionId {
+          found = verification.unsafePayloadValue
+          break
+        }
+      }
     }
-    for await verification in Transaction.unfinished {
-      let transaction = verification.unsafePayloadValue
-      if Int64(bitPattern: transaction.id) == transactionId {
-        await transaction.finish()
+    guard let transaction = found else {
+      return RaeStore.encode(FinishJson(finished: false, error: "no transaction \(transactionId)"))
+    }
+    for _ in 0..<20 {
+      await transaction.finish()
+      try? await Task.sleep(nanoseconds: 100_000_000)
+      if await !raeUnfinished(transactionId) {
         return RaeStore.encode(FinishJson(finished: true, error: ""))
       }
     }
-    return RaeStore.encode(FinishJson(finished: false, error: "no transaction \(transactionId)"))
+    return RaeStore.encode(FinishJson(finished: false, error: "StoreKit still lists transaction \(transactionId) as unfinished"))
   }
 }
 

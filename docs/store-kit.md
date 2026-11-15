@@ -40,7 +40,14 @@ it.
 - `StoreTransaction.jws` is the transaction's `jwsRepresentation`, the signed JWS the app sends
   its server. `verified` is StoreKit's own check on the device; a server checks the JWS itself.
 - Finish a transaction after the app delivered what was bought; an unfinished one comes back in
-  `Transaction.updates` at the next launch.
+  `Transaction.updates` at the next launch. A finish request is done when StoreKit no longer lists
+  the transaction as unfinished (the glue calls `finish()` again every 100 ms until then, for up
+  to 2 s): `finish()` returns before StoreKit's store has it, and a consumable bought again in
+  that moment came back as the same transaction.
+- On a Mac, StoreKit confirms a purchase in a window: from macOS 15.2 the glue passes the app's
+  key (or main, or first) window (`purchase(confirmIn:)`), and with none StoreKit answers
+  `invalidPresentationContext`. A purchase runs on the main actor, so the app's main thread must
+  keep running its event loop (a frame loop does) while it waits.
 - Call `listenForUpdates()` once at launch: purchases made on another device, renewals, refunds
   and approved Ask to Buy requests arrive there.
 
@@ -62,20 +69,32 @@ One lock guards the request table, the transactions seen (so `finish` can find o
 queue of updates.
 
 Not yet: an iOS app build compiling the Swift glue into the app (`tools/ios` compiles a package's
-C sources today), and the purchase test below.
+C sources today).
 
 ## Testing without an App Store account
 
 `testing/Products.storekit` is a StoreKit configuration file with two test products (a
 non-consumable `com.example.rae.unlock`, a consumable `com.example.rae.coins`). StoreKit serves
-products and purchases from such a file only to a signed app with a bundle id that runs in
-StoreKit's test environment: an Xcode scheme's StoreKit configuration, or an XCTest
-`SKTestSession` in a test hosted by an app.
+products and purchases from such a file only to an app in its test environment, which on macOS is
+a test hosted by an app (found 2026-11-15, macOS 27, Xcode 27): a program run by `rae run` has no
+bundle id and StoreKit answers `invalidApp`; `SKTestSession` outside XCTest aborts (it loads XCTest
+from `/System/Library/Frameworks`), and in `swift test` or an `xcodebuild test` of a package (a
+test no app hosts) StoreKit refuses to save the configuration (`SKInternalErrorDomain` 4).
 
-Found on 2026-11-15 (macOS 27, Xcode 27): a program run by `rae run` has no bundle id, and StoreKit
-answers `invalidApp`; `checks/storeKit` checks that a request starts, finishes and is read back
-that way. `SKTestSession` outside a test aborts (it loads XCTest from
-`/System/Library/Frameworks`); with `DYLD_FRAMEWORK_PATH` pointing at Xcode's frameworks it starts,
-but StoreKit refuses to save the configuration (`SKInternalErrorDomain` 4) for a plain app, for
-`swift test` and for `xcodebuild test` of a package's tests (a test not hosted by an app). The
-purchase test therefore needs an app-hosted test, queued in QUEUE.md.
+So there are two checks:
+
+- `checks/storeKit` (in `checks/run.sh`): on a Mac, a products, an entitlements and a finish
+  request start, finish and are read back, and the updates listener starts. No purchase.
+- `bash checks/storeKitPurchase/run.sh` (a Mac with Xcode, about 20 s): the purchase test. It
+  compiles `checks/storeKitPurchase/Purchase.rae` (which takes the package by its tag) with the
+  Rae runtime into a static library, its `main` renamed `rae_program_main`, and writes an Xcode
+  project (`xcode/genProject.py`): a host app (`xcode/HostMain.swift`, linking that library and the
+  package's dylib, with one window for StoreKit to confirm in) and a unit test hosted by it
+  (`xcode/PurchaseTests.swift`). `xcodebuild test` runs the test: it starts `SKTestSession` over
+  `testing/Products.storekit` with the dialogs off, then calls the Rae program, which loads both
+  products, buys the non-consumable (purchased, a JWS of three base64url parts whose payload names
+  the product), finds it among the current entitlements, finishes it and buys the consumable
+  twice (two transactions).
+
+The iOS Simulator run waits for the glue's iOS build (QUEUE.md: the Swift glue in an iOS app
+build).
