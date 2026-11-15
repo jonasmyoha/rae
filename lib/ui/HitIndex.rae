@@ -1,0 +1,115 @@
+# ui/HitIndex — where the clickable nodes are, so a hit test, a marquee or a snap looks only at
+# the few near a point instead of walking the whole tree (ui/inputSystem/HitIndexQuery builds and
+# asks it). Each entry is a node with an OnClick, in hit order (0 is the topmost, the node the
+# walk would find first). Its rectangle is kept in its SPACE: the coordinates of its nearest
+# ancestor with a Camera2D (or the screen when it has none), so a camera that pans or zooms moves
+# no entry. Each space is a grid of square cells keyed by column and row; an entry is listed in
+# every cell its rectangle covers. A rotated node, one with no rectangle yet, or one that would
+# cover more than hitIndexMaxCells cells is LOOSE: tested on every query.
+import Math
+open ecs/Entity
+open collections/IntMap
+
+const hitIndexMaxCells: Int = 64
+
+# Cell columns and rows stay within +-hitIndexCellRange (a key packs both into one Int)
+const hitIndexCellRange: Int = 1048576
+
+type HitEntry {
+  entityId: EntityId
+  space: Int
+  loose: Bool = false
+  left: Float = 0.0
+  top: Float = 0.0
+  right: Float = 0.0
+  bottom: Float = 0.0
+  column0: Int = 0
+  row0: Int = 0
+  column1: Int = -1
+  row1: Int = -1
+}
+
+type HitSpace {
+  # the node with the Camera2D (noEntity(): the screen)
+  rootEntityId: EntityId
+  cellSize: Float = 64.0
+  cells: IntMap(List(Int))
+}
+
+type HitIndex {
+  entries: List(HitEntry)
+  spaces: List(HitSpace)
+  loose: List(Int)
+  # the table generations the entries were made for (empty: never synced)
+  key: List(Int)
+  # for a check: the cell lists the last sync changed, and how many syncs built everything again
+  cellUpdates: Int = 0
+  rebuilds: Int = 0
+}
+
+func emptyHitIndex() ret HitIndex {
+  ret HitIndex { entries: {}, spaces: {}, loose: {}, key: {} }
+}
+
+# One Int for a cell: the column in the high bits, and in the low bits the row mixed with the
+# column. IntMap finds a key's slot from its low bits, so a key with only the row there put every
+# column of a row on one chain (a 50,000-node index took 320 ms to build). The column can be read
+# back from the high bits, so two cells never share a key.
+func hitCellKey(column: view Int, row: view Int) ret Int {
+  let span: Int = hitIndexCellRange * 2
+  let shiftedColumn: Int = column + hitIndexCellRange
+  ret shiftedColumn * span + ((row + hitIndexCellRange) bitxor ((shiftedColumn * 40503) % span))
+}
+
+func hitCellOf(value: view Float, cellSize: view Float) ret Int {
+  let cell: Float = value / cellSize
+  if cell < 0.0 {
+    let whole: Int = cell as Int
+    if whole as Float is cell {
+      ret Math.max(a: -hitIndexCellRange + 1, b: whole)
+    }
+    ret Math.max(a: -hitIndexCellRange + 1, b: whole - 1)
+  }
+  ret Math.min(a: hitIndexCellRange - 1, b: cell as Int)
+}
+
+# Entry `index` added to (`add`) or taken from the cells of its rectangle; the cell lists changed
+func hitCellsUpdate(
+  space: mod HitSpace
+  entry: view HitEntry
+  index: view Int
+  add: view Bool
+) ret Int {
+  var changed: Int = 0
+  loop var row: Int = entry.row0, row <= entry.row1, ++row {
+    loop var column: Int = entry.column0, column <= entry.column1, ++column {
+      let key: Int = hitCellKey(column: column, row: row)
+      if add {
+        if let cell: mod List(Int) = space.cells.modGet(key: key) {
+          cell.add(value: index)
+        } else {
+          space.cells.set(k: key, value: List(Int) { index })
+        }
+      } else if let cell: mod List(Int) = space.cells.modGet(key: key) {
+        loop var i: Int = 0, i < cell.length, ++i {
+          if cell.copyAtDefault(index: i) is index {
+            cell.swapRemove(index: i)
+            break
+          }
+        }
+      }
+      changed = changed + 1
+    }
+  }
+  ret changed
+}
+
+# The cells `entry`'s rectangle covers in `space`, written into it; false when it would cover
+# more than hitIndexMaxCells (it is loose then)
+func hitPlaceInCells(entry: mod HitEntry, cellSize: view Float) ret Bool {
+  entry.column0 = hitCellOf(value: entry.left, cellSize: cellSize)
+  entry.column1 = hitCellOf(value: entry.right, cellSize: cellSize)
+  entry.row0 = hitCellOf(value: entry.top, cellSize: cellSize)
+  entry.row1 = hitCellOf(value: entry.bottom, cellSize: cellSize)
+  ret (entry.column1 - entry.column0 + 1) * (entry.row1 - entry.row0 + 1) <= hitIndexMaxCells
+}

@@ -1174,3 +1174,27 @@ the node that carries the `Camera2D`:
 Case 1482 checks the windowing, the recycling, the read-back, the levels and the budget;
 `checks/uiPlaneView` mounts 50,000 mini timelines (in 20 ms on an M-series Mac, at most 1,146
 entities, the systems at most 0.54 ms a frame from zoomed in to everything on screen).
+
+## 37. Hit tests, marquees and snapping on a big canvas
+
+The hit test (`uiHitTest`, and the pointer's in `updateUiInput`) used to walk every node of every
+root: 400 us a test with 50,000 nodes. It now asks ui/HitIndex, a grid of the clickable nodes
+(those with an `OnClick`) that `updateUiInput` keeps current once a frame
+(lib/ui/inputSystem/HitIndexQuery `hitIndexSync`):
+
+- Each node's rectangle is kept in the coordinates of its nearest ancestor with a `Camera2D` (the
+  screen when it has none), so a camera that pans or zooms moves nothing in the grid.
+- A frame where none of the tables the hit test reads changed costs nothing. When they changed,
+  the tree is walked once, in the hit test's order and with its rules; when the clickable nodes
+  are the same, only a node whose cells changed is moved in the grid (a moved node updates its
+  own cells), and otherwise the grid is built again.
+- A query looks at the cells around the point and tests those nodes exactly as the walk does, so
+  the answer is the walk's. When a table changed after the sync, `uiHitTest` walks instead.
+- `hitIndexInRect(world, uiSystems, left, top, right, bottom)` gives the clickable nodes in a
+  rectangle (a marquee), topmost first; `hitIndexNearestEdgeX` / `hitIndexNearestEdgeY` give the
+  nearest node edge to a line within a distance (snapping), leaving out the node being dragged.
+
+Case 1484 compares the index with the walk on a random scene (a camera canvas, a screen toolbar,
+nested, inactive and rotated nodes), with the marquee and the edges against testing every node;
+`checks/uiHitIndex` times 50,000 nodes: 0.11 us a hit test (the walk 390 us), built in 3.3 ms, a
+panned camera's frame 1.4 ms (the walk to see what changed), an idle frame 0.2 us.

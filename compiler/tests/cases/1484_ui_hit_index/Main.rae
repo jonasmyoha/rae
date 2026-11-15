@@ -1,0 +1,381 @@
+# The hit index (ui/HitIndex, ui/inputSystem/HitIndexQuery) gives the same hits as the walk of the
+# whole tree, on a random scene: a Camera2D canvas of cards (some with a button inside, some
+# inactive, some nested in a plain box), a screen-space toolbar over it, a clickable background,
+# and a
+# rotated button (loose: tested on every query). Thousands of random points, precise and with a
+# touch-sized target.
+# Then: a card moved updates only its own cells; the camera panned updates none; a card switched
+# off builds the index again; the marquee and the nearest edges agree with a brute-force search.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/HitIndex
+open ui/UiSystems
+open ui/Transform
+open ui/cameraSystem/CameraSystem
+open ui/inputSystem/HitIndexQuery
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+
+type Dice {
+  state: Int
+}
+
+# A number from 0 to under `range`
+func roll(dice: mod Dice, range: view Float) ret Float {
+  dice.state = (dice.state * 1103515245 + 12345) % 2147483648
+  ret ((dice.state / 65536) % 32768) as Float / 32768.0 * range
+}
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  clickable: view Bool
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  if clickable {
+    world.onClicks.componentSet(
+      entityId: entityId
+      data: { actionId: "click", actionIdDouble: "", actionIdTriple: "" }
+    )
+  }
+  if not isNone(this: parent) {
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: parent
+    )
+  }
+  ret entityId
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  hitIndexSync(world: world, uiSystems: uiSystems)
+}
+
+# Points where the index and the walk disagree, out of `count` random ones
+func compare(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  dice: mod Dice
+  count: view Int
+) ret Int {
+  var wrong: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let x: Float = roll(dice: dice, range: 900.0) - 50.0
+    let y: Float = roll(dice: dice, range: 700.0) - 50.0
+    loop let targetSize: Float in List(Float) { 0.0, 44.0 } {
+      let walked: EntityId = uiHitTestWalk(
+        world: world
+        uiSystems: uiSystems
+        x: x
+        y: y
+        targetSize: targetSize
+      )
+      let indexed: EntityId = hitIndexTest(
+        world: world
+        uiSystems: uiSystems
+        x: x
+        y: y
+        targetSize: targetSize
+      )
+      if walked is not indexed {
+        wrong = wrong + 1
+      }
+    }
+  }
+  ret wrong
+}
+
+# The clickable nodes overlapping a rectangle, by testing every one
+func bruteInRect(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+) ret List(EntityId) {
+  var hits: List(EntityId) = {}
+  loop let found: view HitFound in hitCollectAll(world: world, uiSystems: uiSystems) {
+    if let rect: WorldRect = hitScreenRect(
+      world: world
+      uiSystems: uiSystems
+      entityId: found.entityId
+    ) {
+      if rect.x <= right and rect.x + rect.w >= left and rect.y <= bottom and rect.y + rect.h >= top {
+        hits.add(value: found.entityId)
+      }
+    }
+  }
+  ret hits
+}
+
+func main() ret Int {
+  var dice: Dice = { state: 20261115 }
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: noEntity()
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+    clickable: false
+  )
+  # a clickable background
+  let unusedBackground: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: page
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+    clickable: true
+  )
+  let canvas: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: page
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+    clickable: false
+  )
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 0.7, offsetX: 30.0, offsetY: -20.0 })
+  var cards: List(EntityId) = {}
+  loop var i: Int = 0, i < 400, ++i {
+    var parent: EntityId = canvas
+    if i % 7 is 3 {
+      parent = node(
+        world: world
+        uiSystems: uiSystems
+        parent: canvas
+        x: roll(dice: dice, range: 300.0)
+        y: roll(dice: dice, range: 300.0)
+        w: 400.0
+        h: 400.0
+        clickable: false
+      )
+    }
+    let card: EntityId = node(
+      world: world
+      uiSystems: uiSystems
+      parent: parent
+      x: roll(dice: dice, range: 1100.0)
+      y: roll(dice: dice, range: 900.0)
+      w: 20.0 + roll(dice: dice, range: 100.0)
+      h: 20.0 + roll(dice: dice, range: 60.0)
+      clickable: true
+    )
+    if i % 3 is 0 {
+      let unusedButton: EntityId = node(
+        world: world
+        uiSystems: uiSystems
+        parent: card
+        x: 4.0
+        y: 4.0
+        w: 12.0
+        h: 12.0
+        clickable: true
+      )
+    }
+    if i % 11 is 5 {
+      world.actives.componentSet(entityId: card, data: { value: false })
+    }
+    cards.add(value: card)
+  }
+  let toolbar: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: page
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 40.0
+    clickable: false
+  )
+  loop var i: Int = 0, i < 12, ++i {
+    let unusedTool: EntityId = node(
+      world: world
+      uiSystems: uiSystems
+      parent: toolbar
+      x: (i as Float) * 64.0 + 4.0
+      y: 4.0
+      w: 56.0
+      h: 32.0
+      clickable: true
+    )
+  }
+  let rotated: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: toolbar
+    x: 300.0
+    y: 200.0
+    w: 120.0
+    h: 60.0
+    clickable: true
+  )
+  var turn: TransformFx = defaultTransformFx()
+  turn.rotation = 0.3
+  world.transforms.componentSet(entityId: rotated, data: turn)
+  frame(world: world, uiSystems: uiSystems)
+  let index: view HitIndex = uiSystems.hitIndex
+  log(
+    "{index.entries.length} clickable nodes in {index.spaces.length} spaces, {index.loose.length} loose; current {hitIndexCurrent(
+      world: world
+      uiSystems: uiSystems
+    )}"
+  )
+  log("random points, wrong hits: {compare(
+    world: world
+    uiSystems: uiSystems
+    dice: dice
+    count: 3000
+  )}")
+  # a card moved: only its cells change
+  let rebuildsBefore: Int = uiSystems.hitIndex.rebuilds
+  let moved: EntityId = cards.copyAtDefault(index: 10)
+  world.rects.componentMod(entityId: moved).position.x = 900.0
+  frame(world: world, uiSystems: uiSystems)
+  log("a card moved: {uiSystems.hitIndex.cellUpdates} cell lists changed, built again {uiSystems.hitIndex.rebuilds is not rebuildsBefore}, wrong hits {compare(
+    world: world
+    uiSystems: uiSystems
+    dice: dice
+    count: 1000
+  )}")
+  # the camera panned and zoomed: no cell changes
+  world.cameras.componentSet(
+    entityId: canvas
+    data: { zoom: 1.3, offsetX: -200.0, offsetY: -150.0 }
+  )
+  frame(world: world, uiSystems: uiSystems)
+  log("the camera moved: {uiSystems.hitIndex.cellUpdates} cell lists changed, built again {uiSystems.hitIndex.rebuilds is not rebuildsBefore}, wrong hits {compare(
+    world: world
+    uiSystems: uiSystems
+    dice: dice
+    count: 1000
+  )}")
+  # nothing changed: the sync does nothing
+  frame(world: world, uiSystems: uiSystems)
+  log("an idle frame: {uiSystems.hitIndex.cellUpdates} cell lists changed")
+  # a card switched off: the nodes changed, the index is built again
+  world.actives.componentSet(entityId: cards.copyAtDefault(index: 20), data: { value: false })
+  frame(world: world, uiSystems: uiSystems)
+  log("a card switched off: built again {uiSystems.hitIndex.rebuilds is not rebuildsBefore}, wrong hits {compare(
+    world: world
+    uiSystems: uiSystems
+    dice: dice
+    count: 1000
+  )}")
+  # stale (a table changed after the sync): uiHitTest walks, and still agrees
+  world.rects.componentMod(entityId: moved).position.x = 100.0
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("before the sync the index is current: {hitIndexCurrent(world: world, uiSystems: uiSystems)}")
+  hitIndexSync(world: world, uiSystems: uiSystems)
+  # marquees, against testing every node
+  var marqueeWrong: Int = 0
+  var marqueeHits: Int = 0
+  loop var i: Int = 0, i < 200, ++i {
+    let left: Float = roll(dice: dice, range: 800.0)
+    let top: Float = roll(dice: dice, range: 600.0)
+    let right: Float = left + roll(dice: dice, range: 200.0)
+    let bottom: Float = top + roll(dice: dice, range: 150.0)
+    let indexed: List(EntityId) = hitIndexInRect(
+      world: world
+      uiSystems: uiSystems
+      left: left
+      top: top
+      right: right
+      bottom: bottom
+    )
+    let brute: List(EntityId) = bruteInRect(
+      world: world
+      uiSystems: uiSystems
+      left: left
+      top: top
+      right: right
+      bottom: bottom
+    )
+    marqueeHits = marqueeHits + indexed.length
+    if indexed.length is not brute.length {
+      marqueeWrong = marqueeWrong + 1
+    } else {
+      loop var j: Int = 0, j < brute.length, ++j {
+        if brute.copyAtDefault(index: j) is not indexed.copyAtDefault(index: j) {
+          marqueeWrong = marqueeWrong + 1
+          break
+        }
+      }
+    }
+  }
+  log("marquees: {marqueeWrong} of 200 differ ({marqueeHits} nodes found)")
+  # nearest edges, against every node's edges
+  var edgeWrong: Int = 0
+  var edgesFound: Int = 0
+  loop var i: Int = 0, i < 300, ++i {
+    let x: Float = roll(dice: dice, range: 800.0)
+    let top: Float = roll(dice: dice, range: 500.0)
+    let bottom: Float = top + 100.0
+    var brute: Float = -1.0
+    var bruteGap: Float = 8.0
+    loop let found: view HitFound in hitCollectAll(world: world, uiSystems: uiSystems) {
+      if let rect: WorldRect = hitScreenRect(
+        world: world
+        uiSystems: uiSystems
+        entityId: found.entityId
+      ) {
+        if rect.y <= bottom and rect.y + rect.h >= top {
+          loop let edge: Float in List(Float) { rect.x, rect.x + rect.w } {
+            if Math.abs(value: edge - x) <= bruteGap {
+              bruteGap = Math.abs(value: edge - x)
+              brute = edge
+            }
+          }
+        }
+      }
+    }
+    var indexed: Float = -1.0
+    if let edge: Float = hitIndexNearestEdgeX(
+      world: world
+      uiSystems: uiSystems
+      x: x
+      top: top
+      bottom: bottom
+      distance: 8.0
+      excludedEntityId: noEntity()
+    ) {
+      indexed = edge
+      edgesFound = edgesFound + 1
+    }
+    if Math.abs(value: Math.abs(value: indexed - x) - Math.abs(value: brute - x)) > 0.0001 {
+      edgeWrong = edgeWrong + 1
+    }
+  }
+  log("nearest edges: {edgeWrong} of 300 differ ({edgesFound} found)")
+  ret 0
+}

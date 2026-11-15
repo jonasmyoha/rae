@@ -19,6 +19,7 @@ open ui/animationSystem/AnimationRules
 open ui/listMotionSystem/ListMotionRules
 open ui/animationSystem/AnimationTracks
 open ecs/ComponentTable
+open ui/HitIndex
 
 # layoutSystem's output: measured sizes, the font measure of Hug text leaves,
 # the computed rects, and the per-subtree layout scale.
@@ -223,6 +224,8 @@ type UiSystems {
   button: ButtonSystem
   textField: TextFieldSystem
   listRows: ListRowSystem
+  # where the clickable nodes are (ui/HitIndex, kept by ui/inputSystem/HitIndexQuery)
+  hitIndex: HitIndex
 }
 
 func createUiSystems() ret UiSystems {
@@ -268,6 +271,7 @@ func createUiSystems() ret UiSystems {
       rowsBound: ComponentTable.create(ListRowBound)
       listsSeen: ComponentTable.create(ListSyncSeen)
     }
+    hitIndex: emptyHitIndex()
     textField: TextFieldSystem {
       caretLineEntityId: noEntity()
       caretVisible: false

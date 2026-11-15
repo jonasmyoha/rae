@@ -1,0 +1,220 @@
+# The hit test with 50,000 nodes (ui/HitIndex): 12,500 mini timelines of 4 clickable nodes each (a
+# box, a header, two lanes), 240 x 80 with gaps of 40 and 30, under a Camera2D, as the media
+# editor's canvas prototype measured the walk (951 us a test at 50,000). Prints the time a hit test
+# takes with the index and with the walk, and what keeping the index costs: built, an idle frame,
+# a panned camera, one node moved. Needs no window:
+#
+#   compiler/bin/rae run checks/uiHitIndex/Main.rae
+#
+# RAE_CANVAS_COUNT=N mini timelines for another size. Exit 0 when a hit test is under 5 us and
+# the two agree.
+import Math
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/HitIndex
+open ui/UiSystems
+open ui/Transform
+open ui/cameraSystem/CameraSystem
+open ui/inputSystem/HitIndexQuery
+open ui/inputSystem/InputSystem
+open ui/layoutSystem/LayoutSystem
+
+const hitBoundUs: Float64 = 5.0
+
+const tests: Int = 20000
+
+type Dice {
+  state: Int
+}
+
+func roll(dice: mod Dice, range: view Float) ret Float {
+  dice.state = (dice.state * 1103515245 + 12345) % 2147483648
+  ret ((dice.state / 65536) % 32768) as Float / 32768.0 * range
+}
+
+func seconds() ret Float64 {
+  ret (nowNs() as Float64) / 1000000000.0
+}
+
+# `value` (seconds) in microseconds, two decimals
+func us(value: view Float64) ret String {
+  let hundredths: Int = (value * 100000000.0) as Int
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  world.onClicks.componentSet(
+    entityId: entityId
+    data: { actionId: "click", actionIdDouble: "", actionIdTriple: "" }
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: entityId
+    parent: parent
+  )
+  ret entityId
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+# The time of a sync (seconds)
+func timedSync(world: mod UiWorld, uiSystems: mod UiSystems) ret Float64 {
+  let start: Float64 = seconds()
+  hitIndexSync(world: world, uiSystems: uiSystems)
+  ret seconds() - start
+}
+
+func main() ret Int {
+  var count: Int = Sys.getEnv(name: "RAE_CANVAS_COUNT").toInt()
+  if count <= 0 {
+    count = 12500
+  }
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 1280.0
+  world.layoutH = 800.0
+  let canvas: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: canvas
+    data: { position: { x: 0.0, y: 0.0 }, size: { x: 1280.0, y: 800.0 } }
+  )
+  let columns: Int = Math.max(a: 1, b: Math.sqrt(x: (count as Float) * 3.0) as Int)
+  var lanes: List(EntityId) = {}
+  loop var i: Int = 0, i < count, ++i {
+    let mini: EntityId = node(
+      world: world
+      uiSystems: uiSystems
+      parent: canvas
+      x: ((i % columns) as Float) * 280.0
+      y: ((i / columns) as Float) * 110.0
+      w: 240.0
+      h: 80.0
+    )
+    let unusedHeader: EntityId = node(
+      world: world
+      uiSystems: uiSystems
+      parent: mini
+      x: 0.0
+      y: 0.0
+      w: 240.0
+      h: 20.0
+    )
+    lanes.add(value: node(
+      world: world
+      uiSystems: uiSystems
+      parent: mini
+      x: 6.0
+      y: 26.0
+      w: 228.0
+      h: 22.0
+    ))
+    let unusedLaneB: EntityId = node(
+      world: world
+      uiSystems: uiSystems
+      parent: mini
+      x: 6.0
+      y: 52.0
+      w: 160.0
+      h: 22.0
+    )
+  }
+  let rows: Int = (count + columns - 1) / columns
+  let centerX: Float = (columns as Float) * 140.0
+  let centerY: Float = (rows as Float) * 55.0
+  world.cameras.componentSet(
+    entityId: canvas
+    data: { zoom: 1.0, offsetX: 640.0 - centerX, offsetY: 400.0 - centerY }
+  )
+  place(world: world, uiSystems: uiSystems)
+  let built: Float64 = timedSync(world: world, uiSystems: uiSystems)
+  let idle: Float64 = timedSync(world: world, uiSystems: uiSystems)
+  world.cameras.componentSet(
+    entityId: canvas
+    data: { zoom: 1.0, offsetX: 600.0 - centerX, offsetY: 380.0 - centerY }
+  )
+  place(world: world, uiSystems: uiSystems)
+  let panned: Float64 = timedSync(world: world, uiSystems: uiSystems)
+  world.rects.componentMod(entityId: lanes.copyAtDefault(index: count / 2)).position.x = 400.0
+  place(world: world, uiSystems: uiSystems)
+  let moved: Float64 = timedSync(world: world, uiSystems: uiSystems)
+  let movedCells: Int = uiSystems.hitIndex.cellUpdates
+  # the hit tests: random points on the screen, with the index and with the walk
+  var dice: Dice = { state: 7 }
+  var xs: List(Float) = List.create(Float, cap: tests)
+  var ys: List(Float) = List.create(Float, cap: tests)
+  loop var i: Int = 0, i < tests, ++i {
+    xs.add(value: roll(dice: dice, range: 1280.0))
+    ys.add(value: roll(dice: dice, range: 800.0))
+  }
+  var indexed: List(EntityId) = List.create(EntityId, cap: tests)
+  let indexStart: Float64 = seconds()
+  loop var i: Int = 0, i < tests, ++i {
+    indexed.add(value: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: xs.copyAtDefault(index: i)
+      y: ys.copyAtDefault(index: i)
+    ))
+  }
+  let indexTime: Float64 = (seconds() - indexStart) / (tests as Float64)
+  let walkTests: Int = 200
+  var wrong: Int = 0
+  var hits: Int = 0
+  let walkStart: Float64 = seconds()
+  loop var i: Int = 0, i < walkTests, ++i {
+    let walked: EntityId = uiHitTestWalk(
+      world: world
+      uiSystems: uiSystems
+      x: xs.copyAtDefault(index: i)
+      y: ys.copyAtDefault(index: i)
+      targetSize: 0.0
+    )
+    if walked is not indexed.copyAtDefault(index: i) {
+      wrong = wrong + 1
+    }
+    if not isNone(this: walked) {
+      hits = hits + 1
+    }
+  }
+  let walkTime: Float64 = (seconds() - walkStart) / (walkTests as Float64)
+  let indexText: String = us(value: indexTime)
+  let walkText: String = us(value: walkTime)
+  log(
+    "{count * 4} nodes: a hit test {indexText} us with the index, {walkText} us walking ({wrong} of {walkTests} differ, {hits} hit something)"
+  )
+  let builtText: String = us(value: built)
+  let idleText: String = us(value: idle)
+  let pannedText: String = us(value: panned)
+  let movedText: String = us(value: moved)
+  log(
+    "  keeping it: built {builtText} us, an idle frame {idleText} us, a panned camera {pannedText} us, one node moved {movedText} us ({movedCells} cell lists changed)"
+  )
+  if indexTime * 1000000.0 >= hitBoundUs or wrong > 0 {
+    log("UI HIT INDEX FAILED")
+    ret 1
+  }
+  log("UI HIT INDEX OK")
+  ret 0
+}

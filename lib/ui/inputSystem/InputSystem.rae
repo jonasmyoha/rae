@@ -35,6 +35,7 @@ open ui/buttonSystem/ButtonSystem
 open ui/InputKind
 open ui/ScrollDrag
 open ui/Transform
+open ui/inputSystem/HitIndexQuery
 import Device
 
 type UiPointerState {
@@ -273,8 +274,36 @@ func uiHitTest(
 }
 
 # The topmost clickable entity under (x, y), each grown to at least
-# `targetSize` on each side (0: the precise test)
+# `targetSize` on each side (0: the precise test). The hit index answers when it
+# is current (ui/inputSystem/HitIndexQuery; updateUiInput syncs it each frame),
+# looking only at the nodes near the point; otherwise the tree is walked.
 func uiHitTestTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret EntityId {
+  if hitIndexCurrent(world: world, uiSystems: uiSystems) {
+    ret hitIndexTest(
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+      targetSize: targetSize
+    )
+  }
+  ret uiHitTestWalk(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSize
+  )
+}
+
+# The hit test by walking every root's tree in reverse paint order
+func uiHitTestWalk(
   world: view UiWorld
   uiSystems: view UiSystems
   x: view Float
@@ -658,6 +687,8 @@ func stepUiInput(
   # Recycle last frame's action channel: frameAdvance swaps in the empty spare so
   # this frame's input produces into a clean queue (the old clearUiActions).
   frameAdvance(this: world.uiActions)
+  # the hit index made current for this frame's hit tests
+  hitIndexSync(world: world, uiSystems: uiSystems)
   # Clear last frame's per-entity marks before recomputing (previous hovered +
   # pressed are the only two that can carry an Interaction).
   buttonInteractionClear(world: world, uiSystems: uiSystems, entityId: input.hoveredEntityId)
