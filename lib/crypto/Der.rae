@@ -1,0 +1,427 @@
+# crypto/Der — ASN.1 DER, as certificates (crypto/X509) and ECDSA signatures (crypto/P256) are
+# written: reading an element (its tag, where its value is), the elements inside a SEQUENCE, an
+# INTEGER, an OBJECT IDENTIFIER, a BIT STRING, a time; and writing them back. Only DER is read:
+# one-byte tags, lengths in their shortest form (no indefinite length), integers with no needless
+# leading byte. Anything else is refused (none), as a signature checker must: a second encoding of
+# the same value is how a signature gets accepted twice.
+open crypto/CryptoBytes
+
+const derBoolean: Int = 1
+
+const derInteger: Int = 2
+
+const derBitString: Int = 3
+
+const derOctetString: Int = 4
+
+const derNull: Int = 5
+
+const derOid: Int = 6
+
+const derUtf8String: Int = 12
+
+const derPrintableString: Int = 19
+
+const derUtcTime: Int = 23
+
+const derGeneralizedTime: Int = 24
+
+const derSequence: Int = 48
+
+const derSet: Int = 49
+
+# An element: its tag, where it starts (its tag byte), where its value starts and ends
+type DerItem {
+  tag: Int
+  start: Int
+  valueStart: Int
+  valueEnd: Int
+}
+
+# The element at `at` in `bytes`, wholly inside `end`; none when it is not DER
+func derRead(bytes: view List(UInt8), at: view Int, end: view Int) ret opt DerItem {
+  if at + 2 > end or end > bytes.length {
+    ret none
+  }
+  let tag: Int = bytes.copyAtDefault(index: at) as Int
+  # a multi-byte tag (low five bits all set) is not used by what this reads
+  if (tag bitand 31) is 31 {
+    ret none
+  }
+  let first: Int = bytes.copyAtDefault(index: at + 1) as Int
+  var length: Int = 0
+  var valueStart: Int = at + 2
+  if first < 128 {
+    length = first
+  } else {
+    let count: Int = first - 128
+    # indefinite (0) and lengths past four bytes are not DER here
+    if count is 0 or count > 4 or at + 2 + count > end {
+      ret none
+    }
+    loop var i: Int = 0, i < count, ++i {
+      length = length * 256 + (bytes.copyAtDefault(index: at + 2 + i) as Int)
+    }
+    # the shortest form: no leading zero byte, and a long form only from 128 on
+    if (bytes.copyAtDefault(index: at + 2) as Int) is 0 or length < 128 {
+      ret none
+    }
+    valueStart = at + 2 + count
+  }
+  if valueStart + length > end {
+    ret none
+  }
+  ret DerItem { tag: tag, start: at, valueStart: valueStart, valueEnd: valueStart + length }
+}
+
+# The whole of `bytes` is one element of tag `tag`
+func derReadWhole(bytes: view List(UInt8), tag: view Int) ret opt DerItem {
+  if let item: DerItem = derRead(bytes: bytes, at: 0, end: bytes.length) {
+    if item.tag is tag and item.valueEnd is bytes.length {
+      ret item
+    }
+  }
+  ret none
+}
+
+# The elements inside `item` (a SEQUENCE or a SET, or any constructed element), filling it exactly
+func derChildren(bytes: view List(UInt8), item: view DerItem) ret opt List(DerItem) {
+  var children: List(DerItem) = {}
+  var at: Int = item.valueStart
+  loop at < item.valueEnd {
+    if let child: DerItem = derRead(bytes: bytes, at: at, end: item.valueEnd) {
+      children.add(value: child)
+      at = child.valueEnd
+    } else {
+      ret none
+    }
+  }
+  ret children
+}
+
+# The bytes of `item`'s value, and of the whole element
+func derValue(bytes: view List(UInt8), item: view DerItem) ret List(UInt8) {
+  var value: List(UInt8) = List.create(UInt8, cap: item.valueEnd - item.valueStart)
+  loop var i: Int = item.valueStart, i < item.valueEnd, ++i {
+    value.add(value: bytes.copyAtDefault(index: i))
+  }
+  ret value
+}
+
+func derElement(bytes: view List(UInt8), item: view DerItem) ret List(UInt8) {
+  var element: List(UInt8) = List.create(UInt8, cap: item.valueEnd - item.start)
+  loop var i: Int = item.start, i < item.valueEnd, ++i {
+    element.add(value: bytes.copyAtDefault(index: i))
+  }
+  ret element
+}
+
+# A non-negative INTEGER's magnitude (big-endian, no sign byte); none for a negative one or one
+# not in its shortest form
+func derPositiveInteger(bytes: view List(UInt8), item: view DerItem) ret opt List(UInt8) {
+  if item.tag is not derInteger or item.valueEnd is item.valueStart {
+    ret none
+  }
+  let first: Int = bytes.copyAtDefault(index: item.valueStart) as Int
+  if first >= 128 {
+    ret none
+  }
+  var start: Int = item.valueStart
+  if first is 0 and item.valueEnd - item.valueStart > 1 {
+    # a leading zero only to keep the next byte's top bit from meaning negative
+    if (bytes.copyAtDefault(index: item.valueStart + 1) as Int) < 128 {
+      ret none
+    }
+    start = start + 1
+  }
+  var magnitude: List(UInt8) = List.create(UInt8, cap: item.valueEnd - start)
+  loop var i: Int = start, i < item.valueEnd, ++i {
+    magnitude.add(value: bytes.copyAtDefault(index: i))
+  }
+  ret magnitude
+}
+
+# A small INTEGER (up to 7 bytes, non-negative)
+func derSmallInteger(bytes: view List(UInt8), item: view DerItem) ret opt Int {
+  if let magnitude: List(UInt8) = derPositiveInteger(bytes: bytes, item: item) {
+    if magnitude.length > 7 {
+      ret none
+    }
+    var value: Int = 0
+    loop let byte: UInt8 in magnitude {
+      value = value * 256 + (byte as Int)
+    }
+    ret value
+  }
+  ret none
+}
+
+# An OBJECT IDENTIFIER as its dotted text ("1.2.840.10045.4.3.2")
+func derOidText(bytes: view List(UInt8), item: view DerItem) ret opt String {
+  if item.tag is not derOid or item.valueEnd is item.valueStart {
+    ret none
+  }
+  var text: String = ""
+  var value: Int = 0
+  var first: Bool = true
+  loop var i: Int = item.valueStart, i < item.valueEnd, ++i {
+    let byte: Int = bytes.copyAtDefault(index: i) as Int
+    # a component's first byte is never 0x80 (no padding)
+    if value is 0 and byte is 128 {
+      ret none
+    }
+    value = value * 128 + (byte bitand 127)
+    if value > 4503599627370496 {
+      ret none
+    }
+    if byte < 128 {
+      if first {
+        var top: Int = 2
+        if value < 40 {
+          top = 0
+        } else if value < 80 {
+          top = 1
+        }
+        text = "{top}.{value - top * 40}"
+        first = false
+      } else {
+        text = "{text}.{value}"
+      }
+      value = 0
+    }
+  }
+  if (bytes.copyAtDefault(index: item.valueEnd - 1) as Int) >= 128 {
+    ret none
+  }
+  ret text
+}
+
+# A BIT STRING's bytes (no unused bits allowed, as keys and signatures have none)
+func derBitStringBytes(bytes: view List(UInt8), item: view DerItem) ret opt List(UInt8) {
+  if item.tag is not derBitString or item.valueEnd is item.valueStart {
+    ret none
+  }
+  if (bytes.copyAtDefault(index: item.valueStart) as Int) is not 0 {
+    ret none
+  }
+  var value: List(UInt8) = List.create(UInt8, cap: item.valueEnd - item.valueStart - 1)
+  loop var i: Int = item.valueStart + 1, i < item.valueEnd, ++i {
+    value.add(value: bytes.copyAtDefault(index: i))
+  }
+  ret value
+}
+
+# Days from 1970-01-01 to a date (the proleptic Gregorian calendar)
+func derDaysFromCivil(year: view Int, month: view Int, day: view Int) ret Int {
+  var y: Int = year
+  if month <= 2 {
+    y = y - 1
+  }
+  var era: Int = y / 400
+  if y < 0 and y % 400 is not 0 {
+    era = era - 1
+  }
+  let yearOfEra: Int = y - era * 400
+  var shiftedMonth: Int = month + 9
+  if month > 2 {
+    shiftedMonth = month - 3
+  }
+  let dayOfYear: Int = (153 * shiftedMonth + 2) / 5 + day - 1
+  let dayOfEra: Int = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+  ret era * 146097 + dayOfEra - 719468
+}
+
+func derDigits(bytes: view List(UInt8), at: view Int, count: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = 0, i < count, ++i {
+    let digit: Int = (bytes.copyAtDefault(index: at + i) as Int) - 48
+    if digit < 0 or digit > 9 {
+      ret -1
+    }
+    value = value * 10 + digit
+  }
+  ret value
+}
+
+# A UTCTime (YYMMDDHHMMSSZ, 1950-2049) or GeneralizedTime (YYYYMMDDHHMMSSZ) as seconds since
+# 1970 (UTC); none for any other form
+func derTimeSeconds(bytes: view List(UInt8), item: view DerItem) ret opt Int {
+  let length: Int = item.valueEnd - item.valueStart
+  var at: Int = item.valueStart
+  var year: Int = 0
+  if item.tag is derUtcTime and length is 13 {
+    year = derDigits(bytes: bytes, at: at, count: 2)
+    if year < 0 {
+      ret none
+    }
+    if year < 50 {
+      year = year + 2000
+    } else {
+      year = year + 1900
+    }
+    at = at + 2
+  } else if item.tag is derGeneralizedTime and length is 15 {
+    year = derDigits(bytes: bytes, at: at, count: 4)
+    at = at + 4
+  } else {
+    ret none
+  }
+  let month: Int = derDigits(bytes: bytes, at: at, count: 2)
+  let day: Int = derDigits(bytes: bytes, at: at + 2, count: 2)
+  let hour: Int = derDigits(bytes: bytes, at: at + 4, count: 2)
+  let minute: Int = derDigits(bytes: bytes, at: at + 6, count: 2)
+  let second: Int = derDigits(bytes: bytes, at: at + 8, count: 2)
+  if year < 0 or month < 1 or month > 12 or day < 1 or day > 31 or hour < 0 or hour > 23 or minute < 0 or minute > 59 or second < 0 or second > 59 {
+    ret none
+  }
+  if (bytes.copyAtDefault(index: at + 10) as Int) is not 90 {
+    ret none
+  }
+  ret derDaysFromCivil(year: year, month: month, day: day) * 86400 + hour * 3600 + minute * 60 + second
+}
+
+# ---- writing ------------------------------------------------------------------------------------
+
+# An element of tag `tag` around `content`
+func derEncode(tag: view Int, content: view List(UInt8)) ret List(UInt8) {
+  var out: List(UInt8) = List.create(UInt8, cap: content.length + 6)
+  out.add(value: tag as UInt8)
+  let length: Int = content.length
+  if length < 128 {
+    out.add(value: length as UInt8)
+  } else {
+    var lengthBytes: List(UInt8) = {}
+    var rest: Int = length
+    loop rest > 0 {
+      lengthBytes.insert(index: 0, value: (rest bitand 255) as UInt8)
+      rest = rest shr 8
+    }
+    out.add(value: (128 + lengthBytes.length) as UInt8)
+    loop let byte: UInt8 in lengthBytes {
+      out.add(value: byte)
+    }
+  }
+  loop let byte: UInt8 in content {
+    out.add(value: byte)
+  }
+  ret out
+}
+
+# A SEQUENCE (or another constructed tag) of elements already encoded
+func derConstructed(tag: view Int, elements: view List(List(UInt8))) ret List(UInt8) {
+  var content: List(UInt8) = {}
+  loop let element: view List(UInt8) in elements {
+    loop let byte: UInt8 in element {
+      content.add(value: byte)
+    }
+  }
+  ret derEncode(tag: tag, content: content)
+}
+
+# A non-negative INTEGER from its big-endian magnitude
+func derEncodePositive(magnitude: view List(UInt8)) ret List(UInt8) {
+  var start: Int = 0
+  loop start < magnitude.length - 1 and (magnitude.copyAtDefault(index: start) as Int) is 0 {
+    start = start + 1
+  }
+  var content: List(UInt8) = {}
+  if magnitude.length is 0 or (magnitude.copyAtDefault(index: start) as Int) >= 128 {
+    content.add(value: 0)
+  }
+  loop var i: Int = start, i < magnitude.length, ++i {
+    content.add(value: magnitude.copyAtDefault(index: i))
+  }
+  ret derEncode(tag: derInteger, content: content)
+}
+
+func derEncodeSmallInteger(value: view Int) ret List(UInt8) {
+  var magnitude: List(UInt8) = {}
+  var rest: Int = value
+  loop rest > 0 or magnitude.length is 0 {
+    magnitude.insert(index: 0, value: (rest bitand 255) as UInt8)
+    rest = rest shr 8
+  }
+  ret derEncodePositive(magnitude: magnitude)
+}
+
+# An OBJECT IDENTIFIER from its dotted text
+func derEncodeOid(text: view String) ret List(UInt8) {
+  let parts: List(String) = text.split(sep: ".")
+  var content: List(UInt8) = {}
+  var values: List(Int) = {}
+  loop let part: view String in parts {
+    values.add(value: part.toInt())
+  }
+  var components: List(Int) = {
+    values.copyAtDefault(index: 0) * 40 + values.copyAtDefault(index: 1)
+  }
+  loop var i: Int = 2, i < values.length, ++i {
+    components.add(value: values.copyAtDefault(index: i))
+  }
+  loop let component: Int in components {
+    var groups: List(UInt8) = { (component bitand 127) as UInt8 }
+    var rest: Int = component shr 7
+    loop rest > 0 {
+      groups.insert(index: 0, value: ((rest bitand 127) bitor 128) as UInt8)
+      rest = rest shr 7
+    }
+    loop let byte: UInt8 in groups {
+      content.add(value: byte)
+    }
+  }
+  ret derEncode(tag: derOid, content: content)
+}
+
+# A BIT STRING of whole bytes
+func derEncodeBitString(value: view List(UInt8)) ret List(UInt8) {
+  var content: List(UInt8) = { 0 }
+  loop let byte: UInt8 in value {
+    content.add(value: byte)
+  }
+  ret derEncode(tag: derBitString, content: content)
+}
+
+# A time as GeneralizedTime (YYYYMMDDHHMMSSZ) from seconds since 1970, or UTCTime before 2050
+func derEncodeTime(seconds: view Int) ret List(UInt8) {
+  var days: Int = seconds / 86400
+  var rest: Int = seconds % 86400
+  if rest < 0 {
+    rest = rest + 86400
+    days = days - 1
+  }
+  # civil from days (the inverse of derDaysFromCivil)
+  let z: Int = days + 719468
+  var era: Int = z / 146097
+  if z < 0 and z % 146097 is not 0 {
+    era = era - 1
+  }
+  let dayOfEra: Int = z - era * 146097
+  let yearOfEra: Int = (dayOfEra - dayOfEra / 1460 + dayOfEra / 36524 - dayOfEra / 146096) / 365
+  let dayOfYear: Int = dayOfEra - (365 * yearOfEra + yearOfEra / 4 - yearOfEra / 100)
+  let shiftedMonth: Int = (5 * dayOfYear + 2) / 153
+  let day: Int = dayOfYear - (153 * shiftedMonth + 2) / 5 + 1
+  var month: Int = shiftedMonth + 3
+  if shiftedMonth >= 10 {
+    month = shiftedMonth - 9
+  }
+  var year: Int = yearOfEra + era * 400
+  if month <= 2 {
+    year = year + 1
+  }
+  let clock: String = "{derTwo(value: month)}{derTwo(value: day)}{derTwo(value: rest / 3600)}{derTwo(
+    value: (rest / 60) % 60
+  )}{derTwo(value: rest % 60)}Z"
+  if year >= 1950 and year < 2050 {
+    let text: String = "{derTwo(value: year % 100)}{clock}"
+    ret derEncode(tag: derUtcTime, content: bytesOfText(text: text))
+  }
+  let text: String = "{year}{clock}"
+  ret derEncode(tag: derGeneralizedTime, content: bytesOfText(text: text))
+}
+
+func derTwo(value: view Int) ret String {
+  if value < 10 {
+    ret "0{value}"
+  }
+  ret "{value}"
+}

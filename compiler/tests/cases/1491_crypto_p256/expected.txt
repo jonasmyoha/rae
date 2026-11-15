@@ -1,0 +1,17 @@
+RFC 6979 public key: true
+RFC 6979 "sample": true, "test": true
+both verify: true, the other message's does not: false
+DER round trip: true
+Wycheproof: 174 valid and 310 invalid vectors, 0 answered wrongly []
+the leaf: v3, "Test Leaf", key 1.2.840.10045.3.1.7, 1767225600 to 2082758400, CA false, its key the leaf's true
+the chain: verifies
+one byte of the leaf changed: fails: certificate 0: the signature does not verify
+its signature changed: fails: certificate 0: the signature does not verify
+in 2040: fails: certificate 0 is not valid at this time
+another root pinned: fails: the chain does not end with the pinned root
+ending in a root of the same name, another key: fails: certificate 1: the signature does not verify
+the intermediate not a CA: fails: certificate 1 signs others but is not a CA
+Apple Root CA - G3: 583 bytes, SHA-256 63343abfb89a6a03ebb57e9b3f5fa7be7c4f5c756f3017b3a8c488c3653e9179
+  "Apple Root CA - G3", v3, key 1.2.840.10045.2.1 on 1.3.132.0.34 (97 bytes), signed 1.2.840.10045.4.3.3
+  valid 1398881946 to 2187800346, CA true, path length -1, 3 extensions
+  checked against itself: signed with 1.2.840.10045.4.3.3 by a 1.3.132.0.34 key: only ECDSA with SHA-256 on P-256 is checked

@@ -1,0 +1,258 @@
+# crypto/BigMod — arithmetic modulo an odd number of a few hundred bits, for elliptic curves
+# (crypto/P256): its field and its group order. A number is a List(Int) of limbs of 24 bits,
+# least significant first, as many as the modulus has; a product of two limbs is under 2^48, so
+# every sum in a multiplication stays far inside 64 bits.
+#
+# Multiplication is Montgomery's (CIOS): a number x is held as x * R mod m, R = 2^(24 * limbs),
+# and montMul(a, b) gives a * b / R mod m. Every operation runs the same steps whatever the values
+# are: no branch and no index depends on a number, a subtraction that may or may not be needed
+# is always done and kept or dropped with a mask. So a secret (a private key, a nonce) takes the
+# same time as any other number.
+open crypto/CryptoBytes
+
+const bigLimbBits: Int = 24
+
+const bigLimbMask: Int = 16777215
+
+type BigModulus {
+  limbs: Int
+  modulus: List(Int)
+  # -modulus^-1 mod 2^24
+  inverse: Int
+  # R^2 mod m and R mod m (1 in Montgomery form)
+  rSquared: List(Int)
+  one: List(Int)
+}
+
+# Zero, `limbs` limbs
+func bigZero(limbs: view Int) ret List(Int) {
+  var value: List(Int) = List.create(Int, cap: limbs)
+  loop var i: Int = 0, i < limbs, ++i {
+    value.add(value: 0)
+  }
+  ret value
+}
+
+# A small number (under 2^24)
+func bigSmall(limbs: view Int, value: view Int) ret List(Int) {
+  var made: List(Int) = bigZero(limbs: limbs)
+  made.set(index: 0, value: value)
+  ret made
+}
+
+# A big-endian byte string as `limbs` limbs (bytes past what they hold are dropped)
+func bigFromBytes(bytes: view List(UInt8), limbs: view Int) ret List(Int) {
+  var value: List(Int) = bigZero(limbs: limbs)
+  let count: Int = bytes.length
+  loop var i: Int = 0, i < count, ++i {
+    # the byte i places from the end: bit 8 * i
+    let byte: Int = bytes.copyAtDefault(index: count - 1 - i) as Int
+    let bit: Int = i * 8
+    let limb: Int = bit / bigLimbBits
+    let shift: Int = bit % bigLimbBits
+    if limb < limbs {
+      value.set(
+        index: limb
+        value: value.copyAtDefault(index: limb) bitor ((byte shl shift) bitand bigLimbMask)
+      )
+    }
+    if shift > bigLimbBits - 8 and limb + 1 < limbs {
+      value.set(
+        index: limb + 1
+        value: value.copyAtDefault(index: limb + 1) bitor (byte shr (bigLimbBits - shift))
+      )
+    }
+  }
+  ret value
+}
+
+# `value` as `byteCount` big-endian bytes
+func bigToBytes(value: view List(Int), byteCount: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = zeroBytes(count: byteCount)
+  loop var i: Int = 0, i < byteCount, ++i {
+    let bit: Int = i * 8
+    let limb: Int = bit / bigLimbBits
+    let shift: Int = bit % bigLimbBits
+    var byte: Int = value.copyAtDefault(index: limb) shr shift
+    if shift > bigLimbBits - 8 {
+      byte = byte bitor (value.copyAtDefault(index: limb + 1) shl (bigLimbBits - shift))
+    }
+    bytes.set(index: byteCount - 1 - i, value: (byte bitand 255) as UInt8)
+  }
+  ret bytes
+}
+
+# a - b over `limbs` limbs, and the borrow out (0 or 1)
+func bigSubtractRaw(a: view List(Int), b: view List(Int), out: mod List(Int)) ret Int {
+  var borrow: Int = 0
+  loop var i: Int = 0, i < out.length, ++i {
+    let difference: Int = a.copyAtDefault(index: i) - b.copyAtDefault(index: i) - borrow
+    out.set(index: i, value: difference bitand bigLimbMask)
+    borrow = (difference shr 63) bitand 1
+  }
+  ret borrow
+}
+
+# `when` (all ones) picks `a`, (zero) picks `b`, limb by limb with a mask
+func bigSelect(mask: view Int, a: view List(Int), b: view List(Int)) ret List(Int) {
+  var picked: List(Int) = List.create(Int, cap: a.length)
+  loop var i: Int = 0, i < a.length, ++i {
+    picked.add(
+      value: (a.copyAtDefault(index: i) bitand mask) bitor (b.copyAtDefault(index: i) bitand (bitnot mask))
+    )
+  }
+  ret picked
+}
+
+# `value` less `m` when it is at least `m` (with `high`, a carry above the limbs, 0 or 1)
+func bigReduceOnce(m: view BigModulus, value: view List(Int), high: view Int) ret List(Int) {
+  var less: List(Int) = bigZero(limbs: m.limbs)
+  let borrow: Int = bigSubtractRaw(a: value, b: m.modulus, out: less)
+  # keep the difference when there was no borrow, or the carry above paid for it
+  let keep: Int = -((1 - borrow) bitor high)
+  ret bigSelect(mask: keep, a: less, b: value)
+}
+
+func bigAddMod(m: view BigModulus, a: view List(Int), b: view List(Int)) ret List(Int) {
+  var sum: List(Int) = bigZero(limbs: m.limbs)
+  var carry: Int = 0
+  loop var i: Int = 0, i < m.limbs, ++i {
+    let total: Int = a.copyAtDefault(index: i) + b.copyAtDefault(index: i) + carry
+    sum.set(index: i, value: total bitand bigLimbMask)
+    carry = total shr bigLimbBits
+  }
+  ret bigReduceOnce(m: m, value: sum, high: carry)
+}
+
+func bigSubMod(m: view BigModulus, a: view List(Int), b: view List(Int)) ret List(Int) {
+  var difference: List(Int) = bigZero(limbs: m.limbs)
+  let borrow: Int = bigSubtractRaw(a: a, b: b, out: difference)
+  # add the modulus back when it went below zero
+  let mask: Int = -borrow
+  var fixed: List(Int) = bigZero(limbs: m.limbs)
+  var carry: Int = 0
+  loop var i: Int = 0, i < m.limbs, ++i {
+    let total: Int = difference.copyAtDefault(index: i) + (m.modulus.copyAtDefault(index: i) bitand mask) + carry
+    fixed.set(index: i, value: total bitand bigLimbMask)
+    carry = total shr bigLimbBits
+  }
+  ret fixed
+}
+
+# a * b / R mod m (Montgomery's CIOS)
+func montMul(m: view BigModulus, a: view List(Int), b: view List(Int)) ret List(Int) {
+  let n: Int = m.limbs
+  var t: List(Int) = bigZero(limbs: n + 2)
+  loop var i: Int = 0, i < n, ++i {
+    let ai: Int = a.copyAtDefault(index: i)
+    var carry: Int = 0
+    loop var j: Int = 0, j < n, ++j {
+      let value: Int = t.copyAtDefault(index: j) + ai * b.copyAtDefault(index: j) + carry
+      t.set(index: j, value: value bitand bigLimbMask)
+      carry = value shr bigLimbBits
+    }
+    let top: Int = t.copyAtDefault(index: n) + carry
+    t.set(index: n, value: top bitand bigLimbMask)
+    t.set(index: n + 1, value: t.copyAtDefault(index: n + 1) + (top shr bigLimbBits))
+    let u: Int = (t.copyAtDefault(index: 0) * m.inverse) bitand bigLimbMask
+    var reduce: Int = (t.copyAtDefault(index: 0) + u * m.modulus.copyAtDefault(index: 0)) shr bigLimbBits
+    loop var j: Int = 1, j < n, ++j {
+      let value: Int = t.copyAtDefault(index: j) + u * m.modulus.copyAtDefault(index: j) + reduce
+      t.set(index: j - 1, value: value bitand bigLimbMask)
+      reduce = value shr bigLimbBits
+    }
+    let last: Int = t.copyAtDefault(index: n) + reduce
+    t.set(index: n - 1, value: last bitand bigLimbMask)
+    t.set(index: n, value: t.copyAtDefault(index: n + 1) + (last shr bigLimbBits))
+    t.set(index: n + 1, value: 0)
+  }
+  var low: List(Int) = List.create(Int, cap: n)
+  loop var i: Int = 0, i < n, ++i {
+    low.add(value: t.copyAtDefault(index: i))
+  }
+  ret bigReduceOnce(m: m, value: low, high: t.copyAtDefault(index: n))
+}
+
+# A modulus from its big-endian bytes (odd), `limbs` limbs
+func bigModulus(bytes: view List(UInt8), limbs: view Int) ret BigModulus {
+  let modulus: List(Int) = bigFromBytes(bytes: bytes, limbs: limbs)
+  # m0^-1 mod 2^24 by Newton's iteration, then negated
+  let low: Int = modulus.copyAtDefault(index: 0)
+  var inverse: Int = 1
+  loop var i: Int = 0, i < 6, ++i {
+    inverse = (inverse * (2 - low * inverse)) bitand bigLimbMask
+  }
+  var m: BigModulus = {
+    limbs: limbs
+    modulus: modulus
+    inverse: (bigLimbMask + 1 - inverse) bitand bigLimbMask
+    rSquared: {}
+    one: {}
+  }
+  # R mod m and R^2 mod m by doubling 1
+  var power: List(Int) = bigSmall(limbs: limbs, value: 1)
+  loop var i: Int = 0, i < 2 * limbs * bigLimbBits, ++i {
+    power = bigAddMod(m: m, a: power, b: power)
+    if i is limbs * bigLimbBits - 1 {
+      m.one = power
+    }
+  }
+  m.rSquared = power
+  ret m
+}
+
+# x into Montgomery form, and back
+func montIn(m: view BigModulus, value: view List(Int)) ret List(Int) {
+  ret montMul(m: m, a: value, b: m.rSquared)
+}
+
+func montOut(m: view BigModulus, value: view List(Int)) ret List(Int) {
+  ret montMul(m: m, a: value, b: bigSmall(limbs: m.limbs, value: 1))
+}
+
+# base^exponent (Montgomery form in and out); `exponent` is big-endian bytes and public (its bits
+# choose the steps, never the base's)
+func montPow(m: view BigModulus, base: view List(Int), exponent: view List(UInt8)) ret List(Int) {
+  var result: List(Int) = m.one
+  loop var i: Int = 0, i < exponent.length, ++i {
+    let byte: Int = exponent.copyAtDefault(index: i) as Int
+    loop var bit: Int = 7, bit >= 0, --bit {
+      result = montMul(m: m, a: result, b: result)
+      if ((byte shr bit) bitand 1) is 1 {
+        result = montMul(m: m, a: result, b: base)
+      }
+    }
+  }
+  ret result
+}
+
+# 1 / value mod m (m prime), Montgomery form in and out: value^(m - 2)
+func montInverse(m: view BigModulus, value: view List(Int)) ret List(Int) {
+  let two: List(Int) = bigSmall(limbs: m.limbs, value: 2)
+  var exponent: List(Int) = bigZero(limbs: m.limbs)
+  let unusedBorrow: Int = bigSubtractRaw(a: m.modulus, b: two, out: exponent)
+  ret montPow(m: m, base: value, exponent: bigToBytes(value: exponent, byteCount: m.limbs * 3))
+}
+
+# Whether `value` is zero, with no branch on its limbs
+func bigIsZero(value: view List(Int)) ret Bool {
+  var bits: Int = 0
+  loop var i: Int = 0, i < value.length, ++i {
+    bits = bits bitor value.copyAtDefault(index: i)
+  }
+  ret bits is 0
+}
+
+# Whether a < b (both reduced or not; for public numbers)
+func bigLess(a: view List(Int), b: view List(Int)) ret Bool {
+  var scratch: List(Int) = bigZero(limbs: a.length)
+  ret bigSubtractRaw(a: a, b: b, out: scratch) is 1
+}
+
+func bigEqual(a: view List(Int), b: view List(Int)) ret Bool {
+  var difference: Int = 0
+  loop var i: Int = 0, i < a.length, ++i {
+    difference = difference bitor (a.copyAtDefault(index: i) bitxor b.copyAtDefault(index: i))
+  }
+  ret difference is 0
+}

@@ -15,6 +15,9 @@ crash.
 | `crypto/X25519` | `x25519NewSecretKey()`, `x25519PublicKey(secretKey)`, `x25519SharedSecret(secretKey, theirPublicKey)` | 32 each |
 | `crypto/Argon2` | `argon2Hash(password, salt, settings, hashSize, key, associatedData)`, `argon2DefaultSettings()` | salt at least 8 (16 random is usual) |
 | `crypto/Aead` | `aeadLock(key, nonce, plainText, associatedData) -> AeadSealed`, `aeadUnlock(key, nonce, sealed, associatedData) -> opt List(UInt8)` | key 32, nonce 24, mac 16 |
+| `crypto/P256` | `p256PublicKey(privateKey)`, `p256NewKeyPair()`, `p256Sign(privateKey, hash)`, `p256Verify(publicKey, hash, signature)`, `es256Sign(privateKey, message)`, `es256Verify(publicKey, message, signature)`, `p256VerifyDer`, `ecdsaSignatureToDer`, `ecdsaSignatureFromDer` | private key 32, public key 65 (`04` x y) or 64, signature 64 (r s) or DER |
+| `crypto/X509` | `x509Parse(der) -> opt X509Certificate`, `x509VerifyChain(chain, pinnedRoot, now) -> X509ChainResult`, `x509SignedBy`, `x509CommonName`, `x509MakeCertificate(...)` | chain leaf first, ending with the root |
+| `crypto/Der` | reading DER (`derRead`, `derChildren`, `derPositiveInteger`, `derOidText`, `derTimeSeconds`, ...) and writing it (`derEncode`, `derConstructed`, ...) | |
 | `crypto/CryptoBytes` | `hexOfBytes`, `bytesOfHex`, `bytesOfText`, `bytesEqual` (constant time), `copyBytes`, `zeroBytes` | |
 
 - **Ed25519 is the standard one** (RFC 8032, SHA-512, Monocypher's optional
@@ -38,3 +41,30 @@ holds the published vectors: RFC 7693 and the BLAKE2 keyed KAT, RFC 8032
 §7.1, RFC 7748 §6.1, RFC 9106 §5, draft-irtf-cfrg-xchacha-03 A.3.1. The older
 raw-pointer `Sys.encrypt` / `decrypt` / `rae_crypto_argon2i` are the same
 Monocypher calls (XChaCha20-Poly1305 with no associated data, Argon2i).
+
+## P-256, ES256 and X.509 chains
+
+`crypto/P256`, `crypto/Der` and `crypto/X509` are Rae, not Monocypher (which has no P-256): what
+a JWS `x5c` chain (an App Store transaction, a passkey) needs.
+
+- **ECDSA on P-256** (`crypto/P256`) over `crypto/BigMod`, Montgomery arithmetic with 24-bit
+  limbs. Point addition is the complete formula of Renes, Costello and Batina (2015), one formula
+  for every pair of points; a secret scalar (a private key, a nonce) multiplies with a Montgomery
+  ladder that swaps with masks, and every field and scalar operation runs the same steps whatever
+  the numbers are. Signing takes its nonce from RFC 6979 (HMAC-SHA-256), so the same key and hash
+  give the same signature. ES256 is SHA-256 and the 64-byte r || s form; X.509 signatures are
+  DER, read strictly (a second encoding of a signature is refused). About 5 ms a sign or verify.
+- **X.509** (`crypto/X509`): `x509VerifyChain` checks that every certificate parses, each is
+  signed by the next one's key and names it as issuer, the last is byte for byte the pinned root,
+  every one is valid at `now`, every one above the leaf is a CA (basic constraints, path length),
+  and none has a critical extension it does not know. Not checked: revocation, name constraints,
+  policies; an app's own marker extensions are in `extensions` for it to check.
+- **Only ECDSA with SHA-256 on P-256 keys is checked so far.** Apple's own CA certificates
+  (Apple Root CA - G3 and the WWDR intermediate) are P-384 with SHA-384: they parse, and a link
+  they sign is refused with that reason until P-384 and SHA-384 are added.
+
+Case 1491 holds RFC 6979 A.2.5 (the key and both SHA-256 signatures, exactly), Wycheproof's 484
+P-256 / SHA-256 vectors (all answered right), a three-certificate chain made in the case (it
+verifies, and fails with one byte changed, a changed signature, a time outside it, another pinned
+root, and an intermediate that is not a CA) and Apple Root CA - G3 parsed.
+

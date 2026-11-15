@@ -25,6 +25,21 @@ static bool none_compare_owns_call_result(CFuncContext* ctx, const AstExpr* oper
                                           const AstTypeRef* opt_type) {
   if (!operand || (operand->kind != AST_EXPR_CALL && operand->kind != AST_EXPR_METHOD_CALL))
     return false;
+  /* A call's optional container (`opt List(Int)`, a value, not a view: the caller checked)
+   * owns its storage even when its elements own nothing: `p256Scalar(...) is none` leaked the
+   * list each call. Its declaration need not be linked to know that. */
+  {
+    AstTypeRef payload = *opt_type;
+    payload.is_opt = false;
+    if (is_drop_target_type(&payload)) return true;
+    /* the inferred type of a call can carry the container's mangled name (List_int64_t) */
+    Str base = get_base_type_name(&payload);
+    if (!payload.is_view && !payload.is_mod
+        && ((base.len > 5 && strncmp(base.data, "List_", 5) == 0)
+            || (base.len > 10 && strncmp(base.data, "StringMap_", 10) == 0)
+            || (base.len > 7 && strncmp(base.data, "IntMap_", 7) == 0)))
+      return true;
+  }
   /* `T.fromBinary(bytes:)` (c_binary.c) has no declaration but hands back an
    * owning optional all the same. */
   bool is_from = false;
@@ -833,7 +848,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
               if (struct_rep) fprintf(out, "; bool %s_has = %s.has;\n", tmp, tmp);
               else fprintf(out, "; bool %s_has = !rae_any_is_none(%s);\n", tmp, tmp);
-              emit_drop_for_value(ctx, out, otr, tmp, true);
+              /* the declared return type spells the container plainly (List(Int)); the
+               * inferred one can carry its mangled name, which the drop does not know */
+              const AstTypeRef* drop_type = otr;
+              if (operand->decl_link && operand->decl_link->kind == AST_DECL_FUNC
+                  && !operand->decl_link->as.func_decl.generic_params
+                  && operand->decl_link->as.func_decl.returns
+                  && operand->decl_link->as.func_decl.returns->type
+                  && operand->decl_link->as.func_decl.returns->type->is_opt)
+                drop_type = operand->decl_link->as.func_decl.returns->type;
+              emit_drop_for_value(ctx, out, drop_type, tmp, true);
               fprintf(out, "  %s%s_has; })))",
                       expr->as.binary.op == AST_BIN_NEQ ? "" : "!", tmp);
               ctx->suppress_opt_unbox = saved_unbox;

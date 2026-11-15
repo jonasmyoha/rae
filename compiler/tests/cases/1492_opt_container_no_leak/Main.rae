@@ -1,0 +1,54 @@
+# Two ways an optional list leaked its storage (found writing crypto/P256; the run is leak-checked):
+#   - a local list returned into an `opt List(T)` (`var made: List(T) = ...; ret made`) was copied
+#     into the optional and the local, counted as moved by the ret, was never freed;
+#   - a call's `opt List(T)` compared with none (`maybe() is none`) was tested and dropped only when
+#     its elements needed freeing, not for the list's own storage.
+import Sys
+
+type Item {
+  tag: Int
+  name: String
+}
+
+func ints(count: view Int) ret opt List(Int) {
+  if count < 0 {
+    ret none
+  }
+  var made: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    made.add(value: i)
+  }
+  ret made
+}
+
+func items() ret opt List(Item) {
+  let made: List(Item) = { Item { tag: 1, name: "one" }, Item { tag: 2, name: "two" } }
+  ret made
+}
+
+func main() {
+  let before: Int = Sys.liveBufferCount()
+  loop var round: Int = 0, round < 50, ++round {
+    if let got: List(Int) = ints(count: 3) {
+      if got.length is not 3 {
+        log("wrong length")
+      }
+    }
+    if let got: List(Item) = items() {
+      if got.copyAtDefault(index: 1).name is not "two" {
+        log("wrong item")
+      }
+    }
+    if ints(count: 2) is none {
+      log("wrong none")
+    }
+    if ints(count: -1) is not none {
+      log("wrong some")
+    }
+    if items() is none {
+      log("wrong none")
+    }
+  }
+  log("50 rounds, buffers left over: {Sys.liveBufferCount() - before}")
+  log("some is none: {ints(count: 1) is none}, none is none: {ints(count: -1) is none}")
+}

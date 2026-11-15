@@ -1,0 +1,534 @@
+# crypto/X509 — X.509 certificates as a JWS `x5c` chain sends them (an App Store transaction, a
+# passkey's attestation): parsing a DER certificate (the bytes it signs, its signature algorithm
+# and value, its subject's public key, its validity, its extensions with basic constraints) and
+# checking a chain leaf -> intermediates -> a root pinned by the app, by signature and dates.
+#
+# What it checks (x509VerifyChain): every certificate parses; each is signed by the next one's key
+# and names it as its issuer; the last is byte for byte the pinned root; every one is valid at the
+# given time; every one above the leaf is a CA (basic constraints) and allows the CAs below it
+# (pathLength); no certificate has a critical extension this module does not know. What it does
+# not: revocation, name constraints, policies, and an app's own marker extensions (`extensions`
+# holds them, for the app to check).
+#
+# Signatures: ECDSA with SHA-256 over a P-256 key (crypto/P256). A link signed another way
+# (ECDSA with SHA-384 or a P-384 key, Apple's own CA certificates) is refused with that reason.
+import String
+open crypto/CryptoBytes
+open crypto/Der
+open crypto/P256
+open crypto/Sha256
+
+const x509EcdsaSha256: String = "1.2.840.10045.4.3.2"
+
+const x509EcdsaSha384: String = "1.2.840.10045.4.3.3"
+
+const x509EcPublicKey: String = "1.2.840.10045.2.1"
+
+const x509CurveP256: String = "1.2.840.10045.3.1.7"
+
+const x509CurveP384: String = "1.3.132.0.34"
+
+const x509BasicConstraints: String = "2.5.29.19"
+
+type X509Extension {
+  oid: String
+  critical: Bool
+  value: List(UInt8)
+}
+
+type X509Certificate {
+  der: List(UInt8)
+  # the signed part, whole (its tag and length included), as the signature covers it
+  tbs: List(UInt8)
+  version: Int = 1
+  serial: List(UInt8)
+  signatureAlgorithm: String
+  signature: List(UInt8)
+  # the issuer's and subject's names, as DER (compared byte for byte)
+  issuer: List(UInt8)
+  subject: List(UInt8)
+  notBefore: Int
+  notAfter: Int
+  publicKeyAlgorithm: String
+  publicKeyCurve: String
+  publicKey: List(UInt8)
+  extensions: List(X509Extension)
+  hasBasicConstraints: Bool = false
+  isCa: Bool = false
+  # -1: no limit
+  pathLength: Int = -1
+}
+
+# The bytes of `item`'s element, in `bytes`
+func x509Element(bytes: view List(UInt8), item: view DerItem) ret List(UInt8) {
+  ret derElement(bytes: bytes, item: item)
+}
+
+# An AlgorithmIdentifier's OID, and its parameter when that is an OID too (a named curve)
+func x509Algorithm(bytes: view List(UInt8), item: view DerItem) ret opt List(String) {
+  if item.tag is not derSequence {
+    ret none
+  }
+  if let parts: List(DerItem) = derChildren(bytes: bytes, item: item) {
+    if parts.length < 1 {
+      ret none
+    }
+    var names: List(String) = {}
+    if let oid: String = derOidText(bytes: bytes, item: parts.copyAtDefault(index: 0)) {
+      names.add(value: oid)
+    } else {
+      ret none
+    }
+    if parts.length > 1 {
+      if let parameter: String = derOidText(bytes: bytes, item: parts.copyAtDefault(index: 1)) {
+        names.add(value: parameter)
+      }
+    }
+    ret names
+  }
+  ret none
+}
+
+# The extensions ([3] EXPLICIT SEQUENCE OF Extension) into `certificate`; false when malformed
+func x509ReadExtensions(
+  bytes: view List(UInt8)
+  item: view DerItem
+  certificate: mod X509Certificate
+) ret Bool {
+  var list: List(DerItem) = {}
+  if let inner: List(DerItem) = derChildren(bytes: bytes, item: item) {
+    list = inner
+  } else {
+    ret false
+  }
+  if list.length is not 1 or list.copyAtDefault(index: 0).tag is not derSequence {
+    ret false
+  }
+  if let extensions: List(DerItem) = derChildren(bytes: bytes, item: list.copyAtDefault(index: 0)) {
+    loop let extension: view DerItem in extensions {
+      if let parts: List(DerItem) = derChildren(bytes: bytes, item: extension) {
+        if parts.length < 2 or parts.length > 3 {
+          ret false
+        }
+        var oid: String = ""
+        if let text: String = derOidText(bytes: bytes, item: parts.copyAtDefault(index: 0)) {
+          oid = text
+        } else {
+          ret false
+        }
+        var critical: Bool = false
+        var valueIndex: Int = 1
+        if parts.length is 3 {
+          let flag: DerItem = parts.copyAtDefault(index: 1)
+          # DER writes only TRUE (FALSE is the default, left out)
+          if flag.tag is not derBoolean or flag.valueEnd - flag.valueStart is not 1 or (bytes.copyAtDefault(
+            index: flag.valueStart
+          ) as Int) is not 255 {
+            ret false
+          }
+          critical = true
+          valueIndex = 2
+        }
+        let valueItem: DerItem = parts.copyAtDefault(index: valueIndex)
+        if valueItem.tag is not derOctetString {
+          ret false
+        }
+        let value: List(UInt8) = derValue(bytes: bytes, item: valueItem)
+        certificate.extensions.add(
+          value: X509Extension { oid: oid, critical: critical, value: value }
+        )
+        if oid is x509BasicConstraints {
+          if not x509ReadBasicConstraints(value: value, certificate: certificate) {
+            ret false
+          }
+        }
+      } else {
+        ret false
+      }
+    }
+    ret true
+  }
+  ret false
+}
+
+# BasicConstraints ::= SEQUENCE { cA BOOLEAN DEFAULT FALSE, pathLenConstraint INTEGER OPTIONAL }
+func x509ReadBasicConstraints(value: view List(UInt8), certificate: mod X509Certificate) ret Bool {
+  if let sequence: DerItem = derReadWhole(bytes: value, tag: derSequence) {
+    if let parts: List(DerItem) = derChildren(bytes: value, item: sequence) {
+      certificate.hasBasicConstraints = true
+      var at: Int = 0
+      if at < parts.length and parts.copyAtDefault(index: at).tag is derBoolean {
+        let flag: DerItem = parts.copyAtDefault(index: at)
+        if flag.valueEnd - flag.valueStart is not 1 or (value.copyAtDefault(index: flag.valueStart) as Int) is not 255 {
+          ret false
+        }
+        certificate.isCa = true
+        at = at + 1
+      }
+      if at < parts.length {
+        if let length: Int = derSmallInteger(bytes: value, item: parts.copyAtDefault(index: at)) {
+          certificate.pathLength = length
+          at = at + 1
+        } else {
+          ret false
+        }
+      }
+      ret at is parts.length
+    }
+  }
+  ret false
+}
+
+# A DER certificate parsed; none when it is not one this module reads (or not strict DER)
+func x509Parse(der: view List(UInt8)) ret opt X509Certificate {
+  var top: List(DerItem) = {}
+  if let certificateItem: DerItem = derReadWhole(bytes: der, tag: derSequence) {
+    if let parts: List(DerItem) = derChildren(bytes: der, item: certificateItem) {
+      top = parts
+    }
+  }
+  if top.length is not 3 {
+    ret none
+  }
+  let tbsItem: DerItem = top.copyAtDefault(index: 0)
+  if tbsItem.tag is not derSequence {
+    ret none
+  }
+  var certificate: X509Certificate = {
+    der: copyBytes(bytes: der)
+    tbs: x509Element(bytes: der, item: tbsItem)
+    serial: {}
+    signatureAlgorithm: ""
+    signature: {}
+    issuer: {}
+    subject: {}
+    notBefore: 0
+    notAfter: 0
+    publicKeyAlgorithm: ""
+    publicKeyCurve: ""
+    publicKey: {}
+    extensions: {}
+  }
+  if let algorithm: List(String) = x509Algorithm(bytes: der, item: top.copyAtDefault(index: 1)) {
+    certificate.signatureAlgorithm = algorithm.copyAtDefault(index: 0)
+  } else {
+    ret none
+  }
+  if let signature: List(UInt8) = derBitStringBytes(bytes: der, item: top.copyAtDefault(index: 2)) {
+    certificate.signature = signature
+  } else {
+    ret none
+  }
+  var fields: List(DerItem) = {}
+  if let inner: List(DerItem) = derChildren(bytes: der, item: tbsItem) {
+    fields = inner
+  } else {
+    ret none
+  }
+  var at: Int = 0
+  # [0] EXPLICIT version (v3 is 2)
+  if at < fields.length and fields.copyAtDefault(index: at).tag is 160 {
+    if let versionParts: List(DerItem) = derChildren(
+      bytes: der
+      item: fields.copyAtDefault(index: at)
+    ) {
+      if versionParts.length is not 1 {
+        ret none
+      }
+      if let version: Int = derSmallInteger(bytes: der, item: versionParts.copyAtDefault(index: 0)) {
+        certificate.version = version + 1
+      } else {
+        ret none
+      }
+    } else {
+      ret none
+    }
+    at = at + 1
+  }
+  if fields.length < at + 6 {
+    ret none
+  }
+  if let serial: List(UInt8) = derPositiveInteger(bytes: der, item: fields.copyAtDefault(index: at)) {
+    certificate.serial = serial
+  } else {
+    ret none
+  }
+  # the signature algorithm inside must be the one outside
+  if let inner: List(String) = x509Algorithm(bytes: der, item: fields.copyAtDefault(index: at + 1)) {
+    if inner.copyAtDefault(index: 0) is not certificate.signatureAlgorithm {
+      ret none
+    }
+  } else {
+    ret none
+  }
+  let issuer: DerItem = fields.copyAtDefault(index: at + 2)
+  let validity: DerItem = fields.copyAtDefault(index: at + 3)
+  let subject: DerItem = fields.copyAtDefault(index: at + 4)
+  let keyInfo: DerItem = fields.copyAtDefault(index: at + 5)
+  if issuer.tag is not derSequence or subject.tag is not derSequence or validity.tag is not derSequence or keyInfo.tag is not derSequence {
+    ret none
+  }
+  certificate.issuer = x509Element(bytes: der, item: issuer)
+  certificate.subject = x509Element(bytes: der, item: subject)
+  if let times: List(DerItem) = derChildren(bytes: der, item: validity) {
+    if times.length is not 2 {
+      ret none
+    }
+    if let notBefore: Int = derTimeSeconds(bytes: der, item: times.copyAtDefault(index: 0)) {
+      certificate.notBefore = notBefore
+    } else {
+      ret none
+    }
+    if let notAfter: Int = derTimeSeconds(bytes: der, item: times.copyAtDefault(index: 1)) {
+      certificate.notAfter = notAfter
+    } else {
+      ret none
+    }
+  } else {
+    ret none
+  }
+  if let keyParts: List(DerItem) = derChildren(bytes: der, item: keyInfo) {
+    if keyParts.length is not 2 {
+      ret none
+    }
+    if let algorithm: List(String) = x509Algorithm(
+      bytes: der
+      item: keyParts.copyAtDefault(index: 0)
+    ) {
+      certificate.publicKeyAlgorithm = algorithm.copyAtDefault(index: 0)
+      if algorithm.length > 1 {
+        certificate.publicKeyCurve = algorithm.copyAtDefault(index: 1)
+      }
+    } else {
+      ret none
+    }
+    if let key: List(UInt8) = derBitStringBytes(bytes: der, item: keyParts.copyAtDefault(index: 1)) {
+      certificate.publicKey = key
+    } else {
+      ret none
+    }
+  } else {
+    ret none
+  }
+  # issuerUniqueID [1], subjectUniqueID [2] (left as they are), extensions [3]
+  loop var i: Int = at + 6, i < fields.length, ++i {
+    let field: DerItem = fields.copyAtDefault(index: i)
+    if field.tag is 163 {
+      if not x509ReadExtensions(bytes: der, item: field, certificate: certificate) {
+        ret none
+      }
+    } else if field.tag is not 129 and field.tag is not 130 {
+      ret none
+    }
+  }
+  ret certificate
+}
+
+# The certificate's subject common name (2.5.4.3), or "" (for messages and tests)
+func x509CommonName(certificate: view X509Certificate) ret String {
+  let name: view List(UInt8) = certificate.subject
+  if let sequence: DerItem = derReadWhole(bytes: name, tag: derSequence) {
+    if let sets: List(DerItem) = derChildren(bytes: name, item: sequence) {
+      loop let set: view DerItem in sets {
+        if let pairs: List(DerItem) = derChildren(bytes: name, item: set) {
+          loop let pair: view DerItem in pairs {
+            if let parts: List(DerItem) = derChildren(bytes: name, item: pair) {
+              if parts.length is 2 {
+                if let oid: String = derOidText(bytes: name, item: parts.copyAtDefault(index: 0)) {
+                  if oid is "2.5.4.3" {
+                    let value: DerItem = parts.copyAtDefault(index: 1)
+                    ret String.fromBytes(
+                      bytes: name
+                      start: value.valueStart
+                      count: value.valueEnd - value.valueStart
+                    )
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  ret ""
+}
+
+# Why `certificate` is not signed by `issuer`, or "" when it is
+func x509SignedBy(certificate: view X509Certificate, issuer: view X509Certificate) ret String {
+  if not bytesEqual(a: certificate.issuer, b: issuer.subject) {
+    ret "its issuer is not the next certificate's subject"
+  }
+  if issuer.publicKeyAlgorithm is not x509EcPublicKey {
+    ret "the issuer's key is not an EC key"
+  }
+  if issuer.publicKeyCurve is not x509CurveP256 or certificate.signatureAlgorithm is not x509EcdsaSha256 {
+    ret "signed with {certificate.signatureAlgorithm} by a {issuer.publicKeyCurve} key: only ECDSA with SHA-256 on P-256 is checked"
+  }
+  if not p256VerifyDer(
+    publicKey: issuer.publicKey
+    hash: sha256(bytes: certificate.tbs)
+    signature: certificate.signature
+  ) {
+    ret "the signature does not verify"
+  }
+  ret ""
+}
+
+# The extensions this module knows (a critical one it does not know fails the chain)
+func x509KnownExtension(oid: view String) ret Bool {
+  ret oid is x509BasicConstraints or oid is "2.5.29.15" or oid is "2.5.29.37" or oid is "2.5.29.17" or oid is "2.5.29.14" or oid is "2.5.29.35"
+}
+
+type X509ChainResult {
+  ok: Bool
+  reason: String
+  # the parsed chain, leaf first (when every certificate parsed)
+  certificates: List(X509Certificate)
+}
+
+# Whether `chain` (DER certificates, leaf first, ending with the root) leads to `pinnedRoot` (DER),
+# each signed by the next and valid at `now` (seconds since 1970)
+func x509VerifyChain(
+  chain: view List(List(UInt8))
+  pinnedRoot: view List(UInt8)
+  now: view Int
+) ret X509ChainResult {
+  var result: X509ChainResult = { ok: false, reason: "", certificates: {} }
+  if chain.length < 2 {
+    result.reason = "the chain needs a leaf and the root"
+    ret result
+  }
+  loop var i: Int = 0, i < chain.length, ++i {
+    if let certificate: X509Certificate = x509Parse(der: chain.copyAtDefault(index: i)) {
+      result.certificates.add(value: certificate)
+    } else {
+      result.reason = "certificate {i} does not parse"
+      ret result
+    }
+  }
+  if not bytesEqual(a: chain.copyAtDefault(index: chain.length - 1), b: pinnedRoot) {
+    result.reason = "the chain does not end with the pinned root"
+    ret result
+  }
+  loop var i: Int = 0, i < result.certificates.length, ++i {
+    let certificate: X509Certificate = result.certificates.copyAtDefault(index: i)
+    if now < certificate.notBefore or now > certificate.notAfter {
+      result.reason = "certificate {i} is not valid at this time"
+      ret result
+    }
+    loop let extension: view X509Extension in certificate.extensions {
+      if extension.critical and not x509KnownExtension(oid: extension.oid) {
+        result.reason = "certificate {i} has a critical extension {extension.oid} this does not know"
+        ret result
+      }
+    }
+    if i > 0 {
+      if not certificate.hasBasicConstraints or not certificate.isCa {
+        result.reason = "certificate {i} signs others but is not a CA"
+        ret result
+      }
+      # the CAs between it and the leaf
+      if certificate.pathLength >= 0 and i - 1 > certificate.pathLength {
+        result.reason = "certificate {i} allows {certificate.pathLength} CAs below it, the chain has {i - 1}"
+        ret result
+      }
+    }
+    if i + 1 < result.certificates.length {
+      let why: String = x509SignedBy(
+        certificate: certificate
+        issuer: result.certificates.copyAtDefault(index: i + 1)
+      )
+      if why.length() > 0 {
+        result.reason = "certificate {i}: {why}"
+        ret result
+      }
+    }
+  }
+  result.ok = true
+  ret result
+}
+
+# ---- making certificates (tests, and a server's own) --------------------------------------------
+
+# A Name with one common name
+func x509Name(commonName: view String) ret List(UInt8) {
+  let pair: List(UInt8) = derConstructed(
+    tag: derSequence
+    elements: {
+      derEncodeOid(text: "2.5.4.3")
+      derEncode(tag: derUtf8String, content: bytesOfText(text: commonName))
+    }
+  )
+  ret derConstructed(
+    tag: derSequence
+    elements: { derConstructed(tag: derSet, elements: { pair }) }
+  )
+}
+
+# A v3 certificate for `subject`'s P-256 key (65 bytes), issued by `issuer` and signed with its
+# private key; `ca` with basic constraints (critical) and `pathLength` (-1: none)
+func x509MakeCertificate(
+  serial: view Int
+  issuer: view String
+  subject: view String
+  notBefore: view Int
+  notAfter: view Int
+  subjectPublicKey: view List(UInt8)
+  ca: view Bool
+  pathLength: view Int
+  issuerPrivateKey: view List(UInt8)
+) ret List(UInt8) {
+  let algorithm: List(UInt8) = derConstructed(
+    tag: derSequence
+    elements: { derEncodeOid(text: x509EcdsaSha256) }
+  )
+  let keyAlgorithm: List(UInt8) = derConstructed(
+    tag: derSequence
+    elements: { derEncodeOid(text: x509EcPublicKey), derEncodeOid(text: x509CurveP256) }
+  )
+  var constraints: List(List(UInt8)) = {}
+  if ca {
+    constraints.add(value: derEncode(tag: derBoolean, content: { 255 }))
+    if pathLength >= 0 {
+      constraints.add(value: derEncodeSmallInteger(value: pathLength))
+    }
+  }
+  let basic: List(UInt8) = derConstructed(
+    tag: derSequence
+    elements: {
+      derEncodeOid(text: x509BasicConstraints)
+      derEncode(tag: derBoolean, content: { 255 })
+      derEncode(
+        tag: derOctetString
+        content: derConstructed(tag: derSequence, elements: constraints)
+      )
+    }
+  )
+  let tbs: List(UInt8) = derConstructed(
+    tag: derSequence
+    elements: {
+      derEncode(tag: 160, content: derEncodeSmallInteger(value: 2))
+      derEncodeSmallInteger(value: serial)
+      algorithm
+      x509Name(commonName: issuer)
+      derConstructed(
+        tag: derSequence
+        elements: { derEncodeTime(seconds: notBefore), derEncodeTime(seconds: notAfter) }
+      )
+      x509Name(commonName: subject)
+      derConstructed(
+        tag: derSequence
+        elements: { keyAlgorithm, derEncodeBitString(value: subjectPublicKey) }
+      )
+      derEncode(tag: 163, content: derConstructed(tag: derSequence, elements: { basic }))
+    }
+  )
+  let signature: List(UInt8) = ecdsaSignatureToDer(
+    signature: p256Sign(privateKey: issuerPrivateKey, hash: sha256(bytes: tbs))
+  )
+  ret derConstructed(
+    tag: derSequence
+    elements: { tbs, algorithm, derEncodeBitString(value: signature) }
+  )
+}

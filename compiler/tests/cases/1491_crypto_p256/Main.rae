@@ -1,0 +1,253 @@
+# P-256 ECDSA (crypto/P256), DER (crypto/Der) and X.509 chains (crypto/X509), all in Rae:
+#   - RFC 6979 A.2.5: the public key of its private key and its two SHA-256 signatures, exactly;
+#   - Wycheproof's 484 P-256 / SHA-256 vectors (wycheproof.txt): every valid signature verifies
+#     and every invalid one (a wrong value, a malformed or non-strict DER encoding, r or s out of
+#     range, a point at infinity) is refused;
+#   - a three-certificate chain made here (root -> intermediate -> leaf) verifies, and fails with
+#     one byte of the leaf changed, with its signature changed, at a time outside it, against
+#     another pinned root, and when the intermediate is not a CA;
+#   - Apple Root CA - G3 (appleRootCaG3.hex) parses: its name, P-384 key, dates and CA flag.
+import String
+open crypto/CryptoBytes
+open crypto/Der
+open crypto/P256
+open crypto/Sha256
+open crypto/X509
+
+func hex(text: view String) ret List(UInt8) {
+  if let bytes: List(UInt8) = bytesOfHex(hex: text) {
+    ret bytes
+  }
+  ret List(UInt8) {}
+}
+
+func rfc6979() {
+  let key: List(UInt8) = hex(
+    text: "c9afa9d845ba75166b5c215767b1d6934e50c3db36e89b127b8a622b120f6721"
+  )
+  if let publicKey: List(UInt8) = p256PublicKey(privateKey: key) {
+    let expected: String = "0460fed4ba255a9d31c961eb74c6356d68c049b8923b61fa6ce669622e60f29fb67903fe1008b8bc99a41ae9e95628bc64f2f1b20c2d7e9f5177a3c294d4462299"
+    log("RFC 6979 public key: {hexOfBytes(bytes: publicKey) is expected}")
+    let sample: List(UInt8) = es256Sign(privateKey: key, message: bytesOfText(text: "sample"))
+    let test: List(UInt8) = es256Sign(privateKey: key, message: bytesOfText(text: "test"))
+    log(
+      "RFC 6979 \"sample\": {hexOfBytes(bytes: sample) is "efd48b2aacb6a8fd1140dd9cd45e81d69d2c877b56aaf991c34d0ea84eaf3716f7cb1c942d657c41d436c7a1b6e29f65f3e900dbb9aff4064dc4ab2f843acda8"}, \"test\": {hexOfBytes(
+        bytes: test
+      ) is "f1abb023518351cd71d881567b1ea663ed3efcf6c5132b354f28d3b0b7d38367019f4113742a2b14bd25926b49c649155f267e60d3814b4c0cc84250e46f0083"}"
+    )
+    log(
+      "both verify: {es256Verify(
+        publicKey: publicKey
+        message: bytesOfText(text: "sample")
+        signature: sample
+      ) and es256Verify(publicKey: publicKey, message: bytesOfText(text: "test"), signature: test)}, the other message's does not: {es256Verify(
+        publicKey: publicKey
+        message: bytesOfText(text: "sample")
+        signature: test
+      )}"
+    )
+    var roundTrip: Bool = false
+    if let back: List(UInt8) = ecdsaSignatureFromDer(der: ecdsaSignatureToDer(signature: sample)) {
+      roundTrip = bytesEqual(a: back, b: sample)
+    }
+    log("DER round trip: {roundTrip}")
+  }
+}
+
+func wycheproof() {
+  let text: String = embedText(file: "wycheproof.txt")
+  var valid: Int = 0
+  var invalid: Int = 0
+  var wrong: List(String) = {}
+  loop let line: view String in text.split(sep: "\n") {
+    if line.length() > 0 and not line.startsWith(prefix: "#") {
+      let parts: List(String) = line.split(sep: " ")
+      let id: String = parts.copyAtDefault(index: 0)
+      var message: List(UInt8) = {}
+      if parts.copyAtDefault(index: 2) is not "-" {
+        message = hex(text: parts.copyAtDefault(index: 2))
+      }
+      var signature: List(UInt8) = {}
+      if parts.copyAtDefault(index: 3) is not "-" {
+        signature = hex(text: parts.copyAtDefault(index: 3))
+      }
+      let expected: Bool = parts.copyAtDefault(index: 4) is "valid"
+      let got: Bool = p256VerifyDer(
+        publicKey: hex(text: parts.copyAtDefault(index: 1))
+        hash: sha256(bytes: message)
+        signature: signature
+      )
+      if expected {
+        valid = valid + 1
+      } else {
+        invalid = invalid + 1
+      }
+      if got is not expected {
+        wrong.add(value: id)
+      }
+    }
+  }
+  log(
+    "Wycheproof: {valid} valid and {invalid} invalid vectors, {wrong.length} answered wrongly {wrong}"
+  )
+}
+
+# A key pair from a name (a fixed private key: the SHA-256 of the name)
+func keyFor(name: view String) ret P256KeyPair {
+  let privateKey: List(UInt8) = sha256(bytes: bytesOfText(text: name))
+  if let publicKey: List(UInt8) = p256PublicKey(privateKey: privateKey) {
+    ret P256KeyPair { privateKey: privateKey, publicKey: publicKey }
+  }
+  ret P256KeyPair { privateKey: List(UInt8) {}, publicKey: List(UInt8) {} }
+}
+
+func chainResult(chain: view List(List(UInt8)), root: view List(UInt8), now: view Int) ret String {
+  let result: X509ChainResult = x509VerifyChain(chain: chain, pinnedRoot: root, now: now)
+  if result.ok {
+    ret "verifies"
+  }
+  ret "fails: {result.reason}"
+}
+
+func chain() {
+  # 2026-01-01 to 2036-01-01, checked in 2030
+  let from: Int = 1767225600
+  let until: Int = 2082758400
+  let now: Int = 1893456000
+  let rootKey: P256KeyPair = keyFor(name: "root")
+  let middleKey: P256KeyPair = keyFor(name: "intermediate")
+  let leafKey: P256KeyPair = keyFor(name: "leaf")
+  let root: List(UInt8) = x509MakeCertificate(
+    serial: 1
+    issuer: "Test Root"
+    subject: "Test Root"
+    notBefore: from
+    notAfter: until
+    subjectPublicKey: rootKey.publicKey
+    ca: true
+    pathLength: 1
+    issuerPrivateKey: rootKey.privateKey
+  )
+  let middle: List(UInt8) = x509MakeCertificate(
+    serial: 2
+    issuer: "Test Root"
+    subject: "Test Intermediate"
+    notBefore: from
+    notAfter: until
+    subjectPublicKey: middleKey.publicKey
+    ca: true
+    pathLength: 0
+    issuerPrivateKey: rootKey.privateKey
+  )
+  let leaf: List(UInt8) = x509MakeCertificate(
+    serial: 3
+    issuer: "Test Intermediate"
+    subject: "Test Leaf"
+    notBefore: from
+    notAfter: until
+    subjectPublicKey: leafKey.publicKey
+    ca: false
+    pathLength: -1
+    issuerPrivateKey: middleKey.privateKey
+  )
+  if let parsed: X509Certificate = x509Parse(der: leaf) {
+    log(
+      "the leaf: v{parsed.version}, \"{x509CommonName(certificate: parsed)}\", key {parsed.publicKeyCurve}, {parsed.notBefore} to {parsed.notAfter}, CA {parsed.isCa}, its key the leaf's {bytesEqual(
+        a: parsed.publicKey
+        b: leafKey.publicKey
+      )}"
+    )
+  }
+  log("the chain: {chainResult(chain: { leaf, middle, root }, root: root, now: now)}")
+  # one byte of the leaf's subject name ("Test Leaf" -> "Test Lea" + 'g')
+  var changed: List(UInt8) = leaf
+  loop var i: Int = 0, i + 8 < changed.length, ++i {
+    if String.fromBytes(bytes: changed, start: i, count: 9) is "Test Leaf" {
+      changed.set(index: i + 8, value: 103)
+      break
+    }
+  }
+  log(
+    "one byte of the leaf changed: {chainResult(
+      chain: { changed, middle, root }
+      root: root
+      now: now
+    )}"
+  )
+  var badSignature: List(UInt8) = leaf
+  badSignature.set(
+    index: badSignature.length - 3
+    value: badSignature.copyAtDefault(index: badSignature.length - 3) bitxor 1
+  )
+  log(
+    "its signature changed: {chainResult(
+      chain: { badSignature, middle, root }
+      root: root
+      now: now
+    )}"
+  )
+  log("in 2040: {chainResult(chain: { leaf, middle, root }, root: root, now: 2208988800)}")
+  let otherKey: P256KeyPair = keyFor(name: "other root")
+  let other: List(UInt8) = x509MakeCertificate(
+    serial: 1
+    issuer: "Test Root"
+    subject: "Test Root"
+    notBefore: from
+    notAfter: until
+    subjectPublicKey: otherKey.publicKey
+    ca: true
+    pathLength: 1
+    issuerPrivateKey: otherKey.privateKey
+  )
+  log("another root pinned: {chainResult(chain: { leaf, middle, root }, root: other, now: now)}")
+  log(
+    "ending in a root of the same name, another key: {chainResult(
+      chain: { leaf, middle, other }
+      root: other
+      now: now
+    )}"
+  )
+  let notCa: List(UInt8) = x509MakeCertificate(
+    serial: 2
+    issuer: "Test Root"
+    subject: "Test Intermediate"
+    notBefore: from
+    notAfter: until
+    subjectPublicKey: middleKey.publicKey
+    ca: false
+    pathLength: -1
+    issuerPrivateKey: rootKey.privateKey
+  )
+  log(
+    "the intermediate not a CA: {chainResult(chain: { leaf, notCa, root }, root: root, now: now)}"
+  )
+}
+
+func appleRoot() {
+  var hexText: String = ""
+  loop let line: view String in embedText(file: "appleRootCaG3.hex").split(sep: "\n") {
+    if not line.startsWith(prefix: "#") {
+      hexText = "{hexText}{line.trim()}"
+    }
+  }
+  let der: List(UInt8) = hex(text: hexText)
+  log("Apple Root CA - G3: {der.length} bytes, SHA-256 {hexOfBytes(bytes: sha256(bytes: der))}")
+  if let root: X509Certificate = x509Parse(der: der) {
+    log(
+      "  \"{x509CommonName(certificate: root)}\", v{root.version}, key {root.publicKeyAlgorithm} on {root.publicKeyCurve} ({root.publicKey.length} bytes), signed {root.signatureAlgorithm}"
+    )
+    log(
+      "  valid {root.notBefore} to {root.notAfter}, CA {root.isCa}, path length {root.pathLength}, {root.extensions.length} extensions"
+    )
+    log("  checked against itself: {x509SignedBy(certificate: root, issuer: root)}")
+  } else {
+    log("  does not parse")
+  }
+}
+
+func main() {
+  rfc6979()
+  wycheproof()
+  chain()
+  appleRoot()
+}

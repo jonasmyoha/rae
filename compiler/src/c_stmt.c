@@ -293,7 +293,9 @@ static bool c_expr_is_moved_owned_local(const CFuncContext* ctx, const AstExpr* 
     const AstTypeRef* type = ctx->local_type_refs[i];
     if (!type || type->is_view || type->is_mod || type->is_opt) return false;
     if (ctx->local_is_ptr[i]) return false;
-    return ctx->local_moved[i] && ctx->local_struct_owns_heap[i];
+    // An owned container local (`var made: List(T) = ...; ret made`) owns its storage as an
+    // owning struct does: copied, the original leaked, since the ret had marked it moved
+    return ctx->local_moved[i] && (ctx->local_struct_owns_heap[i] || is_drop_target_type(type));
   }
   return false;
 }
