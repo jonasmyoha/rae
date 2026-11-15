@@ -19,10 +19,10 @@ type HitEntry {
   entityId: EntityId
   space: Int
   loose: Bool = false
-  left: Float = 0.0
-  top: Float = 0.0
-  right: Float = 0.0
-  bottom: Float = 0.0
+  left: Float64 = 0.0
+  top: Float64 = 0.0
+  right: Float64 = 0.0
+  bottom: Float64 = 0.0
   column0: Int = 0
   row0: Int = 0
   column1: Int = -1
@@ -32,7 +32,7 @@ type HitEntry {
 type HitSpace {
   # the node with the Camera2D (noEntity(): the screen)
   rootEntityId: EntityId
-  cellSize: Float = 64.0
+  cellSize: Float64 = 64.0
   cells: IntMap(List(Int))
 }
 
@@ -61,11 +61,11 @@ func hitCellKey(column: view Int, row: view Int) ret Int {
   ret shiftedColumn * span + ((row + hitIndexCellRange) bitxor ((shiftedColumn * 40503) % span))
 }
 
-func hitCellOf(value: view Float, cellSize: view Float) ret Int {
-  let cell: Float = value / cellSize
+func hitCellOf(value: view Float64, cellSize: view Float64) ret Int {
+  let cell: Float64 = value / cellSize
   if cell < 0.0 {
     let whole: Int = cell as Int
-    if whole as Float is cell {
+    if whole as Float64 is cell {
       ret Math.max(a: -hitIndexCellRange + 1, b: whole)
     }
     ret Math.max(a: -hitIndexCellRange + 1, b: whole - 1)
@@ -106,7 +106,7 @@ func hitCellsUpdate(
 
 # The cells `entry`'s rectangle covers in `space`, written into it; false when it would cover
 # more than hitIndexMaxCells (it is loose then)
-func hitPlaceInCells(entry: mod HitEntry, cellSize: view Float) ret Bool {
+func hitPlaceInCells(entry: mod HitEntry, cellSize: view Float64) ret Bool {
   entry.column0 = hitCellOf(value: entry.left, cellSize: cellSize)
   entry.column1 = hitCellOf(value: entry.right, cellSize: cellSize)
   entry.row0 = hitCellOf(value: entry.top, cellSize: cellSize)

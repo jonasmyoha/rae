@@ -140,8 +140,18 @@ type ProgressBar {
 # TransformFx scale and RuntimeOffset from it, so ANY app zooms or pans a page
 # by writing one component — the editor's wheel/drag, a map, a photo view.
 # Default identity: `"Camera2D": {}` is a no-op until something writes it.
+#
+# Far from the origin (#47320034): a Float holds about 7 digits, so a canvas point at 1e7 under
+# zoom 50 lands on screen as the difference of two numbers near 5e8, and jitters by tens of pixels
+# as the camera pans. `originX`/`originY` (Float64) is the canvas point that sits at the root's
+# origin: the transform pass subtracts it from each child's place, at full precision, BEFORE the
+# zoom scales it, so every Float stays small. A screen point is
+# `root + offset + zoom * (canvas point - origin)`. Pan a big canvas by moving the origin and keep
+# the offset small; with the origin at 0 nothing changes.
 type Camera2D {
   zoom: Float = 1.0
   offsetX: Float = 0.0
   offsetY: Float = 0.0
+  originX: Float64 = 0.0
+  originY: Float64 = 0.0
 }

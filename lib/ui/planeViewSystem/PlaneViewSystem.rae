@@ -33,6 +33,10 @@ type PlaneViewport {
   y: Float
   w: Float
   h: Float
+  # the camera's origin on the plane (Camera2D.originX/Y): a plane point is
+  # (screen - x) / scale + origin
+  originX: Float64 = 0.0
+  originY: Float64 = 0.0
 }
 
 func planeViewport(
@@ -63,6 +67,8 @@ func planeViewport(
   }
   if componentHas(this: world.cameras, entityId: entityId) {
     let camera: view Camera2D = componentView(this: world.cameras, entityId: entityId)
+    viewport.originX = camera.originX
+    viewport.originY = camera.originY
     if not placed {
       viewport.scale = camera.zoom
       viewport.x = camera.offsetX
@@ -278,6 +284,12 @@ func planeSceneFor(plane: view PlaneView, item: view PlaneItem, pixels: view Flo
   ret ""
 }
 
+# A plane coordinate from a screen distance from the plane's origin on screen (Float64, so the
+# camera's origin far from 0 keeps its precision; an item's own place is a Float)
+func planeAt(screen: view Float, scale: view Float, origin: view Float64) ret Float {
+  ret ((screen as Float64) / (scale as Float64) + origin) as Float
+}
+
 # Choose what each item in view gets (into state.boxes and the returned wanted list, entity -1),
 # or the cells to draw when the index's cells are too small on screen
 func planeChoose(
@@ -291,10 +303,26 @@ func planeChoose(
   state.cells.clear()
   let scale: Float = Math.max(a: 0.000001, b: viewport.scale)
   let margin: Float = plane.marginPixels
-  let left: Float = (0.0 - margin - viewport.x) / scale
-  let top: Float = (0.0 - margin - viewport.y) / scale
-  let right: Float = (viewport.w + margin - viewport.x) / scale
-  let bottom: Float = (viewport.h + margin - viewport.y) / scale
+  let left: Float = planeAt(
+    screen: 0.0 - margin - viewport.x
+    scale: scale
+    origin: viewport.originX
+  )
+  let top: Float = planeAt(
+    screen: 0.0 - margin - viewport.y
+    scale: scale
+    origin: viewport.originY
+  )
+  let right: Float = planeAt(
+    screen: viewport.w + margin - viewport.x
+    scale: scale
+    origin: viewport.originX
+  )
+  let bottom: Float = planeAt(
+    screen: viewport.h + margin - viewport.y
+    scale: scale
+    origin: viewport.originY
+  )
   if state.grid.cellSize * scale < plane.cellPixels {
     spatialQueryCells(
       grid: state.grid
@@ -315,10 +343,18 @@ func planeChoose(
     bottom: bottom
     found: state.found
   )
-  let viewLeft: Float = (0.0 - viewport.x) / scale
-  let viewTop: Float = (0.0 - viewport.y) / scale
-  let viewRight: Float = (viewport.w - viewport.x) / scale
-  let viewBottom: Float = (viewport.h - viewport.y) / scale
+  let viewLeft: Float = planeAt(screen: 0.0 - viewport.x, scale: scale, origin: viewport.originX)
+  let viewTop: Float = planeAt(screen: 0.0 - viewport.y, scale: scale, origin: viewport.originY)
+  let viewRight: Float = planeAt(
+    screen: viewport.w - viewport.x
+    scale: scale
+    origin: viewport.originX
+  )
+  let viewBottom: Float = planeAt(
+    screen: viewport.h - viewport.y
+    scale: scale
+    origin: viewport.originY
+  )
   var held: Int = 0
   # the items in the view first, then those in the margin, until the budget is spent
   loop var pass: Int = 0, pass < 2, ++pass {
@@ -380,7 +416,7 @@ func planeViewSyncEntity(
   let generation: Int = componentTableGeneration(this: world.planeViewDatas)
   let known: view PlaneViewState = componentView(this: world.planeViewStates, entityId: entityId)
   let changed: Bool = known.dataGeneration is not generation
-  if not changed and known.viewScale is viewport.scale and known.viewX is viewport.x and known.viewY is viewport.y and known.viewW is viewport.w and known.viewH is viewport.h {
+  if not changed and known.viewScale is viewport.scale and known.viewX is viewport.x and known.viewY is viewport.y and known.viewW is viewport.w and known.viewH is viewport.h and known.viewOriginX is viewport.originX and known.viewOriginY is viewport.originY {
     ret
   }
   let bindings: List(ListViewBinding) = componentView(
@@ -405,6 +441,8 @@ func planeViewSyncEntity(
     state.viewY = viewport.y
     state.viewW = viewport.w
     state.viewH = viewport.h
+    state.viewOriginX = viewport.originX
+    state.viewOriginY = viewport.originY
     wanted = planeChoose(
       plane: plane
       data: data

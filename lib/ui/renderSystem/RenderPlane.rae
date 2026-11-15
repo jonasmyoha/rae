@@ -13,6 +13,17 @@ open ui/PlaneComponents
 open ui/SpatialGrid
 open ui/renderSystem/RenderPaintBox
 
+# Plane coordinate `value` on screen: the plane's origin on screen `at`, plus `value` less the
+# camera's origin, scaled (in Float64, so a plane far from 0 does not jitter)
+func planeScreen(
+  at: view Float
+  value: view Float
+  origin: view Float64
+  scale: view Float
+) ret Float {
+  ret ((at as Float64) + ((value as Float64) - origin) * (scale as Float64)) as Float
+}
+
 func paintPlaneG(
   world: view UiWorld
   entityId: view EntityId
@@ -31,6 +42,14 @@ func paintPlaneG(
   let muted: RgbaColor = g2dChain(color: world.theme.active.palette.textMuted, chain255: chain255)
   let scaleX: Float = wt.scale.x
   let scaleY: Float = wt.scale.y
+  # the camera's origin (Camera2D.originX/Y) is taken off at full precision before the scale
+  var originX: Float64 = 0.0
+  var originY: Float64 = 0.0
+  if componentHas(this: world.cameras, entityId: entityId) {
+    let camera: view Camera2D = componentView(this: world.cameras, entityId: entityId)
+    originX = camera.originX
+    originY = camera.originY
+  }
   loop let index: Int in state.boxes {
     if let item: view PlaneItem = data.items.viewAt(index: index) {
       var color: Int = g2dColor(color: muted)
@@ -39,8 +58,18 @@ func paintPlaneG(
       }
       Gpu2d.drawRect(
         canvas: canvas
-        x: wt.position.x + item.x * scaleX
-        y: wt.position.y + item.y * scaleY
+        x: planeScreen(
+          at: wt.position.x
+          value: item.x
+          origin: originX
+          scale: scaleX
+        )
+        y: planeScreen(
+          at: wt.position.y
+          value: item.y
+          origin: originY
+          scale: scaleY
+        )
         w: Math.max(a: 1.0, b: item.w * scaleX)
         h: Math.max(a: 1.0, b: item.h * scaleY)
         color: color
@@ -53,8 +82,18 @@ func paintPlaneG(
     let alpha: Int = ((muted.a as Float) * Math.max(a: 0.15, b: coverage)) as Int
     Gpu2d.drawRect(
       canvas: canvas
-      x: wt.position.x + (grid.originX + ((cell % grid.columns) as Float) * grid.cellSize) * scaleX
-      y: wt.position.y + (grid.originY + ((cell / grid.columns) as Float) * grid.cellSize) * scaleY
+      x: planeScreen(
+        at: wt.position.x
+        value: grid.originX + ((cell % grid.columns) as Float) * grid.cellSize
+        origin: originX
+        scale: scaleX
+      )
+      y: planeScreen(
+        at: wt.position.y
+        value: grid.originY + ((cell / grid.columns) as Float) * grid.cellSize
+        origin: originY
+        scale: scaleY
+      )
       w: Math.max(a: 1.0, b: grid.cellSize * scaleX)
       h: Math.max(a: 1.0, b: grid.cellSize * scaleY)
       color: g2dColor(color: RgbaColor { r: muted.r, g: muted.g, b: muted.b, a: alpha })

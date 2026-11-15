@@ -93,6 +93,14 @@ func decodeField(
       nodeId: nodeId
     )
   }
+  # a plane coordinate far from the origin (Camera2D.originX/Y): read at full precision
+  if typeName(fallback) is "Float64" {
+    let idx: Int = Json.field(doc: doc, this: val, key: key)
+    if idx < 0 {
+      ret fallback
+    }
+    ret Json.jsonFloat64(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: fallback)
+  }
   if typeName(fallback) is "Bool" {
     ret optBool(
       doc: doc

@@ -142,10 +142,17 @@ type HitSpaceMap {
   y: Float = 0.0
   scaleX: Float = 1.0
   scaleY: Float = 1.0
+  # the camera's origin (Camera2D.originX/Y), added back so a space is the canvas itself
+  originX: Float64 = 0.0
+  originY: Float64 = 0.0
   ok: Bool = true
 }
 
-func hitSpaceMap(uiSystems: view UiSystems, rootEntityId: view EntityId) ret HitSpaceMap {
+func hitSpaceMap(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  rootEntityId: view EntityId
+) ret HitSpaceMap {
   if isNone(this: rootEntityId) {
     ret HitSpaceMap {}
   }
@@ -159,12 +166,27 @@ func hitSpaceMap(uiSystems: view UiSystems, rootEntityId: view EntityId) ret Hit
   if transform.rotation is not 0.0 or transform.scale.x is 0.0 or transform.scale.y is 0.0 {
     ret HitSpaceMap { ok: false }
   }
-  ret HitSpaceMap {
+  var spaceMap: HitSpaceMap = {
     x: transform.position.x
     y: transform.position.y
     scaleX: transform.scale.x
     scaleY: transform.scale.y
   }
+  if componentHas(this: world.cameras, entityId: rootEntityId) {
+    let camera: view Camera2D = componentView(this: world.cameras, entityId: rootEntityId)
+    spaceMap.originX = camera.originX
+    spaceMap.originY = camera.originY
+  }
+  ret spaceMap
+}
+
+# Screen x / y in a space's coordinates (Float64)
+func hitSpaceX(spaceMap: view HitSpaceMap, x: view Float) ret Float64 {
+  ret ((x as Float64) - (spaceMap.x as Float64)) / (spaceMap.scaleX as Float64) + spaceMap.originX
+}
+
+func hitSpaceY(spaceMap: view HitSpaceMap, y: view Float) ret Float64 {
+  ret ((y as Float64) - (spaceMap.y as Float64)) / (spaceMap.scaleY as Float64) + spaceMap.originY
 }
 
 # `entityId`'s rectangle in its space now (loose when it has none, or is rotated)
@@ -192,20 +214,28 @@ func hitEntryNow(
     wt: transform
     cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
   )
-  let x0: Float = (rect.x - spaceMap.x) / spaceMap.scaleX
-  let x1: Float = (rect.x + rect.w - spaceMap.x) / spaceMap.scaleX
-  let y0: Float = (rect.y - spaceMap.y) / spaceMap.scaleY
-  let y1: Float = (rect.y + rect.h - spaceMap.y) / spaceMap.scaleY
-  entry.left = Math.min(a: x0, b: x1)
-  entry.right = Math.max(a: x0, b: x1)
-  entry.top = Math.min(a: y0, b: y1)
-  entry.bottom = Math.max(a: y0, b: y1)
+  let x0: Float64 = hitSpaceX(spaceMap: spaceMap, x: rect.x)
+  let x1: Float64 = hitSpaceX(spaceMap: spaceMap, x: rect.x + rect.w)
+  let y0: Float64 = hitSpaceY(spaceMap: spaceMap, y: rect.y)
+  let y1: Float64 = hitSpaceY(spaceMap: spaceMap, y: rect.y + rect.h)
+  entry.left = x0
+  entry.right = x1
+  if x1 < x0 {
+    entry.left = x1
+    entry.right = x0
+  }
+  entry.top = y0
+  entry.bottom = y1
+  if y1 < y0 {
+    entry.top = y1
+    entry.bottom = y0
+  }
   entry.loose = false
   ret entry
 }
 
 # The index built again from `found`
-func hitIndexRebuild(uiSystems: mod UiSystems, found: view List(HitFound)) {
+func hitIndexRebuild(world: view UiWorld, uiSystems: mod UiSystems, found: view List(HitFound)) {
   var spaces: List(HitSpace) = {}
   var maps: List(HitSpaceMap) = {}
   var entries: List(HitEntry) = List.create(HitEntry, cap: found.length)
@@ -226,7 +256,9 @@ func hitIndexRebuild(uiSystems: mod UiSystems, found: view List(HitFound)) {
           cells: IntMap.create(List(Int), cap: 64)
         }
       )
-      maps.add(value: hitSpaceMap(uiSystems: uiSystems, rootEntityId: hit.spaceRootEntityId))
+      maps.add(
+        value: hitSpaceMap(world: world, uiSystems: uiSystems, rootEntityId: hit.spaceRootEntityId)
+      )
     }
     entries.add(value: hitEntryNow(
       uiSystems: uiSystems
@@ -237,17 +269,24 @@ func hitIndexRebuild(uiSystems: mod UiSystems, found: view List(HitFound)) {
   }
   # a space's cell: twice its entries' average larger side
   loop var s: Int = 0, s < spaces.length, ++s {
-    var sides: Float = 0.0
+    var sides: Float64 = 0.0
     var counted: Int = 0
     loop let entry: view HitEntry in entries {
       if entry.space is s and not entry.loose {
-        sides = sides + Math.max(a: entry.right - entry.left, b: entry.bottom - entry.top)
+        var side: Float64 = entry.right - entry.left
+        if entry.bottom - entry.top > side {
+          side = entry.bottom - entry.top
+        }
+        sides = sides + side
         counted = counted + 1
       }
     }
     if counted > 0 {
       if let space: mod HitSpace = spaces.modAt(index: s) {
-        space.cellSize = Math.max(a: 1.0, b: sides / (counted as Float) * 2.0)
+        space.cellSize = sides / (counted as Float64) * 2.0
+        if space.cellSize < 1.0 {
+          space.cellSize = 1.0
+        }
       }
     }
   }
@@ -312,13 +351,15 @@ func hitIndexSync(world: view UiWorld, uiSystems: mod UiSystems) {
   }
   let found: List(HitFound) = hitCollectAll(world: world, uiSystems: uiSystems)
   if not hitIndexSameNodes(index: uiSystems.hitIndex, found: found) {
-    hitIndexRebuild(uiSystems: uiSystems, found: found)
+    hitIndexRebuild(world: world, uiSystems: uiSystems, found: found)
     uiSystems.hitIndex.key = key
     ret
   }
   var maps: List(HitSpaceMap) = {}
   loop let space: view HitSpace in uiSystems.hitIndex.spaces {
-    maps.add(value: hitSpaceMap(uiSystems: uiSystems, rootEntityId: space.rootEntityId))
+    maps.add(
+      value: hitSpaceMap(world: world, uiSystems: uiSystems, rootEntityId: space.rootEntityId)
+    )
   }
   var fresh: List(HitEntry) = List.create(HitEntry, cap: found.length)
   loop let entry: view HitEntry in uiSystems.hitIndex.entries {
@@ -379,10 +420,10 @@ func hitIndexSync(world: view UiWorld, uiSystems: mod UiSystems) {
 func hitEntryNear(
   entries: view List(HitEntry)
   at: view Int
-  x: view Float
-  y: view Float
-  reachX: view Float
-  reachY: view Float
+  x: view Float64
+  y: view Float64
+  reachX: view Float64
+  reachY: view Float64
 ) ret Bool {
   if let entry: view HitEntry = entries.viewAt(index: at) {
     ret x >= entry.left - reachX and x <= entry.right + reachX and y >= entry.top - reachY and y <= entry.bottom + reachY
@@ -416,13 +457,17 @@ func hitIndexBest(
     }
   }
   loop let space: view HitSpace in index.spaces {
-    let spaceMap: HitSpaceMap = hitSpaceMap(uiSystems: uiSystems, rootEntityId: space.rootEntityId)
+    let spaceMap: HitSpaceMap = hitSpaceMap(
+      world: world
+      uiSystems: uiSystems
+      rootEntityId: space.rootEntityId
+    )
     if spaceMap.ok {
-      let localX: Float = (x - spaceMap.x) / spaceMap.scaleX
-      let localY: Float = (y - spaceMap.y) / spaceMap.scaleY
+      let localX: Float64 = hitSpaceX(spaceMap: spaceMap, x: x)
+      let localY: Float64 = hitSpaceY(spaceMap: spaceMap, y: y)
       # (a hundredth of a unit more, so rounding never drops a node the exact test would take)
-      let reachX: Float = targetSize / Math.abs(value: spaceMap.scaleX) + 0.01
-      let reachY: Float = targetSize / Math.abs(value: spaceMap.scaleY) + 0.01
+      let reachX: Float64 = (targetSize / Math.abs(value: spaceMap.scaleX)) as Float64 + 0.01
+      let reachY: Float64 = (targetSize / Math.abs(value: spaceMap.scaleY)) as Float64 + 0.01
       let column0: Int = hitCellOf(value: localX - reachX, cellSize: space.cellSize)
       let column1: Int = hitCellOf(value: localX + reachX, cellSize: space.cellSize)
       let row0: Int = hitCellOf(value: localY - reachY, cellSize: space.cellSize)
@@ -515,6 +560,7 @@ func hitScreenRect(
 # The entries whose cells meet screen rectangle `left`..`right` x `top`..`bottom`, each once, in
 # hit order (topmost first)
 func hitIndexCandidates(
+  world: view UiWorld
   uiSystems: view UiSystems
   left: view Float
   top: view Float
@@ -532,16 +578,30 @@ func hitIndexCandidates(
     found.add(value: at)
   }
   loop let space: view HitSpace in index.spaces {
-    let spaceMap: HitSpaceMap = hitSpaceMap(uiSystems: uiSystems, rootEntityId: space.rootEntityId)
+    let spaceMap: HitSpaceMap = hitSpaceMap(
+      world: world
+      uiSystems: uiSystems
+      rootEntityId: space.rootEntityId
+    )
     if spaceMap.ok {
-      let x0: Float = (left - spaceMap.x) / spaceMap.scaleX
-      let x1: Float = (right - spaceMap.x) / spaceMap.scaleX
-      let y0: Float = (top - spaceMap.y) / spaceMap.scaleY
-      let y1: Float = (bottom - spaceMap.y) / spaceMap.scaleY
-      let column0: Int = hitCellOf(value: Math.min(a: x0, b: x1), cellSize: space.cellSize)
-      let column1: Int = hitCellOf(value: Math.max(a: x0, b: x1), cellSize: space.cellSize)
-      let row0: Int = hitCellOf(value: Math.min(a: y0, b: y1), cellSize: space.cellSize)
-      let row1: Int = hitCellOf(value: Math.max(a: y0, b: y1), cellSize: space.cellSize)
+      let x0: Float64 = hitSpaceX(spaceMap: spaceMap, x: left)
+      let x1: Float64 = hitSpaceX(spaceMap: spaceMap, x: right)
+      let y0: Float64 = hitSpaceY(spaceMap: spaceMap, y: top)
+      let y1: Float64 = hitSpaceY(spaceMap: spaceMap, y: bottom)
+      var column0: Int = hitCellOf(value: x0, cellSize: space.cellSize)
+      var column1: Int = hitCellOf(value: x1, cellSize: space.cellSize)
+      if column1 < column0 {
+        let swapped: Int = column0
+        column0 = column1
+        column1 = swapped
+      }
+      var row0: Int = hitCellOf(value: y0, cellSize: space.cellSize)
+      var row1: Int = hitCellOf(value: y1, cellSize: space.cellSize)
+      if row1 < row0 {
+        let swapped: Int = row0
+        row0 = row1
+        row1 = swapped
+      }
       loop var row: Int = row0, row <= row1, ++row {
         loop var column: Int = column0, column <= column1, ++column {
           if let cell: view List(Int) = space.cells.viewGet(
@@ -574,6 +634,7 @@ func hitIndexInRect(
 ) ret List(EntityId) {
   var hits: List(EntityId) = {}
   loop let at: Int in hitIndexCandidates(
+    world: world
     uiSystems: uiSystems
     left: left
     top: top
@@ -605,6 +666,7 @@ func hitIndexNearestEdgeX(
   var nearest: opt Float = none
   var nearestGap: Float = distance
   loop let at: Int in hitIndexCandidates(
+    world: world
     uiSystems: uiSystems
     left: x - distance
     top: top
@@ -643,6 +705,7 @@ func hitIndexNearestEdgeY(
   var nearest: opt Float = none
   var nearestGap: Float = distance
   loop let at: Int in hitIndexCandidates(
+    world: world
     uiSystems: uiSystems
     left: left
     top: y - distance

@@ -1,0 +1,193 @@
+# Camera2D far from the origin: a node at canvas x = 3, 1e5, 1e6 and 1e7 under zoom 50, kept near
+# the middle of the screen while the camera pans in steps of 0.37 px. Each frame its screen place
+# is compared with the exact one (Float64). Panned with the offset alone (a Float near 5e8 at
+# 1e7), the error grows with the distance; panned with the camera's origin (Float64, taken off
+# before the zoom) it stays under 0.01 px everywhere. At 3 both are exact: near the origin
+# nothing changes. A PlaneView near 1e7 windows its items by the origin, and the hit index finds
+# a node there.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/UiSystems
+open ui/Transform
+open ui/cameraSystem/CameraSystem
+open ui/layoutSystem/LayoutSystem
+open ui/PlaneComponents
+open ui/SceneInstance
+open ui/inputSystem/HitIndexQuery
+open ui/planeViewSystem/PlaneViewSystem
+
+const zoom: Float = 50.0
+
+const steps: Int = 400
+
+const step: Float64 = 0.37
+
+# Thousandths of a pixel, as text
+func pixels(value: view Float64) ret String {
+  let thousandths: Int = (value * 1000.0 + 0.5) as Int
+  let fraction: Int = thousandths % 1000
+  var padded: String = "{fraction}"
+  if fraction < 10 {
+    padded = "00{fraction}"
+  } else if fraction < 100 {
+    padded = "0{fraction}"
+  }
+  ret "{thousandths / 1000}.{padded}"
+}
+
+# The largest error (px) of the node at canvas x `place` over the pan; `useOrigin` pans with the
+# camera's origin, else with its offset
+func panError(place: view Float, useOrigin: view Bool) ret Float64 {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 1280.0
+  world.layoutH = 800.0
+  let root: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: root
+    data: { position: { x: 0.0, y: 0.0 }, size: { x: 1280.0, y: 800.0 } }
+  )
+  let item: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: item
+    data: { position: { x: place, y: 0.0 }, size: { x: 2.0, y: 2.0 } }
+  )
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: item
+    parent: root
+  )
+  world.onClicks.componentSet(
+    entityId: item
+    data: { actionId: "item", actionIdDouble: "", actionIdTriple: "" }
+  )
+  var worst: Float64 = 0.0
+  loop var i: Int = 0, i < steps, ++i {
+    # the node's wanted screen x: the middle, moved left by the pan
+    let pan: Float64 = (i as Float64) * step
+    let wanted: Float64 = (640.0 as Float64) - pan
+    if useOrigin {
+      # the origin is the canvas point at the screen's left edge
+      world.cameras.componentSet(
+        entityId: root
+        data: {
+          zoom: zoom
+          offsetX: 0.0
+          offsetY: 0.0
+          originX: (place as Float64) - wanted / (zoom as Float64)
+          originY: 0.0
+        }
+      )
+    } else {
+      world.cameras.componentSet(
+        entityId: root
+        data: {
+          zoom: zoom
+          offsetX: (wanted - (place as Float64) * (zoom as Float64)) as Float
+          offsetY: 0.0
+        }
+      )
+    }
+    layoutSystem(world: world, uiSystems: uiSystems)
+    cameraSystem(world: world, uiSystems: uiSystems)
+    transformSystem(world: world, uiSystems: uiSystems)
+    let shown: Float = componentView(this: uiSystems.transform2d.worldTransforms, entityId: item).position.x
+    var error: Float64 = (shown as Float64) - wanted
+    if error < 0.0 {
+      error = -error
+    }
+    if error > worst {
+      worst = error
+    }
+  }
+  # the last frame's node is hit where it is shown
+  hitIndexSync(world: world, uiSystems: uiSystems)
+  let shownX: Float = componentView(this: uiSystems.transform2d.worldTransforms, entityId: item).position.x
+  if hitIndexTest(
+    world: world
+    uiSystems: uiSystems
+    x: shownX + 1.0
+    y: 1.0
+    targetSize: 0.0
+  ) is not item {
+    log("x = {place as Int}: the hit index missed the node")
+  }
+  ret worst
+}
+
+# A PlaneView of 100 cards (100 x 60 on a 120 x 80 pitch) from canvas x = 1e7, its camera's
+# origin on the first card: the same items are live as at the canvas's origin, placed exactly
+func farPlane() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let plane: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: plane
+    data: { position: { x: 0.0, y: 0.0 }, size: { x: 800.0, y: 600.0 } }
+  )
+  var items: List(PlaneItem) = {}
+  loop var i: Int = 0, i < 100, ++i {
+    items.add(value: PlaneItem {
+      x: 10000000.0 + ((i % 10) as Float) * 120.0
+      y: ((i / 10) as Float) * 80.0
+      w: 100.0
+      h: 60.0
+      row: ListViewRow { keys: {}, values: {} }
+    })
+  }
+  world.planeViews.componentSet(
+    entityId: plane
+    data: { itemSceneId: "card", detailPixels: 60.0, marginPixels: 100.0 }
+  )
+  world.planeViewDatas.componentSet(entityId: plane, data: { items: items, bindings: {} })
+  world.cameras.componentSet(
+    entityId: plane
+    data: {
+      zoom: 1.0
+      offsetX: 0.0
+      offsetY: 0.0
+      originX: 10000000.0
+      originY: 0.0
+    }
+  )
+  var scenes: SceneRegistry = createSceneRegistry()
+  planeViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  let card: EntityId = planeItemEntityId(world: world, planeEntityId: plane, item: 11)
+  var placed: String = "(not live)"
+  if not isNone(this: card) {
+    let position: Vec2 = componentView(this: uiSystems.transform2d.worldTransforms, entityId: card).position
+    placed = "{position.x}, {position.y}"
+  }
+  log(
+    "a plane at 1e7: {planeLiveItems(world: world, planeEntityId: plane)} live, card 11 at {placed}"
+  )
+}
+
+func main() ret Int {
+  var ok: Bool = true
+  loop let place: Float in List(Float) { 3.0, 100000.0, 1000000.0, 10000000.0 } {
+    let byOffset: Float64 = panError(place: place, useOrigin: false)
+    let byOrigin: Float64 = panError(place: place, useOrigin: true)
+    log(
+      "x = {place as Int}: panned by the offset {pixels(value: byOffset)} px, by the origin {pixels(
+        value: byOrigin
+      )} px"
+    )
+    if byOrigin >= 0.01 {
+      ok = false
+    }
+  }
+  log("every place under 0.01 px by the origin: {ok}")
+  farPlane()
+  ret 0
+}

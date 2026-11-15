@@ -166,6 +166,7 @@ func composeVisual(
 func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
   # A page at rest pays nothing for animation: no pose, no lookup per node
   let anyPose: Bool = componentCount(this: uiSystems.animation.poses) > 0
+  let anyCamera: Bool = componentCount(this: world.cameras) > 0
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
     let cr: view ComputedRect = queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
@@ -176,8 +177,17 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
     # The origin is moved so that the pivot lands where it was:
     # origin' = origin + p - R(θ) S p, with p the pivot in the box (#1003). The
     # children fold through this, so a scaled card carries its whole subtree.
-    var originX: Float = cr.position.x + ro.x
-    var originY: Float = cr.position.y + ro.y
+    # A child of a camera root has the camera's origin (Float64) taken off its place first, at
+    # full precision, so a canvas point far from 0 is small before anything scales it
+    # (Camera2D.originX); with the origin at 0 the place is unchanged
+    let cameraOrigin: Vec2 = cameraOriginShift(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      anyCamera: anyCamera
+    )
+    var originX: Float = cameraOrigin.x + ro.x
+    var originY: Float = cameraOrigin.y + ro.y
     var scaleX: Float = fx.scaleX
     var scaleY: Float = fx.scaleY
     var rotation: Float = fx.rotation
@@ -210,6 +220,35 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
     componentSet(this: uiSystems.transform2d.localTransforms, entityId: entityId, data: local)
   }
   sharedTakeOutPagePose(world: world, uiSystems: uiSystems)
+}
+
+# `entityId`'s layout place with its parent camera's origin taken off, computed in Float64
+# (its place as it is when the parent has no Camera2D or the origin is 0)
+func cameraOriginShift(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  anyCamera: view Bool
+) ret Vec2 {
+  let place: Vec2 = componentView(this: uiSystems.layout.computedRects, entityId: entityId).position
+  if not anyCamera or not componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    ret place
+  }
+  let parentEntityId: EntityId = componentView(
+    this: uiSystems.hierarchy.parents
+    entityId: entityId
+  ).parent
+  if not componentHas(this: world.cameras, entityId: parentEntityId) {
+    ret place
+  }
+  let camera: view Camera2D = componentView(this: world.cameras, entityId: parentEntityId)
+  if camera.originX is 0.0 and camera.originY is 0.0 {
+    ret place
+  }
+  ret Vec2 {
+    x: ((place.x as Float64) - camera.originX) as Float
+    y: ((place.y as Float64) - camera.originY) as Float
+  }
 }
 
 # A node's local place by layout alone

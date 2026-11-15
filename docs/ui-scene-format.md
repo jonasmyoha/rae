@@ -1198,3 +1198,29 @@ Case 1484 compares the index with the walk on a random scene (a camera canvas, a
 nested, inactive and rotated nodes), with the marquee and the edges against testing every node;
 `checks/uiHitIndex` times 50,000 nodes: 0.11 us a hit test (the walk 390 us), built in 3.3 ms, a
 panned camera's frame 1.4 ms (the walk to see what changed), an idle frame 0.2 us.
+
+## 38. `Camera2D.originX` / `originY`: a canvas far from the origin
+
+A `Float` holds about 7 digits. Under a `Camera2D` a canvas point lands on screen at
+`offset + zoom * point`, and far from 0 those are two big numbers whose difference is the small
+screen place: at 1e7 under zoom 50 both are near 5e8, where a Float steps by 32, and the point
+jumps by up to 16 px as the camera pans (1e6: 2 px, 1e5: 0.25 px).
+
+`originX` and `originY` (Float64) name the canvas point that sits at the camera root's origin. The
+transform pass takes it off each child's place at full precision BEFORE the zoom scales it, so
+every Float stays small: a screen point is `root + offset + zoom * (point - origin)`.
+
+```json
+"Camera2D": { "zoom": 50, "offsetX": 0, "offsetY": 0, "originX": 10000000.25, "originY": 0 }
+```
+
+- Pan a big canvas by moving the origin, and keep the offset for the small part (the screen
+  place of the origin). With the origin at 0 (the default) nothing changes.
+- The plane view (§36), its boxes and cells, and the hit index (§37) map through the origin too;
+  the hit index keeps its rectangles in canvas coordinates (Float64), so a moving origin moves no
+  entry.
+- An item's own place is still a Float (its `Rect`, a `PlaneItem`): at 1e7 it is placed to the
+  nearest whole unit. That error is fixed, not a jitter; give such items whole-unit places.
+
+Case 1485 pans a node at 3, 1e5, 1e6 and 1e7 under zoom 50 both ways (0.000 px by the origin at
+every distance) and windows a plane view at 1e7.
