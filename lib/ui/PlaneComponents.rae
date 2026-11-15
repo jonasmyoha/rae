@@ -1,0 +1,95 @@
+# ui/PlaneComponents — a plane of items placed anywhere (ui/planeViewSystem): a canvas of mini
+# timelines, a node graph, a map of cards. It is ListView in two dimensions. Each item is a data
+# row with a rectangle on the plane, and only the items the view shows (plus a margin) have live
+# entities: pooled sub-scenes, re-pointed at their rows as the camera moves. The detail an item
+# gets depends on its size on screen:
+# - `detailPixels` wide or more: its sub-scene (`PlaneItem.sceneId`, else `itemSceneId`);
+# - smaller, and `lowDetailSceneId` set: that smaller sub-scene;
+# - otherwise a box the plane draws itself (no entity);
+# - and when a cell of the plane's index is under `cellPixels` on screen, the plane draws each
+#   cell's coverage instead of its items.
+# At most `maxLiveItems` items have entities; past that the rest are boxes (the items in the view
+# come before those in the margin). The authored part is PlaneView (saved with the scene); the app
+# gives the items in PlaneViewData; PlaneViewState is the system's (never saved).
+open ui/Components
+open ui/SpatialGrid
+open ecs/Entity
+
+type PlaneView {
+  itemSceneId: String = ""
+  lowDetailSceneId: String = ""
+  detailPixels: Float = 120.0
+  cellPixels: Float = 24.0
+  # how far past the view's edges items stay live, in screen pixels
+  marginPixels: Float = 200.0
+  maxLiveItems: Int = 400
+}
+
+# An item: its rectangle on the plane, its sub-scene ("" = the plane's), its box color (ARGB,
+# 0 = the theme's muted text color) and its data row, which the bindings write into the sub-scene
+type PlaneItem {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  sceneId: String = ""
+  color: Int = 0
+  row: ListViewRow
+}
+
+# The items and the bindings (ListView's: a node of the sub-scene, a component field, a cell of
+# the row). An item whose entity is let go has its bound Text.text, Text.styleId,
+# Sprite.textureKey and Active.value read back into its row, so an edit stays when the item scrolls
+# out and back.
+type PlaneViewData {
+  items: List(PlaneItem)
+  bindings: List(ListViewBinding)
+}
+
+# A live item: its entity and the sub-scene mounted on it
+type PlaneLive {
+  item: Int
+  entityId: EntityId
+  sceneId: String
+}
+
+# A pooled entity, its sub-scene mounted, waiting for an item
+type PlanePooled {
+  entityId: EntityId
+  sceneId: String
+  hidden: Bool = false
+}
+
+type PlaneViewState {
+  grid: SpatialGrid
+  # the PlaneViewData generation the grid and the live items were made for
+  dataGeneration: Int = -1
+  # the view last made live: the plane's scale and its origin on screen
+  viewScale: Float = 0.0
+  viewX: Float = 0.0
+  viewY: Float = 0.0
+  viewW: Float = 0.0
+  viewH: Float = 0.0
+  live: List(PlaneLive)
+  # per item, its index in `live` (-1: not live)
+  liveOf: List(Int)
+  pool: List(PlanePooled)
+  # what the plane draws itself: the items shown as boxes, or the index's cells
+  boxes: List(Int)
+  cells: List(Int)
+  found: List(Int)
+  # the items the last view held (in it or in its margin), for a check
+  inView: Int = 0
+}
+
+func emptyPlaneViewState() ret PlaneViewState {
+  ret PlaneViewState {
+    grid: emptySpatialGrid()
+    live: {}
+    liveOf: {}
+    pool: {}
+    boxes: {}
+    cells: {}
+    found: {}
+  }
+}

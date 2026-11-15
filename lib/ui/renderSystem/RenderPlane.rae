@@ -1,0 +1,63 @@
+# RenderPlane — what a plane (ui/PlaneComponents) draws itself, under its live items: the items too
+# small for an entity as boxes (each in its color, else the theme's muted text color), and when the
+# index's cells are too small on screen, each cell in view as one box as opaque as its items cover
+# it. Both lists are planeViewSystem's, so the cost is the view, not the plane.
+import Gpu2d
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/Components
+open ui/Ecs
+open ui/PlaneComponents
+open ui/SpatialGrid
+open ui/renderSystem/RenderPaintBox
+
+func paintPlaneG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  if not componentHas(this: world.planeViewStates, entityId: entityId) or not componentHas(
+    this: world.planeViewDatas
+    entityId: entityId
+  ) {
+    ret
+  }
+  let state: view PlaneViewState = componentView(this: world.planeViewStates, entityId: entityId)
+  let data: view PlaneViewData = componentView(this: world.planeViewDatas, entityId: entityId)
+  let muted: RgbaColor = g2dChain(color: world.theme.active.palette.textMuted, chain255: chain255)
+  let scaleX: Float = wt.scale.x
+  let scaleY: Float = wt.scale.y
+  loop let index: Int in state.boxes {
+    if let item: view PlaneItem = data.items.viewAt(index: index) {
+      var color: Int = g2dColor(color: muted)
+      if item.color is not 0 {
+        color = item.color
+      }
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: wt.position.x + item.x * scaleX
+        y: wt.position.y + item.y * scaleY
+        w: Math.max(a: 1.0, b: item.w * scaleX)
+        h: Math.max(a: 1.0, b: item.h * scaleY)
+        color: color
+      )
+    }
+  }
+  let grid: view SpatialGrid = state.grid
+  loop let cell: Int in state.cells {
+    let coverage: Float = Math.min(a: 1.0, b: grid.cellCoverage.copyAtDefault(index: cell))
+    let alpha: Int = ((muted.a as Float) * Math.max(a: 0.15, b: coverage)) as Int
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: wt.position.x + (grid.originX + ((cell % grid.columns) as Float) * grid.cellSize) * scaleX
+      y: wt.position.y + (grid.originY + ((cell / grid.columns) as Float) * grid.cellSize) * scaleY
+      w: Math.max(a: 1.0, b: grid.cellSize * scaleX)
+      h: Math.max(a: 1.0, b: grid.cellSize * scaleY)
+      color: g2dColor(color: RgbaColor { r: muted.r, g: muted.g, b: muted.b, a: alpha })
+    )
+  }
+}

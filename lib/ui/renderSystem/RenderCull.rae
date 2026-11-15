@@ -7,7 +7,8 @@
 # The test errs toward drawing. The box is widened by what can paint outside it: a margin, a
 # hover scale, a shadow's blur, a text shadow's offset and softness, a backdrop blur's radius, and
 # text measured wider or taller than its box. A rotated node, or one with no laid-out box, is
-# always drawn. The viewport is the design canvas (Gpu2d's design size), 0,0 at the top left.
+# always drawn, and so is a plane (ui/PlaneComponents), whose items lie outside its box. The
+# viewport is the design canvas (Gpu2d's design size), 0,0 at the top left.
 import Gpu2d
 import Math
 open ui/Ecs
@@ -64,7 +65,11 @@ func paintOffScreen(
   viewW: view Float
   viewH: view Float
 ) ret Bool {
-  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+  # a plane draws its items wherever they are, outside its own box too
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false or componentHas(
+    this: world.planeViews
+    entityId: entityId
+  ) {
     ret false
   }
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {

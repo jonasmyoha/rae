@@ -30,6 +30,7 @@ open ui/renderSystem/RenderFlameGraph
 open ui/renderSystem/RenderHistogram
 open ui/renderSystem/RenderLineGraph
 open ui/renderSystem/RenderStatTable
+open ui/renderSystem/RenderPlane
 import Gpu2d
 import Math
 import Gpu2dText
@@ -556,6 +557,16 @@ func paintEntityG(
       entityId: entityId
       wt: wt
       cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  # a plane's boxes and cells, under its live items (ui/PlaneComponents)
+  if componentHas(this: world.planeViews, entityId: entityId) {
+    paintPlaneG(
+      world: world
+      entityId: entityId
+      wt: wt
       chain255: chain255
       canvas: canvas
     )

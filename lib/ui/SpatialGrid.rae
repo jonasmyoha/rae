@@ -1,0 +1,222 @@
+# ui/SpatialGrid — a uniform grid over a list of rectangles, to find the ones that overlap a
+# rectangle without looking at the others. Built once from the rectangles (two passes: count each
+# cell's rectangles, then fill them in, so the cells are one flat list), and asked again and again:
+# a query visits the cells the rectangle covers, and a rectangle in several cells is reported once.
+#
+# The cell is about twice the average rectangle's larger side, grown until there are at most
+# spatialGridMaxCells cells. Each cell also keeps how much of it its rectangles cover (0 to 1), for
+# a
+# drawing that shows a cell instead of its rectangles when they are too small to see.
+import Math
+
+const spatialGridMaxCells: Int = 262144
+
+type SpatialRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+type SpatialGrid {
+  cellSize: Float = 1.0
+  originX: Float = 0.0
+  originY: Float = 0.0
+  columns: Int = 0
+  rows: Int = 0
+  # cell c's rectangles are cellItems[cellStarts[c] .. cellStarts[c + 1])
+  cellStarts: List(Int)
+  cellItems: List(Int)
+  cellCoverage: List(Float)
+  # the query each rectangle was last reported by, so it is reported once a query
+  stamps: List(Int)
+  stamp: Int = 0
+}
+
+func emptySpatialGrid() ret SpatialGrid {
+  ret SpatialGrid { cellStarts: {}, cellItems: {}, cellCoverage: {}, stamps: {} }
+}
+
+# The column of plane x `x`, clamped to the grid
+func spatialColumn(grid: view SpatialGrid, x: view Float) ret Int {
+  let column: Int = Math.floor(x: (x - grid.originX) / grid.cellSize) as Int
+  ret Math.max(a: 0, b: Math.min(a: grid.columns - 1, b: column))
+}
+
+func spatialRow(grid: view SpatialGrid, y: view Float) ret Int {
+  let row: Int = Math.floor(x: (y - grid.originY) / grid.cellSize) as Int
+  ret Math.max(a: 0, b: Math.min(a: grid.rows - 1, b: row))
+}
+
+# A grid over `rects`
+func buildSpatialGrid(rects: view List(SpatialRect)) ret SpatialGrid {
+  var grid: SpatialGrid = emptySpatialGrid()
+  if rects.length is 0 {
+    ret grid
+  }
+  var left: Float = 0.0
+  var top: Float = 0.0
+  var right: Float = 0.0
+  var bottom: Float = 0.0
+  var sides: Float = 0.0
+  loop var i: Int = 0, i < rects.length, ++i {
+    if let rect: view SpatialRect = rects.viewAt(index: i) {
+      if i is 0 or rect.x < left {
+        left = rect.x
+      }
+      if i is 0 or rect.y < top {
+        top = rect.y
+      }
+      if i is 0 or rect.x + rect.w > right {
+        right = rect.x + rect.w
+      }
+      if i is 0 or rect.y + rect.h > bottom {
+        bottom = rect.y + rect.h
+      }
+      sides = sides + Math.max(a: rect.w, b: rect.h)
+    }
+  }
+  var cellSize: Float = Math.max(a: 1.0, b: sides / (rects.length as Float) * 2.0)
+  let width: Float = Math.max(a: 1.0, b: right - left)
+  let height: Float = Math.max(a: 1.0, b: bottom - top)
+  loop (Math.ceil(x: width / cellSize) * Math.ceil(x: height / cellSize)) as Int > spatialGridMaxCells {
+    cellSize = cellSize * 2.0
+  }
+  grid.cellSize = cellSize
+  grid.originX = left
+  grid.originY = top
+  grid.columns = Math.max(a: 1, b: Math.ceil(x: width / cellSize) as Int)
+  grid.rows = Math.max(a: 1, b: Math.ceil(x: height / cellSize) as Int)
+  let cells: Int = grid.columns * grid.rows
+  var counts: List(Int) = List.create(Int, cap: cells + 1)
+  var coverage: List(Float) = List.create(Float, cap: cells)
+  loop var c: Int = 0, c <= cells, ++c {
+    counts.add(value: 0)
+  }
+  loop var c: Int = 0, c < cells, ++c {
+    coverage.add(value: 0.0)
+  }
+  let cellArea: Float = cellSize * cellSize
+  loop let rect: view SpatialRect in rects {
+    let column0: Int = spatialColumn(grid: grid, x: rect.x)
+    let column1: Int = spatialColumn(grid: grid, x: rect.x + rect.w)
+    let row0: Int = spatialRow(grid: grid, y: rect.y)
+    let row1: Int = spatialRow(grid: grid, y: rect.y + rect.h)
+    let share: Float = rect.w * rect.h / cellArea / (((column1 - column0 + 1) * (row1 - row0 + 1)) as Float)
+    loop var row: Int = row0, row <= row1, ++row {
+      loop var column: Int = column0, column <= column1, ++column {
+        let cell: Int = row * grid.columns + column
+        counts.set(index: cell + 1, value: counts.copyAtDefault(index: cell + 1) + 1)
+        coverage.set(index: cell, value: coverage.copyAtDefault(index: cell) + share)
+      }
+    }
+  }
+  loop var c: Int = 0, c < cells, ++c {
+    counts.set(
+      index: c + 1
+      value: counts.copyAtDefault(index: c + 1) + counts.copyAtDefault(index: c)
+    )
+  }
+  var fill: List(Int) = List.create(Int, cap: cells)
+  loop var c: Int = 0, c < cells, ++c {
+    fill.add(value: counts.copyAtDefault(index: c))
+  }
+  var items: List(Int) = List.create(Int, cap: counts.copyAtDefault(index: cells))
+  loop var c: Int = 0, c < counts.copyAtDefault(index: cells), ++c {
+    items.add(value: 0)
+  }
+  loop var i: Int = 0, i < rects.length, ++i {
+    if let rect: view SpatialRect = rects.viewAt(index: i) {
+      let column0: Int = spatialColumn(grid: grid, x: rect.x)
+      let column1: Int = spatialColumn(grid: grid, x: rect.x + rect.w)
+      let row0: Int = spatialRow(grid: grid, y: rect.y)
+      let row1: Int = spatialRow(grid: grid, y: rect.y + rect.h)
+      loop var row: Int = row0, row <= row1, ++row {
+        loop var column: Int = column0, column <= column1, ++column {
+          let cell: Int = row * grid.columns + column
+          let at: Int = fill.copyAtDefault(index: cell)
+          items.set(index: at, value: i)
+          fill.set(index: cell, value: at + 1)
+        }
+      }
+    }
+  }
+  var stamps: List(Int) = List.create(Int, cap: rects.length)
+  loop var i: Int = 0, i < rects.length, ++i {
+    stamps.add(value: 0)
+  }
+  grid.cellStarts = counts
+  grid.cellItems = items
+  grid.cellCoverage = coverage
+  grid.stamps = stamps
+  ret grid
+}
+
+# The rectangles in the cells that `left`..`right` x `top`..`bottom` covers, each once, into
+# `found` (emptied first). They may miss the rectangle by up to a cell: test the overlap after.
+func spatialQuery(
+  grid: mod SpatialGrid
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+  found: mod List(Int)
+) {
+  found.clear()
+  if grid.columns is 0 or right < grid.originX or bottom < grid.originY {
+    ret
+  }
+  if left > grid.originX + grid.cellSize * (grid.columns as Float) {
+    ret
+  }
+  if top > grid.originY + grid.cellSize * (grid.rows as Float) {
+    ret
+  }
+  grid.stamp = grid.stamp + 1
+  let stamp: Int = grid.stamp
+  let column0: Int = spatialColumn(grid: grid, x: left)
+  let column1: Int = spatialColumn(grid: grid, x: right)
+  let row0: Int = spatialRow(grid: grid, y: top)
+  let row1: Int = spatialRow(grid: grid, y: bottom)
+  loop var row: Int = row0, row <= row1, ++row {
+    loop var column: Int = column0, column <= column1, ++column {
+      let cell: Int = row * grid.columns + column
+      let end: Int = grid.cellStarts.copyAtDefault(index: cell + 1)
+      loop var at: Int = grid.cellStarts.copyAtDefault(index: cell), at < end, ++at {
+        let item: Int = grid.cellItems.copyAtDefault(index: at)
+        if grid.stamps.copyAtDefault(index: item) is not stamp {
+          grid.stamps.set(index: item, value: stamp)
+          found.add(value: item)
+        }
+      }
+    }
+  }
+}
+
+# The cells (their index, row * columns + column) that `left`..`right` x `top`..`bottom` covers
+# and that hold a rectangle, into `found` (emptied first)
+func spatialQueryCells(
+  grid: view SpatialGrid
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+  found: mod List(Int)
+) {
+  found.clear()
+  if grid.columns is 0 or right < grid.originX or bottom < grid.originY {
+    ret
+  }
+  let column0: Int = spatialColumn(grid: grid, x: left)
+  let column1: Int = spatialColumn(grid: grid, x: right)
+  let row0: Int = spatialRow(grid: grid, y: top)
+  let row1: Int = spatialRow(grid: grid, y: bottom)
+  loop var row: Int = row0, row <= row1, ++row {
+    loop var column: Int = column0, column <= column1, ++column {
+      let cell: Int = row * grid.columns + column
+      if grid.cellStarts.copyAtDefault(index: cell + 1) > grid.cellStarts.copyAtDefault(index: cell) {
+        found.add(value: cell)
+      }
+    }
+  }
+}

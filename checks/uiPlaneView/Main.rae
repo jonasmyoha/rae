@@ -1,0 +1,329 @@
+# A plane of 50,000 mini timelines (ui/planeViewSystem), as the media editor's canvas prototype
+# laid them out: each a 4-node sub-scene (checks/uiCanvasCull's), 240 x 80 with gaps of 40 and 30,
+# in a grid sqrt(count * 3) columns wide, under a Camera2D. Mounted one entity each, the prototype
+# took 6.9 s and 200,002 entities, and its systems 37.6 ms a frame. Here only the items in view
+# have entities. For each camera (zoomed in on the middle, half, a quarter, everything) it pans for
+# a while and prints the systems' time a frame (planeViewSystem and the ui pipeline), the paint
+# walk's, and the most entities alive. Then an edit in a mini timeline is checked after it scrolled
+# out and back. Run headless:
+#
+#   RAE_HEADLESS_FRAMES=100000 compiler/bin/rae run checks/uiPlaneView/Main.rae
+#
+# RAE_CANVAS_COUNT=N for another size. Exit 0 when every camera stays under 2,000 entities and
+# 2 ms of systems a frame, the mount is under 100 ms, and the edit is kept.
+import Gpu2d
+import Math
+import Sys
+open ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Components
+open ui/Ecs
+open ui/Pipeline
+open ui/PlaneComponents
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/planeViewSystem/PlaneViewSystem
+open ui/renderSystem/RenderSystem
+open Gpu2dCanvas
+
+const designW: Int = 1280
+
+const designH: Int = 800
+
+const miniW: Float = 240.0
+
+const miniH: Float = 80.0
+
+const pitchW: Float = 280.0
+
+const pitchH: Float = 110.0
+
+const timedFrames: Int = 30
+
+const entityBound: Int = 2000
+
+const systemsBoundMs: Float64 = 2.0
+
+const mountBoundMs: Float64 = 100.0
+
+func seconds() ret Float64 {
+  ret (nowNs() as Float64) / 1000000000.0
+}
+
+func ms(seconds: view Float64) ret String {
+  let hundredths: Int = (seconds * 100000.0) as Int
+  ret "{hundredths / 100}.{(hundredths % 100) / 10}{hundredths % 10}"
+}
+
+type Frames {
+  systems: Float64
+  walk: Float64
+  mostAlive: Int
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  schedule: Schedule
+  scenes: SceneRegistry
+  root: EntityId
+}
+
+func frame(rig: mod Rig, gpuUi: view Gpu2dUi, canvas: mod Gpu2dCanvas) ret Frames {
+  let start: Float64 = seconds()
+  planeViewSystem(world: rig.world, uiSystems: rig.uiSystems, scenes: rig.scenes)
+  runScheduledUiSystems(
+    schedule: rig.schedule
+    world: rig.world
+    uiSystems: rig.uiSystems
+    res: gpuUi
+  )
+  let systems: Float64 = seconds() - start
+  Gpu2d.beginFrame(
+    canvas: canvas
+    r: 0.02
+    g: 0.04
+    b: 0.06
+    a: 1.0
+  )
+  let walkStart: Float64 = seconds()
+  renderSystemGpu2d(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    res: gpuUi
+    canvas: canvas
+  )
+  let walk: Float64 = seconds() - walkStart
+  Gpu2d.endFrame(canvas: canvas)
+  releaseDeadEntities(world: rig.world, uiSystems: rig.uiSystems)
+  ret Frames { systems: systems, walk: walk, mostAlive: aliveCount(world: rig.world) }
+}
+
+# The camera at `zoom` on plane point `centerX`, `centerY`, panning right by `step` screen pixels a
+# frame: the frames' average times and the most entities alive (the jump's first frame not timed)
+func pan(
+  rig: mod Rig
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  zoom: view Float
+  centerX: view Float
+  centerY: view Float
+  step: view Float
+) ret Frames {
+  var total: Frames = { systems: 0.0, walk: 0.0, mostAlive: 0 }
+  loop var i: Int = 0, i <= timedFrames, ++i {
+    rig.world.cameras.componentSet(
+      entityId: rig.root
+      data: {
+        zoom: zoom
+        offsetX: (designW as Float) * 0.5 - centerX * zoom - (i as Float) * step
+        offsetY: (designH as Float) * 0.5 - centerY * zoom
+      }
+    )
+    let one: Frames = frame(rig: rig, gpuUi: gpuUi, canvas: canvas)
+    if i > 0 {
+      total.systems = total.systems + one.systems
+      total.walk = total.walk + one.walk
+    }
+    total.mostAlive = Math.max(a: total.mostAlive, b: one.mostAlive)
+  }
+  total.systems = total.systems / (timedFrames as Float64)
+  total.walk = total.walk / (timedFrames as Float64)
+  ret total
+}
+
+func makeItems(count: view Int, columns: view Int) ret PlaneViewData {
+  var items: List(PlaneItem) = List.create(PlaneItem, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    items.add(value: PlaneItem {
+      x: ((i % columns) as Float) * pitchW
+      y: ((i / columns) as Float) * pitchH
+      w: miniW
+      h: miniH
+      row: ListViewRow { keys: { "title" }, values: { "Scene {i + 1}" } }
+    })
+  }
+  ret PlaneViewData {
+    items: items
+    bindings: { ListViewBinding {
+      nodeId: "Header"
+      componentName: "Text"
+      fieldName: "text"
+      itemField: "title"
+      prefix: ""
+      suffix: ""
+    } }
+  }
+}
+
+# The header text of item `item`'s live mini timeline, or "(not live)"
+func headerOf(world: view UiWorld, plane: view EntityId, item: view Int) ret String {
+  let root: EntityId = planeItemEntityId(world: world, planeEntityId: plane, item: item)
+  if isNone(this: root) {
+    ret "(not live)"
+  }
+  if let index: Int = findNodeInPage(world: world, pageId: "listRow{root.index}", nodeId: "Header") {
+    ret componentView(this: world.texts, entityId: nodeEntityId(world: world, index: index)).text
+  }
+  ret "(no header)"
+}
+
+func main() ret Int {
+  var count: Int = Sys.getEnv(name: "RAE_CANVAS_COUNT").toInt()
+  if count <= 0 {
+    count = 50000
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "Plane view check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: loadSceneFile(path: "checks/uiCanvasCull/Page.raescene")
+  )
+  let root: EntityId = nodeEntityFor(world: world, nodeId: "CanvasRoot")
+  var mini: Scene = loadSceneFile(path: "checks/uiCanvasCull/MiniTimeline.raescene")
+  if isNone(this: root) or mini.ok is false {
+    log("UI PLANE VIEW FAILED: the scenes did not load")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  var scenes: SceneRegistry = createSceneRegistry()
+  registerScene(reg: scenes, key: "mini", scene: mini)
+  let columns: Int = Math.max(a: 1, b: Math.sqrt(x: (count as Float) * 3.0) as Int)
+  let rows: Int = (count + columns - 1) / columns
+  let gridW: Float = (columns as Float) * pitchW
+  let gridH: Float = (rows as Float) * pitchH
+  let centerX: Float = gridW * 0.5
+  let centerY: Float = gridH * 0.5
+  world.cameras.componentSet(
+    entityId: root
+    data: {
+      zoom: 1.0
+      offsetX: (designW as Float) * 0.5 - centerX
+      offsetY: (designH as Float) * 0.5 - centerY
+    }
+  )
+  # the mount: the items made, given to the plane, and its first frame of planeViewSystem
+  let mountStart: Float64 = seconds()
+  world.planeViews.componentSet(entityId: root, data: { itemSceneId: "mini" })
+  world.planeViewDatas.componentSet(entityId: root, data: makeItems(count: count, columns: columns))
+  planeViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  let mount: Float64 = seconds() - mountStart
+  let schedule: Schedule = createUiPipeline(world: world)
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    schedule: own schedule
+    scenes: own scenes
+    root: root
+  }
+  let firstFrameStart: Float64 = seconds()
+  let unusedFirst: Frames = frame(rig: rig, gpuUi: gpuUi, canvas: canvas)
+  let firstFrame: Float64 = seconds() - firstFrameStart
+  let mountText: String = ms(seconds: mount)
+  let firstText: String = ms(seconds: firstFrame)
+  log(
+    "{count} mini timelines: mounted in {mountText} ms ({planeLiveItems(
+      world: rig.world
+      planeEntityId: root
+    )} live, {aliveCount(world: rig.world)} entities), the first frame {firstText} ms"
+  )
+  var ok: Bool = mount * 1000.0 < mountBoundMs
+  let outZoom: Float = Math.min(a: (designW as Float) / gridW, b: (designH as Float) / gridH)
+  let zooms: List(Float) = {
+    1.0
+    0.5
+    0.25
+    0.1
+    outZoom
+  }
+  loop let zoom: Float in zooms {
+    let frames: Frames = pan(
+      rig: rig
+      gpuUi: gpuUi
+      canvas: canvas
+      zoom: zoom
+      centerX: centerX
+      centerY: centerY
+      step: 3.0
+    )
+    let state: view PlaneViewState = componentView(this: rig.world.planeViewStates, entityId: root)
+    let systemsText: String = ms(seconds: frames.systems)
+    let walkText: String = ms(seconds: frames.walk)
+    log(
+      "  zoom {zoom}: systems {systemsText} ms a frame, paint walk {walkText} ms, at most {frames.mostAlive} entities ({state.live.length} live, {state.boxes.length} boxes, {state.cells.length} cells)"
+    )
+    if frames.mostAlive >= entityBound or frames.systems * 1000.0 >= systemsBoundMs {
+      log("  over the bound: {entityBound} entities, {systemsBoundMs} ms")
+      ok = false
+    }
+  }
+  # an edit in the middle's mini timeline, scrolled out and back
+  let middle: Int = (rows / 2) * columns + columns / 2
+  rig.world.cameras.componentSet(
+    entityId: root
+    data: {
+      zoom: 1.0
+      offsetX: (designW as Float) * 0.5 - centerX
+      offsetY: (designH as Float) * 0.5 - centerY
+    }
+  )
+  let unusedBack: Frames = frame(rig: rig, gpuUi: gpuUi, canvas: canvas)
+  let editRoot: EntityId = planeItemEntityId(world: rig.world, planeEntityId: root, item: middle)
+  if let index: Int = findNodeInPage(
+    world: rig.world
+    pageId: "listRow{editRoot.index}"
+    nodeId: "Header"
+  ) {
+    rig.world.texts.componentMod(entityId: nodeEntityId(world: rig.world, index: index)).text = "edited"
+  }
+  let unusedAway: Frames = pan(
+    rig: rig
+    gpuUi: gpuUi
+    canvas: canvas
+    zoom: 1.0
+    centerX: centerX + 5000.0
+    centerY: centerY
+    step: 3.0
+  )
+  let away: String = headerOf(world: rig.world, plane: root, item: middle)
+  rig.world.cameras.componentSet(
+    entityId: root
+    data: {
+      zoom: 1.0
+      offsetX: (designW as Float) * 0.5 - centerX
+      offsetY: (designH as Float) * 0.5 - centerY
+    }
+  )
+  let unusedReturn: Frames = frame(rig: rig, gpuUi: gpuUi, canvas: canvas)
+  let back: String = headerOf(world: rig.world, plane: root, item: middle)
+  log("  the edited mini timeline: away {away}, back {back}")
+  if back is not "edited" or away is not "(not live)" {
+    ok = false
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if not ok {
+    log("UI PLANE VIEW FAILED")
+    ret 1
+  }
+  log("UI PLANE VIEW OK")
+  ret 0
+}

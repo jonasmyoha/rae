@@ -1,0 +1,577 @@
+# planeViewSystem — a plane of items placed anywhere, with live entities only for those in view
+# (ui/PlaneComponents). It is listViewSystem in two dimensions: a node with a PlaneView and a
+# PlaneViewData (its items, each a rectangle on the plane and a data row) gets, as its children,
+# pooled sub-scene entities for the items that overlap the view plus `marginPixels`. As the camera
+# moves, an entity whose item left is re-pointed at an item that came in (its bindings applied
+# again), so a plane of 50,000 items costs the entities of the few hundred in view.
+#
+# The view: the screen (world.layoutW x layoutH) mapped onto the plane through the node's world
+# transform. When the node carries the Camera2D itself (the usual case: the plane is the camera's
+# root), the camera's offset and zoom of this frame are used, so a moving camera is never a frame
+# behind. A ui/SpatialGrid over the items finds the ones in view; it is rebuilt when the items
+# change (PlaneViewData's table generation).
+#
+# Run it once a frame before the ui pipeline (like listViewSystem), with the scenes the items name.
+# An idle frame (the same view, the same items) does nothing.
+import Math
+open ui/Ecs
+open ui/Components
+open ui/PlaneComponents
+open ui/SceneInstance
+open ui/SpatialGrid
+open ui/UiSystems
+open ui/listViewSystem/ListViewSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+
+# The view on the plane: the plane's scale on screen, where its origin is on screen, and the
+# screen's size
+type PlaneViewport {
+  scale: Float
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+func planeViewport(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret PlaneViewport {
+  var viewport: PlaneViewport = {
+    scale: 1.0
+    x: 0.0
+    y: 0.0
+    w: world.layoutW
+    h: world.layoutH
+  }
+  if viewport.w <= 0.0 or viewport.h <= 0.0 {
+    viewport.w = 1280.0
+    viewport.h = 800.0
+  }
+  let placed: Bool = componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+  if placed {
+    let transform: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: entityId
+    )
+    viewport.scale = transform.scale.x
+    viewport.x = transform.position.x
+    viewport.y = transform.position.y
+  }
+  if componentHas(this: world.cameras, entityId: entityId) {
+    let camera: view Camera2D = componentView(this: world.cameras, entityId: entityId)
+    if not placed {
+      viewport.scale = camera.zoom
+      viewport.x = camera.offsetX
+      viewport.y = camera.offsetY
+      ret viewport
+    }
+    # the last transform used the camera as cameraSystem wrote it then: take that out, put this
+    # frame's in
+    var lastZoom: Float = 1.0
+    if componentHas(this: world.transforms, entityId: entityId) {
+      let fx: view TransformFx = componentView(this: world.transforms, entityId: entityId)
+      if fx.scaleX is not 0.0 {
+        lastZoom = fx.scaleX
+      }
+    }
+    var lastOffset: Vec2 = { x: 0.0, y: 0.0 }
+    if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId) {
+      lastOffset = componentView(this: uiSystems.transform2d.runtimeOffsets, entityId: entityId).delta
+    }
+    let parentScale: Float = viewport.scale / lastZoom
+    viewport.x = viewport.x + (camera.offsetX - lastOffset.x) * parentScale
+    viewport.y = viewport.y + (camera.offsetY - lastOffset.y) * parentScale
+    viewport.scale = parentScale * camera.zoom
+  }
+  ret viewport
+}
+
+# `value` written into the row's cell `key` (added when the row has none)
+func planeRowSet(row: mod ListViewRow, key: view String, value: view String) {
+  loop var i: Int = 0, i < row.keys.length, ++i {
+    if row.keys.copyAtDefault(index: i) is key {
+      row.values.set(index: i, value: value)
+      ret
+    }
+  }
+  row.keys.add(value: key)
+  row.values.add(value: value)
+}
+
+# What a binding's field holds now on the sub-scene of `rowRoot`, its prefix and suffix taken off;
+# none for a field that is not read back, or a node the sub-scene lacks
+func planeBoundValue(
+  world: view UiWorld
+  rowRoot: view EntityId
+  binding: view ListViewBinding
+) ret opt String {
+  var index: Int = -1
+  if let found: Int = findNodeInPage(
+    world: world
+    pageId: listViewRowPage(rowRoot: rowRoot)
+    nodeId: binding.nodeId
+  ) {
+    index = found
+  } else {
+    ret none
+  }
+  let target: EntityId = nodeEntityId(world: world, index: index)
+  var value: String = ""
+  if binding.componentName is "Text" and componentHas(this: world.texts, entityId: target) {
+    let text: view Text = componentView(this: world.texts, entityId: target)
+    if binding.fieldName is "text" {
+      value = text.text
+    } else if binding.fieldName is "styleId" {
+      value = text.styleId
+    } else {
+      ret none
+    }
+  } else if binding.componentName is "Sprite" and binding.fieldName is "textureKey" and componentHas(
+    this: world.sprites
+    entityId: target
+  ) {
+    value = componentView(this: world.sprites, entityId: target).textureKey
+  } else if binding.componentName is "Active" and componentHas(
+    this: world.actives
+    entityId: target
+  ) {
+    value = "{componentView(this: world.actives, entityId: target).value}"
+  } else {
+    ret none
+  }
+  if value.startsWith(prefix: binding.prefix) and value.endsWith(suffix: binding.suffix) and value.length() >= binding.prefix.length() + binding.suffix.length() {
+    ret value.sub(
+      start: binding.prefix.length()
+      len: value.length() - binding.prefix.length() - binding.suffix.length()
+    )
+  }
+  ret value
+}
+
+# The bound fields of `rowRoot` read back into item `item`'s row
+func planeReadBack(
+  world: mod UiWorld
+  planeEntityId: view EntityId
+  rowRoot: view EntityId
+  item: view Int
+  bindings: view List(ListViewBinding)
+) {
+  var keys: List(String) = {}
+  var values: List(String) = {}
+  loop let binding: view ListViewBinding in bindings {
+    if let value: String = planeBoundValue(world: world, rowRoot: rowRoot, binding: binding) {
+      keys.add(value: binding.itemField)
+      values.add(value: value)
+    }
+  }
+  if keys.length is 0 {
+    ret
+  }
+  # only a value that changed is written, so a plane scrolled over leaves its items' table alone
+  var changed: Bool = false
+  if let current: view PlaneItem = componentView(
+    this: world.planeViewDatas
+    entityId: planeEntityId
+  ).items.viewAt(index: item) {
+    loop var i: Int = 0, i < keys.length and not changed, ++i {
+      let known: String = listRowValue(row: current.row, key: keys.copyAtDefault(index: i))
+      changed = known is not values.copyAtDefault(index: i)
+    }
+  }
+  if not changed {
+    ret
+  }
+  let data: mod PlaneViewData = componentMod(this: world.planeViewDatas, entityId: planeEntityId)
+  if let target: mod PlaneItem = data.items.modAt(index: item) {
+    loop var i: Int = 0, i < keys.length, ++i {
+      planeRowSet(
+        row: target.row
+        key: keys.copyAtDefault(index: i)
+        value: values.copyAtDefault(index: i)
+      )
+    }
+  }
+}
+
+# A new pooled entity with sub-scene `scene` mounted, a child of the plane
+func planeBuildEntity(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  planeEntityId: view EntityId
+  sceneId: view String
+  scenes: view SceneRegistry
+) ret EntityId {
+  let rowRoot: EntityId = createEntity(world: world)
+  componentSet(
+    this: world.rects
+    entityId: rowRoot
+    data: Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+  )
+  if let index: Int = sceneRegistryIndex(reg: scenes, key: sceneId) {
+    mountSceneInstanceIntoPage(
+      world: world
+      uiSystems: uiSystems
+      mountEntityId: rowRoot
+      scene: sceneRegistryGet(reg: scenes, idx: index)
+      overrides: emptyOverrides()
+      pageId: listViewRowPage(rowRoot: rowRoot)
+    )
+  }
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: rowRoot
+    parent: planeEntityId
+  )
+  ret rowRoot
+}
+
+# Entity `rowRoot` placed at item `item`'s rectangle, shown, and its bindings applied from the row
+func planePlace(
+  world: mod UiWorld
+  rowRoot: view EntityId
+  item: view PlaneItem
+  bindings: view List(ListViewBinding)
+) {
+  let rect: Rect = { position: { x: item.x, y: item.y }, size: { x: item.w, y: item.h } }
+  var moved: Bool = true
+  if componentHas(this: world.rects, entityId: rowRoot) {
+    let current: view Rect = componentView(this: world.rects, entityId: rowRoot)
+    moved = current.position.x is not item.x or current.position.y is not item.y or current.size.x is not item.w or current.size.y is not item.h
+  }
+  if moved {
+    componentSet(this: world.rects, entityId: rowRoot, data: rect)
+  }
+  if componentHas(this: world.actives, entityId: rowRoot) and not componentView(
+    this: world.actives
+    entityId: rowRoot
+  ).value {
+    componentSet(this: world.actives, entityId: rowRoot, data: Active { value: true })
+  }
+  loop let binding: view ListViewBinding in bindings {
+    let unusedFound: Bool = listViewApplySceneBinding(
+      world: world
+      rowRoot: rowRoot
+      binding: binding
+      row: item.row
+    )
+  }
+}
+
+# The sub-scene item `item` gets at its size on screen (`pixels`), or "" for a box
+func planeSceneFor(plane: view PlaneView, item: view PlaneItem, pixels: view Float) ret String {
+  if pixels >= plane.detailPixels {
+    if item.sceneId.length() > 0 {
+      ret item.sceneId
+    }
+    if plane.itemSceneId.length() > 0 {
+      ret plane.itemSceneId
+    }
+  }
+  if pixels >= plane.detailPixels * 0.25 and plane.lowDetailSceneId.length() > 0 {
+    ret plane.lowDetailSceneId
+  }
+  ret ""
+}
+
+# Choose what each item in view gets (into state.boxes and the returned wanted list, entity -1),
+# or the cells to draw when the index's cells are too small on screen
+func planeChoose(
+  plane: view PlaneView
+  data: view PlaneViewData
+  state: mod PlaneViewState
+  viewport: view PlaneViewport
+) ret List(PlaneLive) {
+  var wanted: List(PlaneLive) = {}
+  state.boxes.clear()
+  state.cells.clear()
+  let scale: Float = Math.max(a: 0.000001, b: viewport.scale)
+  let margin: Float = plane.marginPixels
+  let left: Float = (0.0 - margin - viewport.x) / scale
+  let top: Float = (0.0 - margin - viewport.y) / scale
+  let right: Float = (viewport.w + margin - viewport.x) / scale
+  let bottom: Float = (viewport.h + margin - viewport.y) / scale
+  if state.grid.cellSize * scale < plane.cellPixels {
+    spatialQueryCells(
+      grid: state.grid
+      left: left
+      top: top
+      right: right
+      bottom: bottom
+      found: state.cells
+    )
+    state.inView = 0
+    ret wanted
+  }
+  spatialQuery(
+    grid: state.grid
+    left: left
+    top: top
+    right: right
+    bottom: bottom
+    found: state.found
+  )
+  let viewLeft: Float = (0.0 - viewport.x) / scale
+  let viewTop: Float = (0.0 - viewport.y) / scale
+  let viewRight: Float = (viewport.w - viewport.x) / scale
+  let viewBottom: Float = (viewport.h - viewport.y) / scale
+  var held: Int = 0
+  # the items in the view first, then those in the margin, until the budget is spent
+  loop var pass: Int = 0, pass < 2, ++pass {
+    loop let index: Int in state.found {
+      if let item: view PlaneItem = data.items.viewAt(index: index) {
+        let inMargin: Bool = item.x <= right and item.x + item.w >= left and item.y <= bottom and item.y + item.h >= top
+        let inView: Bool = item.x <= viewRight and item.x + item.w >= viewLeft and item.y <= viewBottom and item.y + item.h >= viewTop
+        if inMargin and inView is (pass is 0) {
+          held = held + 1
+          let sceneId: String = planeSceneFor(
+            plane: plane
+            item: item
+            pixels: Math.max(a: item.w, b: item.h) * scale
+          )
+          if sceneId.length() > 0 and wanted.length < plane.maxLiveItems {
+            wanted.add(value: PlaneLive { item: index, entityId: noEntity(), sceneId: sceneId })
+          } else if inView {
+            state.boxes.add(value: index)
+          }
+        }
+      }
+    }
+  }
+  state.inView = held
+  ret wanted
+}
+
+# The rectangles of the items, for the index
+func planeRects(data: view PlaneViewData) ret List(SpatialRect) {
+  var rects: List(SpatialRect) = List.create(SpatialRect, cap: data.items.length)
+  loop let item: view PlaneItem in data.items {
+    rects.add(value: SpatialRect { x: item.x, y: item.y, w: item.w, h: item.h })
+  }
+  ret rects
+}
+
+# One plane: its live entities made to match the view
+func planeViewSyncEntity(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  scenes: view SceneRegistry
+) {
+  if not componentHas(this: world.planeViewDatas, entityId: entityId) {
+    ret
+  }
+  if not componentHas(this: world.planeViewStates, entityId: entityId) {
+    componentSet(this: world.planeViewStates, entityId: entityId, data: emptyPlaneViewState())
+  }
+  var plane: PlaneView = {}
+  if let authored: PlaneView = componentCopy(this: world.planeViews, entityId: entityId) {
+    plane = authored
+  }
+  let viewport: PlaneViewport = planeViewport(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  )
+  let generation: Int = componentTableGeneration(this: world.planeViewDatas)
+  let known: view PlaneViewState = componentView(this: world.planeViewStates, entityId: entityId)
+  let changed: Bool = known.dataGeneration is not generation
+  if not changed and known.viewScale is viewport.scale and known.viewX is viewport.x and known.viewY is viewport.y and known.viewW is viewport.w and known.viewH is viewport.h {
+    ret
+  }
+  let bindings: List(ListViewBinding) = componentView(
+    this: world.planeViewDatas
+    entityId: entityId
+  ).bindings
+  # what each item gets, and which live entities keep their items
+  var wanted: List(PlaneLive) = {}
+  var released: List(PlaneLive) = {}
+  if true {
+    let state: mod PlaneViewState = componentMod(this: world.planeViewStates, entityId: entityId)
+    let data: view PlaneViewData = componentView(this: world.planeViewDatas, entityId: entityId)
+    if changed {
+      state.grid = buildSpatialGrid(rects: planeRects(data: data))
+      state.liveOf = List.create(Int, cap: data.items.length)
+      loop var i: Int = 0, i < data.items.length, ++i {
+        state.liveOf.add(value: -1)
+      }
+    }
+    state.viewScale = viewport.scale
+    state.viewX = viewport.x
+    state.viewY = viewport.y
+    state.viewW = viewport.w
+    state.viewH = viewport.h
+    wanted = planeChoose(
+      plane: plane
+      data: data
+      state: state
+      viewport: viewport
+    )
+    # a live item still wanted with the same sub-scene keeps its entity
+    loop let live: view PlaneLive in state.live {
+      if live.item < data.items.length {
+        state.liveOf.set(index: live.item, value: -1)
+      }
+    }
+    loop var w: Int = 0, w < wanted.length, ++w {
+      state.liveOf.set(index: wanted.copyAtDefault(index: w).item, value: -2 - w)
+    }
+    loop var l: Int = 0, l < state.live.length, ++l {
+      let live: PlaneLive = state.live.copyAtDefault(index: l)
+      var kept: Bool = false
+      if live.item < data.items.length {
+        let mark: Int = state.liveOf.copyAtDefault(index: live.item)
+        if mark <= -2 {
+          if let want: mod PlaneLive = wanted.modAt(index: -2 - mark) {
+            if want.sceneId is live.sceneId and isNone(this: want.entityId) {
+              want.entityId = live.entityId
+              kept = true
+            }
+          }
+        }
+      }
+      if not kept {
+        released.add(value: live)
+      }
+    }
+    state.live = {}
+  }
+  # the items let go: their state read back into their rows (not when the app changed the items:
+  # its rows win), and their entities back to the pool
+  let ownWrites: Bool = not changed
+  loop let live: view PlaneLive in released {
+    if ownWrites {
+      planeReadBack(
+        world: world
+        planeEntityId: entityId
+        rowRoot: live.entityId
+        item: live.item
+        bindings: bindings
+      )
+    }
+  }
+  if true {
+    let state: mod PlaneViewState = componentMod(this: world.planeViewStates, entityId: entityId)
+    loop let live: view PlaneLive in released {
+      state.pool.add(value: PlanePooled { entityId: live.entityId, sceneId: live.sceneId })
+    }
+    # the wanted items without an entity take a pooled one of their sub-scene
+    loop var w: Int = 0, w < wanted.length, ++w {
+      if let want: mod PlaneLive = wanted.modAt(index: w) {
+        if isNone(this: want.entityId) {
+          var found: Int = -1
+          loop var p: Int = state.pool.length - 1, p >= 0 and found < 0, --p {
+            if state.pool.copyAtDefault(index: p).sceneId is want.sceneId {
+              found = p
+            }
+          }
+          if found >= 0 {
+            want.entityId = state.pool.copyAtDefault(index: found).entityId
+            state.pool.swapRemove(index: found)
+          }
+        }
+      }
+    }
+  }
+  # the rest are built, then every wanted item placed and bound
+  loop var w: Int = 0, w < wanted.length, ++w {
+    let want: PlaneLive = wanted.copyAtDefault(index: w)
+    var rowRoot: EntityId = want.entityId
+    if isNone(this: rowRoot) {
+      rowRoot = planeBuildEntity(
+        world: world
+        uiSystems: uiSystems
+        planeEntityId: entityId
+        sceneId: want.sceneId
+        scenes: scenes
+      )
+      if let slot: mod PlaneLive = wanted.modAt(index: w) {
+        slot.entityId = rowRoot
+      }
+    }
+    let item: PlaneItem = componentView(this: world.planeViewDatas, entityId: entityId).items.copyAtDefault(
+      index: want.item
+    )
+    planePlace(
+      world: world
+      rowRoot: rowRoot
+      item: item
+      bindings: bindings
+    )
+  }
+  # the pool hidden; the live items recorded
+  var hide: List(EntityId) = {}
+  if true {
+    let state: mod PlaneViewState = componentMod(this: world.planeViewStates, entityId: entityId)
+    loop var p: Int = 0, p < state.pool.length, ++p {
+      if let pooled: mod PlanePooled = state.pool.modAt(index: p) {
+        if not pooled.hidden {
+          pooled.hidden = true
+          hide.add(value: pooled.entityId)
+        }
+      }
+    }
+    loop var w: Int = 0, w < wanted.length, ++w {
+      let want: PlaneLive = wanted.copyAtDefault(index: w)
+      state.liveOf.set(index: want.item, value: w)
+      state.live.add(value: want)
+    }
+    # the read-back writes were this system's own: the items are still those it built for
+    if ownWrites {
+      state.dataGeneration = componentTableGeneration(this: world.planeViewDatas)
+    } else {
+      state.dataGeneration = generation
+    }
+  }
+  loop let hidden: view EntityId in hide {
+    componentSet(this: world.actives, entityId: hidden, data: Active { value: false })
+  }
+}
+
+# Every plane made to match its view. Run before the ui pipeline, with the item sub-scenes.
+func planeViewSystem(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view SceneRegistry) {
+  var planes: List(EntityId) = {}
+  loop var i: Int = 0, i < componentCount(this: world.planeViews), ++i {
+    planes.add(value: componentEntityAt(this: world.planeViews, i: i))
+  }
+  loop let entityId: view EntityId in planes {
+    planeViewSyncEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      scenes: scenes
+    )
+  }
+}
+
+# The live entity of item `item` of plane `planeEntityId`, or noEntity() when it has none
+func planeItemEntityId(
+  world: view UiWorld
+  planeEntityId: view EntityId
+  item: view Int
+) ret EntityId {
+  if not componentHas(this: world.planeViewStates, entityId: planeEntityId) {
+    ret noEntity()
+  }
+  let state: view PlaneViewState = componentView(
+    this: world.planeViewStates
+    entityId: planeEntityId
+  )
+  let at: Int = state.liveOf.copyAtDefault(index: item)
+  if at < 0 or at >= state.live.length {
+    ret noEntity()
+  }
+  ret state.live.copyAtDefault(index: at).entityId
+}
+
+# The live entities of a plane's items (its sub-scenes' nodes counted), for a check
+func planeLiveItems(world: view UiWorld, planeEntityId: view EntityId) ret Int {
+  if not componentHas(this: world.planeViewStates, entityId: planeEntityId) {
+    ret 0
+  }
+  ret componentView(this: world.planeViewStates, entityId: planeEntityId).live.length
+}

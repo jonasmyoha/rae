@@ -1137,3 +1137,40 @@ a system once a frame after `updateUiInput`, a clipped drawing over the node's o
   rows that show are drawn; a numeric column's cells are drawn to the right.
 
 Case 1474 checks both; `checks/uiLineTable` paints them.
+
+## 36. `PlaneView`: items placed anywhere, live only in view
+
+A plane of items, each a rectangle on the plane with a sub-scene: a canvas of mini timelines, a
+node graph, a map of cards. It is `ListView` in two dimensions (lib/ui/planeViewSystem). Put it on
+the node that carries the `Camera2D`:
+
+```json
+"Canvas": {
+  "Rect": { "x": 0, "y": 0, "w": 1280, "h": 800 },
+  "Camera2D": {},
+  "PlaneView": { "itemSceneId": "mini", "detailPixels": 120, "maxLiveItems": 400 }
+}
+```
+
+- The keys: `itemSceneId` (an item's sub-scene, unless the item names its own), `lowDetailSceneId`
+  (an optional smaller sub-scene for items from a quarter of `detailPixels` up), `detailPixels`
+  (120: the size on screen from which an item gets its full sub-scene), `cellPixels` (24),
+  `marginPixels` (200: how far past the view items stay live) and `maxLiveItems` (400).
+- The app gives the items in a `PlaneViewData` (not saved): each `PlaneItem` has `x`, `y`, `w`,
+  `h`, an optional `sceneId` and box `color`, and a data row; the bindings are ListView's.
+- `planeViewSystem(world, uiSystems, scenes)` runs before the ui pipeline, like `listViewSystem`.
+  A ui/SpatialGrid over the items finds those that overlap the view plus the margin. They get
+  pooled entities, re-pointed at their rows as the camera moves; an entity whose item left is
+  hidden and kept for the next one. Items smaller on screen are boxes the plane draws itself
+  (lib/ui/renderSystem/RenderPlane), and when a grid cell is under `cellPixels` on screen, each
+  cell is drawn as one box, as opaque as its items cover it. Past `maxLiveItems` the rest are
+  boxes, the items in the view before those in the margin.
+- When an item's entity is let go, its bound `Text.text`, `Text.styleId`, `Sprite.textureKey` and
+  `Active.value` are read back into its row, so an edit stays when it scrolls out and back. A
+  change the app makes to the items (the `PlaneViewData` table changed) is bound again to every
+  live item.
+- `planeItemEntityId(world, planeEntityId, item)` gives an item's live entity (or none).
+
+Case 1482 checks the windowing, the recycling, the read-back, the levels and the budget;
+`checks/uiPlaneView` mounts 50,000 mini timelines (in 20 ms on an M-series Mac, at most 1,146
+entities, the systems at most 0.54 ms a frame from zoomed in to everything on screen).

@@ -1,0 +1,210 @@
+# ui/planeViewSystem: a plane of 2,000 items (cards 100 x 60 on a 120 x 80 pitch) under a Camera2D.
+# Only the items in view plus the margin have entities, pooled and re-pointed as the camera pans;
+# zoomed out they are boxes the plane draws, then the index's cells; an edit in a card stays when it
+# scrolls out and back; a change to the items reaches the live cards.
+open ui/Scene
+open ui/Components
+open ui/Ecs
+open ui/PlaneComponents
+open ui/SceneInstance
+open ui/UiSystems
+open ui/planeViewSystem/PlaneViewSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+const columns: Int = 50
+
+const count: Int = 2000
+
+func cardScene() ret String {
+  ret "\{\"type\": \"Scene\", \"version\": 2, \"root\": \"Card\", \"nodes\": \{\"Card\": \{\"Rect\": \{\"x\": 0, \"y\": 0, \"w\": 100, \"h\": 60\}, \"Children\": [\"Label\"]\}, \"Label\": \{\"Rect\": \{\"x\": 4, \"y\": 4, \"w\": 92, \"h\": 20\}, \"Text\": \{\"text\": \"\", \"styleId\": \"body\"\}\}\}\}"
+}
+
+func makeItems() ret PlaneViewData {
+  var items: List(PlaneItem) = List.create(PlaneItem, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    items.add(value: PlaneItem {
+      x: ((i % columns) as Float) * 120.0
+      y: ((i / columns) as Float) * 80.0
+      w: 100.0
+      h: 60.0
+      row: ListViewRow { keys: { "label" }, values: { "Card {i}" } }
+    })
+  }
+  ret PlaneViewData {
+    items: items
+    bindings: { ListViewBinding {
+      nodeId: "Label"
+      componentName: "Text"
+      fieldName: "text"
+      itemField: "label"
+      prefix: ""
+      suffix: ""
+    } }
+  }
+}
+
+# The text of item `item`'s card label, or "(not live)"
+func labelOf(world: view UiWorld, plane: view EntityId, item: view Int) ret String {
+  let root: EntityId = planeItemEntityId(world: world, planeEntityId: plane, item: item)
+  if isNone(this: root) {
+    ret "(not live)"
+  }
+  if let index: Int = findNodeInPage(world: world, pageId: "listRow{root.index}", nodeId: "Label") {
+    let label: EntityId = nodeEntityId(world: world, index: index)
+    ret componentView(this: world.texts, entityId: label).text
+  }
+  ret "(no label)"
+}
+
+func look(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  plane: view EntityId
+  zoom: view Float
+  offsetX: view Float
+  offsetY: view Float
+) {
+  world.cameras.componentSet(
+    entityId: plane
+    data: { zoom: zoom, offsetX: offsetX, offsetY: offsetY }
+  )
+  planeViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+}
+
+func report(world: view UiWorld, plane: view EntityId, name: view String) {
+  let state: view PlaneViewState = componentView(this: world.planeViewStates, entityId: plane)
+  log(
+    "{name}: {state.live.length} live, {state.pool.length} pooled, {state.boxes.length} boxes, {state.cells.length} cells, {aliveCount(
+      world: world
+    )} entities"
+  )
+}
+
+func main() ret Int {
+  var scenes: SceneRegistry = createSceneRegistry()
+  var card: Scene = parseScene(source: cardScene())
+  card.sceneId = "card"
+  registerScene(reg: scenes, key: "card", scene: card)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let plane: EntityId = createEntity(world: world)
+  world.planeViews.componentSet(
+    entityId: plane
+    data: { itemSceneId: "card", detailPixels: 60.0, marginPixels: 100.0 }
+  )
+  world.planeViewDatas.componentSet(entityId: plane, data: makeItems())
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 1.0
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  report(world: world, plane: plane, name: "at the origin")
+  log(
+    "item 0: {labelOf(world: world, plane: plane, item: 0)}, item 51: {labelOf(
+      world: world
+      plane: plane
+      item: 51
+    )}, item 1999: {labelOf(world: world, plane: plane, item: 1999)}"
+  )
+  # an edit in a card, as a text field would make it
+  let editedRoot: EntityId = planeItemEntityId(world: world, planeEntityId: plane, item: 0)
+  if let index: Int = findNodeInPage(
+    world: world
+    pageId: "listRow{editedRoot.index}"
+    nodeId: "Label"
+  ) {
+    world.texts.componentMod(entityId: nodeEntityId(world: world, index: index)).text = "edited"
+  }
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 1.0
+    offsetX: -3000.0
+    offsetY: -1500.0
+  )
+  report(world: world, plane: plane, name: "panned away")
+  log(
+    "item 0: {labelOf(world: world, plane: plane, item: 0)}, item 1000: {labelOf(
+      world: world
+      plane: plane
+      item: 1000
+    )}"
+  )
+  let row: ListViewRow = componentView(this: world.planeViewDatas, entityId: plane).items.copyAtDefault(
+    index: 0
+  ).row
+  log("item 0's row: {row.values.copyAtDefault(index: 0)}")
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 1.0
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  report(world: world, plane: plane, name: "back")
+  log("item 0: {labelOf(world: world, plane: plane, item: 0)}")
+  # an idle frame changes nothing
+  let before: Int = componentTableGeneration(this: world.texts)
+  planeViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log("idle frame wrote texts: {componentTableGeneration(this: world.texts) is not before}")
+  # the app changes an item: its live card shows it
+  if let item: mod PlaneItem = world.planeViewDatas.componentMod(entityId: plane).items.modAt(
+    index: 1
+  ) {
+    item.row.values.set(index: 0, value: "renamed")
+  }
+  planeViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+  log(
+    "item 1: {labelOf(world: world, plane: plane, item: 1)}, item 0: {labelOf(
+      world: world
+      plane: plane
+      item: 0
+    )}"
+  )
+  # zoomed out: boxes, then cells
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 0.3
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  report(world: world, plane: plane, name: "zoom 0.3")
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 0.05
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  report(world: world, plane: plane, name: "zoom 0.05")
+  # a budget: at most 20 live items, the rest boxes
+  world.planeViews.componentMod(entityId: plane).maxLiveItems = 20
+  look(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    plane: plane
+    zoom: 1.0
+    offsetX: -600.0
+    offsetY: -400.0
+  )
+  report(world: world, plane: plane, name: "budget 20")
+  ret 0
+}

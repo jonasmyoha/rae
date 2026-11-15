@@ -12,6 +12,7 @@ open ui/Dialog
 open ui/RadialGradientFill
 open ui/ValueComponents
 open ui/ChartComponents
+open ui/PlaneComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -135,6 +136,10 @@ type UiWorld {
   lineGraphStates: ComponentTable(LineGraphState)
   statTables: ComponentTable(StatTable)
   statTableStates: ComponentTable(StatTableState)
+  # a plane of items (ui/PlaneComponents): authored, the app's items, the system's state
+  planeViews: ComponentTable(PlaneView)
+  planeViewDatas: ComponentTable(PlaneViewData)
+  planeViewStates: ComponentTable(PlaneViewState)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -362,6 +367,9 @@ func createUiWorld() ret UiWorld {
     lineGraphStates: ComponentTable.create(LineGraphState)
     statTables: ComponentTable.create(StatTable)
     statTableStates: ComponentTable.create(StatTableState)
+    planeViews: ComponentTable.create(PlaneView)
+    planeViewDatas: ComponentTable.create(PlaneViewData)
+    planeViewStates: ComponentTable.create(PlaneViewState)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)
