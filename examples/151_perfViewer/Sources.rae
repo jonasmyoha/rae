@@ -6,6 +6,7 @@
 # A click on a row opens it; a live one keeps its views current as its blocks arrive (the last
 # 10 s, lib/perf/PerfListen).
 open Files
+import Sys
 import String
 open app3d/UiShell
 open ecs/ComponentTable
@@ -34,6 +35,10 @@ type ViewerSources {
   filled: Bool = false
   # RAE_PERF_FOLLOW=1: the first program to stream is shown by itself, as a click would
   follow: Bool = false
+  # the status file the devtools page reads (RAE_PERF_STATUS, else /tmp/rae-perf-viewer.json),
+  # and when it was last written
+  statusPath: String = ""
+  statusWrittenNs: Int = 0
 }
 
 # The listener RAE_PERF_LISTEN asks for, and the folder RAE_PERF_FOLDER names
@@ -198,6 +203,9 @@ func sourcesFrame(world: mod UiWorld, viewer: mod PerfViewer, sources: mod Viewe
   if let listener: mod PerfListener = sources.listener {
     arrived = perfListenStep(listener: listener)
   }
+  if sources.listener is not none and (arrived or nowNs() - sources.statusWrittenNs >= 1000000000) {
+    writeStatus(sources: sources, ended: false)
+  }
   var changed: Bool = false
   let table: EntityId = nodeEntityFor(world: world, nodeId: "SourcesTable")
   if componentHas(this: world.statTableStates, entityId: table) and (arrived or not sources.filled) {
@@ -257,4 +265,42 @@ func followedEnded(viewer: view PerfViewer, sources: view ViewerSources) ret Boo
     }
   }
   ret false
+}
+
+# `text` inside JSON quotes
+func jsonText(text: view String) ret String {
+  ret text.replace(old: "\\", new: "\\\\").replace(old: "\"", new: "\\\"")
+}
+
+# The status file the devtools page lists live programs from: this viewer's port and its sources
+# (written once a second while listening, at once when they change, and `ended` at the end)
+func writeStatus(sources: mod ViewerSources, ended: view Bool) {
+  if sources.statusPath.length() is 0 {
+    ret
+  }
+  sources.statusWrittenNs = nowNs()
+  var text: String = "\{\"updatedMs\": {nowMs()}, \"ended\": {ended}"
+  if let listener: view PerfListener = sources.listener {
+    text = "{text}, \"port\": {listener.port}, \"sources\": ["
+    loop var i: Int = 0, i < listener.sources.length, ++i {
+      if let source: view PerfLiveSource = listener.sources.viewAt(index: i) {
+        var program: String = ""
+        var machine: String = ""
+        if let header: view PerfFileHeader = source.header {
+          program = header.program
+          machine = header.machine
+        }
+        if i > 0 {
+          text = "{text}, "
+        }
+        text = "{text}\{\"program\": \"{jsonText(text: program)}\", \"machine\": \"{jsonText(
+          text: machine
+        )}\", \"blocks\": {source.received}, \"ended\": {not source.connected}\}"
+      }
+    }
+    text = "{text}]"
+  } else {
+    text = "{text}, \"port\": 0, \"sources\": []"
+  }
+  let unusedWritten: Bool = Sys.writeFile(path: sources.statusPath, content: "{text}\}\n")
 }

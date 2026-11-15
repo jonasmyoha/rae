@@ -199,6 +199,10 @@ func runViewer(viewer: mod PerfViewer) ret Int {
     folder: folder
   )
   sources.follow = Sys.getEnv(name: "RAE_PERF_FOLLOW") is "1"
+  sources.statusPath = Sys.getEnv(name: "RAE_PERF_STATUS")
+  if sources.statusPath.length() is 0 {
+    sources.statusPath = "/tmp/rae-perf-viewer.json"
+  }
   # RAE_PERF_END_AFTER_LIVE=1: the viewer ends once the program it follows ended (the live check)
   let endAfterLive: Bool = Sys.getEnv(name: "RAE_PERF_END_AFTER_LIVE") is "1"
   setNodeText(world: world, nodeId: "SourcesNote", value: sourcesNote(sources: sources))
@@ -282,6 +286,9 @@ func runViewer(viewer: mod PerfViewer) ret Int {
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   log("[perfViewer] sources: {sourcesSummary(sources: sources)}")
+  if sources.listener is not none {
+    writeStatus(sources: sources, ended: true)
+  }
   if let listener: mod PerfListener = sources.listener {
     perfListenClose(listener: listener)
   }

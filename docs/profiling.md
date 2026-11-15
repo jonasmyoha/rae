@@ -1,113 +1,138 @@
-# Frame profiling (Live captures → Perfetto)
+# Profiling Rae programs
 
-A capture-and-view profiler for finding where per-frame time goes on **desktop
-and iPhone**. It records nested CPU timing **zones** and **counters** during a
-time-boxed capture and writes a **Chrome Trace Event JSON** file you open in
-[ui.perfetto.dev](https://ui.perfetto.dev) (or `chrome://tracing`). There is no
-in-engine viewer on purpose: Perfetto gives a task/thread-aware timeline **and a
-full SQL query engine** over the trace, which is exactly the "capture, then run
-queries to see where the time goes" workflow — and it is far better than
-anything we would build.
+Rae measures a running program with one recorder and reads it in several places. This page says
+what each piece is, how to use them for a game, an audio app and a threaded program, and which
+numbers to trust. The design and its history are in docs/perf-tools-design.md.
 
-The capture layer is `lib/Profile.rae`, over the event recorder `lib/perf/Perf.rae`
-(docs/perf-tools-design.md §3). Overhead when not capturing is a single bool test per
-zone; while capturing a zone is a name lookup and one 32-byte event pushed into a ring,
-and all string/file work is deferred to the end of the capture, so it never skews the
-frames it measures.
+## The pieces
 
-### What moved to the recorder (perf step 2, Rae 0.3.129)
+| piece | what it is | where |
+|---|---|---|
+| the recorder | small fixed-size events (a zone's begin and end, a counter, a mark, a wait, a GPU span) written by each thread into a ring of its own, collected once a frame into a window of the last seconds; a write costs one atomic load and a push, and nothing allocates | `lib/perf/Perf`, through `lib/Profile` in an app |
+| what records by itself | each ECS system that runs (and a mark when it is skipped), the worker pool's chunks and tasks with their spawn flows, every wait (Task.get, a Signal, a lock, a channel), named threads, every presented frame (start, present, pacing counters), GPU pass spans and Metal command buffers, memory and allocations each frame, the audio engine's blocks and nodes (when the app calls `recordAudioCapture`), real-time rule breaks | the runtime, `lib/ecs/Schedule`, `gpu/FramePacer`, `lib/Profile`, `audio/AudioCapture` |
+| the capture file | a capture saved as `.raeperf`: the header (program, machine, Rae version), the names, the lanes, and the events in blocks | `RAE_PERF_OUT=<file>`, `lib/perf/PerfFile` |
+| the live link | the same capture streamed over TCP while it runs, to a viewer on any machine; a slow network drops blocks and counts them, it never makes the program wait | `RAE_PERF_LIVE=<host>:<port>`, `lib/perf/PerfLive` |
+| the perf HUD | a panel over any app with a debug overlay: frame times against the refresh budget (CPU and GPU), a bar per thread (busy, waiting, idle), the audio block's share and the rule breaks, memory and allocations a frame, and a button that saves the last 10 s as a `.raeperf`; closed, it costs nothing | the debug button, then "Performance"; `RAE_PERF_HUD=1` opens it at launch (`lib/ui/PerfHud`) |
+| Rae Perf | the viewer: Frames, Timeline, Flame graph, Threads (with the slowest frame's critical path), GPU, Audio, Memory, Systems, Compare (two captures, or an `RAE_AB` run's settings) and Sources (live programs, a folder of captures) | `examples/151_perfViewer`, the devtools page's Perf tab |
+| reports and budgets | a capture's report in text, a profile run's summary, a frame-time check against this machine's baseline, and budget checks a fixture calls | `tools/perfReport`, `lib/perf/PerfBudget` |
+| Perfetto | the deep dive: every event on a timeline with SQL over it | `rae run tools/perfExport/Main.rae -- capture.raeperf trace.json`, or the `.json` a capture writes beside it |
 
-- `zoneBegin`, `zoneEnd`, `counter` and `tick` keep their signatures; call sites did not
-  change. A capture now owns a `PerfHub`: the main loop writes into its ring, `tick`
-  collects the rings into the hub's window once a frame, and the trace is written from
-  that window. The window holds 300 000 events; past it the oldest go (the log says how
-  many), where the old buffer dropped the newest.
-- The trace has lanes. Process `CPU` has one thread per ring, named after its thread
-  (`CPU main loop` first). Another thread gets a lane of its own with
-  `profileThreadRing(profiler:, name:)` and writes with `perfZoneBegin`/`perfCounter`
-  (lib/perf/Perf) and names from `profileName`. Process `GPU` holds every counter whose
-  name starts with `gpu.` and, once a step writes them, GPU spans.
-- The runtime's work (perf step 3, Rae 0.3.131): a capture installs the hub's runtime table, so
-  each pool worker has a lane (`worker <n>`) with its `parallelLoop` chunks, the loop is a zone on
-  its caller's lane, tasks run as `task` zones with a flow arrow from their `spawn`, and
-  `Task.get`, `Task join`, `taskScope`, `Channel` (waiting for the channel's lock), `lock` (a
-  contended runtime lock) and `Signal wait` are spans of the category `wait`
-  (docs/perf-tools-design.md §4.3). `capturedNames` leaves these names out. A `spawn thread`
-  has a lane named by its function, and a thread C made one named at `rae_thread_attach_named`
-  ("attached thread" for plain `rae_thread_attach`), up to 8 such threads (0.3.132).
-- Systems (perf step 4, Rae 0.3.133): a `lib/ecs` Schedule records each system that runs as a
-  zone named after it, and each one skipped because nothing it reads changed as a mark
-  `<name> (skipped)`; a runner closes the zone with `systemDone`. 106 shows its UI systems and
-  observers this way, and the walkers (143) show their update's systems as zones.
-- GPU spans (perf step 5, Rae 0.3.134): the timed passes are spans on the `GPU` lane, on the CPU's
-  clock (`perf/GpuClock`, its offset and drift as `gpu.clock` counters). A span is when the GPU
-  stamped, not what the pass costs on a tile GPU (see "What to trust" above). Each frame also has
-  `frame.cpu.us`, `frame.drawable.us`, `frame.gpuWait.us`, `gpu.busy.us` and a `bound by …` mark.
-  On Apple each Metal command buffer is a span on its own GPU lane (the GPU's real busy time, the
-  truth a pass slot is checked against), and the walkers write their GPU resource tables' sizes
-  (`gpu.buffers`, `gpu.textures`, …) (0.3.135).
-- Real time and audio (perf step 6, Rae 0.3.136, audio 0.20.0): under `RAE_REALTIME_CHECK=1` each
-  rule break is a mark naming its entry point; `Profile.realtimeRecorder` writes a recorder's
-  p99.9, maximum and share; `audio/AudioCapture.recordAudioCapture` writes the audio renders as
-  spans on an "audio render" lane and the engine's underruns, latency and clock drift, and (audio
-  0.21.0) each node of the buses' plan as a zone; a recorder's calls are zones (sampled one in 16
-  after the first 1 000).
-- Frame pacing (perf step 7, Rae 0.3.138): every Gpu2d frame has "frame start", a "present" zone
-  and "presented" (the display link's target time on iOS), with `frame.interval us`,
-  `frame.jitter us`, `frame.missed refreshes` and `thermal.state`. The video source's events are
-  defined in `lib/perf/VideoEvents` for a player to write.
-- Memory (perf step 8, Rae 0.3.139): each tick writes `mem.frame allocations` (this thread; 0 for an
-  allocation-free frame), `mem.frame allocations, all threads`, `mem.buffers`, `mem.rss kb`, and
-  under `RAE_MEM_STATS=1` `mem.buffer bytes` and `mem.strings`; the walkers add their GPU tables'
-  bytes. `python3 tools/perf-memory-growth.py <trace> --warmup 20` prints each one's growth per
-  minute after the warm-up, and fails over `--max-buffers` / `--max-buffer-bytes`.
-- The capture file and the live link (perf step 9, Rae 0.3.140): `RAE_PERF_OUT=capture.raeperf`
-  writes the binary capture beside the trace (`rae run tools/perfExport/Main.rae --
-  capture.raeperf trace.json` makes a Perfetto trace of it), and `RAE_PERF_LIVE=<host>:<port>`
-  streams the capture over TCP while it runs, dropping (and counting) blocks rather than waiting
-  on a slow network.
-- Timestamps are microseconds to the nanosecond (`12.034`), not whole microseconds.
-- New counters under a capture: `frame.us`, `scene.width`, `scene.height`, and the
-  draws by pass (`draws.gbuffer.instances`/`.triangles`, `draws.forward.*` when the forward
-  path draws, `draws.shadow.*` summed over the cascades), from `app3d/FrameLog`
-  `frameLogCounters`; `gpu.clouds` and `gpu.cloud pass <n>` from `CloudTiming`
-  `publishCloudTimingCounters`, called with the renderer's pass counters. The
-  `RendererPassTiming`/`GpuTiming` counters (`gpu.<pass>`, `gpu.total`), `render.scale`,
-  `render.capFps`, `thermal.state` and the grass counters reach the hub through
-  `Profile.counter` as before.
-- Unchanged: the `[frames]`, `[draws]` and `[clouds gpu]` log lines, so
-  `tools/profile-desktop.sh`, `tools/ios/profile-ios.sh` and their summary (now
-  `tools/perfReport`, which replaced `profile-summary.py`) read the same thing (143's summary measured before and after: the same median frame,
-  the CPU time within noise).
-- The 2D canvas's GPU time (`lib/Gpu2dCanvasTiming`, Rae 0.3.130): under `RAE_PROFILE` the
-  canvas times its frame pass without the `[gpu2d]` log lines (those stay
-  `RAE_GPU2D_TIMING`'s), and `publishCanvas2dTimingCounters` puts each new sample into the
-  GPU process as `gpu.2d frame` (us) and, on Apple, `gpu.2d longest command buffer` (us, the
-  longest of each second). 106 and 121 now own a `Profiler` on their App
-  (`Profile.maybeAutoStart` at creation), with zones `wait`, `input`, `update`, `render`
-  (106) and `update`, `render`, `wait` (121); a capture still running when the window
-  closes is written then.
+## The commands
 
-## Capturing on desktop
+```sh
+# a capture of the first 20 s, as a trace and as a capture file
+RAE_PROFILE=1 RAE_PROFILE_SECONDS=20 RAE_PROFILE_OUT=/tmp/run.json RAE_PERF_OUT=/tmp/run.raeperf \
+  ./compiler/bin/rae run examples/143_walker_forest/Main.rae
 
-Set `RAE_PROFILE` and run the example — the capture auto-starts at launch and
-writes the trace when the window elapses:
+# look at it
+RAE_PERF_OPEN=/tmp/run.raeperf ./compiler/bin/rae run examples/151_perfViewer/Main.rae
+./compiler/bin/rae run tools/perfReport/Main.rae -- capture /tmp/run.raeperf
 
-```bash
-RAE_PROFILE=1 RAE_PROFILE_SECONDS=30 RAE_PROFILE_OUT=/tmp/rae_profile.json \
-  ./compiler/bin/rae run examples/136_walker_character
+# live: start the viewer (it listens on port 7470), then the program
+./compiler/bin/rae run examples/151_perfViewer/Main.rae
+RAE_PROFILE=1 RAE_PERF_LIVE=127.0.0.1:7470 ./compiler/bin/rae run examples/143_walker_forest/Main.rae
+
+# Perfetto
+./compiler/bin/rae run tools/perfExport/Main.rae -- /tmp/run.raeperf /tmp/run.json
 ```
 
-Walk around, let the sun set (the case where 114 drops from 60→~20 fps), and at
-30 s the trace is written to `/tmp/rae_profile.json`. Env vars:
-
-| Variable | Default | Meaning |
+| variable | default | meaning |
 |---|---|---|
-| `RAE_PROFILE` | (unset) | Any non-empty value starts a capture at launch |
-| `RAE_PROFILE_SECONDS` | `20` | Capture length in seconds |
-| `RAE_PROFILE_OUT` | `rae_profile.json` | Output path (relative to the app's cwd) |
+| `RAE_PROFILE` | unset | any value starts a capture at launch (an app that calls `Profile.maybeAutoStart`: 106, 121, the walkers) |
+| `RAE_PROFILE_SECONDS` | `20` | how long the capture runs; a program that ends sooner writes what it has |
+| `RAE_PROFILE_OUT` | `rae_profile.json` | the Perfetto trace (on iOS in the app's Documents folder) |
+| `RAE_PERF_OUT` | unset | also the capture file; under `RAE_AB` one per setting beside it |
+| `RAE_PERF_LIVE` | unset | stream the capture to `<host>:<port>` while it runs |
+| `RAE_PERF_HUD` | unset | `1` opens the perf HUD at launch |
+| `RAE_PERF_OPEN`, `RAE_PERF_COMPARE`, `RAE_PERF_VIEW` | the walker sample | the viewer's capture, a second one to compare, the first view |
+| `RAE_PERF_LISTEN`, `RAE_PERF_FOLDER` | `7470`, the samples | the viewer's port (`0` any free one, `off` none) and the folder its Sources tab lists |
 
-## Capturing on iPhone
+The devtools page's **Perf** tab shows whether Rae Perf runs, the programs streaming to it, and a
+button that opens it (the viewer writes its state to `/tmp/rae-perf-viewer.json`,
+`RAE_PERF_STATUS`, once a second).
+
+## How to: a game
+
+1. **Look first.** Open the perf HUD (the debug button, Performance). The frame graph says whether
+   frames fit the refresh budget and whether the CPU (blue) or the GPU and the display (orange)
+   takes the time. The thread bars say whether the workers are busy or the main thread waits.
+2. **Capture the slow moment.** Press "Save last 10 s" right after it, or run with `RAE_PROFILE=1
+   RAE_PERF_OUT=…`. Open the file in Rae Perf: Frames shows the slow frames and the spread, Systems
+   the zones by total time (and how often a system was skipped), the Timeline what ran in a frame,
+   and GPU how many frames the CPU, the GPU or the drawable bounded.
+3. **Find what a feature costs** with `RAE_AB` (below), not with a GPU pass's slot: on a tile GPU a
+   slot is not a cost. With `RAE_PERF_OUT` set, the viewer opens the run's capture as the baselines
+   against the first case and its Compare view lists every zone's change, most certain first.
+4. **Hold the line.** `rae run tools/perfReport/Main.rae -- regress run.raeperf` compares the frame
+   p95 with the program's baseline on this machine (kept in `~/.rae/perf-baselines`, never in the
+   repository) and exits 1 beyond its spread.
+
+## How to: an audio app
+
+1. **The rules.** Run with `RAE_REALTIME_CHECK=1`: an allocation, a lock or a log on the audio
+   thread is counted, a mark in a capture names where it happened, and the perf HUD shows the count
+   in red. `perfRealtimeBudget()` (lib/perf/PerfBudget) fails a fixture that broke one.
+2. **The block against its period.** Call `recordAudioCapture(profiler:)` (audio/AudioCapture) once
+   a frame while capturing: each block is a span on an "audio render" lane, each node of the render
+   plan a zone ("sum 0", "reverb 7"), with `audio.render share %`, the underruns, the latency and the
+   clock drift. The viewer's Audio view lists the nodes and graphs the share; the HUD shows it live.
+3. **A budget in a test.** Render the scene offline and check
+   `perfAudioBudget(renderNanoseconds: audio.takeRenderNanoseconds(), periodNanoseconds:
+   audio.renderPeriodNanoseconds(), share: 0.5, calibrationNs: perfCalibrationNs())`, the calibration
+   timed before the scene: a slower or busier machine gets a larger allowance, never a smaller one
+   (cases 1401, 1450, 1456 do).
+
+## How to: a threaded program
+
+1. **Nothing to add.** A capture gives each pool worker a lane with its `parallelLoop` chunks and
+   tasks, each `spawn thread` a lane named after its function, a thread C attached a lane named at
+   `rae_thread_attach_named`, and every wait a span of its kind.
+2. **Where the frame went.** The viewer's Threads view shows each lane's busy, waiting and idle
+   share, the waits by kind, and the slowest frame's critical path: the main thread's work, the task
+   on another thread a wait was for (found as the span that ended last inside the wait), and that
+   task's time in the queue back to its spawn. A path that is mostly "waiting" or "in the queue"
+   wants more parallel work or fewer waits, not faster code.
+3. **Your own zones** on another thread: `profileThreadRing(profiler:, name:)` at setup gives the
+   thread a ring and a lane; it writes with `perfZoneBegin`/`perfZoneEnd`/`perfCounter`
+   (lib/perf/Perf), which never allocate or lock.
+
+## Zones and counters in your own code
+
+```rae
+import Profile
+# once, on the App: var profiler: Profiler = Profile.createProfiler(), then
+Profile.maybeAutoStart(profiler: app.profiler)
+# each frame:
+let unusedWritten: Bool = Profile.tick(profiler: app.profiler)   # collects; ends a timed capture
+Profile.zoneBegin(profiler: app.profiler, name: "physics")      # nest freely, begin and end in pairs
+stepPhysics()
+Profile.zoneEnd(profiler: app.profiler, name: "physics")
+Profile.counter(profiler: app.profiler, name: "bodies", value: bodyCount)
+```
+
+Outside a capture each call is one Bool test. An app with a debug overlay also passes its profiler
+to it once a frame after `tick` (`debugOverlayPerf`), which gives the perf HUD its threads and its
+save button.
+
+## One command: profile a run and read the summary
+
+```sh
+tools/profile-desktop.sh examples/143_walker_forest/Main.rae 40      # this machine
+APP=<bundle id> tools/ios/profile-ios.sh <device id> 80              # a phone
+```
+
+Both print the same summary (`tools/perfReport`'s `logs`), one block a place: the frames, the CPU
+time, what each pass drew and the GPU slots, so a comparison can start on the Mac. Both stop at the
+first run that fails and at a total time limit (`TOTAL_SECONDS`, 30 minutes), say so with a
+`STOPPED` line, summarize what they have and exit 1. A failed launch stops the phone's profile at
+once: a locked phone fails the same way at every place. Options are in each script's header;
+`tools/profile-tools-test.sh` checks both without a phone.
+
+Compare the `scale` of two summaries before their times. Dynamic resolution stays on in a profile,
+so a run can settle at a lower scale: 143 on a Mac settled at 0.50, uncapped. `RAE_AB` holds the
+scale still.
+
+## Capturing on an iPhone
 
 Pick **iOS device (profiler)** in the devtools target dropdown, or run:
 
@@ -127,15 +152,18 @@ is retrieved with `devicectl device copy from --domain-type appDataContainer`.
 
 The plain **iOS device** target (no profiler) launches normally with no capture.
 
-## Viewing
+A capture file comes off the phone the same way: set `RAE_PERF_OUT` to a name, and copy it from
+the app's Documents folder. The perf HUD's save button writes there too. Live, a phone streams to a
+Mac on the same network with `RAE_PERF_LIVE=<the Mac's address>:7470`.
 
-1. Open <https://ui.perfetto.dev> (works offline once loaded).
-2. **Open trace file** → pick your `.json`.
-3. The `CPU main loop` track shows each frame's passes as nested spans:
-   `shadow`, `gbuffer`, `ssao`, `depthPyramid`, `lighting`, `taa`, `composite`,
-   `uiOverlay`, `present`. Counters (e.g. `fps`) plot as their own tracks.
+## Perfetto: the deep dive
 
-## Querying (the point of Perfetto)
+Rae Perf answers the usual questions. For anything else, export the capture (`tools/perfExport`)
+or use the `.json` a capture writes, and open it at <https://ui.perfetto.dev> (Open trace file).
+Process `CPU` has a lane per thread, process `GPU` the GPU spans and the `gpu.*` counters; waits are
+spans of the category `wait`, and spawns are flow arrows.
+
+### Querying
 
 Use **Query (SQL)** in the left panel. Total time per pass across the capture —
 the "where is the time going" answer:
@@ -158,32 +186,6 @@ If `present` balloons while the CPU passes stay flat, the frame is **GPU-bound**
 with the sun's elevation is the culprit. The prime suspect for 114 is
 `fitShadowCascades` enlarging the light frustum at a grazing sun, so each cascade
 rasterizes a larger world-space area (`lib/shadow3d.rae`, `lib/gbuffer_shadow.rae`).
-
-## What the zones measure (and don't)
-
-Phase 1 zones are **CPU wall-clock** around each render-graph pass — they bound
-the CPU submit cost and, via `present`, reveal CPU-vs-GPU-bound. They do **not**
-attribute time *inside* the GPU. Exact per-pass GPU milliseconds need **WebGPU
-timestamp queries** (a second, GPU track in the same trace) — tracked as **#528**
-and the real payload for the Instruments pass (#524). The bindings already exist
-(`wgpuCommandEncoderWriteTimestamp`, `wgpuComputePassEncoderWriteTimestamp`), so
-this stays Rae-over-WebGPU with no new renderer C surface.
-
-## One command: profile a run and read the summary
-
-```sh
-tools/profile-desktop.sh examples/143_walker_forest/Main.rae 40      # this machine
-APP=<bundle id> tools/ios/profile-ios.sh <device id> 80              # a phone
-```
-
-Both print the same summary (`tools/profile-summary.py`), one block a place: the frames, the CPU
-time, what each pass drew and the GPU slots. So a comparison can start on the Mac. Both stop at the
-first run that fails and at a total time limit (`TOTAL_SECONDS`, 30 minutes), say so with a `STOPPED`
-line, summarize what they have and exit 1. A failed launch stops the phone's profile at once: a locked
-phone fails the same way at every place. Options are in each script's header.
-
-Compare the `scale` of two summaries before their times. Dynamic resolution stays on in a profile, so
-a run can settle at a lower scale: 143 on a Mac settled at 0.50, uncapped. `RAE_AB` holds the scale still.
 
 ## What to trust
 
@@ -328,17 +330,3 @@ comparing gets a field in `AbSwitches`, a line in `abSwitchOff` and an `if` at i
   frames are always drawn, so a skipped frame does not count as a wait. A measured fall in the cloud tier
   can still happen; it would show as a step in the baselines.
 - With `RAE_AB` unset the frame reads a few false Bools and nothing else changes.
-
-## Adding zones to your own app
-
-```rae
-import profile
-# once at startup:
-profile.profileMaybeAutoStart()
-# each frame:
-profile.profileTick()                 # auto-stops + writes when the window elapses
-profile.zoneBegin(name: "myPhase")    # strictly nested (LIFO) begin/end
-...work...
-profile.zoneEnd(name: "myPhase")
-profile.profileCounter(name: "fps", value: fps)
-```

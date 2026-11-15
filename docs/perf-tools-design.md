@@ -1,7 +1,9 @@
 # Performance tools for Rae — design
 
-Status: design (2026-11-13). The work is queued as `[perf 0/14]` to `[perf 14/14]` in QUEUE.md.
-Step 0 merges the `sound/audio-engine` branch: most steps build on what it added.
+Status: landed (2026-11-15, Rae 0.3.153): steps 1 to 14 below are done, each section ends with
+what its step built and in which version, and docs/profiling.md is the guide to using it. What is
+still open is in "What remains" at the end. This page kept its design text: read a section's
+"Done in" paragraph for what the code does.
 
 ## 1. The short answer
 
@@ -27,6 +29,28 @@ Rae gets one recorder and one set of views for every kind of program:
     timelines, flame graphs and histograms, and compares two captures.
 - **Headless reports and budgets** for the test gates: zero allocations on real-time threads, the
   audio block's worst time against its period, frame-time regressions against a saved baseline.
+
+## 1.1 What landed, by step
+
+| step | what | Rae |
+|---|---|---|
+| 1 | the recorder: `PerfEvent`, a ring per thread, the hub, names (`lib/perf/Perf`) | 0.3.127 |
+| 2 | `lib/Profile` on the recorder, a lane per thread in the trace; the 2D canvas's GPU time | 0.3.129, 0.3.130 |
+| 3 | the runtime's work: pool chunks, tasks and spawn flows, waits, named and attached threads | 0.3.131, 0.3.132 |
+| 4 | the ECS schedule's systems and skips | 0.3.133 |
+| 5 | GPU spans on the CPU's clock, Metal command buffers, the CPU/GPU/drawable split | 0.3.134, 0.3.135 |
+| 6 | real-time rule breaks, recorders, the audio engine's blocks, nodes, underruns and drift | 0.3.136, 0.3.137 |
+| 7 | frame pacing; the video source's events | 0.3.138 |
+| 8 | memory and allocations each frame | 0.3.139 |
+| 9 | the `.raeperf` file, Perfetto export from it, the live link | 0.3.140 |
+| 10 | the `lib/ui` charts: Timeline, FlameGraph, Histogram, LineGraph, StatTable, with reference pictures and gestures | 0.3.141 to 0.3.144 |
+| 11 | the perf HUD in any app | 0.3.145 |
+| 12 | Rae Perf (`examples/151_perfViewer`): the views, comparing two captures and `RAE_AB` runs, live programs and folders, the critical path and the deeper views | 0.3.148 to 0.3.151 |
+| 13 | `tools/perfReport` and `lib/perf/PerfBudget`; budgets in the audio fixtures | 0.3.152 |
+| 14 | docs/profiling.md around these tools; the devtools page's Perf tab | 0.3.153 |
+
+Found on the way and fixed: 106 allocated about 13 750 times a frame (now 29, 0.3.146 and the 2D
+canvas's bind groups kept across frames, 0.3.147).
 
 ## 2. What exists today
 
@@ -642,7 +666,16 @@ Nth copy on, and a copy that fails once is checked to be tried again).
 | 13 | reports and budgets in the gates; the profile scripts | 9 |
 | 14 | docs/profiling.md and the devtools page | all |
 
-## 13. Decisions still needed
+## 13. What remains
+
+- **An iPad and iPhone run** of the HUD, the viewer and a phone streaming live: the queue's
+  postponed "[perf: device captures that need a person]" line (a locked phone refuses a launch).
+- **`--perf-functions`** (below) and **the viewer on the devtools page itself** (below) are not
+  queued.
+- The render path still makes 29 allocations a rendered frame in 106: the GPU recording's lists,
+  the dependency arena and the render pass setup (0.3.147's note).
+
+## 13.1 Decisions still needed (as designed)
 
 - **The merge (step 0).** Most steps use the sound branch's `Atomic`, `SpscRing`,
   `RealtimeRecorder`, `realtime` keyword and thread kinds. Building them on `main` first would mean

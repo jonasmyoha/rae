@@ -484,6 +484,20 @@ const server = Bun.serve<SocketData>({
       }
     }
 
+    // The perf viewer's status (examples/151_perfViewer writes it while it listens): the live
+    // programs streaming to it (RAE_PERF_LIVE), for the Perf tab. Running = written in the last
+    // 5 s and not marked ended.
+    if (url.pathname === "/api/perf/live" && req.method === "GET") {
+      const statusPath = process.env.RAE_PERF_STATUS || "/tmp/rae-perf-viewer.json";
+      try {
+        const status = JSON.parse(await Bun.file(statusPath).text());
+        const running = !status.ended && Date.now() - Number(status.updatedMs ?? 0) < 5000;
+        return Response.json({ running, port: status.port ?? 0, sources: running ? status.sources ?? [] : [] });
+      } catch (_) {
+        return Response.json({ running: false, port: 0, sources: [] });
+      }
+    }
+
     if (url.pathname === "/api/examples" && req.method === "GET") {
       // The stress cases and the hardware checks ride along as records with
       // origin "stress" / "checks"; the client sorts each into its own tab.

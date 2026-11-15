@@ -254,6 +254,12 @@ const EXAMPLE_COLLECTIONS = {
     title: "Checks",
     subtitle: "Hardware checks, not examples: each one tests a part of the GPU layer on a real GPU (or the browser runtime) and exits 0 when it passes. Run all of them with checks/run.sh."
   },
+  // The perf tools (docs/profiling.md): Rae Perf, the capture viewer (example 151), and the
+  // programs streaming to it live (its status file, /api/perf/live).
+  perf: {
+    title: "Perf",
+    subtitle: "Rae Perf opens .raeperf captures and shows the programs that stream to it: start one with RAE_PROFILE=1 RAE_PERF_LIVE=<this machine>:7470, or open the perf HUD in an app (the debug button, Performance) and save its last 10 s."
+  },
   stress: {
     title: "Stress",
     subtitle: "Small programs that poke one classic language foot gun each — and say in the open whether Rae handles it or still gets it wrong."
@@ -264,7 +270,8 @@ const COLLECTION_CATEGORIES = {
   ui: ["UI"],
   renderer2d: ["2D Renderer"],
   renderer3d: ["3D Renderer"],
-  raytracer: ["Raytracer"]
+  raytracer: ["Raytracer"],
+  perf: ["Tools"]
 };
 let currentExampleCollection = "examples";
 let selectedExampleId = null;
@@ -2039,6 +2046,8 @@ function applyExampleCollection(collection) {
 
   const visible = examplesForCurrentCollection();
   if (currentExampleCollection === "stress") renderStressScoreboard(visible);
+  if (currentExampleCollection === "perf") startPerfLive();
+  else stopPerfLive();
   // Spell out what "Run all" will actually start. The label cannot say it
   // without growing to a sentence, and the scope being invisible is what made
   // the button surprising in the first place.
@@ -4561,6 +4570,7 @@ function setActiveView(targetView) {
     return;
   }
   stopExamplesBackgroundAnimation();
+  stopPerfLive();
   if (resolvedView === "statistics") {
     if (!statsViewLoaded) {
       statsViewLoaded = true;
@@ -4757,6 +4767,63 @@ function renderStressVerdictLine(verdict) {
 
 // The scoreboard in the hero subtitle: the shelves' sizes from the packs,
 // and the outcome of the last Run-all over the tab (kept in localStorage).
+// THE PERF TAB'S LIVE PROGRAMS. While the Perf tab shows, the viewer's status (/api/perf/live) is
+// read every 2 s into the heading: whether Rae Perf runs, its port, and each program streaming to
+// it. "Open Rae Perf" runs the viewer (the tab's one example) as the Run button would.
+let perfLiveTimer = null;
+
+function startPerfLive() {
+  renderPerfLive();
+  if (!perfLiveTimer) perfLiveTimer = setInterval(renderPerfLive, 2000);
+}
+
+function stopPerfLive() {
+  if (perfLiveTimer) clearInterval(perfLiveTimer);
+  perfLiveTimer = null;
+}
+
+async function renderPerfLive() {
+  const subtitleEl = document.getElementById("examples-hero-subtitle");
+  if (!subtitleEl || currentExampleCollection !== "perf") return;
+  let status = { running: false, port: 0, sources: [] };
+  try {
+    const response = await fetch("/api/perf/live");
+    if (response.ok) status = await response.json();
+  } catch (_) { /* the server is away: shown as not running */ }
+  if (currentExampleCollection !== "perf") return;
+  subtitleEl.textContent = EXAMPLE_COLLECTIONS.perf.subtitle + " ";
+  const live = document.createElement("div");
+  live.className = "perf-live";
+  if (!status.running) {
+    const line = document.createElement("p");
+    line.textContent = "Rae Perf is not running.";
+    live.appendChild(line);
+    const open = document.createElement("button");
+    open.type = "button";
+    open.className = "button";
+    open.textContent = "Open Rae Perf";
+    open.addEventListener("click", () => triggerExampleRun("run"));
+    live.appendChild(open);
+  } else {
+    const line = document.createElement("p");
+    const count = status.sources.length;
+    line.textContent = `Rae Perf listens on port ${status.port}: ${count} program${count === 1 ? "" : "s"} streaming to it` +
+      (count ? "; pick one in its Sources tab." : ".");
+    live.appendChild(line);
+    if (count) {
+      const list = document.createElement("ul");
+      for (const source of status.sources) {
+        const item = document.createElement("li");
+        const name = source.program || "a program (no header yet)";
+        item.textContent = `${name} on ${source.machine || "?"}: ${source.blocks} blocks${source.ended ? ", ended" : ", live"}`;
+        list.appendChild(item);
+      }
+      live.appendChild(list);
+    }
+  }
+  subtitleEl.appendChild(live);
+}
+
 function renderStressScoreboard(visible) {
   const subtitleEl = document.getElementById("examples-hero-subtitle");
   if (!subtitleEl) return;
