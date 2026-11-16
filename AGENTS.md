@@ -573,6 +573,24 @@ eye (2026-10-19). The rules:
   adding a line to the allowlist is the reviewable exception, with a reason
   that review would accept (a tutorial step, a deliberate twin).
 
+## UI coordinates: one model (decision 2026-11-16)
+
+Every Rae program, app and example uses ONE UI coordinate model, the standard at the top of
+`docs/ui-coordinate-and-responsive-layout.md` (Model A, example 106's):
+
+- UI is in **design units (du), `unitScale` = 3 du per logical point** (the phone frame is
+  1080x2280 du; `200` is the same physical size everywhere).
+- The layout **fills the window** (window points x 3): a bigger window shows more, never a bigger
+  UI. Size classes are in points; safe areas and touch targets in du (44 pt = 132 du).
+- A fixed art-directed area (a game table, a splash) is a subtree at a fixed du size under
+  `ScaleToFit`; never a global scaled canvas, never a program's own `setDesignResolution` for UI.
+- Origin top-left, y down; pixels only at the GPU (`renderScale = dpr / unitScale`). 3D worlds
+  keep their own units (metres); only their UI/HUD is in du.
+
+Write new UI in du. Code still laid out at 1 unit per point is transitional (the tasks
+[ui coords 2/7 ... 7/7] move it); do not add more of it, and do not describe another model in a
+doc or comment.
+
 ## UI rendering loops & performance
 
 Hard-won lesson (full postmortem: `rae/docs/ui-render-loop-performance.md`):

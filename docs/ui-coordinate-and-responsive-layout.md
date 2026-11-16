@@ -1,19 +1,50 @@
 # Rae UI — Frames, Coordinates & Responsive Layout (final architecture)
 
-Status: **accepted architecture for new UI work, partially implemented in
-`examples/106_mobile_ui`.** This is the authoritative design; it supersedes and
-absorbs `docs/ui-viewport-and-safe-area-plan.md` and
-`examples/98_mobile_ui/docs/adaptive-layout.md`.
+## The standard (decided 2026-11-16): one coordinate model for every Rae program
+
+Model A below (example 106's model) is **the one coordinate model of every Rae program, app and
+example**. It was chosen so that the phone and desktop versions of every app share as much code
+and `.raescene` data as possible. Six rules:
+
+1. **One design unit.** Every UI size, position, font size, padding, radius and offset is in
+   design units (du). `unitScale` = **3 du per logical point**. A phone is about 1080-1290 du
+   wide; the authored phone frame is 1080x2280 du; 1 du is about 1 pixel on a @3x phone; `200`
+   is the same physical size on every device and in every frame.
+2. **The layout fills the window.** The layout area is the window in points x 3
+   (`area_du = windowPt x unitScale`). A bigger window shows more, never a bigger UI. Size
+   classes are measured in points (window du / `unitScale`); safe areas and touch targets are
+   in du (the 44 pt minimum touch target is 132 du).
+3. **Fixed art-directed areas are subtrees, not the canvas.** A game table, a board or a
+   splash is a subtree authored at a fixed du size and scaled as one block with `ScaleToFit`.
+   There is never a global scaled canvas (no `setDesignResolution` to a fixed virtual size for
+   the UI).
+4. **Origin top-left, y down; pixels only at the GPU.** Pixels appear only where the GPU draws:
+   `renderScale = dpr / unitScale` maps du to framebuffer pixels. Pointer input arrives in du.
+5. **3D worlds keep their own units.** A 3D world stays in its own world units (metres); only
+   its UI and HUD are in du.
+6. **Phone and desktop share scenes** through the window-filling layout (rule 2), size classes
+   and, later, named frames (§2-§3 below).
+
+Status of the code (2026-11-16): example 106 follows these rules with its own `unitScale` and
+responsive extent (`examples/106_mobile_ui/Viewport.rae`). Most other programs still lay out at
+1 unit per logical point through `app3d/UiShell.syncDesignResolution`; the queued tasks
+[ui coords 2/7 ... 7/7] move `unitScale` and the responsive extent into lib/ui, then every shared
+panel, the UI editor and every example to du, and finally remove the 1-unit-per-point mode. Where
+a doc or comment in the tree quotes a UI size in points, it describes that transitional layout:
+the same size in du is the number x 3.
+
+This document supersedes `docs/ui-viewport-and-safe-area-plan.md` and
+`examples/98_mobile_ui/docs/adaptive-layout.md`. Sections below the standard are the design it
+comes from.
 
 Current implementation target:
-- **106_mobile_ui is the primary target.** It is the gpu2d/SDL3-only mobile UI
-  app where Model A should be implemented first.
+- **106_mobile_ui is the reference implementation.** It is the gpu2d/SDL3-only mobile UI app
+  where Model A was implemented first.
 - **98_mobile_ui is legacy/reference.** Keep it useful as a comparison point and
   for old raylib behavior, but do not migrate it unless a separate task
   explicitly revives that work.
-- **Model A is locked for 106.** Use one shared design unit with
-  `unitScale=3`, a 1080-wide phone frame, and desktop frames authored around
-  5760×3240 du for a 1080p logical desktop.
+- **Model A is the standard** (above): one shared design unit with `unitScale=3`, a 1080-wide
+  phone frame, and desktop frames authored around 5760x3240 du for a 1080p logical desktop.
 
 Combines: **Figma-style named frames + variants**, **Game proto4-style
 high-resolution virtual coordinates**, one shared entity/component model,
@@ -69,7 +100,7 @@ ratio of frame widths is locked to the ratio of the devices' logical widths
 | C. Per-frame unit | 1080×2280 du | 2560×1440 du | **no** (button changes size on copy) | yes |
 
 **Decision: A — one shared design unit; frames are device-sized
-rectangles in that unit.** This is exactly **Figma's** model (one canvas unit;
+rectangles in that unit** (now the standard for every program, rules 1-6 at the top). This is exactly **Figma's** model (one canvas unit;
 an iPhone frame is 393×852 and a Desktop frame is 1440×1024 in the *same* px —
 a 200-px button is identical in both), lifted to high resolution. The honest
 consequence: **the desktop frame is authored at ~5760×3240 du, not 2560×1440.**

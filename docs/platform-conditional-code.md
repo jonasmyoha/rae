@@ -171,7 +171,7 @@ settled on (`any-pointer`, `pointer`, `hover`):
 Device.hasTouch() ret Bool               # any touch input present (the touch MacBook: true)
 Device.primaryPointer() ret Pointer      # Pointer { fine, coarse, none }: the touch MacBook: fine; a phone: coarse
 Device.canHover() ret Bool               # a mouse/trackpad that hovers exists
-Display.scale() ret Float                # pixels per point (2.0 on Retina); layout works in points
+Display.scale() ret Float                # pixels per point (2.0 on Retina); the window is in points, the layout in du (3 per point, ui-coordinate-and-responsive-layout.md)
 ```
 
 | device | hasTouch | primaryPointer | canHover |

@@ -5,10 +5,13 @@
 #
 #   design units  --(scale + offset, "fit")-->  physical px  -->  clip space
 #
-# The app authors against a fixed DESIGN canvas (1080x720 design units). The
-# renderer scales that canvas to fit the OS window (letterboxing on the short
-# axis) and applies the display's DPI — so the same coordinates look right at
-# any window size or pixel density. Resize the window: the grid + content keep
+# It shows Gpu2d's low-level fixed-canvas transform: a fixed 1080x720 design
+# canvas scaled to fit the OS window (letterboxing on the short axis), with the
+# display's DPI applied. That is NOT how a Rae UI is laid out: the standard
+# (docs/ui-coordinate-and-responsive-layout.md, rules 1-6) is du, 3 per point,
+# with the layout filling the window and a fixed area only as a ScaleToFit
+# subtree. [ui coords 6/7] turns this example into a demonstration of du. Resize the window: the
+# grid + content keep
 # their proportions and the dark letterbox bars grow/shrink. The clear color
 # is the area OUTSIDE the design canvas; the canvas fill shows the 1080x720
 # design region; the grid lines mark every 120 design units.

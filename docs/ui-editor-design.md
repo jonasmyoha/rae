@@ -59,10 +59,12 @@ texture manifest, and a design-resolution + fit rule (now native:
 - **Window:** the editor is a DESKTOP app: it opens landscape, `1400x900` logical
   (`RAE_UI_EDITOR_WINDOW=WxH` overrides), resizable, and it works on a phone-sized
   window too (the panels minimize from the top bar; they always START open). The
-  chrome is authored in logical POINTS: the canvas design resolution is the
-  window's logical size (physical pixels / DPR), re-applied on every resize, so a
-  76pt top bar is 76pt on any display and the chrome never scales with the
-  document. **The document's frame** = the root node's authored `Rect` when it has
+  chrome fills the window: the canvas design resolution is the window's size,
+  re-applied on every resize, so the top bar is the same physical size on any
+  display and the chrome never scales with the document. Today the chrome is in
+  logical points (1 unit per point, a 76 pt top bar), the transitional layout;
+  the standard (ui-coordinate-and-responsive-layout.md, rules 1-6) is design
+  units, 3 per point (a 228 du top bar), which [ui coords 4/7] moves it to. **The document's frame** = the root node's authored `Rect` when it has
   one, else `1080x1920`, `RAE_UI_EDITOR_DESIGN=WxH` overrides (and the device frame
   below for a phone-authored scene); the camera FITS the frame into the chrome's
   `EditArea` on load and zooms/pans it after, so a phone scene stays a phone at any
@@ -158,8 +160,9 @@ two layers, so the document's layout can never push the chrome around and the
 chrome can be hidden for a pure passive view (`H` key).
 
 - **document layer** — the loaded scene, mounted with `mountPage` (one call, exactly
-  like a 106 page) under a `Viewport` node that carries the design resolution and
-  the letterbox. Remounted whole on reload.
+  like a 106 page) under a `Viewport` node that carries the document's frame
+  (its design extent), placed and zoomed in the EditArea by the camera.
+  Remounted whole on reload.
 - **chrome layer** — authored in the app's OWN `.raescene`
   (`assets/scenes/Editor.raescene`, `chrome/*.raescene` sub-scenes), the desktop
   editor layout the reference editor uses (docs/ui-editor-reference-features.md §3):
@@ -225,7 +228,7 @@ the library systems, like 106's `FramePipeline.rae`):
 | `watchSystem/` | `fileWatchSystem` | poll `Sys.fileMtime` of the OPENED document, its sub-scenes and imports every 250 ms (only while the window is visible); changed → `documentLoadSystem` remount, scroll preserved. This is for the document, which may live in another project; the editor's own chrome scenes are NOT watched here — under `rae watch` a chrome edit restarts the editor like any `.rae`/`.raescene` edit (docs/hot-reload-plan.md) |
 | `diagnosticsSystem/` | `diagnosticsSystem` | owns `List(SceneDiagnostic)` (unknown component, runtime-only component, unknown token, missing sub-scene, missing texture, parse error); writes the chrome's counter pill + status line (the list panel was removed from the left column; a dialog will show the rows) |
 | `inspectorSystem/` | `inspectorSystem` | hover → highlight rect; click → select (see *Canvas selection* below); overlay with node id, component names (`componentNamesFor`), computed rect; arrow keys walk the tree; `Esc` clears |
-| `viewportSystem/` | `viewportSystem` | design resolution + letterbox from the document; window resize → re-fit |
+| `viewportSystem/` | `viewportSystem` | the chrome fills the window (design resolution = the window, re-applied on resize); the document keeps its own frame, fitted by the camera |
 
 Rendering is the stock `lib/ui` render system; the highlight is a `Shape` entity on
 a third `overlay` layer driven by `inspectorSystem`, not a special draw path.

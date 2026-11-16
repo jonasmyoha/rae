@@ -1,14 +1,16 @@
 # Device presets — logical resolution + safe-area insets for the
 # common mobile form factors, ported from game proto4's
-# `utils/layoutSimulation.ts`. Widths/heights and safe insets are in
-# CSS logical points (the space iOS/Android report), NOT design units.
+# `utils/layoutSimulation.ts`. The tables are in logical points, the
+# space iOS and Android report; the layout is in design units, 3 per
+# point (docs/ui-coordinate-and-responsive-layout.md, rules 1-2), so a
+# preset's size or inset in du is its points x unitScale (the iPhone 15
+# Pro's 393x852 pt is 1179x2556 du, its 59 pt top inset 177 du).
 #
-# `devicePresetInsets` converts a preset's point-space safe insets into
-# the caller's layout extent by *fraction of the device dimension*, so
-# the result lands correctly in whatever design-unit grid the app
-# authored its scenes in (e.g. 106 is a 1080x2280 du grid). This keeps
-# the presets resolution-independent: `safeTop 59 / height 852` is a
-# ~6.9% top reserve regardless of the target grid.
+# `devicePresetInsets` converts a preset's safe insets into the caller's
+# layout extent by *fraction of the device dimension* (`safeTop 59 /
+# height 852` is a ~6.9% top reserve), which lands right in a du extent
+# such as 106's 1080x2280 du frame and in a program still laid out in
+# points; the du helpers come with [ui coords 2/7].
 #
 # The iPhone insets are Apple's published safe areas in points (checked
 # 2026-11-01): upright, the Dynamic Island phones (15 Pro, 15 Pro Max) 59 top,

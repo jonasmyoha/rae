@@ -5,6 +5,22 @@ it draws with. The node/component grammar itself is documented with the
 components (`lib/ui/Components.rae`, docs/ui-editor-design.md §5); the theme
 token sections in docs/ui-theme-system.md.
 
+## Units: design units, 3 per point
+
+Every size, position, font size, padding, radius and offset in a scene is in **design units
+(du)**: the one coordinate model of every Rae program (docs/ui-coordinate-and-responsive-layout.md,
+rules 1-6). `unitScale` is 3 du per logical point; the authored phone frame is 1080x2280 du; the
+layout fills the window (the window in points x 3), so a scene's root lays out into the real
+window and never scales as a whole. A fixed art-directed area (a game board, a splash) is a
+subtree at a fixed du size under `ScaleToFit`. Origin top-left, y down. A scene's units are not
+its own choice: the 20 scenes of example 106 still write `"unitScale": 3` (the editor reads it to
+know a phone scene), and [ui coords 7/7] makes du the only unit so no scene declares one.
+
+Today most programs still lay out at 1 unit per logical point (the transitional layout that the
+tasks [ui coords 2/7 ... 7/7] remove; example 106's scenes are already in du). The sizes this
+document quotes in points (a 44-point `circleButton`, a 24-point swipe band, `edgePoints`) are
+that layout; in du they are the same number x 3.
+
 ## 1. A scene reference is a package path, without extension
 
 A scene is a module and a folder is a package — exactly the Rae source rule

@@ -17,10 +17,11 @@
 # the canvas, GPU2D loads it and paints UiWorld, then presents once. UI
 # hit-testing has priority over orbit input.
 #
-# RESPONSIVE, NOT SCALED: the design resolution tracks the window's logical
-# size, so the design->pixel transform is identity. Fonts keep their
-# authored point size at every window size, and there are no letterbox
-# bars. The UI scene is authored at absolute coordinates, so
+# RESPONSIVE, NOT SCALED: the layout fills the window (rule 2 of
+# docs/ui-coordinate-and-responsive-layout.md), so fonts keep their authored
+# size at every window size, and there are no letterbox bars. Today its
+# units are logical points (1 per point, the transitional layout that
+# [ui coords 6/7] moves to du, 3 per point). The UI scene is authored at absolute coordinates, so
 # `anchorUiToExtent` re-places the root-level nodes whenever the extent
 # changes — intent ("centered", "right-aligned", "full-bleed") lives there
 # rather than in resolution-specific constants.
@@ -121,9 +122,9 @@ func main() ret Int {
     name: "window.{state135AppId}.geometry"
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
-  # Design resolution tracks the window's LOGICAL size, so the transform is
-  # identity: no letterbox bars, and fonts keep their authored point size
-  # instead of shrinking with window width.
+  # The design resolution tracks the window (in points for now, du later):
+  # the layout fills it, no letterbox bars, and fonts keep their authored
+  # size instead of shrinking with window width.
   var extentW: Float = windowExtentW()
   var extentH: Float = windowExtentH()
   Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)

@@ -186,14 +186,14 @@ func renderGate() ret Bool {
 }
 
 # --- Coordinate system (#112) --------------------------------------------
-# Draw coordinates are in DESIGN units. By default 1 unit = 1 physical pixel
-# (identity). Call setDesignResolution to author against a fixed virtual
-# canvas that is scaled to fit the window — DPI-independent and resolution-
-# independent, the Figma-style shared design-unit model
-# (docs/ui-coordinate-and-responsive-layout.md). Three layers:
-#   design units  --(scale + offset / fit)-->  physical px  --> clip space.
+# Draw coordinates are in DESIGN units (du): 3 per logical point, origin top-left, y down, the
+# layout area = the window in points x 3, never a scaled fixed canvas for UI (the one model of
+# every Rae program, docs/ui-coordinate-and-responsive-layout.md rules 1-6; a fixed area is a
+# ScaleToFit subtree). The UI library sets the design resolution; pixels appear only here,
+# du -> px = dpr / unitScale. Layers: design units --(scale + offset / fit)--> px --> clip space.
 # fit: 0 = fit (contain, letterboxed), 1 = fill (cover, cropped), 2 = stretch.
-# Pass width/height <= 0 to return to identity (physical-pixel) coordinates.
+# Before a design resolution is set, or after width/height <= 0, a unit is one physical pixel:
+# the raw state of a window, not a layout model.
 func nativeSetDesignResolution(
   width: Float
   height: Float

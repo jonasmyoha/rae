@@ -256,10 +256,12 @@ the playback overlays), `WorldHelpers.rae` shortens the component setters.
 ## 8. Coordinates, viewport, assets, persistence, headless
 
 - **Coordinates:** Model A of `docs/ui-coordinate-and-responsive-layout.md`
-  — scenes are authored in design units (a 1080-wide phone frame,
-  `unitScale=3`), gpu2d's design-resolution transform fits the frame into
-  the SDL3 window (letterboxed), and `Viewport.rae` is the one place that
-  converts. Safe areas come from `docs/ui-viewport-and-safe-area-plan.md`;
+  (the standard of every Rae program, its rules 1-6) — scenes are authored in
+  design units (a 1080-wide phone frame, `unitScale=3`), the layout fills the
+  window (the extent grows to the window's aspect, a centered phone column on a
+  wide window), only a forced device frame (`RAE_UI_FRAME`) is fitted into the
+  window, and `Viewport.rae` is the one place that converts. Safe areas are in
+  du, from the same document;
   by default the real window drives the layout through its size class
   (compact / medium / expanded, live while resizing); `RAE_UI_DEVICE` /
   `RAE_UI_FRAME` emulate a device preset instead.

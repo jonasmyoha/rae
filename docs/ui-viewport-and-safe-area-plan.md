@@ -1,4 +1,7 @@
 > **⚠️ SUPERSEDED (kept as implementation reference).**
+> Its coordinate model is NOT the standard: every Rae program uses the one model at the top of
+> [`ui-coordinate-and-responsive-layout.md`](./ui-coordinate-and-responsive-layout.md)
+> (rules 1-6: design units, `unitScale` = 3 du per point, the layout fills the window).
 > The authoritative design is now
 > [`ui-coordinate-and-responsive-layout.md`](./ui-coordinate-and-responsive-layout.md)
 > (frames + shared entity graph + per-frame overrides + local `ScaleToFit`

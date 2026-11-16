@@ -1,9 +1,11 @@
 # viewportSystem — the window and the chrome's coordinate space (docs/
 # ui-editor-design.md §2). The editor is a DESKTOP app: the window opens
 # landscape (1400x900 logical, RAE_UI_EDITOR_WINDOW=WxH overrides, resizable)
-# and the chrome is authored in logical POINTS — the design resolution is the
-# window's logical size, re-applied on every resize, so a 44pt top bar is 44pt
-# on any display. The document keeps its own frame (its design extent, column
+# and the chrome is laid out to fill the window, re-applied on every resize, so its top bar is
+# the same physical size on any display. Today the chrome is in logical points (1 unit per
+# point), the transitional layout; the standard (docs/ui-coordinate-and-responsive-layout.md,
+# rules 1-2) is du, 3 per point, which [ui coords 4/7] moves the chrome to. The document keeps its
+# own frame (its design extent, column
 # and safe insets — the device frame for a phone-authored scene) and is placed
 # in the chrome's EditArea by the camera (cameraSystem), which fits it on load
 # and zooms/pans it after; the chrome never scales with the document.
