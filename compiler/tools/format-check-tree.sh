@@ -18,13 +18,15 @@
 set -u
 cd "$(dirname "$0")/.." || exit 1
 BIN="${RAE_BIN:-bin/rae}"
-ROOT=".."
+# RAE_FORMAT_TREE_ROOT checks another tree (its lib, packages, examples, docs and stress only):
+# compiler/tools/module-folder-tools-check.sh uses it on a small fixture
+ROOT="${RAE_FORMAT_TREE_ROOT:-..}"
 FILES=$({
   find "$ROOT/lib" "$ROOT/packages" "$ROOT/examples" \( -name '*.rae' -o -name '*.raepack' \) -type f \
     -not -path "$ROOT/examples/legacy/*" -not -path '*/.rae/*' \
-    -not -path "$ROOT/examples/24_code_hybrid_hot_reload/scripts/*"
-  find tests/cases tests/checkTargets -name '*.rae' -type f -not -path '*/.rae/*'
-  find "$ROOT/docs" "$ROOT/stress" \( -name '*.rae' -o -name '*.raepack' \) -type f
+    -not -path "$ROOT/examples/24_code_hybrid_hot_reload/scripts/*" 2>/dev/null
+  [ -n "${RAE_FORMAT_TREE_ROOT:-}" ] || find tests/cases tests/checkTargets -name '*.rae' -type f -not -path '*/.rae/*'
+  find "$ROOT/docs" "$ROOT/stress" \( -name '*.rae' -o -name '*.raepack' \) -type f 2>/dev/null
 } | grep -vE 'tests/cases/(006_|015_|019_|20[0-8]_|345_|346_|348_|568_|786_|81[0-3]_|829_|830_|1055_|1091_|1171_|1267_)' | sort)
 JSON=$("$BIN" format --json --check $FILES 2>/dev/null)
 python3 - "$JSON" <<'PY'

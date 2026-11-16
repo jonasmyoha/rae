@@ -3778,7 +3778,7 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
         imports = append_import(imports, parse_import_clause(&parser, true, false));
     } else {
         // #787: bare `export` at file top — this file's decls belong to the
-        // folder-package's same-named main module (merge retargets module_name).
+        // folder import's same-named main module (merge retargets module_name).
         parser_advance(&parser); // consume export
         module->export_to_main = true;
     }

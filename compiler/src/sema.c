@@ -8535,7 +8535,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             }
             break;
         case AST_EXPR_METHOD_CALL:
-            // #786: 3-level folder-package qualifier `pkg.Module.func(args)`. The
+            // #786: 3-level folder import qualifier `pkg.Module.func(args)`. The
             // object is `pkg.Module` (a MEMBER whose object is a bare package ident).
             // If `pkg` is not a value binding and `pkg/Module` names a real, visible
             // module, resolve `func` there. Guards against chained value access
@@ -10504,7 +10504,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
     type_ref->resolved_type = base; return base;
 }
 
-// Does module_name `mn` live under a FOLDER named `folder`? A folder-package is
+// Does module_name `mn` live under a FOLDER named `folder`? A folder import is
 // any '/'-separated component of the path EXCEPT the last (which is the module
 // file). `a/b/Color/Green` -> folders {a, b, Color}; `Green` (flat) -> none.
 static bool module_name_has_folder(const char* mn, Str folder) {
@@ -10523,7 +10523,7 @@ static bool module_name_has_folder(const char* mn, Str folder) {
 }
 
 // #788 (c2) definition-site enum-case / package-symbol clash. When an `enum
-// Color` and a folder-PACKAGE `Color/` (holding modules) both exist, `Color.x`
+// Color` and a folder `Color/` (holding modules) both exist, `Color.x`
 // is ambiguous — enum case `x` vs module/symbol `x` in package `Color`. Per the
 // #779 spec this is caught at the DEFINITION site (once, at the enum), not
 // deferred to every `Color.x` use. Enum names are PascalCase, so this only bites
@@ -10536,7 +10536,7 @@ static void sema_check_enum_package_clash(AstModule* module) {
             if (!module_name_has_folder(d->module_name, ename)) continue;
             char buf[320];
             snprintf(buf, sizeof buf,
-                "'%.*s' names both an enum and a folder-package — `%.*s.member` would be ambiguous (an enum case vs a module in package '%.*s'). Rename the enum or the folder so a qualifier resolves to one thing.",
+                "'%.*s' names both an enum and a folder of modules — `%.*s.member` would be ambiguous (an enum case vs a module in folder '%.*s'). Rename the enum or the folder so a qualifier resolves to one thing.",
                 (int)ename.len, ename.data, (int)ename.len, ename.data, (int)ename.len, ename.data);
             diag_error(e->origin_file ? e->origin_file : module->file_path,
                        (int)e->line, (int)e->column, buf);

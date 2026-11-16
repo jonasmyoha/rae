@@ -126,7 +126,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -252,6 +252,10 @@ float8-lowerings: build
 # The generated C of the largest and the browser-smoke apps compiles with
 # -Wall -Wextra -Werror (tools/c-warnings-gate.sh); `make test` runs it as one
 # pre-suite case too.
+# The tools that work per file also work per module folder (docs/module-model-options.md)
+module-folder-tools: build
+	bash tools/module-folder-tools-check.sh
+
 c-warnings-gate: build
 	@bash tools/c-warnings-gate.sh
 

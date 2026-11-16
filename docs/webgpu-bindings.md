@@ -59,7 +59,7 @@ files at 1000 lines, the output is split into three files:
 - `lib/webgpu/WebgpuTypes.rae` — `c_struct` type mirrors (+ `cheader`)
 - `lib/webgpu/Webgpu.rae` — the functions (`import webgpu/WebgpuTypes`)
 
-Module files are PascalCase (the package folder stays camelCase `webgpu/`), so
+Module files are PascalCase (the folder stays camelCase `webgpu/`), so
 the generator writes `Webgpu.rae` / `WebgpuEnums.rae` / `WebgpuTypes.rae` (#801).
 Every generated function binds via `unsafe extern("symbol")` in the #868
 post-parameter modifier order (`func f(...) unsafe extern("sym") ret T`): the

@@ -24,6 +24,11 @@ docs/module-model-options.md is the design.
   it: `Gpu2d.loadImageKey`, `Gpu2d.drawImageKey` and the rest.
   **`Gpu2dImages.` existed only in 0.3.172**; code written against it goes back
   to `Gpu2d.` and drops `import Gpu2dImages`.
+- The rules follow (0.3.176): AGENTS.md says a module is a PascalCase file or
+  folder, a system is a module of its own, and a module at the line cap becomes
+  a folder; "package" means a `.raepack` package only. `rae init` writes these
+  module rules into a new project's AGENTS.md. `run_cases.sh --grep` given a
+  file of a module folder searches for its module; `--list` prints the cases.
 
 ## 0.2.0, 2026-10-11: physics and servers
 

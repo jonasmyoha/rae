@@ -987,7 +987,7 @@ int bindgen_run(int argc, char** argv) {
     register_aliases(combined);
 
     // Module FILES are PascalCase (`webgpu` -> `Webgpu`, #801/#818); the
-    // package FOLDER stays the camelCase `import_prefix`.
+    // folder stays the camelCase `import_prefix`.
     snprintf(g_pascal, sizeof(g_pascal), "%s", module);
     if (g_pascal[0] >= 'a' && g_pascal[0] <= 'z') g_pascal[0] = (char)(g_pascal[0] - 'a' + 'A');
     g_out_dir = out_dir; g_import_prefix = import_prefix; g_cheader = cheader; g_module_comment = module_comment;

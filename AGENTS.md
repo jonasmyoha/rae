@@ -42,33 +42,43 @@ These instructions define **how Codex should work**, communicate progress, and i
   `LCT_GREY`) and vendored code (`third_party/`, `lodepng`, `stb`).
 
 ### File and folder names follow the same rule — no `snake_case` on disk either:
-- A `.rae` file is a MODULE, and its name is spelled in code at every `import`/
-  `open` and every qualified call (`GpuTiming.createGpuTiming()`). `snake_case`
-  there is the same C habit as a `snake_case` identifier, so it is banned too.
-- **Module FILES are `PascalCase`; package FOLDERS are `camelCase`.** A module is
-  a namespace, spelled like a type, so its file is PascalCase — `GpuTiming.rae`,
-  `CameraRig.rae`, `Vec3.rae`, `Math.rae`, and EQUALLY `WorldBiome.rae`,
-  `Gpu2dText.rae`, `NoiseWgsl.rae`. There is NO "bag of functions stays
-  camelCase" exception any more: every `.rae` module file is PascalCase whether
-  or not it has a single owning type. A folder is a PACKAGE, not a module, so it
-  is camelCase — `ui/`, `ecs/`, `renderSystem/`, `hierarchySystem/`, `webgpu/`,
-  `compress/`, `legacyRaylib/`. A system module therefore lives at
-  `ui/renderSystem/RenderSystem.rae`: camelCase folder, PascalCase file.
+- A MODULE's name is spelled in code at every `import`/`open` and every
+  qualified call (`GpuTiming.createGpuTiming()`). `snake_case` there is the same
+  C habit as a `snake_case` identifier, so it is banned too.
+- **A module is a `PascalCase` FILE or a `PascalCase` FOLDER; any other folder
+  is `camelCase`** (docs/module-model-options.md). A module is a namespace,
+  spelled like a type — `GpuTiming.rae`, `CameraRig.rae`, `Vec3.rae`,
+  `Math.rae`, and EQUALLY `WorldBiome.rae`, `NoiseWgsl.rae`. There is NO "bag of
+  functions stays camelCase" exception: every module is PascalCase whether or
+  not it has a single owning type. A **module folder** (`lib/Gpu2d/`) is ONE
+  module: every `.rae` file in it and in its camelCase subfolders, called as
+  `Gpu2d.` with one `import Gpu2d`; the files' own names do not matter (they are
+  storage, PascalCase like every `.rae` file), and code that uses the module
+  cannot tell a file from a folder. A PascalCase subfolder of a module folder is
+  a module of its own. A **plain folder** is camelCase and only part of a path —
+  `ui/`, `ecs/`, `webgpu/`, `compress/`, `legacyRaylib/`. A file and a folder of
+  one name in one place is an error, and so is a PascalCase folder holding Rae
+  files in a program's own tree (module folders are for `lib/` and packages, for
+  now).
+- **"Package" means a `.raepack` package** (a versioned dependency such as
+  `packages/audio`), never a plain folder.
 - The import separator is `/` (never `.`): `import ui/renderSystem/RenderSystem`,
-  `open ecs/hierarchySystem/HierarchySystem`. The program entry file is the
-  `Main` module — `Main.rae`.
+  `open ecs/hierarchySystem/HierarchySystem`, `import Gpu2d`. An import and a
+  qualifier are spelled exactly as on disk, with the same upper and lower case
+  (`import vec3` is an error even where the filesystem ignores case). The
+  program entry file is the `Main` module — `Main.rae`.
 - **There is no lowercase-file exception any more: EVERY `.rae` file is
   PascalCase.** `core` used to be the one lowercase module; it is now the
   package `lib/core/` (`Core.rae`, `List.rae`), a camelCase folder with
   PascalCase files like every other package. It is still the prelude —
   auto-loaded and auto-opened, so `log(x)` and `List` are bare-callable with no
-  import — but the folder name being `core` is just the normal camelCase-package
+  import — but the folder name being `core` is just the normal camelCase-folder
   rule, not a special case (#818).
 - **Rule of thumb — core vs collections:** put a type in `core/` only if the
   *compiler itself* understands it (like `List`, which collection loops and the
   ECS are built on). A data structure written in ordinary Rae over `List`/
   `Buffer` — the hash maps, and future `Set`/`Queue`/`RingBuffer` — goes in the
-  `collections/` package, which is NOT in the prelude: you `open collections/
+  `collections/` folder, which is NOT in the prelude: you `open collections/
   StringMap` to use it. core = what the language needs; collections = a library
   you ask for (#819, see `docs/collections.md`).
 - Exceptions that keep their existing spelling:
@@ -81,9 +91,11 @@ These instructions define **how Codex should work**, communicate progress, and i
     C-boundary exception `extern` gets.
 - When you rename a module, update every `import`/`open` path and every
   `oldName.` qualifier that referenced it (they live in code, never in strings —
-  a `"lib/foo_bar.wgsl"` asset path is a string and stays). A package-FOLDER
+  a `"lib/foo_bar.wgsl"` asset path is a string and stays). A plain-folder
   rename only changes the folder component of import paths — the file component
-  stays PascalCase (`ui/RenderSystem/RenderSystem` -> `ui/renderSystem/RenderSystem`).
+  stays PascalCase (`ui/oldName/RenderSystem` -> `ui/renderSystem/RenderSystem`).
+  Splitting a module FILE into a module FOLDER of the same name changes no
+  import and no qualifier.
 
 ### No single-letter names for parameters or meaningful locals:
 - Write `state`, `settings`, `world` — not `s`, `c`, `w`. A single letter says
@@ -448,7 +460,7 @@ Do not introduce features that increase expressive power at the cost of clarity,
   with no metaphors, no rhetorical contrasts, and no abstract terms like `idempotent`,
   `converge`, `fail closed`, or `names the cost` unless you replace them with the
   concrete behavior.
-- **File size limit**: Aim to keep all source files under 1,000 lines of code (LOC). If a file exceeds this limit, it should be refactored into smaller, domain-specific modules. This helps maintain clarity and reduces LLM context usage.
+- **File size limit**: Aim to keep all source files under 1,000 lines of code (LOC). This helps maintain clarity and reduces LLM context usage. A Rae module that reaches the cap becomes a **module folder** of the same name (`lib/Gpu2d.rae` -> `lib/Gpu2d/`, its files split by topic), never a second module: callers keep their imports and qualifiers (docs/module-model-options.md). Other source files (the compiler's C) are split into smaller, domain-specific files.
 - **Git operations**:
   - **Commit frequently**: Always commit meaningful work before moving on to the next task in the `QUEUE`.
   - **Commit messages**: Use good, clear, and descriptive commit messages that explain *why* the change was made.
@@ -520,8 +532,12 @@ Compiler code should favor:
 These rules apply to every app and library task. They do not apply to the
 compiler's own C.
 
-- **Stateful runtime code is ECS.** Each system lives in its own camelCase
-  folder with a PascalCase module (`relaySystem/RelaySystem.rae`). Per-thing
+- **Stateful runtime code is ECS.** Each system is a module of its own: a
+  PascalCase file (`RelaySystem.rae`), or a PascalCase module folder
+  (`RelaySystem/`, any file names inside) once it needs more than one file —
+  imported as `import net/RelaySystem` either way. Older systems still sit in a
+  camelCase folder with a PascalCase file (`relaySystem/RelaySystem.rae`) until
+  they are moved; do not start new ones that way. Per-thing
   data is components on entities. Data there is exactly one of per World
   or App (a socket, a session table, a clock) is a resource: a plain field
   on that World or App, passed to systems through their `mod`/`view`

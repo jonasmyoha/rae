@@ -80,6 +80,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/example-copy-gate.sh" ]; then
   if ! bash tools/example-copy-gate.sh; then COPY_CHECK_FAILED=1; fi
   echo
 fi
+# The tools that work per file also work per module folder
+# (tools/module-folder-tools-check.sh).
+MODULE_TOOLS_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/module-folder-tools-check.sh" ]; then
+  if ! bash tools/module-folder-tools-check.sh; then MODULE_TOOLS_FAILED=1; fi
+  echo
+fi
 # The stress cases (docs/stress-tests.md), same place: a "footgun" case that
 # stops reproducing FAILS on purpose (the ratchet).
 STRESS_CHECK_FAILED=0
@@ -689,6 +696,7 @@ fi
 if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$COPY_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$MODULE_TOOLS_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi

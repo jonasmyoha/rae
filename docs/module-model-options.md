@@ -143,8 +143,12 @@ let entityId: EntityId = createEntity(world: world)
 - **A nested module is qualified by its last name** (`Images.loadImageKey` for `Gpu2d/Images`),
   so general names (`Images`, `Text`) meet more often. The existing error for two imports with
   one last name covers it (import one with `as`).
-- **Tools that work per file work per module:** the module build cache, and
-  `run_cases.sh --grep '<import path>'`.
+- **Tools that work per file work per module** (0.3.176): a build reads every file of the
+  program each time (no source cache), so a change to any file of a module folder, or a file
+  added to it, is in the next build; `run_cases.sh --grep lib/Gpu2d/Images.rae --list` searches
+  for the file's module (`Gpu2d`); the format tree check and the example-copy gate walk module
+  folders. `compiler/tools/module-folder-tools-check.sh` holds a fixture for each, one pre-suite
+  case of every full run.
 - **Rae keeps two folder rules for now:** module folders in `lib/` and packages, and a program's
   own folders (next point).
 

@@ -5,6 +5,7 @@
 #
 # Usage:  bash tools/run_cases.sh 1163_named_arg_val 541_channel_worker
 #         bash tools/run_cases.sh --grep 'open ecs/Query'   # cases whose .rae mention it
+#         bash tools/run_cases.sh --grep lib/Gpu2d/Images.rae --list   # a file: its module's import path
 # Each name is a case directory under tests/cases (or its number). Verdict
 # lines print as cases end; details of each failure and a summary at the end.
 # Exit code: 1 if any case failed.
@@ -14,8 +15,21 @@ cd "$(dirname "$0")/.."     # -> compiler/
 JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
 
 if [ "${1:-}" = "--grep" ]; then
-  [ -n "${2:-}" ] || { echo "usage: run_cases.sh --grep <text>" >&2; exit 2; }
-  NAMES=$(grep -rlF --include='*.rae' -- "$2" tests/cases | while read -r f; do
+  [ -n "${2:-}" ] || { echo "usage: run_cases.sh --grep <text> [--list]" >&2; exit 2; }
+  PATTERN="$2"
+  # A source file's path (lib/Gpu2d/Images.rae, packages/audio/Sound.rae) is searched as the
+  # import path of the module it belongs to: the file itself, or the deepest PascalCase folder
+  # above it, a module folder (docs/module-model-options.md). Nothing imports a file of a module
+  # folder by its own name.
+  case "$PATTERN" in
+    lib/*.rae|packages/*.rae|../lib/*.rae|../packages/*.rae)
+      MODULE=$(printf '%s\n' "$PATTERN" | sed -E 's#^(\.\./)?lib/##; s#^(\.\./)?packages/##; s#\.rae$##')
+      OWNER=$(printf '%s\n' "$MODULE" | awk -F/ '{ o=""; p=""; for (i=1;i<NF;i++) { p = p (i>1?"/":"") $i; if ($i ~ /^[A-Z]/) o=p } print (o==""?$0:o) }')
+      echo "module of $PATTERN: $OWNER"
+      PATTERN="$OWNER"
+      ;;
+  esac
+  NAMES=$(grep -rlF --include='*.rae' -- "$PATTERN" tests/cases | while read -r f; do
     d=$(dirname "$f")
     # A case's helper modules live below it; the case is the first dir under tests/cases
     echo "$d" | sed 's#^tests/cases/##; s#/.*##'
@@ -24,6 +38,10 @@ else
   NAMES=$(printf '%s\n' "$@")
 fi
 [ -n "$NAMES" ] || { echo "no cases given or matched"; exit 2; }
+if [ "${3:-}" = "--list" ]; then
+  printf '%s\n' "$NAMES"
+  exit 0
+fi
 
 OUT=$(mktemp -d -t rae_cases_XXXXXX); export OUT
 trap 'rm -rf "$OUT"' EXIT

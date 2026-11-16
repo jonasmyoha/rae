@@ -235,10 +235,12 @@ ignore generations; games rely on them.
   (`character.rae:135`) with one system, and it iterates a **depth-sorted entity
   order** (built once from the hierarchy) instead of pointer-chasing `Children`.
 
-### 2.5 Systems — one folder each, camelCase folder, PascalCase file
-Every system is its own folder: the folder is the camelCase form of the system
-type, and its primary file is the PascalCase type name (AGENTS.md naming rules:
-camelCase package folders, PascalCase module files). Folders are namespaces of
+### 2.5 Systems — one module each
+Every system is a module of its own: a PascalCase file (`TransformSystem.rae`), or a
+PascalCase module folder (`TransformSystem/`, any file names inside) once it needs more
+than one file (AGENTS.md naming rules; docs/module-model-options.md). Systems written
+before module folders sit in a camelCase folder with a PascalCase file
+(`transformSystem/TransformSystem.rae`), the layout shown below, until they are moved. Folders are namespaces of
 the one project module, so `TransformSystem.update(...)` is available with no
 import:
 ```

@@ -13,7 +13,7 @@ read those for the full rules. The changes, and the queue items that landed them
 | Struct-literal field-name check (#778) | unknown/renamed fields fail at the literal, not at gcc | `spec/rae.md` §2.4 (end) |
 | No module-level globals (#764/#766/#789) | singletons are resources on a World/App, threaded through `mod`/`view` | `docs/globals-and-app-ownership.md`, `spec/rae.md` §2.5 |
 | Naming (#777/#790) | no `snake_case`; types/enums/modules PascalCase, everything else camelCase | `docs/naming-conventions.md` |
-| Module model (#779/#786/#787) | project auto-visibility, folder = package, file = module namespace, `import`/`open`, `export` merge, `Package.Module.func()` qualifiers | `docs/module-namespacing.md` |
+| Module model (#779/#786/#787) | project auto-visibility, a folder is a namespace, a file is a module (since 0.3.174 a PascalCase folder is a module too, docs/module-model-options.md), `import`/`open`, `export` merge, `Package.Module.func()` qualifiers | `docs/module-namespacing.md` |
 | Dropped redundant prefixes (#780) | `gpuTimingEnabled(t)` → `GpuTiming.enabled(t)` | — |
 
 Suggested order (do them in this order to minimize re-work): **naming → module
@@ -152,7 +152,8 @@ Full design: `docs/module-namespacing.md`. The parts that change existing code:
 into a subfolder does *not* create an import wall. `import`/`open` are for **`lib/`
 and external packages only.** So delete intra-project `import`s.
 
-**A folder is a package; a file is a module namespace.** Each project file belongs
+**A project folder is a namespace; a file is a module.** (Since 0.3.174 a module is a PascalCase
+file or a PascalCase folder, docs/module-model-options.md.) Each project file belongs
 to the namespace of the folder directly containing it, used only to *disambiguate*
 when a bare name is defined in two folders:
 

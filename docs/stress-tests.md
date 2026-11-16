@@ -84,7 +84,7 @@ stress/
   example (nothing to look at, nothing to learn from as a pattern) nor a
   compiler test (a compiler test asserts the spec; a stress case is allowed to
   assert a bug). Number-prefixed case folders follow the `examples/` bucket
-  convention; the name after the number is camelCase (a folder is a package).
+  convention; the name after the number is camelCase (a plain folder is camelCase).
 - One `Main.rae` per case, short enough to read in one screen, with the foot
   gun in the first ten lines and comments written for a reader who does not
   know Rae. Every case is a plain program with no assets and no window.

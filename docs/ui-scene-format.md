@@ -1,4 +1,4 @@
-# The `.raescene` format: scenes are modules, folders are packages (#1008)
+# The `.raescene` format: scenes are modules, folders are part of their path (#1008)
 
 This is the reference for how one `.raescene` refers to another and to the data
 it draws with. The node/component grammar itself is documented with the
@@ -21,9 +21,9 @@ tasks [ui coords 2/7 ... 7/7] remove; example 106's scenes are already in du). T
 document quotes in points (a 44-point `circleButton`, a 24-point swipe band, `edgePoints`) are
 that layout; in du they are the same number x 3.
 
-## 1. A scene reference is a package path, without extension
+## 1. A scene reference is a path, without extension
 
-A scene is a module and a folder is a package — exactly the Rae source rule
+A scene is a module and a folder is part of its path — like the Rae source rule
 (AGENTS.md): scene files and ids are **PascalCase**, folders are **camelCase**,
 and a reference is the path from the scene root with no extension:
 

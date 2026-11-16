@@ -36,13 +36,13 @@ const restart: Int = Keys.keyR   # also valid in a const initializer (folds to t
 shadow it, since `Keys.keyW` cannot be a call.
 A genuine value binding of the same name in scope does win.
 
-A module inside a lib **package** (`procgen/Texture`) is qualified by its
+A module inside a lib **folder** (`procgen/Texture`) is qualified by its
 **last name**, for its consts as for its calls: `Texture.matGrass`,
 `Texture.texClampByte(...)` (2026-10-07). The last name counts only for a
 module the file itself imports or opens, so `Entity` never means
 `ecs/Entity` by accident. Two imports with the same last name make it an
 error that names both; import one with `as` and qualify by that name. A
-package is never a qualifier: `procgen.Texture.matGrass` is an error that
+plain folder is never a qualifier: `procgen.Texture.matGrass` is an error that
 spells the right form, as is a const the module does not declare (fixtures
 1014, 1015).
 
@@ -72,14 +72,14 @@ under the project root is compiled and mutually visible to every other project
 file, with **no `import`/`open`** — across any subfolder depth. Moving a file
 into a subfolder never creates an import boundary or changes its visibility.
 `import`/`open` are for **`lib/` / external** packages only. The prelude
-stays auto-loaded and bare-callable, unchanged: the `core/` package
+stays auto-loaded and bare-callable, unchanged: the `core/` folder
 (`core/Core`, `core/List`) plus `String`, `Math`, `Io` and `Sys`.
-`core` is a normal camelCase folder-package now (#818) — a package prelude
-entry auto-opens its whole folder, so `log` and `List` are bare-callable with
+`core` is a normal camelCase folder now (#818) — a prelude entry that names a
+folder auto-opens the whole folder, so `log` and `List` are bare-callable with
 no import.
 
 The hash maps are **not** in the prelude: `StringMap(V)` and `IntMap(V)` live
-in the `collections/` package (#819) and are asked for explicitly with
+in the `collections/` folder (#819) and are asked for explicitly with
 `open collections/StringMap` / `open collections/IntMap`. The rule is core =
 the types the compiler itself understands (`List`); collections = pure-Rae
 libraries over `List`/`Buffer` that you import. See `docs/collections.md`.
@@ -106,7 +106,7 @@ spelling. It is a warning only, and there is no syntax to silence it.
 
 **Picking one of two project modules.** When two project files declare the
 same name, a bare read of it is ambiguous; a file picks one by opening it by
-its package path, relative to the project: `open alpha/Values` (2026-10-07,
+its import path, relative to the project: `open alpha/Values` (2026-10-07,
 fixture 1016). This works with or without `--project`: without it, the
 project root is the entry file's directory. (A
 file-relative `open "../alpha/Values"` is not an import form; relative
@@ -152,11 +152,11 @@ particles.tick()
 
 The folder qualifier is ordinary namespace qualification (same machinery as
 `filesystem.exists(...)`); it just resolves against a project folder name rather
-than a `lib/` package.
+than a `lib/` folder.
 
 ## Module directives: `import` and `open`
 
-An import names a **package path** — `import ui/Theme`, `open
+An import names an **import path** — `import ui/Theme`, `open
 collections/StringMap`, a dependency's `import codec/Decoder` — never a
 path relative to the importing file. `import "./x"` and `import "../x"` are
 rejected where they are written: the project's own files are visible
@@ -219,13 +219,14 @@ The pair used to be a common habit; it never did anything the `open` alone did n
 
 **Directives are module-granular.** `open ecs/Tag` opens exactly the module
 `ecs/Tag` — never its siblings. A bare name's origin is therefore always a
-directive on the page. To open a whole package you name the package itself:
+directive on the page. To open a whole camelCase folder you name the folder itself:
 `open ecs` covers every module under `ecs/` (the same folder form `import math`
 already uses to load a folder). Writing `open ecs` and `open ecs/Tag` together is
-an error, since the package form already covers the module. The two structural
-auto-visibility rules are unchanged: files inside the same lib package see each
+an error, since the folder form already covers the module. (A module folder,
+`open Gpu2d`, is one module and does not cover the PascalCase modules under it.) The
+two structural auto-visibility rules are unchanged: files inside the same lib folder see each
 other bare, and a project's own tree is auto-visible. (Before this rule, opening
-any one module of a lib package silently opened the whole package — `open ui/Theme`
+any one module of a lib folder silently opened the whole folder — `open ui/Theme`
 bare-opened all of `lib/ui/**` — which hid where names came from and made
 collisions silent.)
 
@@ -271,9 +272,11 @@ function names as bare calls.
 Two clashes are diagnosed so a `Qualifier.member` reference always resolves to
 exactly one thing:
 
-- **Enum-vs-package clash (definition-site).** If an `enum Color` and a
-  folder-**package** `Color/` (a folder holding modules) both exist, `Color.x`
-  would be ambiguous — an enum case `x` vs a module `x` in package `Color`. This
+- **Enum-vs-folder clash (definition-site).** If an `enum Color` and a
+  folder `Color/` holding modules both exist, `Color.x`
+  would be ambiguous — an enum case `x` vs a module `x` in folder `Color`. (Since
+  0.3.174 a PascalCase folder with Rae files in a program's own tree is an error by
+  itself, so this is reached from lib/ and packages only.) This
   is a hard error at the **enum's definition site** (caught once, not at every
   use). Enum names are PascalCase, so it only bites a PascalCase type-grouping
   folder named like an enum. Rename the enum or the folder.
@@ -389,9 +392,9 @@ symbol so the namespace reaches all the way down to the C ABI:
 
     rae_ext_<module-path>_<name>
 
-The **complete module path** is encoded — a subfolder package is namespaced
+The **complete module path** is encoded — a module in a subfolder is namespaced
 exactly like a top-level one, so the namespace never disappears for nested
-packages:
+modules (the files of a module folder share its one module path):
 
     lib/image.rae            module: image           -> rae_ext_image_loadPng
     lib/compress/oracle.rae  module: compress/oracle  -> rae_ext_compress_oracle_deflate
@@ -411,5 +414,5 @@ and internal plumbing names that start with `rae_`/`__` (they bind to fixed
 runtime symbols, e.g. `lib/ui/msdf.rae`'s `rae_ext_rae_sys_read_file`).
 
 Library authors therefore do **not** prefix function names for uniqueness — the
-package path provides it. Call qualified (`oracle.deflate(...)`,
+module path provides it. Call qualified (`oracle.deflate(...)`,
 `spotify.launch(...)`); the qualifier is the module's file stem.

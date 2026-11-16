@@ -147,7 +147,7 @@ frame systems — landed 2026-09-19, see §1.)
    was needed: the project namespace is flat and recursive, so only the one
    explicit sibling `open` (`GpuAssetRegistry`) changed path. The split did
    surface a latent duplicate: `rae_ext_rae_sys_read_file` was re-declared in
-   three files, which the flat root tolerated but the folder-package rule
+   three files, which the flat root tolerated but the lib folder rule
    rejects as ambiguous — it and `write_file` now have ONE root declaration in
    `FileIo.rae`.
 3. **16 `if screen is` ladders** in `ScreenRouter.rae` (`buildScreenWorld`,

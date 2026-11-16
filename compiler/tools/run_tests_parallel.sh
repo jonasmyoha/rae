@@ -85,6 +85,15 @@ if [ -f tools/example-copy-gate.sh ]; then
   stage_time "tools/example-copy-gate.sh" "$stage_start"
   echo
 fi
+# The tools that work per file also work per module folder
+# (tools/module-folder-tools-check.sh, docs/module-model-options.md).
+MODULE_TOOLS_CHECK=1
+if [ -f tools/module-folder-tools-check.sh ]; then
+  stage_start=$(date +%s)
+  if bash tools/module-folder-tools-check.sh; then MODULE_TOOLS_CHECK=0; fi
+  stage_time "tools/module-folder-tools-check.sh" "$stage_start"
+  echo
+fi
 # The stress cases (docs/stress-tests.md): one more pre-suite "case". A
 # "footgun" case that stops reproducing FAILS here on purpose (the ratchet).
 STRESS_CHECK=1
@@ -210,6 +219,7 @@ done
 if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$COPY_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$MODULE_TOOLS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
