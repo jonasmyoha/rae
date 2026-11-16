@@ -384,7 +384,7 @@ it (`Coverage` unless a nicer example exists).
 | TextBinding, DataRequest, DataDependency, RefreshRegion, ImageSourceResolver | as declared | yes | data bindings — no editor system feeds them; `ImageSourceResolver.textureKeys` decodes from its JSON array (#1007; Coverage's `IconSprite` carries `["logo"]`) | Coverage |
 | ContainerStyle | a theme container name | yes (an unknown name is an unknownToken diagnostic, #1000) | yes | Coverage `TextBlock`, CoverageCard |
 | ProfileStat, AvatarSource, ListSource, HistoryList, AnchorBottom, NavTab, AlbumHeader, ProgressBar, BottomSheet, PlaybackIcon, PlaybackCover, LikedHeart, TrackText | 106's app bindings | yes | app systems (106) drive them; inert in the editor | Coverage `MetaRow` |
-| BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared (+ `Carousel.autoAdvanceSeconds`, #1005) | yes | yes — lib/ui/animationSystem/EffectSystems.rae (#1005): sine / two-sine runtime offsets, a swipe-or-timer paged container with `previewScale`, puffs recycled from the node's authored children | Coverage `BackdropBox`, `IconSprite`, `CardsRow` |
+| BackgroundPan, Carousel, SmokeFx, WobbleFx | as declared (+ `Carousel.autoAdvanceSeconds`, #1005) | yes | yes — lib/ui/AnimationSystem/EffectSystems.rae (#1005): sine / two-sine runtime offsets, a swipe-or-timer paged container with `previewScale`, puffs recycled from the node's authored children | Coverage `BackdropBox`, `IconSprite`, `CardsRow` |
 | AnimFrames, AnimTrigger | baseKey frames textureKeys fps loopForever onEndTextureKey (+ `frameCount`, #1005); event actionId restartOnTrigger | yes — the `frames` / `textureKeys` List fields decode from their JSON arrays (#1007; Coverage's `NineSlice` authors `frames: [0, 1, 2]`), or author `baseKey` + `frameCount` for `<baseKey><i>` keys | yes (#1005): frames advance at fps into Sprite.textureKey, loop or stop on onEndTextureKey; a trigger (actionId, or click/hover on the node) starts / restarts | Coverage `NineSlice` |
 
 `typeName` of a `List(T)` field is spelled in full since #1006, and a scene's
@@ -469,7 +469,7 @@ was inside, and the editor camera zoomed on any wheel at all. Each was fine on
 its own; together they broadcast one notch to both.
 
 The fix is in the lib, not in the editor: the wheel is **routed**.
-`updateUiInput` (lib/ui/inputSystem) calls `routeUiWheel` once per frame,
+`updateUiInput` (lib/ui/InputSystem) calls `routeUiWheel` once per frame,
 which stores the delta on `UiInput.wheel` and the ONE entity that takes it on
 `UiInput.wheelTarget`. The target is the nearest wheel consumer on the path to
 the topmost node under the pointer. A consumer is a `ScrollRoot` (its window
@@ -535,7 +535,7 @@ and brightens it to `hoverOpacity` under the pointer. `Open...` authors
 about it.
 
 The change between rest and hover is animated. `buttonHoverFadeUpdate`
-(lib/ui/buttonSystem/ButtonHoverFade.rae) keeps a runtime `HoverFade { amount }`
+(lib/ui/ButtonSystem/ButtonHoverFade.rae) keeps a runtime `HoverFade { amount }`
 on every hover-reactive Shadow, in the ButtonSystem's own table next to
 `Interaction`. It moves `amount` linearly toward 1 while the node is hovered
 and toward 0 when it is not, taking 0.15 s for a full fade. The painter mixes

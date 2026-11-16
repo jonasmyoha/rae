@@ -1,10 +1,10 @@
 open ui/Ecs
 open ui/EventLoop
 open ui/WindowGeometry
-open ui/scrollRootSystem/ScrollRootSystem
+open ui/ScrollRootSystem
 open ecs/ComponentTable
 open ui/UiSystems
-open ui/animationSystem/AnimationTracks
+open ui/AnimationSystem
 open ui/textFieldSystem/TextFieldSystem
 open FileWatch
 open HotReload
@@ -28,7 +28,7 @@ func frameWaitSystem(
 ) {
   let playbackSystem: view PlaybackSystem = app.musicSystems.playbackSystem
   # Per-frame scroll bounds: the active page's ScrollRoot and its laid-out
-  # floor (lib/ui/scrollRootSystem). Wrong floor → spring never settles; a
+  # floor (lib/ui/ScrollRootSystem). Wrong floor → spring never settles; a
   # root not yet laid out, or whose content fits, is inert.
   let range: ScrollRange = scrollRootRange(
     world: world

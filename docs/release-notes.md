@@ -24,6 +24,13 @@ docs/module-model-options.md is the design.
   it: `Gpu2d.loadImageKey`, `Gpu2d.drawImageKey` and the rest.
   **`Gpu2dImages.` existed only in 0.3.172**; code written against it goes back
   to `Gpu2d.` and drops `import Gpu2dImages`.
+- The ui system folders that held several modules are one module each
+  (0.3.177): `import ui/RenderSystem` replaces `import ui/renderSystem/RenderSystem`
+  and its 17 sibling imports, and `RenderFills.`, `RenderSprite.`, `RenderCull.`
+  calls are `RenderSystem.`; likewise ui/AnimationSystem, ButtonSystem,
+  PageTransitionSystem, InputSystem, LayoutSystem, ListMotionSystem,
+  ListReorderSystem, ListViewSystem and ScrollRootSystem. physicsScenes 1.2.0
+  and qr 1.1.0 use them.
 - The rules follow (0.3.176): AGENTS.md says a module is a PascalCase file or
   folder, a system is a module of its own, and a module at the line cap becomes
   a folder; "package" means a `.raepack` package only. `rae init` writes these

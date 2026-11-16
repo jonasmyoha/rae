@@ -7,8 +7,8 @@ open ui/EventLoop
 open ui/Theme
 open ui/DebugOverlay
 open ui/DebugPlacement
-open ui/scrollRootSystem/ScrollRootSystem
-open ui/inputSystem/InputSystem
+open ui/ScrollRootSystem
+open ui/InputSystem
 
 # Frame phase 1 — input. The hot-reload signal, the pointer/keyboard input
 # system, the live-resize probe, the scroll physics, the action dispatch, the
@@ -126,7 +126,7 @@ func frameInputSystem(
   )
 
   # Drag, wheel, momentum and spring-back: the lib's scroll physics on the
-  # page's ScrollRoot (lib/ui/scrollRootSystem). A drag claims its press, so
+  # page's ScrollRoot (lib/ui/ScrollRootSystem). A drag claims its press, so
   # its release clicks nothing. It must run before layout/transform and
   # render, or the first Home wheel event is invisible until another
   # wake/rebuild path refreshes the frame.

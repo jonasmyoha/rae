@@ -437,7 +437,7 @@ to its new place (section 23).
 
 A virtual `ListView` (the default mode) whose node also carries
 `ListReorder` lets a person drag its rows into another order
-(lib/ui/ListReorder, the system is ui/listReorderSystem):
+(lib/ui/ListReorder, the system is ui/ListReorderSystem):
 
 ```json
 "Tasks": {
@@ -614,7 +614,7 @@ back, and the start anchor.
 
 An app asks for a row of a virtual `ListView` in view with
 `requestScrollToRow(world, listEntity, index, place)` (lib/ui/ScrollToRow,
-ui/scrollRootSystem/ScrollToRowSystem): the list's scroll root (its own,
+ui/ScrollRootSystem/ScrollToRowSystem): the list's scroll root (its own,
 else its nearest ancestor's) scrolls so data row `index` is wholly in view
 at the window's `end` (the bottom: a list read from the bottom, near the
 thumb) or `start`, kept within the root's range; an index past the end is
@@ -896,7 +896,7 @@ by default, `livelySoft` for a zoom). Going forward the arriving page's says how
 page's nodes need nothing more: the leaving page's `Disappear` start within the first 40% of the transition, its opacity is zero by
 60% in every kind, and the arriving page's `Appear` start at 25%. Taps go to the arriving page from its first frame, where it is drawn.
 
-A host has one of two page models (`lib/ui/pageTransitionSystem`), with a `PageTransitionSystem` from `createPageTransitionSystem()`:
+A host has one of two page models (`lib/ui/PageTransitionSystem`), with a `PageTransitionSystem` from `createPageTransitionSystem()`:
 
 - **Resident pages in one world:** `pageTransitionResident(system, world, uiSystems, fromRoot, toRoot, back)`. The leaving page deactivates at the end.
 - **A new world per screen:** `pageTransitionBegin(system, own oldWorld, own oldUiSystems, root, back)`, build the new world and lay it out as
@@ -1077,7 +1077,7 @@ scene.
   span's name as an index), `timelineAddSpan(state:, lane:, start:, end:, nameId:, depth:)` in
   order of `start` (an earlier one is refused), `timelineAddMark(state:, lane:, time:)`, and
   `timelineShow(state:, start:, end:)` for the view.
-- It is drawn (lib/ui/renderSystem/RenderTimeline) over the node's own fill, clipped to its box:
+- It is drawn (lib/ui/RenderSystem/RenderTimeline) over the node's own fill, clipped to its box:
   the lanes' bands, each span in its name's color with the name inside when it is wide enough,
   the selection outlined, the marks as thin lines, and each lane's name on a chip. Its cost is
   what is visible: spans narrower than a pixel are one rect per pixel column, found by binary
@@ -1178,7 +1178,7 @@ the node that carries the `Camera2D`:
   A ui/SpatialGrid over the items finds those that overlap the view plus the margin. They get
   pooled entities, re-pointed at their rows as the camera moves; an entity whose item left is
   hidden and kept for the next one. Items smaller on screen are boxes the plane draws itself
-  (lib/ui/renderSystem/RenderPlane), and when a grid cell is under `cellPixels` on screen, each
+  (lib/ui/RenderSystem/RenderPlane), and when a grid cell is under `cellPixels` on screen, each
   cell is drawn as one box, as opaque as its items cover it. Past `maxLiveItems` the rest are
   boxes, the items in the view before those in the margin.
 - When an item's entity is let go, its bound `Text.text`, `Text.styleId`, `Sprite.textureKey` and
@@ -1196,7 +1196,7 @@ entities, the systems at most 0.54 ms a frame from zoomed in to everything on sc
 The hit test (`uiHitTest`, and the pointer's in `updateUiInput`) used to walk every node of every
 root: 400 us a test with 50,000 nodes. It now asks ui/HitIndex, a grid of the clickable nodes
 (those with an `OnClick`) that `updateUiInput` keeps current once a frame
-(lib/ui/inputSystem/HitIndexQuery `hitIndexSync`):
+(lib/ui/InputSystem/HitIndexQuery `hitIndexSync`):
 
 - Each node's rectangle is kept in the coordinates of its nearest ancestor with a `Camera2D` (the
   screen when it has none), so a camera that pans or zooms moves nothing in the grid.
@@ -1260,7 +1260,7 @@ one end to the other, leaving and arriving level, as a node editor draws its lin
   edge. The ends are read from the nodes' places every frame, so a wire follows a moved node.
 - `wireAt(world, uiSystems, wiresEntityId, x, y)` gives the wire under a screen point (the
   nearest within the tolerance), or -1.
-- The drawing (lib/ui/renderSystem/RenderWires, lib/Gpu2dCanvasCurve) puts each wire in the
+- The drawing (lib/ui/RenderSystem/RenderWires, lib/Gpu2dCanvasCurve) puts each wire in the
   frame's one box draw, in the box shader's curve mode: cut into a few exact sub-curves, each a
   quad turned along its chord, whose pixels measure their distance to the curve. Put the Wires
   node first under the canvas, so wires go under the nodes.
@@ -1273,7 +1273,7 @@ about 1.7 ms of GPU time.
 ## 40. `PaintCache`, and what a zoomed-out canvas leaves out
 
 A canvas of many nodes, zoomed out, used to draw every node: 50,000 mini timelines took 3.6 s a
-frame. Three rules make it cheap (lib/ui/renderSystem/RenderPaintCache):
+frame. Three rules make it cheap (lib/ui/RenderSystem/RenderPaintCache):
 
 - **Specks.** Under a zoomed-out camera (a node's scale under 1), a node at most 4 pixels on
   screen draws its own box only, not its children.
@@ -1324,7 +1324,7 @@ Each frame, after `updateUiInput`, the app runs
   nearest left or right edge of another clickable node on screen within `snapDistance` points,
   and its top or bottom the same way (ui/HitIndex's nearest-edge queries; what is inside the
   dragged node does not count). A guide line is drawn across the screen where they meet
-  (lib/ui/renderSystem/RenderCanvasGuides).
+  (lib/ui/RenderSystem/RenderCanvasGuides).
 
 Case 1489 drives each gesture with scripted input: the zooms leave the point under the pointer
 within a hundredth of a pixel, the pans move by what they should, a released drag coasts and a

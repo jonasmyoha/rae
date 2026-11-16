@@ -1,0 +1,481 @@
+# RenderPaintBox — the geometry helpers the gpu2d painter shares (#1000, split
+# out of RenderSystem.rae at the 1000-line cap): the box an entity paints into
+# (WorldTransform2D scale + hover scale about the TransformFx pivot), the soft
+# drop shadow for `Shadow.blur`, and the `MaskShape` clip.
+open ui/Ecs
+import Gpu2d
+import ui/Components
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/UiSystems
+open ui/ButtonSystem
+import ui/Theme
+import ui/ThemeResolved
+open ui/Transform
+open ui/AnimationComponents
+open ui/RegistryValues
+open ui/AnimationSystem
+import Math
+
+func g2dColor(color: view RgbaColor) ret Int {
+  ret (color.a shl 24) bitor (color.r shl 16) bitor (color.g shl 8) bitor color.b
+}
+
+# Sprite scale mode -> the gpu2d draw call's mode code.
+func g2dScaleMode(m: view ScaleMode) ret Int {
+  if m is ScaleMode.fill {
+    ret 1
+  }
+  if m is ScaleMode.stretch {
+    ret 2
+  }
+  ret 0
+}
+
+# A color with the subtree's accumulated alpha (0..255) applied.
+func g2dChain(color: view RgbaColor, chain255: view Int) ret RgbaColor {
+  let a: Int = (color.a * chain255) / 255
+  ret RgbaColor { r: color.r, g: color.g, b: color.b, a: a }
+}
+
+func g2dRadius(world: view UiWorld, entityId: view EntityId, fallback: view Float) ret Float {
+  if componentHas(this: world.cornerRadiuses, entityId: entityId) {
+    let cr: view CornerRadius = componentView(this: world.cornerRadiuses, entityId: entityId)
+    ret cr.radius
+  }
+  ret fallback
+}
+
+func g2dHoverMul(world: view UiWorld, entityId: view EntityId) ret Float {
+  if componentHas(this: world.hoverScales, entityId: entityId) {
+    let hs: view HoverScale = componentView(this: world.hoverScales, entityId: entityId)
+    ret hs.current
+  }
+  ret 1.0
+}
+
+# The box an entity paints into (#1000): its world rectangle (ui/Transform
+# worldRectOf), grown by the hover multiplier about the entity's TransformFx pivot
+# (center when it has none). Hover is paint only: its children and its hit test
+# do not move. `scale` is the whole uniform factor, for what zooms with the box: a
+# radius, a stroke, a blur. Rotation is drawn about the origin
+# (paintEntityG), not here.
+type PaintBox {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  scale: Float
+}
+
+func g2dPaintBox(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+) ret PaintBox {
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  let hoverMul: Float = g2dHoverMul(world: world, entityId: entityId)
+  var pivotX: Float = 0.5
+  var pivotY: Float = 0.5
+  if componentHas(this: world.transforms, entityId: entityId) {
+    let fx: view TransformFx = componentView(this: world.transforms, entityId: entityId)
+    pivotX = fx.pivot.x
+    pivotY = fx.pivot.y
+  }
+  var uniform: Float = wt.scale.x * hoverMul
+  if wt.scale.y * hoverMul < uniform {
+    uniform = wt.scale.y * hoverMul
+  }
+  ret PaintBox {
+    x: rect.x + rect.w * (1.0 - hoverMul) * pivotX
+    y: rect.y + rect.h * (1.0 - hoverMul) * pivotY
+    w: rect.w * hoverMul
+    h: rect.h * hoverMul
+    scale: uniform
+  }
+}
+
+# What a Shape's stroke, dash and gap are multiplied by in `box`
+func g2dStrokeScale(shape: view Shape, box: view PaintBox) ret Float {
+  if shape.strokeFixed {
+    ret 1.0
+  }
+  ret box.scale
+}
+
+# A Shape's stroke width in `box`
+func g2dStrokeWidth(shape: view Shape, box: view PaintBox) ret Float {
+  ret shape.strokeWidth * g2dStrokeScale(shape: shape, box: box)
+}
+
+# A bounded stack of translucent shapes approximates a soft shadow in Rae.
+# Three layers at opacity 1 preserve the original appearance; authored scenes
+# can opt into a finer falloff. Alpha is normalized by layer count.
+func paintShadowG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  box: view PaintBox
+  radius: view Float
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let shadow: view Shadow = componentView(this: world.shadows, entityId: entityId)
+  if shadow.blur <= 0.0 {
+    ret
+  }
+  # Rest and hovered opacity, mixed by the hover fade (ui/ButtonSystem).
+  var restOpacity: Float = shadow.opacity
+  var hoverOpacity: Float = shadow.opacity
+  if shadow.hoverOnly {
+    restOpacity = 0.0
+  } else if shadow.hoverOpacity > 0.0 {
+    hoverOpacity = shadow.hoverOpacity
+  }
+  var opacity: Float = restOpacity
+  if restOpacity is not hoverOpacity {
+    let hover: Float = hoverFadeAmount(world: world, uiSystems: uiSystems, entityId: entityId)
+    opacity = restOpacity + (hoverOpacity - restOpacity) * hover
+  }
+  if opacity <= 0.0 {
+    ret
+  }
+  var layers: Int = shadow.layers
+  if layers < 1 {
+    layers = 1
+  }
+  if layers > 16 {
+    layers = 16
+  }
+  if opacity < 0.0 {
+    opacity = 0.0
+  }
+  if opacity > 1.0 {
+    opacity = 1.0
+  }
+  var color: RgbaColor = { r: 0, g: 0, b: 0, a: 255 }
+  if shadow.hasColor {
+    color = shadow.color
+  }
+  # The blur is in design units, so a zoomed box's shadow zooms with it
+  let blur: Float = shadow.blur * box.scale
+  let step: Float = blur / layers.toFloat()
+  var offset: Float = blur / 3.0
+  if shadow.centered {
+    offset = 0.0
+  }
+  loop var layer: Int = 0, layer < layers, ++layer {
+    let grow: Float = step * (layer + 1).toFloat()
+    let falloff: Float = (70.0 - layer.toFloat() * 66.0 / layers.toFloat()) * 3.0 / layers.toFloat()
+    let alpha: Int = (falloff * opacity).toInt() * chain255 / 255 * color.a / 255
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: box.x - grow
+      y: box.y - grow + offset
+      w: box.w + grow * 2.0
+      h: box.h + grow * 2.0
+      radius: radius + grow
+      color: g2dColor(color: RgbaColor { r: color.r, g: color.g, b: color.b, a: alpha })
+    )
+  }
+}
+
+# The mask's box: the entity's own, or the named source node's (resolved in
+# the entity's page). Returns whether a clip was pushed.
+func pushMaskClipG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  canvas: mod Gpu2dCanvas
+) ret Bool {
+  let mask: view MaskShape = componentView(this: world.maskShapes, entityId: entityId)
+  var source: EntityId = entityId
+  if mask.sourceNodeId.length() > 0 {
+    let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
+    if let index: Int = findNodeInPage(world: world, pageId: page, nodeId: mask.sourceNodeId) {
+      source = nodeEntityId(world: world, index: index)
+    }
+  }
+  if componentHas(this: uiSystems.layout.computedRects, entityId: source) is false or componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: source
+  ) is false {
+    ret false
+  }
+  let cr: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: source)
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: source
+  )
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  var x: Float = rect.x
+  var y: Float = rect.y
+  var w: Float = rect.w
+  var h: Float = rect.h
+  var radius: Float = mask.radius * wt.scale.x
+  if mask.kind is MaskKind.circle {
+    var diameter: Float = w
+    if h < diameter {
+      diameter = h
+    }
+    x = x + (w - diameter) / 2.0
+    y = y + (h - diameter) / 2.0
+    w = diameter
+    h = diameter
+    radius = diameter / 2.0
+  }
+  Gpu2d.pushClipRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+  )
+  ret true
+}
+
+# One edge of a dashed outline: segments of `dash` then `gap` along the edge,
+# starting at its beginning; a partial last segment is clipped to the edge.
+# `horizontal` runs along x at (x, y) for `length`, else along y.
+func paintDashedEdge(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  length: view Float
+  width: view Float
+  horizontal: view Bool
+  dash: view Float
+  gap: view Float
+  color: view Int
+) {
+  var at: Float = 0.0
+  var guard: Int = 0
+  loop at < length and guard < 4096 {
+    var segment: Float = dash
+    if at + segment > length {
+      segment = length - at
+    }
+    if horizontal {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: x + at
+        y: y
+        w: segment
+        h: width
+        color: color
+      )
+    } else {
+      Gpu2d.drawRect(
+        canvas: canvas
+        x: x
+        y: y + at
+        w: width
+        h: segment
+        color: color
+      )
+    }
+    at = at + dash + gap
+    guard = guard + 1
+  }
+}
+
+# The four edges of a dashed box, the stroke inside the box like drawBox's
+# border: top and bottom run full width, left and right fill the remaining
+# height between them.
+func paintDashedEdges(
+  canvas: mod Gpu2dCanvas
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+  width: view Float
+  dash: view Float
+  gap: view Float
+  color: view Int
+) {
+  var step: Float = gap
+  if step < 0.0 {
+    step = 0.0
+  }
+  paintDashedEdge(
+    canvas: canvas
+    x: x
+    y: y
+    length: w
+    width: width
+    horizontal: true
+    dash: dash
+    gap: step
+    color: color
+  )
+  paintDashedEdge(
+    canvas: canvas
+    x: x
+    y: y + h - width
+    length: w
+    width: width
+    horizontal: true
+    dash: dash
+    gap: step
+    color: color
+  )
+  let sideLength: Float = h - width * 2.0
+  if sideLength > 0.0 {
+    paintDashedEdge(
+      canvas: canvas
+      x: x
+      y: y + width
+      length: sideLength
+      width: width
+      horizontal: false
+      dash: dash
+      gap: step
+      color: color
+    )
+    paintDashedEdge(
+      canvas: canvas
+      x: x + w - width
+      y: y + width
+      length: sideLength
+      width: width
+      horizontal: false
+      dash: dash
+      gap: step
+      color: color
+    )
+  }
+}
+
+# A node's edge as painted: its Shape's stroke color (through the opacity chain) and width (design
+# units), toward its FocusStyle's by how far its field's focus fade has come
+type ShapeEdge {
+  color: RgbaColor
+  width: Float
+}
+
+# How far a FocusStyle node is toward its focused look: its fade while one runs, else its focus
+func focusAmount(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  if componentHas(this: uiSystems.animation.focusFades, entityId: entityId) {
+    let current: Float = componentView(this: uiSystems.animation.focusFades, entityId: entityId).progress.current
+    ret Math.max(a: 0.0, b: Math.min(a: 1.0, b: current))
+  }
+  if componentHas(this: world.textFields, entityId: entityId) and componentView(
+    this: world.textFields
+    entityId: entityId
+  ).focused {
+    ret 1.0
+  }
+  ret 0.0
+}
+
+func mixChannel(from: view Int, to: view Int, amount: view Float) ret Int {
+  ret Math.round(x: from.toFloat() + (to.toFloat() - from.toFloat()) * amount).toInt()
+}
+
+func shapeEdge(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  shape: view Shape
+  chain255: view Int
+) ret ShapeEdge {
+  let base: RgbaColor = shapeStroke(world: world, shape: shape, chain255: chain255)
+  if componentHas(this: world.focusStyles, entityId: entityId) is false {
+    ret ShapeEdge { color: base, width: shape.strokeWidth }
+  }
+  let amount: Float = focusAmount(world: world, uiSystems: uiSystems, entityId: entityId)
+  if amount <= 0.0 {
+    ret ShapeEdge { color: base, width: shape.strokeWidth }
+  }
+  let style: view FocusStyle = componentView(this: world.focusStyles, entityId: entityId)
+  var focusColor: RgbaColor = uiThemeColor(theme: world.theme, name: style.stroke)
+  if let literal: RgbaColor = parseHexColor(text: style.stroke) {
+    focusColor = literal
+  }
+  let to: RgbaColor = g2dChain(color: focusColor, chain255: chain255)
+  var width: Float = shape.strokeWidth
+  if style.strokeWidth >= 0.0 {
+    width = shape.strokeWidth + (style.strokeWidth - shape.strokeWidth) * amount
+  }
+  # An edge-less field fades its edge in from the focused color, not from black
+  var from: RgbaColor = base
+  if shape.strokeWidth <= 0.0 {
+    from = RgbaColor { r: to.r, g: to.g, b: to.b, a: 0 }
+  }
+  ret ShapeEdge {
+    color: RgbaColor {
+      r: mixChannel(from: from.r, to: to.r, amount: amount)
+      g: mixChannel(from: from.g, to: to.g, amount: amount)
+      b: mixChannel(from: from.b, to: to.b, amount: amount)
+      a: mixChannel(from: from.a, to: to.a, amount: amount)
+    }
+    width: width
+  }
+}
+
+# A Shape's stroke color: its palette slot from the ACTIVE theme (#235) or
+# its literal, through the opacity chain
+func shapeStroke(world: view UiWorld, shape: view Shape, chain255: view Int) ret RgbaColor {
+  var strokeBase: RgbaColor = shape.stroke
+  if shape.strokeSlot.length() > 0 {
+    strokeBase = uiThemeColor(theme: world.theme, name: shape.strokeSlot)
+  }
+  ret g2dChain(color: strokeBase, chain255: chain255)
+}
+
+# The box a node's fill paints in: a Circle Shape's centered square (side
+# twice its radius, the smaller side unless set), as the Shape painter draws
+# it, else the node's box. A gradient on a circle is then a circle, not a
+# stadium across a wider box.
+func g2dFillBox(world: view UiWorld, entityId: view EntityId, box: view PaintBox) ret PaintBox {
+  if componentHas(this: world.shapes, entityId: entityId) {
+    let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+    if shape.kind is ShapeKind.circle {
+      let radius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
+      ret PaintBox {
+        x: box.x + box.w / 2.0 - radius
+        y: box.y + box.h / 2.0 - radius
+        w: radius * 2.0
+        h: radius * 2.0
+        scale: box.scale
+      }
+    }
+  }
+  ret PaintBox {
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    scale: box.scale
+  }
+}
+
+# The corner radius a node's fill paints with, in the painted box's units
+# (`box.scale` applied): its Shape's own radius when it has one (a circle's is
+# half its smaller side unless set), else its CornerRadius, else square. A
+# GradientFill on a rounded button follows the button's Shape, written once.
+func g2dFillRadius(world: view UiWorld, entityId: view EntityId, box: view PaintBox) ret Float {
+  if componentHas(this: world.shapes, entityId: entityId) {
+    let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+    if shape.kind is ShapeKind.circle {
+      if shape.radius > 0.0 {
+        ret shape.radius * box.scale
+      }
+      if box.h < box.w {
+        ret box.h / 2.0
+      }
+      ret box.w / 2.0
+    }
+    if shape.radius > 0.0 {
+      ret shape.radius * box.scale
+    }
+  }
+  ret g2dRadius(world: world, entityId: entityId, fallback: 0.0) * box.scale
+}

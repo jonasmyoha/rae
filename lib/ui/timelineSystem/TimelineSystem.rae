@@ -1,7 +1,7 @@
 # ui/timelineSystem — the Timeline chart (ui/ChartComponents, docs/perf-tools-design.md §6): its
 # data (timelineAddLane, timelineAddSpan, timelineAddMark), what of it is visible
 # (timelineVisible), what is under a point (timelineHit), zoom and pan, and the system that turns
-# the wheel, drags and clicks into them. The drawing is ui/renderSystem/RenderTimeline.
+# the wheel, drags and clicks into them. The drawing is ui/RenderSystem/RenderTimeline.
 #
 # Its cost is what is visible, not the data: a lane's spans are kept in order of their start, so
 # the first span that can reach into the view is a binary search away; and where spans are
@@ -16,7 +16,7 @@ open ui/ChartComponents
 open ui/Components
 open ui/Ecs
 open ui/UiSystems
-open ui/inputSystem/InputSystem
+open ui/InputSystem
 
 # The timeline's box on screen
 type TimelineBox {

@@ -94,7 +94,7 @@ Ordered by leverage.
 6. **`ListView` / virtualisation** is a component type with no system; 106
    hand-rolls history windowing per view. A real `listViewSystem` is required
    before any editor/DAW list (tracks, clips, albums). **LANDED (#945 engine,
-   #964 rows):** `lib/ui/listViewSystem` windows + recycles pooled rows; a row
+   #964 rows):** `lib/ui/ListViewSystem` windows + recycles pooled rows; a row
    is a mounted item sub-scene (`ListView.itemSceneId` from a `SceneRegistry`,
    re-bound on recycle through the `SceneOverride` writers — Text, Sprite,
    OnClick, Active) or a bindings-only skeleton. 106's History page is a

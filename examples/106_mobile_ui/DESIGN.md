@@ -59,15 +59,15 @@ tap does, what Spotify's state means for the play button, what is persisted
 │    .raescene JSON -> components via the       │  Registry*, Theme*, Frames
 │    registry; theme tokens resolved per world  │
 ├──────────────────────────────────────────────┤
-│ 3. Layout + transform                         │  lib/ui/layoutSystem, fitSystem,
+│ 3. Layout + transform                         │  lib/ui/LayoutSystem, fitSystem,
 │    safe area -> layout -> fit -> world        │  safeAreaSystem, Transform,
 │    transform -> visual bounds                 │  visualBoundsSystem, Pipeline
 ├──────────────────────────────────────────────┤
-│ 4. Render                                     │  lib/ui/renderSystem over
+│ 4. Render                                     │  lib/ui/RenderSystem over
 │    retained gpu2d canvas: boxes, MSDF text,   │  lib/Gpu2dCanvas + lib/webgpu
 │    images, layers; presented through SDL3     │
 ├──────────────────────────────────────────────┤
-│ 5. Behaviors                                 │  lib/ui/inputSystem, animation-
+│ 5. Behaviors                                 │  lib/ui/InputSystem, animation-
 │    input/hit-test/actions, animation, scroll, │  System, ScrollPhysics/Root,
 │    widget style, list view, overlays          │  widgetStyleSystem, listView-
 │                                               │  System, LogOverlay/DebugOverlay
@@ -124,7 +124,7 @@ outside the saved-state ordinal map.
 Scrolling is data too: the scene authors a `ScrollRoot` on the node that
 scrolls (`"Body": { "ScrollRoot": { "axis": "y", "floor": "content",
 "endInset": … } }`; the album page root itself), and the lib
-`scrollRootSystem` (lib/ui/scrollRootSystem) seeds its `ScrollState` from the
+`scrollRootSystem` (lib/ui/ScrollRootSystem) seeds its `ScrollState` from the
 session's `ScrollMemory` (page id -> position; the hot-reload restore writes
 the restored screen into it) and computes the floor from the LAID-OUT content
 — the far edge of the root's children (a virtual `ListView` host counts its
@@ -291,7 +291,7 @@ the playback overlays), `WorldHelpers.rae` shortens the component setters.
 | Pixel coordinates, origin top-left, no translation? | Design units, not pixels: Model A with a design-resolution fit transform and a `Viewport` spine (§8). |
 | HiDPI at 1×, let raylib scale? | The window is sized in logical points, the framebuffer in physical px; `dpr` is part of `Viewport`, and MSDF text is resolution-independent. |
 | Data hot reload of `.raescene`? | Landed (`lib/FileWatch` + `HotReloadGlue.rae`). |
-| List virtualisation cutover? | `lib/ui/listViewSystem` exists (#945); the History list still hand-windows its rows — the migration is #964. |
+| List virtualisation cutover? | `lib/ui/ListViewSystem` exists (#945); the History list still hand-windows its rows — the migration is #964. |
 | The Live (VM) target? | Removed (#957). Compiled is the one target; `spawn`/`Channel` are real threads. |
 | raylib immediate-mode painter, no `RenderSyncSystem`? | Replaced by the retained gpu2d canvas; the render system re-records on change and `RenderDecide` skips frames with nothing to draw. |
 | Manual per-component registry — reflection or codegen? | Still manual; the reflection path is queued (#959–#961) on `fields`/`typeName`, which now exist. |

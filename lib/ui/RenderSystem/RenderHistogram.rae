@@ -1,0 +1,96 @@
+# RenderHistogram — a Histogram (ui/ChartComponents, ui/histogramSystem) drawn into its node's box:
+# its bars (the selected one brighter), the budget's line in red and the percentiles' lines, each
+# labelled at its top. Clipped to the box.
+import Gpu2d
+import Gpu2dText
+import SdfText
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/ChartComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/histogramSystem/HistogramSystem
+open ui/timelineSystem/TimelineSystem
+
+func histogramLineColor(kind: view HistogramLineKind) ret Int {
+  if kind is HistogramLineKind.budget {
+    ret 0xFFE15759
+  }
+  if kind is HistogramLineKind.p50 {
+    ret 0xFF76B7B2
+  }
+  if kind is HistogramLineKind.p95 {
+    ret 0xFFEDC948
+  }
+  ret 0xFFF28E2B
+}
+
+func paintHistogramG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if componentHas(this: world.histogramStates, entityId: entityId) is false {
+    ret
+  }
+  let histogram: view Histogram = componentView(this: world.histograms, entityId: entityId)
+  let state: view HistogramState = componentView(this: world.histogramStates, entityId: entityId)
+  let paint: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let box: TimelineBox = { x: paint.x, y: paint.y, w: paint.w, h: paint.h }
+  Gpu2d.pushClipRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+  )
+  loop let bar: HistogramBar in histogramBars(histogram: histogram, state: state, box: box) {
+    var color: Int = 0xFF4E79A7
+    if bar.bucket is state.selected {
+      color = 0xFF8FB4DA
+    }
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: bar.x
+      y: bar.y
+      w: bar.w
+      h: bar.h
+      color: color
+    )
+  }
+  var labelY: Float = box.y + 14.0
+  loop let line: HistogramLine in histogramLines(histogram: histogram, state: state, box: box) {
+    let color: Int = histogramLineColor(kind: line.kind)
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: line.x
+      y: box.y
+      w: 2.0
+      h: box.h
+      color: color
+    )
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: res.textFont
+      text: line.label
+      x: line.x + 4.0
+      y: labelY
+      sizePx: 13.0
+      color: color
+    )
+    labelY = labelY + 15.0
+  }
+  Gpu2d.popClipRect(canvas: canvas)
+}

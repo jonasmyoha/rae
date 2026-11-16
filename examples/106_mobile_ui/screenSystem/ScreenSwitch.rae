@@ -3,17 +3,17 @@ open ui/Pipeline
 open ecs/Schedule
 open ecs/Entity
 open ecs/ComponentTable
-open ui/layoutSystem/LayoutSystem
+open ui/LayoutSystem
 open ui/Transform
-open ui/scrollRootSystem/ScrollRootSystem
-open ui/pageTransitionSystem/PageTransitionSystem
+open ui/ScrollRootSystem
+open ui/PageTransitionSystem
 open ui/UiSystems
 
 # Persistent-world screen-switch handler. Called from the inner loop
 # once per frame after `dispatchActions` has chosen `nextScreen`:
 #   * willSwitch=true  → re-mount only a page whose row asks
 #                        (`ScreenPage.refreshOnEntry`), and run the page
-#                        transition (ui/pageTransitionSystem), which also flies
+#                        transition (ui/PageTransitionSystem), which also flies
 #                        a cover both pages show with one `HeroWidget` key.
 #   * willSwitch=false → poll the hot-reload watcher and possibly
 #                        force an outer rebuild.

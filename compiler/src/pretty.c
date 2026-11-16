@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* An import path is written bare (`ui/renderSystem/RenderSystem`) unless it
+/* An import path is written bare (`ui/RenderSystem/RenderSystem`) unless it
  * holds something the bare spelling cannot carry (a file suffix, a space). */
 static bool import_path_needs_quotes(Str path) {
   for (size_t i = 0; i < path.len; i++) {

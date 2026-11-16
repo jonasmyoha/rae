@@ -207,7 +207,7 @@ runs. `delaySeconds` shifts one node's phase against its siblings'. Reduced moti
 running loop is a `LoopRun` in `uiSystems.animation.loopRuns` (it counts for `animationInFlight`)
 and writes its pose after the tracks, so its pose wins while it runs; at its end it hands the node
 to an ordinary track (`animationTo` the laid-out pose) and its run goes. The steps are
-lib/ui/animationSystem/LoopMotion; the trigger is animationTriggers' loopTriggers. Case 1398;
+lib/ui/AnimationSystem/LoopMotion; the trigger is animationTriggers' loopTriggers. Case 1398;
 the scene grammar is docs/ui-scene-format.md section 21.
 
 ```json
@@ -237,7 +237,7 @@ change one number: `"bundles": ["appearRise"], "Appear": { "y": 40 }`.
 
 ## 5. animationSystem
 
-Folder `lib/ui/animationSystem/`. New files: `AnimationSystem.rae` already exists and
+Folder `lib/ui/AnimationSystem/`. New files: `AnimationSystem.rae` already exists and
 keeps `HoverScale`; the new work is `AnimationTracks.rae` (the type, create, update),
 `AnimationRules.rae` (pure, unit-tested: pose math, stagger delays) and
 `AnimationTriggers.rae` (finding what started).
@@ -360,8 +360,8 @@ now hands the step to the list's motion state, and the rows that keep their key 
 scroll included. A scroll with no data change still moves nothing. A row that falls far behind because rows are added
 faster than a glide ends (a test adding a task every few frames) moves fast, but it is never drawn out of place.
 
-**Built in 0.3.22:** all of the above, in `lib/ui/listMotionSystem/` and
-`lib/ui/listViewSystem/ListViewFlow.rae`. What the code decided:
+**Built in 0.3.22:** all of the above, in `lib/ui/ListMotionSystem/` and
+`lib/ui/ListViewSystem/ListViewFlow.rae`. What the code decided:
 
 - `listViewSystem` calls list motion itself, because a ghost must be taken before its row is rebound, and only that
   system sees that moment. So there is no host call any more: `listMotionSystem`, `listMotionNeedsRun` and
@@ -384,7 +384,7 @@ faster than a glide ends (a test adding a task every few frames) moves fast, but
 ### 8.1 Two worlds, or one
 
 A host has one of two page models, and both are supported by one system,
-`lib/ui/pageTransitionSystem/`:
+`lib/ui/PageTransitionSystem/`:
 
 - **Resident pages in one world**, such as example 106: both roots are alive; nothing
   more is needed.
@@ -424,7 +424,7 @@ are transparent over a shared background (SUMU's are) would show two sets of tex
 over each other. So the leaving page's opacity always reaches zero by 60% of the
 transition, in every kind, and the background and any bar in another world stay still.
 
-**Built in 0.3.24:** sections 8.1 and 8.2, in `lib/ui/pageTransitionSystem/`. What the code decided:
+**Built in 0.3.24:** sections 8.1 and 8.2, in `lib/ui/PageTransitionSystem/`. What the code decided:
 
 - A new world per screen takes two calls, `pageTransitionBegin` before the host builds the new world and
   `pageTransitionArrive` after, as the kind is the new page's `PageTransition`, or going back the old page's. A host
@@ -456,7 +456,7 @@ transition, in every kind, and the background and any bar in another world stay 
   `HeroTransitionSystem` becomes this, and `HeroWidget` stays as an alias so that
   existing scenes load.
 
-**Built in 0.3.26:** in `lib/ui/animationSystem/SharedElements.rae`, for both page models. What the code decided:
+**Built in 0.3.26:** in `lib/ui/AnimationSystem/SharedElements.rae`, for both page models. What the code decided:
 
 - A morph is the new node with a pose, not a copy flying above it. So it can be any node, with whatever is under it, and it
   takes taps where it is drawn. The pose gets a second axis for this, `stretchY`, as two boxes need not have one shape.
@@ -495,7 +495,7 @@ continues, or springs back, from the finger's velocity. Since a track retargets 
 the current value and velocity, this needs only a paused state, and no new motion
 math. It is one thumb's natural Back. The bar's Back stays.
 
-**Built in 0.3.27:** `lib/ui/pageTransitionSystem/EdgeSwipe.rae` finds the gesture, and `pageTransitionDrag` drives the
+**Built in 0.3.27:** `lib/ui/PageTransitionSystem/EdgeSwipe.rae` finds the gesture, and `pageTransitionDrag` drives the
 transition. What the code decided:
 
 - The finding and the driving are apart, as only the host knows what Back means. `edgeSwipeStep` runs after the input step and

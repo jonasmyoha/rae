@@ -1,0 +1,795 @@
+# gpu2d render path for lib/ui (#142 M3).
+#
+# A backend-specific paint walk that renders a UiWorld through lib/gpu2d
+# (WebGPU), so the SAME ECS scenes lib/ui/render.rae draws with raylib can be
+# drawn on the GPU. The two MSDF fonts (body text + Material icons) are PASSED
+# IN via Gpu2dUi (module-level heap globals miscompile); album-cover images are
+# resolved by key through the gpu2d runtime registry (Gpu2d.loadImageKey /
+# drawImageKey). Shapes call gpu2d primitives directly so GPU-only apps do not
+# import the dual-backend raylib draw sink.
+#
+# Text styles resolve via lib/ui/text_style (the backend-neutral table);
+# mat:* icon glyphs map name->codepoint via ui/IconCodepoints and draw
+# from the Material atlas font. Paint order mirrors lib/ui/render.rae:
+# layer-sorted parent roots, then recursive parent-before-child traversal.
+#
+# Pixel policy for Model A: this renderer does not blanket-round layout
+# coordinates. Layout, hover scale, and animation remain in fractional design
+# units; gpu2d maps them to physical pixels through its design-resolution
+# transform and the SDF/AA shaders cover subpixel edges. Only explicitly
+# pixel-bound primitives such as future one-device-pixel strokes should snap at
+# the backend boundary. Snapping every box here would move centered widgets and
+# make animation shimmer.
+open ui/Ecs
+import Gpu2d
+import Math
+import Gpu2dText
+import SdfText
+import ui/AnimationSystem
+import ui/Components
+import ui/IconCodepoints
+import ui/Layer
+import ui/Theme
+import ui/ThemeResolved
+import ui/TextStyle
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasBackdrop
+open ui/UiSystems
+open ui/Transform
+
+# Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
+type Gpu2dUi {
+  textFont: SdfFont  # body text (e.g. Roboto MSDF atlas)
+  iconFont: SdfFont  # Material-icon MSDF atlas (mat:* glyphs)
+  # Text styles (size/color-slot/align) loaded from the .raescene
+  # theme (#230/#231). The single source of styleId resolution for
+  # this render path — see ui/text_style resolveText*.
+  theme: ResolvedTheme
+  # #764: the active palette theme (built-in light/dark, optionally overlaid with
+  # the .raescene palette by loadUiAssets). Was the module-global `activeTheme`;
+  # now carried here so an app can seed each UiWorld's `theme.active` from its
+  # owned Gpu2dUi (see seedWorldTheme) instead of a process global.
+  activeTheme: Theme
+}
+
+# #764: seed a freshly-created UiWorld's theme resource from the app's owned
+# Gpu2dUi. `active` is a plain value struct (RgbaColor slots, no heap) so the
+# assignment is a safe copy; the scene-deserializer token subsets are deep-copied
+# into `theme.resolved` via applyResolvedTokens (idempotent on `.ok`). Call once,
+# right after createUiWorld and BEFORE loadScene/mountUiScene, so token/color
+# resolution during deserialization sees the app's theme rather than the default.
+func seedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
+  world.theme.active = res.activeTheme
+  world.theme.generation = world.theme.generation + 1
+  applyResolvedTokens(dst: world.theme.resolved, src: res.theme)
+}
+
+# Seed AGAIN with a different token table (#1008): applyResolvedTokens fills an
+# empty table once, so a world that already carries tokens keeps them — a viewer
+# that reloads a document whose `import`s changed must start from a fresh table
+# before the next page deserializes against it.
+func reseedWorldTheme(world: mod UiWorld, res: view Gpu2dUi) pub {
+  var fresh: ResolvedTheme = createResolvedTheme()
+  world.theme.resolved = own fresh
+  seedWorldTheme(world: world, res: res)
+}
+
+# #764: seed a freshly-created UiWorld's theme from an app-owned UiTheme (e.g. an
+# AppState field). Used by apps that rebuild their world per screen/frame and keep
+# the source-of-truth theme on their persistent state — the copy carries the chosen
+# active palette + generation + scene token tables onto each new world.
+func seedWorldThemeFrom(world: mod UiWorld, src: view UiTheme) pub {
+  world.theme.active = src.active
+  world.theme.generation = src.generation
+  applyResolvedTokens(dst: world.theme.resolved, src: src.resolved)
+}
+
+func paintShapeG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let sh: view Shape = componentView(this: world.shapes, entityId: entityId)
+  # The edge, with a focused field's look mixed in (FocusStyle)
+  let edge: ShapeEdge = shapeEdge(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    shape: sh
+    chain255: chain255
+  )
+  # Resolve a palette slot from the ACTIVE theme at paint (#235) so a
+  # dark/light toggle re-colors without a scene re-parse; empty slot
+  # keeps the literal fill.
+  var fillBase: RgbaColor = sh.fill
+  if sh.fillSlot.length() > 0 {
+    fillBase = uiThemeColor(theme: world.theme, name: sh.fillSlot)
+  }
+  let fill: RgbaColor = g2dChain(color: fillBase, chain255: chain255)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
+  if sh.kind is ShapeKind.circle {
+    # `box` is already scaled by everything (inherited camera/parent scale,
+    # the node's own TransformFx, hover) — `box.scale` is that whole uniform
+    # factor, so the radius is scaled by it exactly ONCE. Multiplying by
+    # wt.scale as well made the circle grow with the zoom squared.
+    var smaller: Float = box.w
+    if box.h < smaller {
+      smaller = box.h
+    }
+    var r: Float = sh.radius * hoverMul
+    if r <= 0.0 {
+      r = smaller / 2.0
+    }
+    let circleBox: PaintBox = {
+      x: box.x + box.w / 2.0 - r
+      y: box.y + box.h / 2.0 - r
+      w: r * 2.0
+      h: r * 2.0
+      scale: hoverMul
+    }
+    if componentHas(this: world.shadows, entityId: entityId) {
+      paintShadowG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        box: circleBox
+        radius: r
+        chain255: chain255
+        canvas: canvas
+      )
+    }
+    # the stroke as a RoundedRect draws it: a border inset from the edge
+    # (a dash pattern is a rectangle guide's, so a circle's stroke is solid)
+    if edge.width > 0.0 {
+      Gpu2d.drawBox(
+        canvas: canvas
+        x: circleBox.x
+        y: circleBox.y
+        w: circleBox.w
+        h: circleBox.h
+        radius: r
+        fill: g2dColor(color: fill)
+        borderWidth: edge.width * g2dStrokeScale(shape: sh, box: circleBox)
+        border: g2dColor(color: edge.color)
+      )
+      ret
+    }
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: circleBox.x
+      y: circleBox.y
+      w: circleBox.w
+      h: circleBox.h
+      radius: r
+      color: g2dColor(color: fill)
+    )
+    ret
+  }
+  var radius: Float = sh.radius
+  if radius <= 0.0 {
+    radius = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
+  }
+  if componentHas(this: world.shadows, entityId: entityId) {
+    paintShadowG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      box: box
+      radius: radius * hoverMul
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  if edge.width > 0.0 {
+    let stroke: RgbaColor = edge.color
+    if sh.strokeDash > 0.0 {
+      # A dashed stroke: the fill as a plain box, then the dashes as
+      # rect segments along the four edges (square corners; a guide).
+      if fill.a > 0 {
+        Gpu2d.drawRoundedRect(
+          canvas: canvas
+          x: drawX
+          y: drawY
+          w: drawW
+          h: drawH
+          radius: radius * hoverMul
+          color: g2dColor(color: fill)
+        )
+      }
+      paintDashedEdges(
+        canvas: canvas
+        x: drawX
+        y: drawY
+        w: drawW
+        h: drawH
+        width: edge.width * g2dStrokeScale(shape: sh, box: box)
+        dash: sh.strokeDash * g2dStrokeScale(shape: sh, box: box)
+        gap: sh.strokeGap * g2dStrokeScale(shape: sh, box: box)
+        color: g2dColor(color: stroke)
+      )
+      ret
+    }
+    Gpu2d.drawBox(
+      canvas: canvas
+      x: drawX
+      y: drawY
+      w: drawW
+      h: drawH
+      radius: radius * hoverMul
+      fill: g2dColor(color: fill)
+      borderWidth: edge.width * g2dStrokeScale(shape: sh, box: box)
+      border: g2dColor(color: stroke)
+    )
+    ret
+  }
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: drawX
+    y: drawY
+    w: drawW
+    h: drawH
+    radius: radius * hoverMul
+    color: g2dColor(color: fill)
+  )
+}
+
+func paintEntityG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+    ret
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
+    ret
+  }
+  let cr: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  let wv: WorldVisual = worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId)
+  if wv.visible is false {
+    ret
+  }
+  if wv.alpha <= 0.0 {
+    ret
+  }
+  var chain255: Int = (wv.alpha * 255.0).toInt()
+  if chain255 > 255 {
+    chain255 = 255
+  }
+  if chain255 < 0 {
+    chain255 = 0
+  }
+  # The accumulated rotation (#1003): everything this entity paints turns
+  # about its origin — the transform pass already moved the origin so the
+  # authored pivot is the fixed point.
+  if wt.rotation is not 0.0 {
+    Gpu2d.setRotation(
+      canvas: canvas
+      angle: wt.rotation
+      pivotX: wt.position.x
+      pivotY: wt.position.y
+    )
+  }
+  if componentHas(this: world.backdropBlurs, entityId: entityId) {
+    paintBackdropBlurG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.gradientFills, entityId: entityId) or componentHas(
+    this: world.radialGradientFills
+    entityId: entityId
+  ) {
+    paintGradientG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  } else if componentHas(this: world.switches, entityId: entityId) {
+    paintSwitchG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  } else if componentHas(this: world.shapes, entityId: entityId) {
+    paintShapeG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  # a plane's boxes and cells, under its live items (ui/PlaneComponents)
+  if componentHas(this: world.planeViews, entityId: entityId) {
+    paintPlaneG(
+      world: world
+      entityId: entityId
+      wt: wt
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  # its wires, as one curve each (ui/WireComponents)
+  if componentHas(this: world.wireSets, entityId: entityId) {
+    paintWiresG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  # a chart over its node's own fill (ui/ChartComponents)
+  if componentHas(this: world.flameGraphs, entityId: entityId) {
+    paintFlameGraphG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.histograms, entityId: entityId) {
+    paintHistogramG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.lineGraphs, entityId: entityId) {
+    paintLineGraphG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.statTables, entityId: entityId) {
+    paintStatTableG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.timelines, entityId: entityId) {
+    paintTimelineG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.backdropImages, entityId: entityId) {
+    paintBackdropG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.sprites, entityId: entityId) {
+    paintSpriteG(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  # text too small to read under a zoomed-out camera is not drawn (RenderPaintCache)
+  if componentHas(this: world.texts, entityId: entityId) and not paintTextTooSmall(wt: wt, cr: cr) {
+    if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+      paintTextWithGhost(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        wt: wt
+        cr: cr
+        chain255: chain255
+        res: res
+        canvas: canvas
+      )
+    } else {
+      paintTextG(
+        world: world
+        entityId: entityId
+        wt: wt
+        cr: cr
+        chain255: chain255
+        res: res
+        canvas: canvas
+        content: componentView(this: world.texts, entityId: entityId).text
+      )
+    }
+    # the focused text field's caret, after its text (ui/textFieldSystem)
+    paintCaretG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  # gpu2d has separate box/image/text pipelines; the canvas flushes by itself where a later item
+  # would otherwise draw under an earlier one (Gpu2dCanvasFrame canvasKeepOrder), so a node needs no
+  # flush of its own.
+  Gpu2d.clearRotation(canvas: canvas)
+}
+
+# True when every pixel of `entityId`'s subtree is inside its own box: it clips its descendants
+# (OverflowPolicy clip) or masks them to its own box (a MaskShape with no source node)
+func paintClipsSubtree(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if entityClipsChildrenG(world: world, entityId: entityId) {
+    ret true
+  }
+  if componentHas(this: world.maskShapes, entityId: entityId) {
+    ret componentView(this: world.maskShapes, entityId: entityId).sourceNodeId.length() is 0
+  }
+  ret false
+}
+
+# True when `e` clips its descendants (OverflowPolicy.mode == clip).
+func entityClipsChildrenG(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.overflows, entityId: entityId) is false {
+    ret false
+  }
+  let op: view OverflowPolicy = componentView(this: world.overflows, entityId: entityId)
+  ret op.mode is OverflowMode.clip
+}
+
+func paintSubtreeG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  unsafe {
+    # Off screen (RenderCull): not painted, and when it clips its children (their pixels are
+    # inside its box) none of its subtree is either
+    let offScreen: Bool = paintOffScreen(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      viewW: paintViewWidth()
+      viewH: paintViewHeight()
+    )
+    if offScreen and paintClipsSubtree(world: world, entityId: entityId) {
+      ret
+    }
+    # MaskShape (#1000): the entity AND its descendants are clipped to a
+    # rounded rect / circle over its own box, or over `sourceNodeId`'s box in
+    # the same page. Pushed before the entity paints so a masked sprite is cut
+    # too, popped after the children walk (gpu2d clips nest).
+    var masked: Bool = false
+    if componentHas(this: world.maskShapes, entityId: entityId) {
+      masked = pushMaskClipG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        canvas: canvas
+      )
+    }
+    if not offScreen {
+      paintEntityG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
+    if componentHas(this: world.childrens, entityId: entityId) is false {
+      if masked {
+        Gpu2d.popClipRect(canvas: canvas)
+      }
+      ret
+    }
+    # Clip descendants to this entity's box when it opts in via
+    # OverflowPolicy.clip (#115). The container's own fill was already
+    # painted above (unclipped); only its children are scissored. A rounded
+    # container clips with rounded corners (#118), else a plain rect (#144).
+    # gpu2d's clip is runtime state that persists across the per-entity
+    # flushes, so pushing here and popping after the children walk scopes it.
+    var clipped: Bool = false
+    if entityClipsChildrenG(world: world, entityId: entityId) {
+      if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+        if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) {
+          let cwt: view WorldTransform2D = componentView(
+            this: uiSystems.transform2d.worldTransforms
+            entityId: entityId
+          )
+          let clipRect: WorldRect = worldRectOf(
+            wt: cwt
+            cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+          )
+          let crad: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
+          if crad > 0.0 {
+            Gpu2d.pushClipRoundedRect(
+              canvas: canvas
+              x: clipRect.x
+              y: clipRect.y
+              w: clipRect.w
+              h: clipRect.h
+              radius: crad * cwt.scale.x
+            )
+          } else {
+            Gpu2d.pushClipRect(
+              canvas: canvas
+              x: clipRect.x
+              y: clipRect.y
+              w: clipRect.w
+              h: clipRect.h
+            )
+          }
+          clipped = true
+        }
+      }
+    }
+    if componentCount(this: uiSystems.animation.sharedNodes) > 0 {
+      paintSharedUnderG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
+    # as they are, not at all (a speck), or into a cached picture (RenderPaintCache)
+    let children: PaintChildren = paintChildrenChoose(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      canvas: canvas
+    )
+    if children is not PaintChildren.skip {
+      paintChildrenG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
+    if children is PaintChildren.capture {
+      paintCaptureFinish(canvas: canvas)
+    }
+    if clipped {
+      Gpu2d.popClipRect(canvas: canvas)
+    }
+    if masked {
+      Gpu2d.popClipRect(canvas: canvas)
+    }
+  }
+}
+
+# `entityId`'s children, in paint order
+func paintChildrenG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  unsafe {
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
+    let n: Int = ch.ids.length
+    # The children in up to three passes by their subtree's hover paint rank (a popped tile over
+    # its siblings). Each child is ranked once, and with nothing popped or on top anywhere (no
+    # PaintOnTop, no HoverScale) not at all: ranking walks the child's whole subtree, and three
+    # times per child at every depth was most of a large canvas's frame.
+    var ranks: List(Int) = {}
+    var passes: Int = 1
+    if componentCount(this: world.paintOnTops) > 0 or componentCount(this: world.hoverScales) > 0 {
+      ranks = List.create(Int, cap: n)
+      loop var i: Int = 0, i < n, ++i {
+        let rank: Int = subtreeHoverPaintRank(
+          world: world
+          entityId: rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        )
+        ranks.add(value: rank)
+        passes = Math.max(a: passes, b: rank + 1)
+      }
+    }
+    var pass: Int = 0
+    loop pass < passes {
+      var i: Int = 0
+      loop i < n {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        # a raised node (ui/Layer isRaisedNode) is painted with its layer's roots instead
+        if ranks.copyAtFallback(index: i, fallback: 0) is pass and componentHas(
+          this: uiSystems.animation.sharedNodes
+          entityId: cid
+        ) is false and isRaisedNode(world: world, uiSystems: uiSystems, entityId: cid) is false {
+          paintSubtreeG(
+            world: world
+            uiSystems: uiSystems
+            entityId: cid
+            res: res
+            canvas: canvas
+          )
+        }
+        i = i + 1
+      }
+      pass = pass + 1
+    }
+  }
+}
+
+func gpu2dLayerRange(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  minOrder: view Int
+  maxOrder: view Int
+) pub {
+  unsafe {
+    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+    let m: Int = roots.length
+    var p: Int = 0
+    loop p < m {
+      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
+      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+        uiSystems: uiSystems
+        entityId: root
+      )
+      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
+        let ord: Int = entityLayerOrder(world: world, entityId: root)
+        if ord >= minOrder {
+          if ord < maxOrder {
+            canvasBackdropLayer(canvas: canvas)
+            paintSubtreeG(
+              world: world
+              uiSystems: uiSystems
+              entityId: root
+              res: res
+              canvas: canvas
+            )
+          }
+        }
+      }
+      p = p + 1
+    }
+  }
+}
+
+# Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame.
+func renderSystemGpu2d(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) pub {
+  let allRangeLow: Int = -1000000
+  let allRangeHi: Int = 1000000
+  gpu2dLayerRange(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    canvas: canvas
+    minOrder: allRangeLow
+    maxOrder: allRangeHi
+  )
+  renderSharedNodesGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    canvas: canvas
+  )
+  # a dragged canvas node's snapping guides, over everything (ui/canvasGestureSystem)
+  paintCanvasGuidesG(world: world, canvas: canvas)
+}
+
+# The nodes doing a shared element's work, over everything else and outside their page's clips
+func renderSharedNodesGpu2d(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    if sharedPaintsLast(uiSystems: uiSystems, entityId: entityId) {
+      paintSubtreeG(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        res: res
+        canvas: canvas
+      )
+    }
+  }
+}
+
+# A shared node a page hands over is drawn last; a marker moving inside one world is drawn under
+# the node that holds its old and new place (paintSharedUnderG)
+func sharedPaintsLast(uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  ret componentHas(this: uiSystems.animation.sharedNodes, entityId: entityId) and isNone(
+    this: componentView(this: uiSystems.animation.sharedNodes, entityId: entityId).paintUnder
+  )
+}
+
+# The markers moving under `entityId`, before its children
+func paintSharedUnderG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
+    let shared: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
+    if componentView(this: uiSystems.animation.sharedNodes, entityId: shared).paintUnder is entityId {
+      paintSubtreeG(
+        world: world
+        uiSystems: uiSystems
+        entityId: shared
+        res: res
+        canvas: canvas
+      )
+    }
+  }
+}

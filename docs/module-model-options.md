@@ -122,6 +122,25 @@ let entityId: EntityId = createEntity(world: world)
 | Is a module a file, or a file or a folder? | Whether splitting a big file changes the code that uses it | A file or a folder; using code cannot tell, so a split never changes it |
 | How is a module written in code? | Whether `Name.call()` reads as a module or a variable | Always PascalCase, as today; a camelCase folder is only a path |
 
+### Open: the rule for a program's own folders (needs a decision)
+
+Today (0.3.177) a program's own tree has its own rule: every file sees every other with no
+import; a camelCase folder name only breaks a tie (`enemies.tick()` when two folders declare
+`tick`); a PascalCase folder holding Rae files is an error (rule 9). The options:
+
+- **A. Keep it as it is.** Programs never have module folders; a big program file is split
+  into more files of the same folder (all visible anyway), and only lib/ and packages use module
+  folders. Simplest, but a program cannot group a subsystem under one name the way a library
+  does, and code moved from a program into lib/ changes form.
+- **B. PascalCase folders are module folders in a program too** (recommended). The same rule
+  everywhere: `game/Hud/` is one module `Hud` (its files share one scope and one name, `Hud.draw()`
+  qualifies it); the program stays auto-visible (no import needed, as for every program file);
+  camelCase folders keep breaking ties. Rule 9 goes away, and code moves between a program and
+  lib/ unchanged.
+- **C. Every program folder is a namespace you must qualify.** Folders become real boundaries
+  inside a program (Go's rule). Most consistent with libraries but gives up the free movement of
+  files that programs have now.
+
 ### Not part of this proposal
 
 - A program's own folders keep today's rule (every project file sees every other; a folder name

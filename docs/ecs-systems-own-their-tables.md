@@ -74,7 +74,7 @@ follow-up if it earns its churn.
 worldTransforms, worldVisuals, runtimeOffsets }`, `AnimationSystem { animStates,
 smokeStates, carouselStates }`, `HeroTransitionSystem { heroTransitions }`,
 `ButtonSystem { interactions }` on `UiSystems`; the button behavior is
-gathered in `lib/ui/buttonSystem/` — `buttonInteractionClear/Mark` (was
+gathered in `lib/ui/ButtonSystem/` — `buttonInteractionClear/Mark` (was
 inputSystem), `buttonStyleUpdate` (ButtonStyle.rae, was widgetStyleSystem),
 `buttonHoverScaleUpdate` (ButtonHoverScale.rae, was hoverScaleSystem) — as ONE
 type and module, not one function: the three keep their pipeline stages

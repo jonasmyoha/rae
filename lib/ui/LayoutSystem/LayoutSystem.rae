@@ -1,0 +1,734 @@
+# Two-phase layout — RUICS § 7 in Rae form.
+#
+# Both phases are LINEAR walks over the cached parent-before-child depth
+# order (#713), not tree recursion (#731):
+# Phase 1 (`measureLinear`)   : bottom-up — the depth order walked in
+#                                REVERSE, so `measureNode` writes each
+#                                child's MeasuredSize (Hug sum of active
+#                                children + gaps + padding) before its
+#                                parent reads it.
+# Phase 2 (`computeLinear`)   : top-down — the depth order walked
+#                                forward. Each root seeds its own
+#                                ComputedRect; `placeChildren` then
+#                                resolves each active child's final size
+#                                and position into ComputedRect,
+#                                distributing remaining main-axis space
+#                                across `Fill` children, clamping by
+#                                Constraints, and respecting `Align` on
+#                                the cross axis (and inside Stack
+#                                containers on both axes).
+#
+# Coordinate space is **local to parent**: ComputedRect.x and .y are
+# offsets relative to the parent's content origin. The TransformSystem
+# in transform.rae composes these into absolute WorldTransform2D
+# coordinates each frame.
+#
+# Layout types covered: None / Horizontal / Vertical / Stack.
+# Grid is reserved in the type but not implemented (RUICS hasn't
+# implemented it either; the music player doesn't need it).
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
+
+# The layout root measures against `world.layoutW` / `world.layoutH`
+# (the live layout extent, set by the app from the window size) — the
+# old module-level screen-size globals + `setLayoutScreenSize` marker
+# are gone; roots read the extent directly in `seedRoot`.
+
+# -----------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------
+
+# Returns true if `entityId` should participate in layout. Inactive
+# nodes are filtered per RUICS § 7.3 — they don't contribute to
+# parent measurement or placement.
+func layoutActive(world: view UiWorld, entityId: view EntityId) ret Bool {
+  # A row leaving a list sideways has given its place to the new rows
+  if componentHas(this: world.leavings, entityId: entityId) and componentView(
+    this: world.leavings
+    entityId: entityId
+  ).holdsPlace is false {
+    ret false
+  }
+  if componentHas(this: world.actives, entityId: entityId) is false {
+    ret true
+  }
+  let a: view Active = componentView(this: world.actives, entityId: entityId)
+  ret a.value
+}
+
+# Resolve a single axis given an authored Size, Rect-fallback, and a
+# parent-supplied content extent. See RUICS § 7.4 — `resolveAxis`.
+#
+# `rectVal` is `Rect.w` or `Rect.h` depending on which axis we're on.
+# `measuredVal` is the bottom-up MeasuredSize for that axis (0 if the
+# node hasn't been measured yet).
+# `parentAvail` is the parent's content size on this axis, or -1.0 if
+# unknown (in which case Fill falls back to rectVal).
+func resolveAxisFromSize(
+  axis: view SizeAxis
+  rectVal: view Float
+  measuredVal: view Float
+  parentAvail: view Float
+  hasMeasured: view Bool
+  hasParentAvail: view Bool
+) ret Float {
+  var result: Float = rectVal
+  if axis.mode is SizeMode.fixed {
+    result = rectVal
+  }
+  if axis.mode is SizeMode.fill {
+    if hasParentAvail {
+      result = parentAvail
+    } else {
+      result = rectVal
+    }
+  }
+  if axis.mode is SizeMode.hug {
+    if hasMeasured {
+      result = measuredVal
+    } else {
+      result = rectVal
+    }
+  }
+  # Apply optional min/max clamps. -1 is the "no clamp" sentinel
+  # (see components.rae's SizeAxis docstring).
+  ret clampToSizeAxis(axis: axis, value: result)
+}
+
+# Apply Constraints (independent of Size) — width clamp.
+func applyConstraintsW(world: view UiWorld, entityId: view EntityId, w: view Float) ret Float {
+  if componentHas(this: world.constraints, entityId: entityId) is false {
+    ret w
+  }
+  let c: view Constraints = componentView(this: world.constraints, entityId: entityId)
+  var r: Float = w
+  if c.hasMinW {
+    if r < c.minW {
+      r = c.minW
+    }
+  }
+  if c.hasMaxW {
+    if r > c.maxW {
+      r = c.maxW
+    }
+  }
+  ret r
+}
+
+func applyConstraintsH(world: view UiWorld, entityId: view EntityId, h: view Float) ret Float {
+  if componentHas(this: world.constraints, entityId: entityId) is false {
+    ret h
+  }
+  let c: view Constraints = componentView(this: world.constraints, entityId: entityId)
+  var r: Float = h
+  if c.hasMinH {
+    if r < c.minH {
+      r = c.minH
+    }
+  }
+  if c.hasMaxH {
+    if r > c.maxH {
+      r = c.maxH
+    }
+  }
+  ret r
+}
+
+# Authored Padding, defaulted to all-zeros if absent.
+# The root's extent-relative horizontal placement, defaulting to `left`.
+func rootExtentAnchor(world: view UiWorld, entityId: view EntityId) ret HExtent {
+  if componentHas(this: world.extentAnchors, entityId: entityId) is false {
+    ret HExtent.left
+  }
+  let a: view ExtentAnchor = componentView(this: world.extentAnchors, entityId: entityId)
+  ret a.h
+}
+
+func entityPadding(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Insets {
+  var base: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  if componentHas(this: world.paddings, entityId: entityId) {
+    let p: view Padding = componentView(this: world.paddings, entityId: entityId)
+    base = p.insets
+  }
+  # Fold safe-area insets (design units, set by safeAreaSystem from the
+  # active device preset) onto the authored padding: per-edge
+  # base + apply*inset + extra. See ui-viewport-and-safe-area-plan.md.
+  if componentHas(this: world.safeAreas, entityId: entityId) is false {
+    ret base
+  }
+  let safe: view SafeArea = componentView(this: world.safeAreas, entityId: entityId)
+  if safe.enabled is false {
+    ret base
+  }
+  var insets: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  if componentHas(this: uiSystems.safeArea.safeInsets, entityId: entityId) {
+    let si: view SafeInsets = componentView(this: uiSystems.safeArea.safeInsets, entityId: entityId)
+    insets = si.insets
+  }
+  ret Insets {
+    l: base.l + safe.apply.l * insets.l + safe.extra.l
+    t: base.t + safe.apply.t * insets.t + safe.extra.t
+    r: base.r + safe.apply.r * insets.r + safe.extra.r
+    b: base.b + safe.apply.b * insets.b + safe.extra.b
+  }
+}
+
+func entityRect(world: view UiWorld, entityId: view EntityId) ret Rect {
+  if componentHas(this: world.rects, entityId: entityId) is false {
+    ret Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
+  }
+  let r: view Rect = componentView(this: world.rects, entityId: entityId)
+  ret r
+}
+
+func entitySize(world: view UiWorld, entityId: view EntityId) ret Size {
+  if componentHas(this: world.sizes, entityId: entityId) is false {
+    ret defaultSize()
+  }
+  let s: view Size = componentView(this: world.sizes, entityId: entityId)
+  ret s
+}
+
+func entityLayout(world: view UiWorld, entityId: view EntityId) ret Layout {
+  if componentHas(this: world.layouts, entityId: entityId) is false {
+    ret defaultLayout()
+  }
+  let l: view Layout = componentView(this: world.layouts, entityId: entityId)
+  ret l
+}
+
+# Returns the entity's explicit Offset.delta, or zero.
+func entityOffset(world: view UiWorld, entityId: view EntityId) ret Vec2 {
+  if componentHas(this: world.offsets, entityId: entityId) is false {
+    ret Vec2 { x: 0.0, y: 0.0 }
+  }
+  let o: view Offset = componentView(this: world.offsets, entityId: entityId)
+  ret o.delta
+}
+
+# Returns the active children of `entityId` in declaration order. List
+# is fresh; safe for the caller to mutate if needed.
+func activeChildren(world: view UiWorld, entityId: view EntityId) ret List(EntityId) {
+  var out: List(EntityId) = List.create(EntityId, cap: 4)
+  activeChildrenInto(world: world, entityId: entityId, out: out)
+  ret out
+}
+
+# #973: fill a REUSED `out` buffer with `entityId`'s layout-active children,
+# instead of allocating a fresh List per node per frame. `out` is cleared
+# first (clear() keeps the capacity), so the linear measure/place drivers hand
+# the SAME buffer every node and pay no per-node allocation — activeChildren
+# was ~105k Buffer allocs / 12 s in 114, the top idle-frame source after the
+# skinning fix. The layout walk is flat (measure and place each iterate the
+# depth order once, no re-entrancy), so one scratch buffer per phase is safe.
+func activeChildrenInto(world: view UiWorld, entityId: view EntityId, out: mod List(EntityId)) {
+  unsafe {
+    out.clear()
+    if componentHas(this: world.childrens, entityId: entityId) is false {
+      ret
+    }
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
+    let n: Int = ch.ids.length
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      if layoutActive(world: world, entityId: cid) {
+        out.add(value: cid)
+      }
+      i = i + 1
+    }
+  }
+}
+
+# -----------------------------------------------------------------
+# Phase 1 — Measure
+#
+# Bottom-up. For Hug-sized nodes, MeasuredSize is the layout sum of
+# active children + padding. For non-container or non-Hug nodes,
+# MeasuredSize is the authored rect (set so the parent's measure
+# can still fall back to a real number).
+# -----------------------------------------------------------------
+func measureNode(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  scratch: mod List(EntityId)
+) {
+  unsafe {
+    activeChildrenInto(world: world, entityId: entityId, out: scratch)
+    let kids: view List(EntityId) = scratch
+    let n: Int = kids.length
+
+    # Compute the container's measured size from its children.
+    let layout: Layout = entityLayout(world: world, entityId: entityId)
+    let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: entityId)
+    let rect: Rect = entityRect(world: world, entityId: entityId)
+
+    var measuredW: Float = rect.size.x
+    var measuredH: Float = rect.size.y
+
+    if n > 0 {
+      var sumMain: Float = 0.0
+      var maxCross: Float = 0.0
+      var j: Int = 0
+      loop j < n {
+        let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: j)
+        let cw: Float = childMeasuredW(world: world, uiSystems: uiSystems, entityId: cid)
+        let ch: Float = childMeasuredH(world: world, uiSystems: uiSystems, entityId: cid)
+        if layout.kind is LayoutType.horizontal {
+          sumMain = sumMain + cw
+          if ch > maxCross {
+            maxCross = ch
+          }
+        } else {
+          if layout.kind is LayoutType.vertical {
+            sumMain = sumMain + ch
+            if cw > maxCross {
+              maxCross = cw
+            }
+          } else {
+            # Stack / None: max child extents on both axes.
+            if cw > sumMain {
+              sumMain = cw
+            }
+            if ch > maxCross {
+              maxCross = ch
+            }
+          }
+        }
+        j = j + 1
+      }
+      if layout.kind is LayoutType.horizontal {
+        var gapTotal: Float = layout.gap * (n - 1).toFloat()
+        if gapTotal < 0.0 {
+          gapTotal = 0.0
+        }
+        measuredW = sumMain + gapTotal + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
+      }
+      if layout.kind is LayoutType.vertical {
+        var gapTotal: Float = layout.gap * (n - 1).toFloat()
+        if gapTotal < 0.0 {
+          gapTotal = 0.0
+        }
+        measuredH = sumMain + gapTotal + pad.t + pad.b
+        measuredW = maxCross + pad.l + pad.r
+      }
+      if layout.kind is LayoutType.stack {
+        measuredW = sumMain + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
+      }
+      if layout.kind is LayoutType.none {
+        # `Layout: None` falls back to max child extents per RUICS § 7.5.
+        measuredW = sumMain + pad.l + pad.r
+        measuredH = maxCross + pad.t + pad.b
+      }
+      if layout.kind is LayoutType.grid {
+        let extent: Vec2 = measureGrid(
+          world: world
+          uiSystems: uiSystems
+          kids: kids
+          layout: layout
+        )
+        measuredW = extent.x + pad.l + pad.r
+        measuredH = extent.y + pad.t + pad.b
+      }
+    } else {
+      # Leaf nodes: their authored rect IS their measure — except a Text leaf,
+      # whose Hug size should hug its glyphs. #1004: when a MeasuredText (the
+      # font measure written before layout) is present, it is the leaf's
+      # measure. Fixed/Fill axes ignore MeasuredSize (resolveAxisFromSize uses
+      # the authored rect / parent), so only a `Size: Hug` text axis changes.
+      measuredW = rect.size.x
+      measuredH = rect.size.y
+      if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {
+        let mt: view MeasuredText = componentView(
+          this: uiSystems.layout.measuredTexts
+          entityId: entityId
+        )
+        measuredW = mt.w
+        measuredH = mt.h
+      }
+    }
+
+    # A pooled (virtual) ListView that hugs its height is as tall as its
+    # visible rows: min(rows, visibleItemCount) pitches minus the last gap,
+    # plus its padding (#71098456). Its children are the pooled row window,
+    # which slides with the scroll, so their extent is not the list's size.
+    if componentHas(this: world.listViews, entityId: entityId) {
+      let lv: view ListView = componentView(this: world.listViews, entityId: entityId)
+      if lv.mode is ListViewMode.virtual {
+        var shown: Int = 1
+        if componentHas(this: world.listViewDatas, entityId: entityId) {
+          shown = componentView(this: world.listViewDatas, entityId: entityId).rows.length
+        }
+        if shown < 1 {
+          shown = 1
+        }
+        if shown > lv.visibleItemCount {
+          shown = lv.visibleItemCount
+        }
+        let pad: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: entityId)
+        measuredH = shown.toFloat() * (lv.itemHeight + lv.itemGap) - lv.itemGap + pad.t + pad.b
+      }
+    }
+
+    measuredW = applyConstraintsW(world: world, entityId: entityId, w: measuredW)
+    measuredH = applyConstraintsH(world: world, entityId: entityId, h: measuredH)
+
+    let ms: MeasuredSize = { w: measuredW, h: measuredH }
+    componentSet(this: uiSystems.layout.measuredSizes, entityId: entityId, data: ms)
+  }
+}
+
+# Grid columns for a layout: an authored `columns` < 1 means one column, so
+# an unconfigured grid degrades to a vertical list instead of dividing by 0.
+func gridColumns(layout: view Layout) ret Int {
+  if layout.columns < 1 {
+    ret 1
+  }
+  ret layout.columns
+}
+
+# `Layout: Grid` (#991): children fill `columns` cells per row in authored
+# order, row-major. Each column is as wide as its widest child and each row as
+# tall as its tallest, so a grid of equal tiles is exactly the rows-of-
+# Horizontal-containers it replaces; `columnGap` / `rowGap` sit between cells.
+# Returns the content extent (no padding).
+func measureGrid(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  kids: view List(EntityId)
+  layout: view Layout
+) ret Vec2 {
+  unsafe {
+    let n: Int = kids.length
+    let cols: Int = gridColumns(layout: layout)
+    let rows: Int = (n + cols - 1) / cols
+    var colWidths: List(Float) = List.create(Float, cap: cols)
+    var c: Int = 0
+    loop c < cols {
+      colWidths.add(value: 0.0)
+      c = c + 1
+    }
+    var totalH: Float = 0.0
+    var r: Int = 0
+    loop r < rows {
+      var rowH: Float = 0.0
+      var k: Int = 0
+      loop k < cols {
+        let i: Int = r * cols + k
+        if i < n {
+          let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+          let cw: Float = childMeasuredW(world: world, uiSystems: uiSystems, entityId: cid)
+          let ch: Float = childMeasuredH(world: world, uiSystems: uiSystems, entityId: cid)
+          if ch > rowH {
+            rowH = ch
+          }
+          if cw > rae_ext_rae_buf_get(buf: colWidths.data, index: k) {
+            colWidths.set(index: k, value: cw)
+          }
+        }
+        k = k + 1
+      }
+      totalH = totalH + rowH
+      r = r + 1
+    }
+    var totalW: Float = 0.0
+    var w: Int = 0
+    loop w < cols {
+      totalW = totalW + rae_ext_rae_buf_get(buf: colWidths.data, index: w)
+      w = w + 1
+    }
+    if cols > 1 {
+      totalW = totalW + layout.columnGap * (cols - 1).toFloat()
+    }
+    if rows > 1 {
+      totalH = totalH + layout.rowGap * (rows - 1).toFloat()
+    }
+    ret Vec2 { x: totalW, y: totalH }
+  }
+}
+
+# Bottom-up measure over the cached parent-before-child depth order (#713),
+# walked in REVERSE so every child is measured before its parent reads it —
+# the linear equivalent of the old post-order recursion (#731). Entities in
+# no hierarchy (no Parent AND no Children) are absent from the depth order;
+# measure them directly so a lone root still gets a MeasuredSize for compute.
+func measureLinear(world: mod UiWorld, uiSystems: mod UiSystems) {
+  unsafe {
+    let order: view List(EntityId) = depthOrder(
+      state: world.hierarchyOrder
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+    )
+    var scratch: List(EntityId) = List.create(EntityId, cap: 8)
+    var i: Int = order.length - 1
+    loop i >= 0 {
+      if let entityId: EntityId = order.copyAt(index: i) {
+        measureNode(
+          world: world
+          uiSystems: uiSystems
+          entityId: entityId
+          scratch: scratch
+        )
+      }
+      i = i - 1
+    }
+    let alive: view List(EntityId) = world.allocator.alive
+    loop var k: Int = 0, k < alive.length, ++k {
+      let entityId: EntityId = rae_ext_rae_buf_get(buf: alive.data, index: k)
+      if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false {
+        if componentHas(this: world.childrens, entityId: entityId) is false {
+          measureNode(
+            world: world
+            uiSystems: uiSystems
+            entityId: entityId
+            scratch: scratch
+          )
+        }
+      }
+    }
+  }
+}
+
+# Helper — return the resolved measured width for `entityId`. Hug
+# nodes use their MeasuredSize; Fill nodes use their authored rect
+# (parent will overwrite during compute pass anyway); Fixed uses rect.
+func childMeasuredW(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  let size: Size = entitySize(world: world, entityId: entityId)
+  let rect: Rect = entityRect(world: world, entityId: entityId)
+  var measuredW: Float = rect.size.x
+  if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
+    let ms: view MeasuredSize = componentView(
+      this: uiSystems.layout.measuredSizes
+      entityId: entityId
+    )
+    measuredW = ms.w
+  }
+  ret resolveAxisFromSize(
+    axis: size.w
+    rectVal: rect.size.x
+    measuredVal: measuredW
+    parentAvail: 0.0
+    hasMeasured: true
+    hasParentAvail: false
+  )
+}
+
+func childMeasuredH(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Float {
+  let size: Size = entitySize(world: world, entityId: entityId)
+  let rect: Rect = entityRect(world: world, entityId: entityId)
+  var measuredH: Float = rect.size.y
+  if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
+    let ms: view MeasuredSize = componentView(
+      this: uiSystems.layout.measuredSizes
+      entityId: entityId
+    )
+    measuredH = ms.h
+  }
+  ret resolveAxisFromSize(
+    axis: size.h
+    rectVal: rect.size.y
+    measuredVal: measuredH
+    parentAvail: 0.0
+    hasMeasured: true
+    hasParentAvail: false
+  )
+}
+
+# -----------------------------------------------------------------
+# Phase 2 — Compute
+#
+# Top-down. Each call decides this entity's own ComputedRect (in
+# parent-content-local coordinates), then places its children inside
+# the resulting content box.
+# -----------------------------------------------------------------
+
+# Resolve own size given the parent's content box. parentAvailW / H
+# are -1.0 when unknown (Fill then falls back to authored rect).
+func resolveOwnSize(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  parentAvailW: view Float
+  parentAvailH: view Float
+  hasParentAvail: view Bool
+) ret Vec2 {
+  let size: Size = entitySize(world: world, entityId: entityId)
+  let rect: Rect = entityRect(world: world, entityId: entityId)
+  var measuredW: Float = rect.size.x
+  var measuredH: Float = rect.size.y
+  if componentHas(this: uiSystems.layout.measuredSizes, entityId: entityId) {
+    let ms: view MeasuredSize = componentView(
+      this: uiSystems.layout.measuredSizes
+      entityId: entityId
+    )
+    measuredW = ms.w
+    measuredH = ms.h
+  }
+  let w: Float = resolveAxisFromSize(
+    axis: size.w
+    rectVal: rect.size.x
+    measuredVal: measuredW
+    parentAvail: parentAvailW
+    hasMeasured: true
+    hasParentAvail: hasParentAvail
+  )
+  let h: Float = resolveAxisFromSize(
+    axis: size.h
+    rectVal: rect.size.y
+    measuredVal: measuredH
+    parentAvail: parentAvailH
+    hasMeasured: true
+    hasParentAvail: hasParentAvail
+  )
+  let cw: Float = applyConstraintsW(world: world, entityId: entityId, w: w)
+  let ch: Float = applyConstraintsH(world: world, entityId: entityId, h: h)
+  ret Vec2 { x: cw, y: ch }
+}
+
+# -----------------------------------------------------------------
+# Entry point — run the two phases. Both are linear walks over the
+# cached depth order (#713): measure bottom-up (reverse), compute
+# top-down (forward). No per-frame tree recursion.
+# -----------------------------------------------------------------
+func layoutSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  measureLinear(world: world, uiSystems: uiSystems)
+  computeLinear(world: world, uiSystems: uiSystems)
+}
+
+# -----------------------------------------------------------------
+# ifDirty — generation-skip wrapper around layoutSystem
+# (mirrors systemIfDirty). SUPERSEDED by the declared schedule (#939,
+# lib/ui/Pipeline.rae: the `layout` entry declares this exact read set and
+# uiShouldRun judges it) — fixture 839 proves the two agree frame by frame.
+# Retained for its fixture (490) and the legacy raylib example until #949
+# moves the mobile-UI example onto the schedule. Tracks the generation counter of
+# every ComponentTable the layout pass READS; when none bumped since
+# the last call, the measure+compute walk is skipped (identical output).
+# The layout OUTPUT tables (measuredSizes/computedRects) are deliberately
+# NOT tracked, or the first call would instantly re-dirty the cache.
+# `entityCount` snapshots alive.length (no gen on the raw List); -1
+# sentinels guarantee the first call always runs.
+# NOTE: `extentAnchors` is NOT a tracked input — it's set once at build
+# and only affects placement of a full-window rebuild, so it rides the
+# rebuild that already dirties `rects`.
+type LayoutCache {
+  rectsGen: Int
+  sizesGen: Int
+  layoutsGen: Int
+  paddingsGen: Int
+  offsetsGen: Int
+  constraintsGen: Int
+  activesGen: Int
+  alignsGen: Int
+  childrensGen: Int
+  parentsGen: Int
+  entityCount: Int
+}
+
+func createLayoutCache() pub ret LayoutCache {
+  ret LayoutCache {
+    rectsGen: -1
+    sizesGen: -1
+    layoutsGen: -1
+    paddingsGen: -1
+    offsetsGen: -1
+    constraintsGen: -1
+    activesGen: -1
+    alignsGen: -1
+    childrensGen: -1
+    parentsGen: -1
+    entityCount: -1
+  }
+}
+
+# Runs `layoutSystem` only when at least one input table has bumped
+# its generation since the last call (or the alive-entity count
+# changed). Returns true when the system actually ran, false when the
+# cached measuredSizes/computedRects output is still valid.
+#
+# Granularity is at the SYSTEM level: this wrapper either runs the
+# entire layoutSystem once or skips it entirely. It does NOT short-
+# circuit any of the inner measure/compute iterations — those run to
+# convergence as before each time the wrapper actually fires.
+func ifDirty(world: mod UiWorld, uiSystems: mod UiSystems, cache: mod LayoutCache) pub ret Bool {
+  let rGen: Int = componentTableGeneration(Rect, this: world.rects)
+  let szGen: Int = componentTableGeneration(Size, this: world.sizes)
+  let lyGen: Int = componentTableGeneration(Layout, this: world.layouts)
+  let pdGen: Int = componentTableGeneration(Padding, this: world.paddings)
+  let ofGen: Int = componentTableGeneration(Offset, this: world.offsets)
+  let cnGen: Int = componentTableGeneration(Constraints, this: world.constraints)
+  let acGen: Int = componentTableGeneration(Active, this: world.actives)
+  let alGen: Int = componentTableGeneration(Align, this: world.aligns)
+  let chGen: Int = componentTableGeneration(Children, this: world.childrens)
+  let plGen: Int = componentTableGeneration(Parent, this: uiSystems.hierarchy.parents)
+  let entityCount: Int = world.allocator.alive.length
+
+  var dirty: Bool = false
+  if rGen is not cache.rectsGen {
+    dirty = true
+  }
+  if szGen is not cache.sizesGen {
+    dirty = true
+  }
+  if lyGen is not cache.layoutsGen {
+    dirty = true
+  }
+  if pdGen is not cache.paddingsGen {
+    dirty = true
+  }
+  if ofGen is not cache.offsetsGen {
+    dirty = true
+  }
+  if cnGen is not cache.constraintsGen {
+    dirty = true
+  }
+  if acGen is not cache.activesGen {
+    dirty = true
+  }
+  if alGen is not cache.alignsGen {
+    dirty = true
+  }
+  if chGen is not cache.childrensGen {
+    dirty = true
+  }
+  if plGen is not cache.parentsGen {
+    dirty = true
+  }
+  if entityCount is not cache.entityCount {
+    dirty = true
+  }
+
+  if dirty is false {
+    ret false
+  }
+
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cache.rectsGen = rGen
+  cache.sizesGen = szGen
+  cache.layoutsGen = lyGen
+  cache.paddingsGen = pdGen
+  cache.offsetsGen = ofGen
+  cache.constraintsGen = cnGen
+  cache.activesGen = acGen
+  cache.alignsGen = alGen
+  cache.childrensGen = chGen
+  cache.parentsGen = plGen
+  cache.entityCount = entityCount
+  ret true
+}

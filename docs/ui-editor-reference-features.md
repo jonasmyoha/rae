@@ -60,7 +60,7 @@ overlay scene on a `guides` layer between the document and the chrome: `FrameGui
 (the page column — the design area the document is laid out in) and `SafeAreaGuide`
 (the column inset by the device frame's insets), each a plain `Shape` node with the
 new **dashed stroke** (`strokeDash` / `strokeGap` on `Shape`, painted by
-`lib/ui/renderSystem/RenderPaintBox.rae` as rect segments along the four edges — pure
+`lib/ui/RenderSystem/RenderPaintBox.rae` as rect segments along the four edges — pure
 Rae, no C), plus a small `Text` label each. `guideSystem/GuideSystem.rae` writes their
 Rects from the document's frame after every load; `G` toggles them;
 `RAE_UI_EDITOR_GUIDES=0` starts hidden. Colors and rhythm follow the reference (sky

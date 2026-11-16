@@ -15,9 +15,8 @@ import ecs/Transform
 open ecs/Hierarchy
 open ecs/Entity
 open ecs/Queue
-open ui/animationSystem/AnimationRules
-open ui/listMotionSystem/ListMotionRules
-open ui/animationSystem/AnimationTracks
+open ui/AnimationSystem
+open ui/ListMotionSystem
 open ecs/ComponentTable
 open ui/HitIndex
 
@@ -188,7 +187,7 @@ type ListRowBound {
   listGeneration: Int = -1
 }
 
-# What a ListView's last reconcile saw (ui/listViewSystem): the list and data tables'
+# What a ListView's last reconcile saw (ui/ListViewSystem): the list and data tables'
 # generations, the children table's (rows built, destroyed or reordered), the rows still leaving,
 # the list motion's (a drag holding the list, the motion states), the row size the container
 # gives, the scroll and the sub-scenes registered
@@ -224,7 +223,7 @@ type UiSystems {
   button: ButtonSystem
   textField: TextFieldSystem
   listRows: ListRowSystem
-  # where the clickable nodes are (ui/HitIndex, kept by ui/inputSystem/HitIndexQuery)
+  # where the clickable nodes are (ui/HitIndex, kept by ui/InputSystem/HitIndexQuery)
   hitIndex: HitIndex
 }
 

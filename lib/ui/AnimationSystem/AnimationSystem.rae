@@ -1,0 +1,100 @@
+# Per-frame animation systems. Hosts grow as we add animated
+# components — for now: one system that drives `HoverScale.current`
+# toward its target.
+#
+# Each system follows the same shape:
+#   * Walks its ComponentTable.
+#   * Reads any per-frame context (the cursor-hit entity, the
+#     frame's `dt`).
+#   * Mutates the animated field in place.
+#   * Returns true if anything is still in flight (delta above an
+#     epsilon), so the host can keep the dirty-render pump going
+#     until the animation has settled.
+#
+# Permanent components, not one-shots — `HoverScale` lives on every
+# tile that wants the effect. Just change the target by adjusting
+# `restScale` / `hoverScale`; the system handles the rest.
+import Math
+import ui/Ecs
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+
+# The one ease in lib/ui outside a motion: `current` toward `target` at `rate` per second, for what
+# has a
+# rate and no end (an authored HoverScale.speed, rows following a finger). It is exactly `target`
+# once
+# within `epsilon`, so the caller can stop saying it is in flight.
+func easeTowards(
+  current: view Float
+  target: view Float
+  speed: view Float
+  deltaTime: view Float
+  epsilon: view Float
+) ret Float {
+  let delta: Float = target - current
+  if delta < epsilon and delta > -epsilon {
+    ret target
+  }
+  ret current + delta * (1.0 - Math.exp(x: -speed * deltaTime))
+}
+
+# Three-tier paint-rank a child carrying HoverScale gets in
+# paintSubtree's pass loop:
+#   0  — no HoverScale, or current is at rest (paints in normal flow)
+#   1  — popped, easing back toward rest (target = restScale)
+#   2  — popped, actively hovered (target = hoverScale), or marked
+#        PaintOnTop (a lifted list row, ui/ListReorderSystem)
+# Higher rank paints later (= on top). Rank-2 paints over rank-1 so a
+# newly-hovered tile beats a still-unhovering sibling regardless of
+# their order in the Children list.
+func hoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
+  # Marked to paint over its siblings (ui/PaintOnTop: a lifted list row)
+  if componentHas(this: world.paintOnTops, entityId: entityId) {
+    ret 2
+  }
+  if componentHas(this: world.hoverScales, entityId: entityId) is false {
+    ret 0
+  }
+  let hs: view HoverScale = componentView(this: world.hoverScales, entityId: entityId)
+  if hs.current <= hs.restScale {
+    ret 0
+  }
+  if hs.target >= hs.hoverScale {
+    ret 2
+  }
+  ret 1
+}
+
+# Max `hoverPaintRank` over `entityId` and its whole descendant subtree.
+# Painter uses this (not the entity's own rank) when sorting siblings
+# so a row containing the hovered tile is dispatched into the higher
+# pass and lands above sibling rows whose tiles would otherwise
+# overdraw the popped tile's vertical overflow.
+func subtreeHoverPaintRank(world: view UiWorld, entityId: view EntityId) pub ret Int {
+  unsafe {
+    var best: Int = hoverPaintRank(world: world, entityId: entityId)
+    if best is 2 {
+      ret 2
+    }
+    if componentHas(this: world.childrens, entityId: entityId) is false {
+      ret best
+    }
+    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
+    let n: Int = ch.ids.length
+    var i: Int = 0
+    loop i < n {
+      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+      let r: Int = subtreeHoverPaintRank(world: world, entityId: cid)
+      if r > best {
+        best = r
+      }
+      if best is 2 {
+        ret 2
+      }
+      i = i + 1
+    }
+    ret best
+  }
+}

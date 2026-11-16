@@ -129,9 +129,9 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `WorldTransform2D` (derived) `ExtentAnchor` | `transformSystem` |
 | `SafeArea` | `safeAreaSystem` (app calls `applySafeAreas`) |
 | `AnchorBottom` `LayerTag` | `anchorBottomSystem` / `layerTagSystem` (app, DockSystems) |
-| `HoverScale` | `buttonHoverScaleUpdate` (lib/ui/buttonSystem) |
+| `HoverScale` | `buttonHoverScaleUpdate` (lib/ui/ButtonSystem) |
 | `PointerEvents` `OnClick` `Active` | input system + render visibility |
-| `WidgetId` `WidgetState` `StateStyle` | `buttonStyleUpdate` (lib/ui/buttonSystem) |
+| `WidgetId` `WidgetState` `StateStyle` | `buttonStyleUpdate` (lib/ui/ButtonSystem) |
 | `SceneInstance` | resolved at mount (`resolveSceneInstances`) |
 
 ### Binding components (one system each)
@@ -158,8 +158,8 @@ one system; the app systems marked *(obs)* are rows of the observation schedule
 | `BottomSheet` / `SheetPanel` | `bottomSheetSystem` *(obs)* | `screenSystem/BottomSheet.rae` |
 | `TextField` | lib `textFieldSystem` via `searchFieldSystem` | `screenSystem/SearchSystems.rae` (input phase) |
 | `NavTab` | `navTabsSystem` | `screenSystem/DockSystems.rae` (on switch) |
-| `ScrollRoot` | `scrollRootSystem` + `updateScrollRoot` | lib/ui/scrollRootSystem (input: lib `UiInput` in `inputSystem/InputGpu2d.rae`) |
-| `HeroWidget` | `spawnHeroTransition`, a morph (`SharedElements`) | lib/ui/animationSystem (key written by the cover binding systems) |
+| `ScrollRoot` | `scrollRootSystem` + `updateScrollRoot` | lib/ui/ScrollRootSystem (input: lib `UiInput` in `inputSystem/InputGpu2d.rae`) |
+| `HeroWidget` | `spawnHeroTransition`, a morph (`SharedElements`) | lib/ui/AnimationSystem (key written by the cover binding systems) |
 
 ### Who OWNS which table (ECS split step 4, docs/ecs-systems-own-their-tables.md)
 

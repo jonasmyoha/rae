@@ -1964,7 +1964,10 @@ static bool module_graph_load_module(ModuleGraph* graph,
   // sibling .rae files in the same folder, so `import pkg.Main` exposes the whole
   // package. Exporting siblings merge into this main module; the rest become their
   // own modules. A plain module (not named after its folder) does not pull siblings.
-  if (module_path) {
+  // A file of a module folder never does: the folder loads all its files itself, with
+  // the folder's module name (docs/module-model-options.md); a sibling pulled here would
+  // load first without it.
+  if (module_path && !logical_name) {
     const char* mp = module_path;
     const char* lastSlash = strrchr(mp, '/');
     if (lastSlash && lastSlash > mp) {

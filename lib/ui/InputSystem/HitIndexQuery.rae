@@ -1,0 +1,752 @@
+# Keeping ui/HitIndex current, and asking it: the topmost clickable node at a point (the hit
+# test), the clickable nodes in a rectangle (a marquee), and the nearest edge to a line (snapping).
+#
+# hitIndexSync runs once a frame (updateUiInput calls it). When none of the tables the hit test
+# reads has changed since the last sync, it does nothing. Otherwise it walks the tree in the hit
+# test's order (the same walk uiHitTestWalk makes, with the same rules: an inactive or leaving
+# node's subtree is skipped, a raised node is taken with its layer's roots) and lists the
+# clickable nodes. When the list is the one the index holds, only the entries whose cells changed
+# are moved, so a node that moved updates its own cells and no others; a camera that moved changes
+# no cells at all. When the list changed (a node added, removed, reordered), the index is built
+# again.
+#
+# A query maps the point into each space, looks at the cells around it, and tests each node there
+# exactly as the walk does (uiPointInEntityTarget), keeping the topmost. uiHitTestTarget asks the
+# index when it is current, and walks otherwise.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open collections/IntMap
+open ui/Components
+open ui/Ecs
+open ui/HitIndex
+open ui/Layer
+open ui/Transform
+open ui/UiSystems
+
+# The generations of the tables the hit test reads, and how many entities are alive
+func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
+  ret List(Int) {
+    componentTableGeneration(this: world.childrens)
+    componentTableGeneration(this: world.actives)
+    componentTableGeneration(this: world.leavings)
+    componentTableGeneration(this: world.onClicks)
+    componentTableGeneration(this: world.layerRoots)
+    componentTableGeneration(this: world.layerRefs)
+    componentTableGeneration(this: world.cameras)
+    componentTableGeneration(this: uiSystems.hierarchy.parents)
+    componentTableGeneration(this: uiSystems.transform2d.worldTransforms)
+    componentTableGeneration(this: uiSystems.transform2d.worldVisuals)
+    componentTableGeneration(this: uiSystems.layout.computedRects)
+    aliveCount(world: world)
+  }
+}
+
+# The index was synced with the tables as they are now (hitIndexKey's numbers, compared in place:
+# a hit test asks this every time, so it makes no list)
+func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  let key: view List(Int) = uiSystems.hitIndex.key
+  ret key.length is 12 and key.copyAtDefault(index: 0) is componentTableGeneration(
+    this: world.childrens
+  ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
+    index: 2
+  ) is componentTableGeneration(this: world.leavings) and key.copyAtDefault(index: 3) is componentTableGeneration(
+    this: world.onClicks
+  ) and key.copyAtDefault(index: 4) is componentTableGeneration(this: world.layerRoots) and key.copyAtDefault(
+    index: 5
+  ) is componentTableGeneration(this: world.layerRefs) and key.copyAtDefault(index: 6) is componentTableGeneration(
+    this: world.cameras
+  ) and key.copyAtDefault(index: 7) is componentTableGeneration(this: uiSystems.hierarchy.parents) and key.copyAtDefault(
+    index: 8
+  ) is componentTableGeneration(this: uiSystems.transform2d.worldTransforms) and key.copyAtDefault(
+    index: 9
+  ) is componentTableGeneration(this: uiSystems.transform2d.worldVisuals) and key.copyAtDefault(
+    index: 10
+  ) is componentTableGeneration(this: uiSystems.layout.computedRects) and key.copyAtDefault(
+    index: 11
+  ) is aliveCount(world: world)
+}
+
+# A clickable node in hit order, and the root of its space
+type HitFound {
+  entityId: EntityId
+  spaceRootEntityId: EntityId
+}
+
+# The walk of uiHitTestEntity, listing every clickable node it would test, topmost first
+func hitCollect(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  spaceRootEntityId: view EntityId
+  found: mod List(HitFound)
+) {
+  unsafe {
+    if uiEntityActive(world: world, entityId: entityId) is false {
+      ret
+    }
+    var space: EntityId = spaceRootEntityId
+    if componentHas(this: world.cameras, entityId: entityId) {
+      space = entityId
+    }
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
+      var i: Int = children.ids.length - 1
+      loop i >= 0 {
+        let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+          hitCollect(
+            world: world
+            uiSystems: uiSystems
+            entityId: child
+            spaceRootEntityId: space
+            found: found
+          )
+        }
+        i = i - 1
+      }
+    }
+    if componentHas(this: world.onClicks, entityId: entityId) {
+      found.add(value: HitFound { entityId: entityId, spaceRootEntityId: space })
+    }
+  }
+}
+
+# uiHitTestTarget's roots, walked
+func hitCollectAll(world: view UiWorld, uiSystems: view UiSystems) ret List(HitFound) {
+  var found: List(HitFound) = {}
+  let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+  loop var i: Int = roots.length - 1, i >= 0, --i {
+    let root: EntityId = roots.copyAtDefault(index: i)
+    let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+      uiSystems: uiSystems
+      entityId: root
+    )
+    if componentHas(this: world.layerRoots, entityId: root) is false and shown {
+      hitCollect(
+        world: world
+        uiSystems: uiSystems
+        entityId: root
+        spaceRootEntityId: noEntity()
+        found: found
+      )
+    }
+  }
+  ret found
+}
+
+# The place and scale that map a space onto the screen (the screen's: 0, 0 and 1)
+type HitSpaceMap {
+  x: Float = 0.0
+  y: Float = 0.0
+  scaleX: Float = 1.0
+  scaleY: Float = 1.0
+  # the camera's origin (Camera2D.originX/Y), added back so a space is the canvas itself
+  originX: Float64 = 0.0
+  originY: Float64 = 0.0
+  ok: Bool = true
+}
+
+func hitSpaceMap(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  rootEntityId: view EntityId
+) ret HitSpaceMap {
+  if isNone(this: rootEntityId) {
+    ret HitSpaceMap {}
+  }
+  if not componentHas(this: uiSystems.transform2d.worldTransforms, entityId: rootEntityId) {
+    ret HitSpaceMap { ok: false }
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: rootEntityId
+  )
+  if transform.rotation is not 0.0 or transform.scale.x is 0.0 or transform.scale.y is 0.0 {
+    ret HitSpaceMap { ok: false }
+  }
+  var spaceMap: HitSpaceMap = {
+    x: transform.position.x
+    y: transform.position.y
+    scaleX: transform.scale.x
+    scaleY: transform.scale.y
+  }
+  if componentHas(this: world.cameras, entityId: rootEntityId) {
+    let camera: view Camera2D = componentView(this: world.cameras, entityId: rootEntityId)
+    spaceMap.originX = camera.originX
+    spaceMap.originY = camera.originY
+  }
+  ret spaceMap
+}
+
+# Screen x / y in a space's coordinates (Float64)
+func hitSpaceX(spaceMap: view HitSpaceMap, x: view Float) ret Float64 {
+  ret ((x as Float64) - (spaceMap.x as Float64)) / (spaceMap.scaleX as Float64) + spaceMap.originX
+}
+
+func hitSpaceY(spaceMap: view HitSpaceMap, y: view Float) ret Float64 {
+  ret ((y as Float64) - (spaceMap.y as Float64)) / (spaceMap.scaleY as Float64) + spaceMap.originY
+}
+
+# `entityId`'s rectangle in its space now (loose when it has none, or is rotated)
+func hitEntryNow(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  space: view Int
+  spaceMap: view HitSpaceMap
+) ret HitEntry {
+  var entry: HitEntry = { entityId: entityId, space: space, loose: true }
+  if not spaceMap.ok or not componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  ) or not componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    ret entry
+  }
+  let transform: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  if transform.rotation is not 0.0 {
+    ret entry
+  }
+  let rect: WorldRect = worldRectOf(
+    wt: transform
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  let x0: Float64 = hitSpaceX(spaceMap: spaceMap, x: rect.x)
+  let x1: Float64 = hitSpaceX(spaceMap: spaceMap, x: rect.x + rect.w)
+  let y0: Float64 = hitSpaceY(spaceMap: spaceMap, y: rect.y)
+  let y1: Float64 = hitSpaceY(spaceMap: spaceMap, y: rect.y + rect.h)
+  entry.left = x0
+  entry.right = x1
+  if x1 < x0 {
+    entry.left = x1
+    entry.right = x0
+  }
+  entry.top = y0
+  entry.bottom = y1
+  if y1 < y0 {
+    entry.top = y1
+    entry.bottom = y0
+  }
+  entry.loose = false
+  ret entry
+}
+
+# The index built again from `found`
+func hitIndexRebuild(world: view UiWorld, uiSystems: mod UiSystems, found: view List(HitFound)) {
+  var spaces: List(HitSpace) = {}
+  var maps: List(HitSpaceMap) = {}
+  var entries: List(HitEntry) = List.create(HitEntry, cap: found.length)
+  loop let hit: view HitFound in found {
+    var space: Int = -1
+    loop var s: Int = 0, s < spaces.length and space < 0, ++s {
+      if let known: view HitSpace = spaces.viewAt(index: s) {
+        if known.rootEntityId is hit.spaceRootEntityId {
+          space = s
+        }
+      }
+    }
+    if space < 0 {
+      space = spaces.length
+      spaces.add(
+        value: HitSpace {
+          rootEntityId: hit.spaceRootEntityId
+          cells: IntMap.create(List(Int), cap: 64)
+        }
+      )
+      maps.add(
+        value: hitSpaceMap(world: world, uiSystems: uiSystems, rootEntityId: hit.spaceRootEntityId)
+      )
+    }
+    entries.add(value: hitEntryNow(
+      uiSystems: uiSystems
+      entityId: hit.entityId
+      space: space
+      spaceMap: maps.copyAtDefault(index: space)
+    ))
+  }
+  # a space's cell: twice its entries' average larger side
+  loop var s: Int = 0, s < spaces.length, ++s {
+    var sides: Float64 = 0.0
+    var counted: Int = 0
+    loop let entry: view HitEntry in entries {
+      if entry.space is s and not entry.loose {
+        var side: Float64 = entry.right - entry.left
+        if entry.bottom - entry.top > side {
+          side = entry.bottom - entry.top
+        }
+        sides = sides + side
+        counted = counted + 1
+      }
+    }
+    if counted > 0 {
+      if let space: mod HitSpace = spaces.modAt(index: s) {
+        space.cellSize = sides / (counted as Float64) * 2.0
+        if space.cellSize < 1.0 {
+          space.cellSize = 1.0
+        }
+      }
+    }
+  }
+  var loose: List(Int) = {}
+  var changed: Int = 0
+  loop var i: Int = 0, i < entries.length, ++i {
+    if let entry: mod HitEntry = entries.modAt(index: i) {
+      if not entry.loose {
+        if let space: mod HitSpace = spaces.modAt(index: entry.space) {
+          if hitPlaceInCells(entry: entry, cellSize: space.cellSize) {
+            changed = changed + hitCellsUpdate(
+              space: space
+              entry: entry
+              index: i
+              add: true
+            )
+          } else {
+            entry.loose = true
+          }
+        }
+      }
+      if entry.loose {
+        loose.add(value: i)
+      }
+    }
+  }
+  let index: mod HitIndex = uiSystems.hitIndex
+  index.entries = entries
+  index.spaces = spaces
+  index.loose = loose
+  index.cellUpdates = changed
+  index.rebuilds = index.rebuilds + 1
+}
+
+# The same nodes in the same order and spaces as the index holds
+func hitIndexSameNodes(index: view HitIndex, found: view List(HitFound)) ret Bool {
+  if found.length is not index.entries.length {
+    ret false
+  }
+  loop var i: Int = 0, i < found.length, ++i {
+    let hit: HitFound = found.copyAtDefault(index: i)
+    let entry: HitEntry = index.entries.copyAtDefault(index: i)
+    if entry.entityId is not hit.entityId {
+      ret false
+    }
+    if let space: view HitSpace = index.spaces.viewAt(index: entry.space) {
+      if space.rootEntityId is not hit.spaceRootEntityId {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+# The index made current: nothing when no table it reads changed, the moved entries' cells when
+# the nodes are the same, otherwise built again
+func hitIndexSync(world: view UiWorld, uiSystems: mod UiSystems) {
+  let key: List(Int) = hitIndexKey(world: world, uiSystems: uiSystems)
+  if hitIndexCurrent(world: world, uiSystems: uiSystems) {
+    uiSystems.hitIndex.cellUpdates = 0
+    ret
+  }
+  let found: List(HitFound) = hitCollectAll(world: world, uiSystems: uiSystems)
+  if not hitIndexSameNodes(index: uiSystems.hitIndex, found: found) {
+    hitIndexRebuild(world: world, uiSystems: uiSystems, found: found)
+    uiSystems.hitIndex.key = key
+    ret
+  }
+  var maps: List(HitSpaceMap) = {}
+  loop let space: view HitSpace in uiSystems.hitIndex.spaces {
+    maps.add(
+      value: hitSpaceMap(world: world, uiSystems: uiSystems, rootEntityId: space.rootEntityId)
+    )
+  }
+  var fresh: List(HitEntry) = List.create(HitEntry, cap: found.length)
+  loop let entry: view HitEntry in uiSystems.hitIndex.entries {
+    fresh.add(value: hitEntryNow(
+      uiSystems: uiSystems
+      entityId: entry.entityId
+      space: entry.space
+      spaceMap: maps.copyAtDefault(index: entry.space)
+    ))
+  }
+  let index: mod HitIndex = uiSystems.hitIndex
+  var changed: Int = 0
+  var looseChanged: Bool = false
+  loop var i: Int = 0, i < fresh.length, ++i {
+    if let next: mod HitEntry = fresh.modAt(index: i) {
+      let old: HitEntry = index.entries.copyAtDefault(index: i)
+      if let space: mod HitSpace = index.spaces.modAt(index: old.space) {
+        if not next.loose and not hitPlaceInCells(entry: next, cellSize: space.cellSize) {
+          next.loose = true
+        }
+        let sameCells: Bool = old.loose is next.loose and old.column0 is next.column0 and old.column1 is next.column1 and old.row0 is next.row0 and old.row1 is next.row1
+        if not sameCells {
+          if not old.loose {
+            changed = changed + hitCellsUpdate(
+              space: space
+              entry: old
+              index: i
+              add: false
+            )
+          }
+          if not next.loose {
+            changed = changed + hitCellsUpdate(
+              space: space
+              entry: next
+              index: i
+              add: true
+            )
+          }
+          looseChanged = looseChanged or old.loose is not next.loose
+        }
+      }
+    }
+  }
+  index.entries = fresh
+  if looseChanged {
+    index.loose = {}
+    loop var i: Int = 0, i < index.entries.length, ++i {
+      if index.entries.copyAtDefault(index: i).loose {
+        index.loose.add(value: i)
+      }
+    }
+  }
+  index.cellUpdates = changed
+  index.key = key
+}
+
+# Entry `at`'s rectangle comes within `reachX`, `reachY` of space point `x`, `y`
+func hitEntryNear(
+  entries: view List(HitEntry)
+  at: view Int
+  x: view Float64
+  y: view Float64
+  reachX: view Float64
+  reachY: view Float64
+) ret Bool {
+  if let entry: view HitEntry = entries.viewAt(index: at) {
+    ret x >= entry.left - reachX and x <= entry.right + reachX and y >= entry.top - reachY and y <= entry.bottom + reachY
+  }
+  ret false
+}
+
+# The entries listed in the cells around space point `x`, `y` (within `reach` in the space's units)
+# and the loose ones: the topmost (lowest index) the exact test accepts. -1 when none.
+func hitIndexBest(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret Int {
+  let index: view HitIndex = uiSystems.hitIndex
+  var best: Int = -1
+  loop let at: Int in index.loose {
+    if best < 0 or at < best {
+      if uiPointInEntityTarget(
+        world: world
+        uiSystems: uiSystems
+        entityId: index.entries.copyAtDefault(index: at).entityId
+        x: x
+        y: y
+        targetSize: targetSize
+      ) {
+        best = at
+      }
+    }
+  }
+  loop let space: view HitSpace in index.spaces {
+    let spaceMap: HitSpaceMap = hitSpaceMap(
+      world: world
+      uiSystems: uiSystems
+      rootEntityId: space.rootEntityId
+    )
+    if spaceMap.ok {
+      let localX: Float64 = hitSpaceX(spaceMap: spaceMap, x: x)
+      let localY: Float64 = hitSpaceY(spaceMap: spaceMap, y: y)
+      # (a hundredth of a unit more, so rounding never drops a node the exact test would take)
+      let reachX: Float64 = (targetSize / Math.abs(value: spaceMap.scaleX)) as Float64 + 0.01
+      let reachY: Float64 = (targetSize / Math.abs(value: spaceMap.scaleY)) as Float64 + 0.01
+      let column0: Int = hitCellOf(value: localX - reachX, cellSize: space.cellSize)
+      let column1: Int = hitCellOf(value: localX + reachX, cellSize: space.cellSize)
+      let row0: Int = hitCellOf(value: localY - reachY, cellSize: space.cellSize)
+      let row1: Int = hitCellOf(value: localY + reachY, cellSize: space.cellSize)
+      loop var row: Int = row0, row <= row1, ++row {
+        loop var column: Int = column0, column <= column1, ++column {
+          if let cell: view List(Int) = space.cells.viewGet(
+            key: hitCellKey(column: column, row: row)
+          ) {
+            loop let at: Int in cell {
+              # the rectangle the index holds is current (hitIndexCurrent): a node it misses is
+              # not tested further
+              if (best < 0 or at < best) and hitEntryNear(
+                entries: index.entries
+                at: at
+                x: localX
+                y: localY
+                reachX: reachX
+                reachY: reachY
+              ) {
+                if uiPointInEntityTarget(
+                  world: world
+                  uiSystems: uiSystems
+                  entityId: index.entries.copyAtDefault(index: at).entityId
+                  x: x
+                  y: y
+                  targetSize: targetSize
+                ) {
+                  best = at
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  ret best
+}
+
+# The topmost clickable node under `x`, `y` (each grown to at least `targetSize` a side), from the
+# index; call it when hitIndexCurrent
+func hitIndexTest(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret EntityId {
+  let best: Int = hitIndexBest(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSize
+  )
+  if best < 0 {
+    ret noEntity()
+  }
+  ret uiSystems.hitIndex.entries.copyAtDefault(index: best).entityId
+}
+
+# A node's screen rectangle now, when it can be hit (active, visible, laid out)
+func hitScreenRect(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret opt WorldRect {
+  if uiEntityActive(world: world, entityId: entityId) is false or not componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  ) or not componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+    ret none
+  }
+  if worldVisualOf(world: world, uiSystems: uiSystems, entityId: entityId).visible is false {
+    ret none
+  }
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+  ret WorldRect {
+    x: Math.min(a: rect.x, b: rect.x + rect.w)
+    y: Math.min(a: rect.y, b: rect.y + rect.h)
+    w: Math.abs(value: rect.w)
+    h: Math.abs(value: rect.h)
+  }
+}
+
+# The entries whose cells meet screen rectangle `left`..`right` x `top`..`bottom`, each once, in
+# hit order (topmost first)
+func hitIndexCandidates(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+) ret List(Int) {
+  let index: view HitIndex = uiSystems.hitIndex
+  var seen: List(Bool) = List.create(Bool, cap: index.entries.length)
+  loop var i: Int = 0, i < index.entries.length, ++i {
+    seen.add(value: false)
+  }
+  var found: List(Int) = {}
+  loop let at: Int in index.loose {
+    seen.set(index: at, value: true)
+    found.add(value: at)
+  }
+  loop let space: view HitSpace in index.spaces {
+    let spaceMap: HitSpaceMap = hitSpaceMap(
+      world: world
+      uiSystems: uiSystems
+      rootEntityId: space.rootEntityId
+    )
+    if spaceMap.ok {
+      let x0: Float64 = hitSpaceX(spaceMap: spaceMap, x: left)
+      let x1: Float64 = hitSpaceX(spaceMap: spaceMap, x: right)
+      let y0: Float64 = hitSpaceY(spaceMap: spaceMap, y: top)
+      let y1: Float64 = hitSpaceY(spaceMap: spaceMap, y: bottom)
+      var column0: Int = hitCellOf(value: x0, cellSize: space.cellSize)
+      var column1: Int = hitCellOf(value: x1, cellSize: space.cellSize)
+      if column1 < column0 {
+        let swapped: Int = column0
+        column0 = column1
+        column1 = swapped
+      }
+      var row0: Int = hitCellOf(value: y0, cellSize: space.cellSize)
+      var row1: Int = hitCellOf(value: y1, cellSize: space.cellSize)
+      if row1 < row0 {
+        let swapped: Int = row0
+        row0 = row1
+        row1 = swapped
+      }
+      loop var row: Int = row0, row <= row1, ++row {
+        loop var column: Int = column0, column <= column1, ++column {
+          if let cell: view List(Int) = space.cells.viewGet(
+            key: hitCellKey(column: column, row: row)
+          ) {
+            loop let at: Int in cell {
+              if not seen.copyAtDefault(index: at) {
+                seen.set(index: at, value: true)
+                found.add(value: at)
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  found.sort()
+  ret found
+}
+
+# The clickable nodes that overlap screen rectangle `left`..`right` x `top`..`bottom` (a marquee),
+# topmost first; call it when hitIndexCurrent
+func hitIndexInRect(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+) ret List(EntityId) {
+  var hits: List(EntityId) = {}
+  loop let at: Int in hitIndexCandidates(
+    world: world
+    uiSystems: uiSystems
+    left: left
+    top: top
+    right: right
+    bottom: bottom
+  ) {
+    let entityId: EntityId = uiSystems.hitIndex.entries.copyAtDefault(index: at).entityId
+    if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
+      if rect.x <= right and rect.x + rect.w >= left and rect.y <= bottom and rect.y + rect.h >= top {
+        hits.add(value: entityId)
+      }
+    }
+  }
+  ret hits
+}
+
+# `entityId` is `ancestorEntityId` or inside it
+func hitWithin(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  ancestorEntityId: view EntityId
+) ret Bool {
+  if isNone(this: ancestorEntityId) {
+    ret false
+  }
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if at is ancestorEntityId {
+      ret true
+    }
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+      ret false
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret false
+}
+
+# Snapping: the screen x of the clickable nodes' left or right edge nearest to `x`, within
+# `distance`, among the nodes that reach rows `top`..`bottom`, `excludedEntityId` (the node being
+# dragged) and what is inside it left out; none when no edge is that near
+func hitIndexNearestEdgeX(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  top: view Float
+  bottom: view Float
+  distance: view Float
+  excludedEntityId: view EntityId
+) ret opt Float {
+  var nearest: opt Float = none
+  var nearestGap: Float = distance
+  loop let at: Int in hitIndexCandidates(
+    world: world
+    uiSystems: uiSystems
+    left: x - distance
+    top: top
+    right: x + distance
+    bottom: bottom
+  ) {
+    let entityId: EntityId = uiSystems.hitIndex.entries.copyAtDefault(index: at).entityId
+    if not hitWithin(uiSystems: uiSystems, entityId: entityId, ancestorEntityId: excludedEntityId) {
+      if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
+        if rect.y <= bottom and rect.y + rect.h >= top {
+          loop let edge: Float in List(Float) { rect.x, rect.x + rect.w } {
+            let gap: Float = Math.abs(value: edge - x)
+            if gap <= nearestGap {
+              nearestGap = gap
+              nearest = edge
+            }
+          }
+        }
+      }
+    }
+  }
+  ret nearest
+}
+
+# The same for a horizontal line: the nearest top or bottom edge to `y`, among the nodes that
+# reach columns `left`..`right`
+func hitIndexNearestEdgeY(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  y: view Float
+  left: view Float
+  right: view Float
+  distance: view Float
+  excludedEntityId: view EntityId
+) ret opt Float {
+  var nearest: opt Float = none
+  var nearestGap: Float = distance
+  loop let at: Int in hitIndexCandidates(
+    world: world
+    uiSystems: uiSystems
+    left: left
+    top: y - distance
+    right: right
+    bottom: y + distance
+  ) {
+    let entityId: EntityId = uiSystems.hitIndex.entries.copyAtDefault(index: at).entityId
+    if not hitWithin(uiSystems: uiSystems, entityId: entityId, ancestorEntityId: excludedEntityId) {
+      if let rect: WorldRect = hitScreenRect(world: world, uiSystems: uiSystems, entityId: entityId) {
+        if rect.x <= right and rect.x + rect.w >= left {
+          loop let edge: Float in List(Float) { rect.y, rect.y + rect.h } {
+            let gap: Float = Math.abs(value: edge - y)
+            if gap <= nearestGap {
+              nearestGap = gap
+              nearest = edge
+            }
+          }
+        }
+      }
+    }
+  }
+  ret nearest
+}

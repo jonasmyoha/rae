@@ -1,0 +1,142 @@
+# ButtonHoverScale — the button system's HOVER phase (buttonSystem/): every
+# `HoverScale` entity eases toward its hover scale while the pointer is over
+# it (or a descendant) and back to rest otherwise. Runs after the transform
+# pass, so the scale shows next frame — unchanged from when it lived in
+# animationSystem/.
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/AnimationSystem
+open ecs/Entity
+open ecs/ComponentTable
+open Spring
+open ui/ThemeResolved
+import Math
+
+# True when `entityId` is `ancestor` itself or sits anywhere below it in
+# the parent chain. Lets a hovered container (e.g. the Library's
+# playlist tile, which carries the OnClick) drive the HoverScale on its
+# child covers so the whole thumbnail scales as one — the hit-test only
+# ever reports the single OnClick entity, never its decorative children.
+# Depth-guarded against malformed cycles.
+func hoverScaleContains(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  ancestor: view EntityId
+) ret Bool {
+  if entityId is ancestor {
+    ret true
+  }
+  var cur: EntityId = entityId
+  var guard: Int = 0
+  loop guard < 64 {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: cur) is false {
+      ret false
+    }
+    let p: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: cur)
+    if p.parent is ancestor {
+      ret true
+    }
+    cur = p.parent
+    guard = guard + 1
+  }
+  ret false
+}
+
+# Step every HoverScale entity by one frame. `hovered` is the topmost
+# cursor-hit entity (use `noEntity()` when nothing is hovered); its Interaction
+# also selects the authored pressed scale. Returns true while any animates.
+func buttonHoverScaleUpdate(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  hovered: view EntityId
+  deltaTime: view Float
+) pub ret Bool {
+  # Clamp the frame delta. When the event loop has been idle (the
+  # cursor sat still off-screen for several seconds, say), the
+  # very first tick after a mouse-move arrives with a huge dt and
+  # the ease snaps in one frame. Capping at 1/20 s caps the
+  # per-tick step at `speed/20` of the delta — feels right at
+  # speed=12 (60% of the remaining delta per frame max).
+  var frameDt: Float = deltaTime
+  if frameDt > 0.05 {
+    frameDt = 0.05
+  }
+  if frameDt < 0.0 {
+    frameDt = 0.0
+  }
+  var stillAnimating: Bool = false
+  let n: Int = componentCount(this: world.hoverScales)
+  var i: Int = 0
+  loop i < n {
+    let entityId: EntityId = componentEntityAt(this: world.hoverScales, i: i)
+    let hs: view HoverScale = componentView(this: world.hoverScales, entityId: entityId)
+    var target: Float = hs.restScale
+    let containsHover: Bool = hoverScaleContains(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      ancestor: hovered
+    )
+    if containsHover {
+      target = hs.hoverScale
+    }
+    if containsHover and entityPressed(world: world, uiSystems: uiSystems, entityId: hovered) {
+      target = hs.pressedScale
+    }
+    var next: Float = hs.current
+    var velocity: Float = hs.velocity
+    var token: MotionToken = {}
+    var springs: Bool = false
+    # at rest on its target there is nothing to step, so no motion to look up (a token is Strings)
+    let atRest: Bool = hs.current is target and hs.target is target and velocity is 0.0
+    if hs.motion.length() > 0 and not atRest {
+      if let named: MotionToken = themeMotion(theme: world.theme.resolved, name: hs.motion) {
+        token = named
+        springs = named.kind is MotionKind.spring
+      }
+    }
+    if springs {
+      if next is not target or velocity is not 0.0 {
+        # It keeps its speed when the target changes, so a press that ends early does not stall
+        var state: SpringState = { value: next, velocity: velocity }
+        springStep(
+          state: state
+          target: target
+          response: token.response
+          damping: token.damping
+          deltaTime: frameDt
+        )
+        next = state.value
+        velocity = state.velocity
+        if springAtRest(state: state, target: target, distance: 0.001) {
+          next = target
+          velocity = 0.0
+        }
+      }
+    } else {
+      next = easeTowards(
+        current: hs.current
+        target: target
+        speed: hs.speed
+        deltaTime: frameDt
+        epsilon: 0.001
+      )
+    }
+    if next is not hs.current or target is not hs.target {
+      # Per-frame animation state is a mutable component update, not a
+      # replace/drop cycle. Updating in place avoids allocator churn in the
+      # hot hover path that 106 drives while the cursor moves over covers.
+      let slot: mod HoverScale = componentMod(this: world.hoverScales, entityId: entityId)
+      slot.current = next
+      slot.target = target
+      slot.velocity = velocity
+      if next is not target {
+        stillAnimating = true
+      }
+    }
+    i = i + 1
+  }
+  ret stillAnimating
+}

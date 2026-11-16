@@ -1,0 +1,276 @@
+# RenderFills — the gradient and backdrop painters split from RenderSystem
+# (the file cap): GradientFill through the gpu2d box shader's gradient mode,
+# RadialGradientFill through its radial mode, BackdropImage as the tinted,
+# clipped image behind a node.
+open ui/Ecs
+open ui/UiSystems
+import Gpu2d
+import ui/Components
+import ui/Theme
+import ui/ThemeResolved
+open ecs/ComponentTable
+open Gpu2dCanvas
+open Gpu2dCanvasRadial
+open ui/RadialGradientFill
+open ui/BackdropComponents
+open ui/RegistryValues
+open Gpu2dCanvasBackdrop
+
+# The color a gradient end paints: its palette slot when it names one, else
+# its literal color, through the node's opacity chain
+func gradientEndColor(
+  world: view UiWorld
+  color: view RgbaColor
+  slot: view String
+  chain255: view Int
+) ret Int {
+  var base: RgbaColor = color
+  if slot.length() > 0 {
+    base = uiThemeColor(theme: world.theme, name: slot)
+  }
+  ret g2dColor(color: g2dChain(color: base, chain255: chain255))
+}
+
+# GradientFill uses the gpu2d box shader's gradient mode so dock shadows and
+# dialog scrims stay in the same painter-order pipeline as normal shapes. A
+# RadialGradientFill paints the same way (over a GradientFill on the same
+# node); either one replaces the Shape fill.
+func paintGradientG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let nodeBox: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  # a Circle's centered square, as the Shape painter draws it
+  let box: PaintBox = g2dFillBox(world: world, entityId: entityId, box: nodeBox)
+  # the corners of the node's Shape (or its CornerRadius), already scaled
+  let fillRadius: Float = g2dFillRadius(world: world, entityId: entityId, box: nodeBox)
+  if componentHas(this: world.shadows, entityId: entityId) {
+    paintShadowG(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      box: box
+      radius: fillRadius
+      chain255: chain255
+      canvas: canvas
+    )
+  }
+  if componentHas(this: world.gradientFills, entityId: entityId) {
+    let gf: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
+    Gpu2d.drawGradientRect(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      radius: fillRadius
+      from: gradientEndColor(
+        world: world
+        color: gf.from
+        slot: gf.fromSlot
+        chain255: chain255
+      )
+      to: gradientEndColor(
+        world: world
+        color: gf.to
+        slot: gf.toSlot
+        chain255: chain255
+      )
+      angleDeg: gf.angle
+    )
+  }
+  if componentHas(this: world.radialGradientFills, entityId: entityId) {
+    let radial: view RadialGradientFill = componentView(
+      this: world.radialGradientFills
+      entityId: entityId
+    )
+    canvasDrawRadialGradientRect(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      radius: fillRadius
+      from: gradientEndColor(
+        world: world
+        color: radial.from
+        slot: radial.fromSlot
+        chain255: chain255
+      )
+      to: gradientEndColor(
+        world: world
+        color: radial.to
+        slot: radial.toSlot
+        chain255: chain255
+      )
+      centerX: radial.centerX
+      centerY: radial.centerY
+      reach: radial.radius
+      stop: radial.stop
+    )
+  }
+  # The fill first, then the node's Shape stroke over it: a gradient button
+  # keeps its edge.
+  paintShapeStrokeG(
+    world: world
+    entityId: entityId
+    box: box
+    radius: fillRadius
+    chain255: chain255
+    canvas: canvas
+  )
+}
+
+# Only the stroke of a node's Shape (no fill), at `radius`: what a GradientFill
+# paints after itself. Nothing when the node has no Shape or no stroke.
+func paintShapeStrokeG(
+  world: view UiWorld
+  entityId: view EntityId
+  box: view PaintBox
+  radius: view Float
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  if not componentHas(this: world.shapes, entityId: entityId) {
+    ret
+  }
+  let shape: view Shape = componentView(this: world.shapes, entityId: entityId)
+  if shape.strokeWidth <= 0.0 {
+    ret
+  }
+  let stroke: RgbaColor = shapeStroke(world: world, shape: shape, chain255: chain255)
+  if shape.strokeDash > 0.0 and shape.kind is not ShapeKind.circle {
+    paintDashedEdges(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+      width: g2dStrokeWidth(shape: shape, box: box)
+      dash: shape.strokeDash * g2dStrokeScale(shape: shape, box: box)
+      gap: shape.strokeGap * g2dStrokeScale(shape: shape, box: box)
+      color: g2dColor(color: stroke)
+    )
+    ret
+  }
+  # the gradient's own box, so the edge lies on the fill
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    fill: 0
+    borderWidth: g2dStrokeWidth(shape: shape, box: box)
+    border: g2dColor(color: stroke)
+  )
+}
+
+func paintBackdropG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let bi: view BackdropImage = componentView(this: world.backdropImages, entityId: entityId)
+  let radius: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let hoverMul: Float = box.scale
+  let drawW: Float = box.w
+  let drawH: Float = box.h
+  let drawX: Float = box.x
+  let drawY: Float = box.y
+  if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
+    let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
+    let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
+    Gpu2d.drawImageKey(
+      canvas: canvas
+      key: bi.textureKey
+      x: drawX
+      y: drawY
+      w: drawW
+      h: drawH
+      radius: radius * hoverMul
+      tint: g2dColor(color: tint)
+    )
+    ret
+  }
+  # Raylib uses captured blur textures for BackdropImage. gpu2d does not have
+  # framebuffer capture yet, so paint a stable translucent glass fallback.
+  let fallback: RgbaColor = { r: 18, g: 22, b: 30, a: 210 }
+  let chained: RgbaColor = g2dChain(color: fallback, chain255: chain255)
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: drawX
+    y: drawY
+    w: drawW
+    h: drawH
+    radius: radius * hoverMul
+    color: g2dColor(color: chained)
+  )
+}
+
+# BackdropBlur (ui/BackdropComponents): what is drawn under the node so far, blurred, rounded like
+# its Shape, with the tint over it; before the node's own Shape and children. When the frame cannot
+# be read this time (its first frame on a surface that cannot be sampled), only the tint is drawn.
+func paintBackdropBlurG(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  let blur: view BackdropBlur = componentView(this: world.backdropBlurs, entityId: entityId)
+  let box: PaintBox = g2dPaintBox(
+    world: world
+    entityId: entityId
+    wt: wt
+    cr: cr
+  )
+  let radius: Float = g2dFillRadius(world: world, entityId: entityId, box: box)
+  let drawn: Bool = canvasBackdropBlur(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    blurRadius: blur.radius * box.scale
+    alpha: chain255.toFloat() / 255.0
+  )
+  if blur.tint.length() is 0 {
+    ret
+  }
+  var tint: RgbaColor = uiThemeColor(theme: world.theme, name: blur.tint)
+  if let literal: RgbaColor = parseHexColor(text: blur.tint) {
+    tint = literal
+  }
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: box.x
+    y: box.y
+    w: box.w
+    h: box.h
+    radius: radius
+    color: g2dColor(color: g2dChain(color: tint, chain255: chain255))
+  )
+}

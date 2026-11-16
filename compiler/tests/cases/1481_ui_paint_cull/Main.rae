@@ -1,4 +1,4 @@
-# Drawing only what is on screen (lib/ui/renderSystem/RenderCull) on an 800 x 600 viewport: a node
+# Drawing only what is on screen (lib/ui/RenderSystem/RenderCull) on an 800 x 600 viewport: a node
 # fully on screen, half on screen and fully off; one just off but within the margin; one off whose
 # shadow reaches back in; a rotated one off screen (drawn: its bounds are not tested); an off-screen
 # clip container (its subtree is skipped) and an unclipped one (its children are still walked);
@@ -12,9 +12,8 @@ open ui/SceneLoader
 open ui/Transform
 open ui/UiSystems
 open ui/cameraSystem/CameraSystem
-open ui/layoutSystem/LayoutSystem
-open ui/renderSystem/RenderCull
-open ui/renderSystem/RenderSystem
+open ui/LayoutSystem
+open ui/RenderSystem
 
 func node(world: view UiWorld, nodeId: view String) ret EntityId {
   if let index: Int = world.nodeIds.get(k: nodeId) {

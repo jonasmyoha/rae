@@ -1,0 +1,44 @@
+# RenderCanvasGuides — the snapping guides of a node being dragged on a canvas
+# (ui/canvasGestureSystem): a thin line across the screen where its edge meets another node's,
+# drawn over everything at the end of the frame's UI.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open ui/CanvasComponents
+open ui/Components
+open ui/Ecs
+open ui/Theme
+
+func paintCanvasGuidesG(world: view UiWorld, canvas: mod Gpu2dCanvas) {
+  let count: Int = componentCount(this: world.canvasControlStates)
+  if count is 0 {
+    ret
+  }
+  let color: Int = g2dColor(color: uiThemeColor(theme: world.theme, name: "accent"))
+  loop var i: Int = 0, i < count, ++i {
+    let state: CanvasControlState = componentCopyAtDefault(this: world.canvasControlStates, i: i)
+    if let x: view Float = state.guideX {
+      Gpu2d.drawLine(
+        canvas: canvas
+        x0: x
+        y0: 0.0
+        x1: x
+        y1: paintViewHeight()
+        thickness: 1.0
+        color: color
+      )
+    }
+    if let y: view Float = state.guideY {
+      Gpu2d.drawLine(
+        canvas: canvas
+        x0: 0.0
+        y0: y
+        x1: paintViewWidth()
+        y1: y
+        thickness: 1.0
+        color: color
+      )
+    }
+  }
+}

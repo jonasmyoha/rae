@@ -1,0 +1,83 @@
+# HeroTransitionSystem: the hero's way into a shared-element morph
+# (ui/AnimationSystem/SharedElements), for a host that shows two pages in one world with no page
+# transition. `HeroWidget { key }` is another way to write `SharedElement { key, mode: morph }`,
+# so a scene with one needs no change.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+open ui/UiSystems
+
+# The `HeroWidget` with `key` under the page `pageId`, or noEntity().
+func findHeroOnPage(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pageId: view String
+  key: view String
+) pub ret EntityId {
+  let n: Int = componentCount(this: world.heroWidgets)
+  var i: Int = 0
+  loop i < n {
+    let entityId: EntityId = componentEntityAt(this: world.heroWidgets, i: i)
+    let hero: view HeroWidget = queryViewAt(table: world.heroWidgets, denseIndex: i)
+    if hero.key is key {
+      let page: String = pageOf(world: world, uiSystems: uiSystems, entityId: entityId)
+      if page is pageId {
+        ret entityId
+      }
+    }
+    i = i + 1
+  }
+  ret noEntity()
+}
+
+func heroPlaced(world: view UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Bool {
+  if isNone(this: entityId) {
+    ret false
+  }
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false {
+    ret false
+  }
+  ret componentHas(this: uiSystems.layout.computedRects, entityId: entityId)
+}
+
+# The hero `target` flies from where `source` is drawn (both laid out, sharing `key`). False,
+# and nothing changes, when either has no box yet or the source is off screen, as a grid tile
+# scrolled out of view is: the destination then just appears.
+func spawnHeroTransition(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  key: view String
+  source: view EntityId
+  target: view EntityId
+) pub ret Bool {
+  if heroPlaced(world: world, uiSystems: uiSystems, entityId: source) is false or heroPlaced(
+    world: world
+    uiSystems: uiSystems
+    entityId: target
+  ) is false {
+    ret false
+  }
+  let from: SharedSource = sharedSourceOf(
+    world: world
+    uiSystems: uiSystems
+    entityId: source
+    key: key
+  )
+  if from.onScreen is false {
+    ret false
+  }
+  log("[hero] start key={key} from=({from.x},{from.y} {from.w}x{from.h})")
+  sharedMorph(
+    world: world
+    uiSystems: uiSystems
+    target: target
+    pageRoot: noEntity()
+    source: from
+    motion: "smooth"
+    isHero: true
+    paintUnder: noEntity()
+  )
+  ret true
+}

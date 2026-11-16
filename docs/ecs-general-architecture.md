@@ -250,7 +250,7 @@ renderSystem/RenderSystem.rae
 ```
 (This section said PascalCase folders, `TransformSystem/TransformSystem.rae`,
 until 2026-11-01; the code moved to camelCase folders with Rae's naming
-rules — `lib/ui/renderSystem/`, `lib/ecs/transformSystem/`, the system folders
+rules — `lib/ui/RenderSystem/`, `lib/ecs/transformSystem/`, the system folders
 of examples 106 and 121.)
 No snake_case, plurals, or abbreviations in the system name —
 `transformSystem/TransformSystem.rae`, not `transform`/`xform`/`TransformSys`. A system is a function over a `World`. Systems

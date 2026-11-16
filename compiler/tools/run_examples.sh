@@ -1171,7 +1171,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           # now-playing text is a binding: spotifyBindingSystem writes the
           # TextBinding nodes from SpotifyState (spotifySystem/SpotifyView).
           # Finally a Library -> album tap runs the hero as a shared-element
-          # morph (ui/animationSystem/SharedElements): the log
+          # morph (ui/AnimationSystem/SharedElements): the log
           # must show it start (from the source's rect) and land (done), and the
           # resting frame after it is non-blank. Last, the Profile page's
           # settings button action opens the settings dialog and its switch

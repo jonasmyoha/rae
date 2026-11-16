@@ -169,7 +169,7 @@ a filesystem path, and only the *call-site* qualifier uses dots:
 ```rae
 import ecs/ComponentTable       # import PATH — slashes
 import app3d/CameraRig
-open ui/RenderSystem/RenderSystem
+open ui/RenderSystem
 
 let t: ComponentTable(Foo) = createComponentTable(Foo)   # opened → bare
 CameraRig.createCameraRig(camera: cam)                   # QUALIFIER — dots
@@ -179,7 +179,7 @@ geo.Point.make(x: 1, y: 2)                               # package.Module.func (
 - `import M` — makes `M.func(...)` and UFCS (`value.func()`) work, but **not** bare
   `func(...)`.
 - `open M` — everything `import` does, **plus** module `M`'s names become bare in
-  this file (so a UI file writes `open ui/RenderSystem/RenderSystem` for its bare
+  this file (so a UI file writes `open ui/RenderSystem` for its bare
   helpers). `open` implies `import`. The prelude (`core/Core`, `core/List`,
   `String`, `Math`, `Io`, `Sys`) is auto-opened for every file — bare
   `log`/`createList` need no `import` or `open`.

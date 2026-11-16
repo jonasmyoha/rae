@@ -62,7 +62,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   now).
 - **"Package" means a `.raepack` package** (a versioned dependency such as
   `packages/audio`), never a plain folder.
-- The import separator is `/` (never `.`): `import ui/renderSystem/RenderSystem`,
+- The import separator is `/` (never `.`): `import ui/RenderSystem`,
   `open ecs/hierarchySystem/HierarchySystem`, `import Gpu2d`. An import and a
   qualifier are spelled exactly as on disk, with the same upper and lower case
   (`import vec3` is an error even where the filesystem ignores case). The
@@ -93,7 +93,7 @@ These instructions define **how Codex should work**, communicate progress, and i
   `oldName.` qualifier that referenced it (they live in code, never in strings —
   a `"lib/foo_bar.wgsl"` asset path is a string and stays). A plain-folder
   rename only changes the folder component of import paths — the file component
-  stays PascalCase (`ui/oldName/RenderSystem` -> `ui/renderSystem/RenderSystem`).
+  stays PascalCase (`gfx/Texture` -> `graphics/Texture`).
   Splitting a module FILE into a module FOLDER of the same name changes no
   import and no qualifier.
 

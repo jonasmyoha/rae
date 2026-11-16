@@ -118,7 +118,7 @@ by THAT table alone — never a general ordered structure.
 
 | System | Iterates | Why order does not matter |
 |---|---|---|
-| UI paint (`ui/renderSystem`) | paintable roots | explicit `LayerRoot.order` + parent-before-child hierarchy traversal; never dense draw order |
+| UI paint (`ui/RenderSystem`) | paintable roots | explicit `LayerRoot.order` + parent-before-child hierarchy traversal; never dense draw order |
 | Deferred G-buffer (`GbufferWorld`) | `meshRenderers` | depth-resolved — submit order does not change the image |
 | Forward meshes (`Gpu3d`) | `meshRenderers` | opaque + depth-tested |
 | SDF clusters (`Gpu3dWorld` scene + shadow) | `sdfs` | membership is the explicit `cluster` id; the cluster HEAD is the lowest `EntityId.index` (stable key — was dense-first, fixed in #810) |
@@ -543,7 +543,7 @@ func uiFrameEnd(world: mod UiWorld, uiSystems: mod UiSystems)                   
 func releaseDeadEntities(world: mod UiWorld, uiSystems: mod UiSystems)
 # lib/ecs/World.rae: freeEntity = retireEntity + recycleEntityIndex
 
-# lib/ui/buttonSystem/ — the button behavior, gathered (one type, three phases)
+# lib/ui/ButtonSystem/ — the button behavior, gathered (one type, three phases)
 func buttonInteractionClear / buttonInteractionMark   # from the hit test (stage input)
 func buttonStyleUpdate(world, uiSystems)               # StateStyle swap (stage widgetStyle)
 func buttonHoverScaleUpdate(world, uiSystems, hovered, deltaTime) ret Bool   # stage hoverScale
