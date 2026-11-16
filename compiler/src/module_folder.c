@@ -43,7 +43,9 @@ static bool has_exact_entry(const char* dir, const char* name) {
 }
 
 /* `path` is a folder (want_dir) or a file, and its last name is spelled exactly as written */
-static bool exists_exact(const char* path, bool want_dir) {
+bool module_folder_exists_exact(const char* path, bool want_dir);
+static bool exists_exact(const char* path, bool want_dir) { return module_folder_exists_exact(path, want_dir); }
+bool module_folder_exists_exact(const char* path, bool want_dir) {
   if (want_dir ? !path_is_dir(path) : !path_is_file(path)) return false;
   char parent[PATH_MAX];
   snprintf(parent, sizeof parent, "%s", path);

@@ -51,8 +51,12 @@ tell which.
    Windows ignore case in file names (today `import vec3` loads `lib/Vec3.rae` on a Mac). The
    compiler compares every import path segment with the exact name on disk and reports a
    mismatch as an error that gives the right spelling.
-9. **A PascalCase folder in a program's own tree is an error for now** ("module folders are for
-   lib/ and packages"), until the program rule below is decided.
+9. **A program's own tree follows the same rule** (decided 2026-11-17, option B below; Rae
+   0.3.178). A PascalCase folder of a program is a module folder: `game/Hud/` is one module `Hud`,
+   named by its path from the project root, with its camelCase subfolders' files and its
+   PascalCase subfolders as modules of their own. Like every program file it needs no import
+   (`drawHud()` or `Hud.drawHud()`); camelCase folders still only break a tie (`enemies.tick()`).
+   An enum and a module may share a name, as a type and a module do (case 729).
 
 ### Before and after
 
@@ -122,17 +126,17 @@ let entityId: EntityId = createEntity(world: world)
 | Is a module a file, or a file or a folder? | Whether splitting a big file changes the code that uses it | A file or a folder; using code cannot tell, so a split never changes it |
 | How is a module written in code? | Whether `Name.call()` reads as a module or a variable | Always PascalCase, as today; a camelCase folder is only a path |
 
-### Open: the rule for a program's own folders (needs a decision)
+### Decided: the rule for a program's own folders (2026-11-17: option B)
 
-Today (0.3.177) a program's own tree has its own rule: every file sees every other with no
+Until 0.3.177 a program's own tree had its own rule: every file sees every other with no
 import; a camelCase folder name only breaks a tie (`enemies.tick()` when two folders declare
-`tick`); a PascalCase folder holding Rae files is an error (rule 9). The options:
+`tick`); a PascalCase folder holding Rae files was an error. The options were:
 
 - **A. Keep it as it is.** Programs never have module folders; a big program file is split
   into more files of the same folder (all visible anyway), and only lib/ and packages use module
   folders. Simplest, but a program cannot group a subsystem under one name the way a library
   does, and code moved from a program into lib/ changes form.
-- **B. PascalCase folders are module folders in a program too** (recommended). The same rule
+- **B. PascalCase folders are module folders in a program too** (chosen). The same rule
   everywhere: `game/Hud/` is one module `Hud` (its files share one scope and one name, `Hud.draw()`
   qualifies it); the program stays auto-visible (no import needed, as for every program file);
   camelCase folders keep breaking ties. Rule 9 goes away, and code moves between a program and
@@ -143,9 +147,6 @@ import; a camelCase folder name only breaks a tie (`enemies.tick()` when two fol
 
 ### Not part of this proposal
 
-- A program's own folders keep today's rule (every project file sees every other; a folder name
-  breaks a tie: `enemies.tick()`). Whether that should follow the same casing rule is a separate
-  question.
 - The same file-and-folder pair that Rust allows (`foo.rs` beside `foo/`) was considered and
   refused (rule 1): it saves one file move, and the module would live in two places.
 

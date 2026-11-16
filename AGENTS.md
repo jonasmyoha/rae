@@ -57,9 +57,10 @@ These instructions define **how Codex should work**, communicate progress, and i
   cannot tell a file from a folder. A PascalCase subfolder of a module folder is
   a module of its own. A **plain folder** is camelCase and only part of a path —
   `ui/`, `ecs/`, `webgpu/`, `compress/`, `legacyRaylib/`. A file and a folder of
-  one name in one place is an error, and so is a PascalCase folder holding Rae
-  files in a program's own tree (module folders are for `lib/` and packages, for
-  now).
+  one name in one place is an error. A program's own tree follows the same rule
+  (since 0.3.178): `game/Hud/` is the module `Hud`, seen from the rest of the
+  program with no import like every program file, while a camelCase folder only
+  breaks a tie between two same-named functions (`enemies.tick()`).
 - **"Package" means a `.raepack` package** (a versioned dependency such as
   `packages/audio`), never a plain folder.
 - The import separator is `/` (never `.`): `import ui/RenderSystem`,

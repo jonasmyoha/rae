@@ -2149,17 +2149,72 @@ static bool module_graph_load_module(ModuleGraph* graph,
   return true;
 }
 
-static bool directory_has_rae_file(const char* path) {
-  DIR* handle = opendir(path);
-  if (!handle) return false;
-  bool found = false;
-  struct dirent* entry;
-  while (!found && (entry = readdir(handle)) != NULL) {
-    size_t length = strlen(entry->d_name);
-    found = length > 4 && strcmp(entry->d_name + length - 4, ".rae") == 0;
+static bool load_nested_module_folders(ModuleGraph* graph, const char* dir_path, const char* skip_file,
+                                       uint64_t* hash_out, bool no_implicit);
+
+/* A PascalCase folder of a program's own tree (docs/module-model-options.md option B): its files
+ * and those of its camelCase subfolders are one module, named by the folder's path from the
+ * project root (`Hud`, `screens/Hud`), and each PascalCase folder under it is a module of its own.
+ * A file and a folder of one name beside it is an error. */
+static bool load_project_module_folder(ModuleGraph* graph, const char* parent, const char* name,
+                                       const char* skip_file, uint64_t* hash_out, bool no_implicit) {
+  char folder[PATH_MAX];
+  char file[PATH_MAX];
+  snprintf(folder, sizeof folder, "%s/%s", parent, name);
+  snprintf(file, sizeof file, "%s/%s.rae", parent, name);
+  if (module_folder_exists_exact(file, false)) {
+    fprintf(stderr, "error: '%s' is both a file and a folder (%s and %s/): a module is one of them, "
+            "so remove the file or move it into the folder (docs/module-model-options.md rule 1)\n",
+            name, diag_simplify_path(file), diag_simplify_path(folder));
+    return false;
   }
-  closedir(handle);
-  return found;
+  char* logical = derive_module_path(graph->root_path, file);
+  if (!logical) return false;
+  ModuleFolderFiles files;
+  char message[PATH_MAX * 3];
+  if (!module_folder_list(folder, &files, message, sizeof message)) {
+    fprintf(stderr, "error: %s\n", message);
+    module_folder_files_free(&files);
+    free(logical);
+    return false;
+  }
+  bool ok = true;
+  for (int i = 0; i < files.count && ok; i++) {
+    if (skip_file && strcmp(files.items[i].path, skip_file) == 0) continue;
+    char part_path[2048];
+    snprintf(part_path, sizeof part_path, "%s/%s", logical, files.items[i].stem);
+    if (module_graph_has_module(graph, part_path)) continue;
+    graph->pending_logical = logical;
+    ok = module_graph_load_module(graph, part_path, files.items[i].path, NULL, hash_out, no_implicit);
+    graph->pending_logical = NULL;
+  }
+  module_folder_files_free(&files);
+  free(logical);
+  if (!ok) return false;
+  /* the PascalCase folders under it, below camelCase subfolders too: modules of their own */
+  return load_nested_module_folders(graph, folder, skip_file, hash_out, no_implicit);
+}
+
+static bool load_nested_module_folders(ModuleGraph* graph, const char* dir_path, const char* skip_file,
+                                       uint64_t* hash_out, bool no_implicit) {
+  DIR* dir = opendir(dir_path);
+  if (!dir) return true;
+  bool ok = true;
+  struct dirent* entry;
+  while (ok && (entry = readdir(dir)) != NULL) {
+    if (entry->d_name[0] == '.') continue;
+    char child[PATH_MAX];
+    snprintf(child, sizeof child, "%s/%s", dir_path, entry->d_name);
+    struct stat st;
+    if (stat(child, &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+    if (module_folder_name_is_module(entry->d_name, strlen(entry->d_name))) {
+      ok = load_project_module_folder(graph, dir_path, entry->d_name, skip_file, hash_out, no_implicit);
+    } else {
+      ok = load_nested_module_folders(graph, child, skip_file, hash_out, no_implicit);
+    }
+  }
+  closedir(dir);
+  return ok;
 }
 
 static bool scan_directory_for_modules(ModuleGraph* graph,
@@ -2209,17 +2264,14 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       if (rae_deps_owns_path(child_path)) {
         continue;
       }
-      /* docs/module-model-options.md rule 9: a PascalCase folder is a module folder, and module
-       * folders are for lib/ and packages, not (yet) a program's own tree */
-      if (module_folder_name_is_module(entry->d_name, strlen(entry->d_name))
-          && directory_has_rae_file(child_path)) {
-        fprintf(stderr,
-                "error: %s/ is a PascalCase folder with Rae files in the program's own tree: a "
-                "PascalCase folder is a module folder, and module folders are for lib/ and "
-                "packages only for now; rename it in camelCase (docs/module-model-options.md "
-                "rule 9)\n", diag_simplify_path(child_path));
-        closedir(dir);
-        return false;
+      /* docs/module-model-options.md option B: a PascalCase folder in a program's own tree is a
+       * module folder, as in lib/ and packages; the program still sees it with no import */
+      if (module_folder_name_is_module(entry->d_name, strlen(entry->d_name))) {
+        if (!load_project_module_folder(graph, dir_path, entry->d_name, skip_file, hash_out, no_implicit)) {
+          closedir(dir);
+          return false;
+        }
+        continue;
       }
       if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out, no_implicit)) {
         closedir(dir);
@@ -5267,9 +5319,9 @@ static const char* RAE_INIT_TEMPLATE_AGENTS_MD =
   "  camelCase and only part of a path. \"Package\" means a `.raepack` package.\n"
   "- A module that reaches the 1,000-line cap becomes a folder of the same name,\n"
   "  split by topic; its users change nothing. Never split it into a second module.\n"
-  "- A file and a folder of one name in one place is an error. A PascalCase folder\n"
-  "  with Rae files in this program's own tree is an error for now: module folders\n"
-  "  are for libraries and packages.\n"
+  "- A file and a folder of one name in one place is an error. This program's own\n"
+  "  PascalCase folders are modules too, seen with no import like every program file;\n"
+  "  a camelCase folder only breaks a tie between two same-named functions.\n"
   "- Imports and qualifiers are spelled exactly as on disk, with the same upper and\n"
   "  lower case, on every system (`import Vec3`, never `import vec3`).\n"
   "- Types and modules are PascalCase; everything else (functions, values, fields,\n"

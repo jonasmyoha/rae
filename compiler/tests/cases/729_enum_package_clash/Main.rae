@@ -1,10 +1,12 @@
-# A PascalCase folder is a module folder, and a program's own tree may not hold one yet
-# (docs/module-model-options.md rule 9): the sibling `Color/` directory holds a .rae file, so
-# the build stops before it reaches the enum `Color` it would also have clashed with (the
-# earlier test of this case, from when a folder of any case was a project namespace).
+# An enum and a module folder may share a name (docs/module-model-options.md option B): the
+# sibling `Color/` is the program's module folder `Color`, and `enum Color` is a type. A member
+# after `Color.` that is an enum case is the case; one that is a function of the module is the
+# call, as `Vec3.create` and `Vec3.vnorm` share `Vec3.` for lib/Vec3's type and module. (This case
+# once tested a definition-site error for this pair, from when a folder of modules was a
+# namespace of separate modules, and then the PascalCase-folder error of 0.3.174.)
 enum Color { red, green, blue }
 
 func main() {
   let c: Int = Color.green
-  log("{c}")
+  log("{c} {Color.shade()}")
 }

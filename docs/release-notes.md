@@ -16,7 +16,8 @@ docs/module-model-options.md is the design.
   module. A module that reaches the 1,000-line cap becomes a folder with no
   change to the code that uses it. Refused: a file and a folder of one name, an
   import of a file inside a module folder, the same function in two files of
-  one module, and a PascalCase folder with Rae files in a program's own tree.
+  one module. A program's PascalCase folders are module folders too (0.3.178),
+  seen with no import like every program file.
 - Imports and qualifiers are spelled as on disk, with the same upper and lower
   case, on every system (0.3.173): `import vec3` and `math.sqrt` are refused
   with the right spelling. They used to work on macOS only.

@@ -5,6 +5,10 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/* `path` is a folder (want_dir) or a file whose last name is spelled exactly as written (macOS and
+ * Windows ignore case in stat) */
+bool module_folder_exists_exact(const char* path, bool want_dir);
+
 /* True when a file or folder name is PascalCase (starts with A-Z): a module */
 bool module_folder_name_is_module(const char* name, size_t length);
 

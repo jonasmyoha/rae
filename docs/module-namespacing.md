@@ -185,8 +185,8 @@ a declaration is in. A PascalCase subfolder is a module of its own
 cover it. Refused: a file and a folder of one name in one place, at any depth;
 importing a file of a module folder (`import Gpu2d/Window`: "write `import
 Gpu2d`"); the same function with the same parameters in two files of one
-module; a PascalCase folder holding Rae files in a program's own tree (module
-folders are for `lib/` and packages, for now). A file whose whole body is in
+module. A program's own PascalCase folders are module folders too (0.3.178),
+seen with no import like every program file. A file whose whole body is in
 `when` is part of the module on that target only. `rae format` and the
 1,000-line cap stay per file.
 
@@ -275,8 +275,9 @@ exactly one thing:
 - **Enum-vs-folder clash (definition-site).** If an `enum Color` and a
   folder `Color/` holding modules both exist, `Color.x`
   would be ambiguous — an enum case `x` vs a module `x` in folder `Color`. (Since
-  0.3.174 a PascalCase folder with Rae files in a program's own tree is an error by
-  itself, so this is reached from lib/ and packages only.) This
+  0.3.178 a PascalCase folder is one module, named like the enum; that pair is allowed, as
+  a type and a module of one name are, case 729. The error remains for a camelCase folder of
+  separate modules named like the enum.) This
   is a hard error at the **enum's definition site** (caught once, not at every
   use). Enum names are PascalCase, so it only bites a PascalCase type-grouping
   folder named like an enum. Rename the enum or the folder.
