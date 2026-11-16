@@ -10,6 +10,7 @@
 # nothing) and records a missingTexture diagnostic. The chrome's counters and status line are
 # written here from the document + the list; the chrome itself is a scene.
 import Gpu2d
+import Gpu2dImages
 import String
 open ui/SceneImports
 open Sys
@@ -133,7 +134,7 @@ func registerPlaceholderImage(canvas: mod Gpu2dCanvas, key: view String, size: c
       pixels.add(value: shade + shade * 256 + shade * 65536 + 255 * 16777216)
     }
   }
-  let handle: Int = Gpu2d.registerImageRgba(
+  let handle: Int = Gpu2dImages.registerImageRgba(
     canvas: canvas
     key: "{key}"
     pixels: pixels.data
@@ -185,12 +186,12 @@ func textureUpdate(
       continue
     }
     textureSystem.resolvedKeys.add(value: "{key}")
-    if Gpu2d.hasImageKey(canvas: canvas, key: key) {
+    if Gpu2dImages.hasImageKey(canvas: canvas, key: key) {
       continue
     }
     let path: String = findTexturePath(textureSystem: textureSystem, assets: assets, key: key)
     if path.length() > 0 {
-      let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: key, path: path)
+      let handle: Int = Gpu2dImages.loadImageKey(canvas: canvas, key: key, path: path)
       if handle > 0 {
         continue
       }

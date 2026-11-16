@@ -22,6 +22,7 @@
 # font is too small" rather than like a unit bug, which is why the
 # conversion lives in one place.
 import Gpu2d
+import Gpu2dImages
 open SdfText
 open ui/MaterialIconFont
 open ui/Ecs
@@ -241,12 +242,12 @@ func loadMountedSceneTextures(
       continue
     }
     settled.add(value: "{key}")
-    if Gpu2d.hasImageKey(canvas: canvas, key: key) {
+    if Gpu2dImages.hasImageKey(canvas: canvas, key: key) {
       continue
     }
     let path: String = sceneAssetTexturePath(assets: assets, key: key)
     if path.length() > 0 {
-      let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: key, path: path)
+      let handle: Int = Gpu2dImages.loadImageKey(canvas: canvas, key: key, path: path)
       if handle > 0 {
         continue
       }

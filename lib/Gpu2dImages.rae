@@ -1,0 +1,220 @@
+# Gpu2dImages — images on the 2D canvas (#143, #908): decode a PNG or JPEG into a GPU texture,
+# keep it under a string key, and draw it as a textured rounded quad (whole, nine-sliced, tiled,
+# scaled or turned). Moved out of lib/Gpu2d so that module stays under the 1,000-line cap; call
+# these as `Gpu2dImages.loadImageKey(...)`.
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# Since #908 the images live on the app-owned Gpu2dCanvas (decoded by C, the
+# textures + draws are manager objects there); these are the Gpu2d-spelled
+# entry points over it. Decode a PNG/JPEG file and upload it as a GPU texture;
+# returns a 1-based handle (0 on failure). Load once, at startup; the texture
+# is cached for the canvas's lifetime.
+func loadImage(canvas: mod Gpu2dCanvas, path: copy String) ret Int {
+  ret canvasLoadImage(canvas: canvas, path: path)
+}
+
+# Device-free decode probe (#228): runs loadImage's exact decode +
+# error policy (magic-sniff dispatch, one decoder per format) without
+# uploading a texture, so decode behavior is testable headless and
+# assets can be validated from tooling. 1 = decodes, 0 = failed
+# (with the standard stderr line). Compiled target only.
+func nativeDecodeImageProbe(path: String) unsafe extern("rae_ext_Gpu2d_decodeImageProbe") ret Int
+
+func decodeImageProbe(path: copy String) ret Int {
+  unsafe {
+    ret nativeDecodeImageProbe(path: path)
+  }
+}
+
+# Decode+upload `path` and register it under `key` (returns the handle, 0 on
+# failure). Lets a renderer resolve a Sprite.textureKey to an image without a
+# Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.
+func loadImageKey(canvas: mod Gpu2dCanvas, key: copy String, path: copy String) ret Int {
+  ret canvasLoadImageKey(canvas: canvas, key: key, path: path)
+}
+
+# Register an image straight from RGBA pixels generated in Rae (#539) — no file.
+# `pixels` is one packed int per pixel: r | g<<8 | b<<16 | a<<24 (order R,G,B,A).
+func registerImageRgba(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  pixels: view Buffer(Int)
+  w: copy Int
+  h: copy Int
+) pub ret Int {
+  let handle: Int = canvasRegisterImageRgba(
+    canvas: canvas
+    pixels: pixels
+    width: w
+    height: h
+  )
+  if handle > 0 {
+    canvasRegisterImageKey(canvas: canvas, key: key, handle: handle)
+  }
+  ret handle
+}
+
+func hasImageKey(canvas: view Gpu2dCanvas, key: view String) ret Bool {
+  ret canvasHasImageKey(canvas: canvas, key: key)
+}
+
+func drawImageKey(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+) {
+  canvasDrawImageKey(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+  )
+}
+
+# Rotation (#1003): until clearRotation, every box, image and glyph drawn turns
+# by `angle` radians about (pivotX, pivotY) in design units. Clips stay
+# axis-aligned. Cleared at every beginFrame.
+func setRotation(
+  canvas: mod Gpu2dCanvas
+  angle: copy Float
+  pivotX: copy Float
+  pivotY: copy Float
+) {
+  canvasSetRotation(
+    canvas: canvas
+    angle: angle
+    pivotX: pivotX
+    pivotY: pivotY
+  )
+}
+
+func clearRotation(canvas: mod Gpu2dCanvas) {
+  canvasClearRotation(canvas: canvas)
+}
+
+# Nine-slice (#1003): the image's left/top/right/bottom source pixels keep that
+# thickness (design units) at the destination's edges; the middle stretches.
+func drawImageKeyNineSlice(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  left: copy Float
+  top: copy Float
+  right: copy Float
+  bottom: copy Float
+  tint: copy Int
+) {
+  canvasDrawImageKeyNineSlice(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    left: left
+    top: top
+    right: right
+    bottom: bottom
+    tint: tint
+  )
+}
+
+# Tiled (#1003): the image repeats tileX x tileY times across the rect.
+func drawImageKeyTiled(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  tileX: copy Float
+  tileY: copy Float
+) {
+  canvasDrawImageKeyTiled(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+    tileX: tileX
+    tileY: tileY
+  )
+}
+
+# Draw a registered image with ScaleMode semantics:
+# 0 = fit, 1 = fill/cover-crop, 2 = stretch.
+func drawImageKeyScaled(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  scaleMode: copy Int
+) {
+  canvasDrawImageKeyScaled(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+    scaleMode: scaleMode
+  )
+}
+
+# Draw image `handle` into the rect at (x,y) sized w×h, with optional corner
+# `radius`. `tint` is 0xAARRGGBB applied multiplicatively — 0xFFFFFFFF draws
+# the image unchanged; a solid color tints a white/alpha icon to that color.
+# Submitted between beginFrame/endFrame; drawn above boxes, below text.
+func drawImage(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  handle: copy Int
+  tint: copy Int
+) {
+  canvasDrawImage(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    handle: handle
+    tint: tint
+  )
+}
