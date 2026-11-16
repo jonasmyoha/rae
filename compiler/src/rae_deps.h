@@ -60,6 +60,9 @@ int rae_deps_count(void);
 /* `normalized` is a `/`-separated import path. When its first segment names a
  * registered dep, return a malloc'd path to <depdir>/<rest>.rae if that file
  * exists (NULL otherwise). */
+/* The folder of the dependency that owns `normalized`'s prefix, and the rest of the path after it
+ * (import_case); NULL when no dependency owns it. */
+const char* rae_deps_dir_for(const char* normalized, const char** rest_out);
 char* rae_deps_resolve_module_file(const char* normalized);
 
 /* Folder-package form: the dep dir itself for `import x`, or <depdir>/<rest>

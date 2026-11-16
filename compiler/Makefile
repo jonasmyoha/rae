@@ -47,6 +47,7 @@ CFLAGS += -DRAE_RUNTIME_SOURCE_DIR=\"$(RUNTIME_DIR)\"
 CFLAGS += -MMD -MP
 
 SRCS = $(SRC_DIR)/main.c \
+       $(SRC_DIR)/import_case.c \
        $(SRC_DIR)/arena.c \
        $(SRC_DIR)/str.c \
        $(SRC_DIR)/diag.c \

@@ -7212,30 +7212,36 @@ static bool sema_is_module_name(AstModule* module, Str name) {
 // project folders (particles/), all of which are valid namespace qualifiers
 // whose calls sema leaves for the backend to resolve. This broader scan keeps
 // sema_report_bad_receiver from flagging those as unknown receivers.
-static bool sema_ci_eq(const char* comp, Str name) {
-    // Case-insensitive equality. A folder namespace is camelCase on disk
-    // (`particles/`) but is qualified PascalCase in code (`Particles.tick()`),
-    // and the backend resolves that case-insensitively — mirror it here so a
-    // valid folder/module qualifier is never flagged as an unknown receiver.
-    if (strlen(comp) != name.len) return false;
+/* docs/module-model-options.md rule 8: a qualifier is spelled as its module or folder is, with
+ * the same upper and lower case. `name` exactly a module's last component or a project folder
+ * namespace: true. A name that matches one only when case is ignored is not one: false, with the
+ * real spelling copied into `near` (when given) for the diagnostic. */
+static void sema_note_case_near(const char* comp, Str name, char* near, size_t cap) {
+    if (!near || near[0] || strlen(comp) != name.len) return;
     for (size_t i = 0; i < name.len; i++) {
         char a = comp[i], b = name.data[i];
         if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
         if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
-        if (a != b) return false;
+        if (a != b) return;
     }
-    return true;
+    snprintf(near, cap, "%s", comp);
 }
-static bool sema_name_is_module_component(AstModule* module, Str name) {
+static bool sema_component_is(const char* comp, Str name, char* near, size_t cap) {
+    if (strlen(comp) == name.len && memcmp(comp, name.data, name.len) == 0) return true;
+    sema_note_case_near(comp, name, near, cap);
+    return false;
+}
+static bool sema_name_is_module_component(AstModule* module, Str name, char* near, size_t cap) {
+    if (near && cap) near[0] = '\0';
     if (sema_is_module_name(module, name)) return true;
     for (AstDecl* d = module->decls; d; d = d->next) {
         if (d->module_name) {
             const char* slash = strrchr(d->module_name, '/');
             const char* comp = slash ? slash + 1 : d->module_name;
-            if (sema_ci_eq(comp, name)) return true;
+            if (sema_component_is(comp, name, near, cap)) return true;
         }
         char ns[256]; sema_project_namespace(d, ns, sizeof ns);
-        if (ns[0] != '\0' && sema_ci_eq(ns, name)) return true;
+        if (ns[0] != '\0' && sema_component_is(ns, name, near, cap)) return true;
     }
     for (const AstImport* imp = module->imports; imp; imp = imp->next) {
         if (!imp->module) continue;
@@ -7243,7 +7249,7 @@ static bool sema_name_is_module_component(AstModule* module, Str name) {
             if (!d->module_name) continue;
             const char* slash = strrchr(d->module_name, '/');
             const char* comp = slash ? slash + 1 : d->module_name;
-            if (sema_ci_eq(comp, name)) return true;
+            if (sema_component_is(comp, name, near, cap)) return true;
         }
     }
     return false;
@@ -7270,11 +7276,17 @@ static void sema_report_bad_receiver(CompilerContext* ctx, AstModule* module,
     bool is_func = sym && sym->decl && sym->decl->kind == AST_DECL_FUNC;
     if (sym && !is_func) return;              // value binding, type/enum, or generic param
     if (sema_arg_is_type_name(symbols, recv)) return;  // primitive type namespace
-    if (sema_name_is_module_component(module, name)) return;
+    char near[256];
+    if (sema_name_is_module_component(module, name, near, sizeof near)) return;
     Str aliased = sema_resolve_alias(s_current_decl_origin, name);
-    if (aliased.data && sema_name_is_module_component(module, aliased)) return;
-    char buf[256];
-    if (is_func) {
+    if (aliased.data && sema_name_is_module_component(module, aliased, NULL, 0)) return;
+    char buf[512];
+    if (!is_func && near[0]) {
+        snprintf(buf, sizeof(buf),
+            "no module '%.*s'; the module is '%s': write `%s.` (a qualifier is spelled as its module, "
+            "with the same upper and lower case)",
+            (int)name.len, name.data, near, near);
+    } else if (is_func) {
         snprintf(buf, sizeof(buf),
             "'%.*s' names a function, not a value: a bare function name is not a value in Rae; call it as %.*s(...), or this name may refer to a binding that no longer exists",
             (int)name.len, name.data, (int)name.len, name.data);
@@ -8646,7 +8658,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         /* The file component of a package module (`Poller`
                          * for `net/Poller`): tried too, and committed below
                          * only if a module function resolves */
-                        else if (sema_name_is_module_component(module, lhs)) {
+                        else if (sema_name_is_module_component(module, lhs, NULL, 0)) {
                             modname = lhs;
                             via_component = true;
                         }

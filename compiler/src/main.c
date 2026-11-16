@@ -43,6 +43,7 @@
 #include "rae_format.h"
 #include "rae_version.h"
 #include "rae_deps.h"
+#include "import_case.h"
 #include "rae_pack_edit.h"
 #include "rae_toolchain.h"
 #include "rae_package_native.h"
@@ -2015,6 +2016,16 @@ static bool module_graph_load_module(ModuleGraph* graph,
     free(raw);
     if (!normalized) {
       return false;
+    }
+    /* docs/module-model-options.md rule 8: spelled as on disk, on every system */
+    {
+      char case_message[PATH_MAX + 512];
+      if (!import_case_check(normalized, import->is_open ? "open" : "import", graph->root_path,
+                             compiler_stdlib_dir(), case_message, sizeof case_message)) {
+        diag_error(file_path, (int)import->line, (int)import->column, case_message);
+        free(normalized);
+        return false;
+      }
     }
     char* child_file = resolve_module_file(graph->root_path, normalized);
     if (!child_file || !file_exists(child_file)) {

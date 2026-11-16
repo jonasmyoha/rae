@@ -162,6 +162,17 @@ path relative to the importing file. `import "./x"` and `import "../x"` are
 rejected where they are written: the project's own files are visible
 without an import (above), so a relative path is never needed.
 
+**Spelled as on disk, with the same upper and lower case (0.3.173,
+docs/module-model-options.md rule 8).** Every segment of an import or open
+path is compared with the exact file or folder name, on every system: macOS
+and Windows ignore case in file names, so `import vec3` used to load
+`lib/Vec3.rae` there and fail on Linux. It is now refused everywhere with the
+right spelling: `no module 'vec3'; the file is 'Vec3.rae': write `import
+Vec3``. A dependency's prefix is its name from the pack; the rest is checked
+in its folder. A qualifier is spelled exactly as its module or folder too:
+`math.sqrt` for the module `Math` is refused (`the module is 'Math'`), and so
+is `Particles.tick()` for the folder `particles/` (cases 1499-1502).
+
 ### `import module`
 
 Makes the module available through its namespace, and makes its functions

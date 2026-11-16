@@ -46,7 +46,7 @@ tell which.
    module only on that target. The per-platform code of a module can then live in its own files
    instead of `when` branches in one file.
 7. **Diagnostics** name the file and line where a declaration really is.
-8. **Names are checked against the disk exactly.** Casing carries meaning here, and macOS and
+8. **Names are checked against the disk exactly** (implemented in Rae 0.3.173, before the rest). Casing carries meaning here, and macOS and
    Windows ignore case in file names (today `import vec3` loads `lib/Vec3.rae` on a Mac). The
    compiler compares every import path segment with the exact name on disk and reports a
    mismatch as an error that gives the right spelling.

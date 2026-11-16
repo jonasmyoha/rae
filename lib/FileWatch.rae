@@ -9,10 +9,10 @@
 #
 # How callers wire it in:
 #   1. Build a `List(String)` of paths to watch.
-#   2. Call `fileWatch.createFileWatcher(paths, enabled, intervalSeconds)` once after
+#   2. Call `FileWatch.createFileWatcher(paths, enabled, intervalSeconds)` once after
 #      the paths are known. The snapshot records each file's mtime so
 #      the first check is quiet.
-#   3. Once per frame, call `fileWatch.checkForChanges(watcher, getTime())`.
+#   3. Once per frame, call `FileWatch.checkForChanges(watcher, getTime())`.
 #      It is throttled by `intervalSeconds`, so calling every frame is cheap —
 #      most calls early-return. Where the OS delivers file notifications
 #      (lib/FileNotify.rae) a notification also makes it look at once, and

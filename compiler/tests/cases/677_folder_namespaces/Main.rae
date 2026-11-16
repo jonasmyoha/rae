@@ -2,7 +2,9 @@
 # enemies/ and particles/, so a BARE `tick()` would be ambiguous — qualify it
 # by folder (no import/open needed). A name unique to one folder (`spawnWave`)
 # is still callable bare, even across folders (the whole project is auto-open).
+# The qualifier is the folder spelled as on disk: `particles.tick()`, not
+# `Particles.tick()` (docs/module-model-options.md rule 8; case 1502).
 func main() {
-  log("enemies={enemies.tick()} particles={Particles.tick()}")
+  log("enemies={enemies.tick()} particles={particles.tick()}")
   log("unique bare={spawnWave()}")
 }

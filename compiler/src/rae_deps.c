@@ -549,6 +549,14 @@ static const ResolvedDep* lookup(const char* normalized, const char** rest_out) 
   return NULL;
 }
 
+const char* rae_deps_dir_for(const char* normalized, const char** rest_out) {
+  const char* rest = NULL;
+  const ResolvedDep* dep = lookup(normalized, &rest);
+  if (!dep) return NULL;
+  if (rest_out) *rest_out = rest;
+  return dep->dir;
+}
+
 char* rae_deps_resolve_module_file(const char* normalized) {
   const char* rest = NULL;
   const ResolvedDep* dep = lookup(normalized, &rest);
