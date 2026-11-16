@@ -796,6 +796,9 @@ The compiler has one version, `compiler/VERSION` — a single semver line
   language stops moving.
   `0.3.0` (2026-11-04) is the first named one: the start of the package manager (the toolchain
   store, `./rae`, exact pins in the `.raepack`, and the first package).
+  `0.4.0` (named 2026-11-16) is the next: module folders (a module is a PascalCase file or a
+  PascalCase folder, docs/module-model-options.md). The tasks that build it bump PATCH; the
+  task `[release: modules, Rae 0.4.0, then push]` sets 0.4.0 once all of it is in.
 - **Bump discipline: in the SAME commit as the change, not after.** A commit
   that changes language, `lib/` or CLI behavior in a way users should be
   able to tell apart from the last release bumps `compiler/VERSION`'s PATCH
