@@ -76,8 +76,8 @@ let logo: Int = Gpu2d.loadImageKey(canvas: canvas, key: "logo", path: "logo.png"
 Gpu2d.endFrame(canvas: canvas)
 ```
 
-(Today, since 0.3.172, the image functions are in a separate module and the call reads
-`Gpu2dImages.loadImageKey`; with this proposal they go back into `Gpu2d`.)
+(In 0.3.172 only, the image functions were a separate module and the call read
+`Gpu2dImages.loadImageKey`; since 0.3.175 lib/Gpu2d/ is a module folder holding them again.)
 
 Vectors stay exactly as they are:
 

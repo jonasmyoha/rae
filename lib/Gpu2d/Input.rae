@@ -1,0 +1,167 @@
+# Gpu2d: input, valid after pollClose each frame (lib/Gpu2d/ is one module, see Window.rae)
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- Input (valid after pollClose each frame) ----------------------------
+# pollClose records mouse/keyboard/wheel state while it pumps the event queue,
+# so these read this frame's input. Coordinates are in DESIGN units (the same
+# space drawRect etc. take), so hit-testing lines up with what was drawn.
+func nativePointerX() mainThread unsafe extern("rae_ext_Gpu2d_pointerX") ret Float
+
+func pointerX() ret Float {
+  unsafe {
+    ret nativePointerX()
+  }
+}
+
+func nativePointerY() mainThread unsafe extern("rae_ext_Gpu2d_pointerY") ret Float
+
+func pointerY() ret Float {
+  unsafe {
+    ret nativePointerY()
+  }
+}
+
+# Multitouch (#526): active finger count + per-finger position in design units.
+# On desktop this is 0 (use the mouse pointer); on iOS every touch is reported so
+# a UI can drive a joystick with one finger and the camera with another.
+func nativeTouchCount() mainThread unsafe extern("rae_ext_Gpu2d_touchCount") ret Int
+
+func touchCount() ret Int {
+  unsafe {
+    ret nativeTouchCount()
+  }
+}
+
+func nativeTouchX(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchX") ret Float
+
+func touchX(index: copy Int) ret Float {
+  unsafe {
+    ret nativeTouchX(index: index)
+  }
+}
+
+func nativeTouchY(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchY") ret Float
+
+func touchY(index: copy Int) ret Float {
+  unsafe {
+    ret nativeTouchY(index: index)
+  }
+}
+
+# Stable finger id (grab a finger at press, hold it for the whole drag) + whether
+# it went down this frame (edge). id is -1 out of range.
+func nativeTouchId(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchId") ret Int
+
+func touchId(index: copy Int) ret Int {
+  unsafe {
+    ret nativeTouchId(index: index)
+  }
+}
+
+func nativeTouchPressed(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_touchPressed") ret Bool
+
+func touchPressed(index: copy Int) ret Bool {
+  unsafe {
+    ret nativeTouchPressed(index: index)
+  }
+}
+
+# OS safe-area insets (notch / home indicator / rounded corners) in design units.
+# 0 on platforms without insets. Lay HUD + UI chrome inside these.
+func nativeSafeTop() mainThread unsafe extern("rae_ext_Gpu2d_safeTop") ret Float
+
+func safeTop() ret Float {
+  unsafe {
+    ret nativeSafeTop()
+  }
+}
+
+func nativeSafeBottom() mainThread unsafe extern("rae_ext_Gpu2d_safeBottom") ret Float
+
+func safeBottom() ret Float {
+  unsafe {
+    ret nativeSafeBottom()
+  }
+}
+
+func nativeSafeLeft() mainThread unsafe extern("rae_ext_Gpu2d_safeLeft") ret Float
+
+func safeLeft() ret Float {
+  unsafe {
+    ret nativeSafeLeft()
+  }
+}
+
+func nativeSafeRight() mainThread unsafe extern("rae_ext_Gpu2d_safeRight") ret Float
+
+func safeRight() ret Float {
+  unsafe {
+    ret nativeSafeRight()
+  }
+}
+
+# Left mouse button held this frame.
+func nativePointerDown() mainThread unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
+
+func pointerDown() ret Bool {
+  unsafe {
+    ret nativePointerDown()
+  }
+}
+
+func nativePointerPressed() mainThread unsafe extern("rae_ext_Gpu2d_pointerPressed") ret Bool
+
+func pointerPressed() ret Bool {
+  unsafe {
+    ret nativePointerPressed()
+  }
+}
+
+func nativePointerReleased() mainThread unsafe extern("rae_ext_Gpu2d_pointerReleased") ret Bool
+
+func pointerReleased() ret Bool {
+  unsafe {
+    ret nativePointerReleased()
+  }
+}
+
+# Per-frame mouse-wheel / trackpad delta (positive = scrolled up), matching
+# raylib's getMouseWheelMove semantics.
+func nativeWheelMove() mainThread unsafe extern("rae_ext_Gpu2d_wheelMove") ret Float
+
+func wheelMove() ret Float {
+  unsafe {
+    ret nativeWheelMove()
+  }
+}
+
+# Desktop cursor kind. 0=arrow, 1=pointer/hand, 2=text, 3=horizontal resize,
+# 4=vertical resize, 5=crosshair, 6=not-allowed.
+func nativeSetMouseCursor(kind: Int) mainThread unsafe extern("rae_ext_Gpu2d_setMouseCursor")
+
+func setMouseCursor(kind: copy Int) {
+  unsafe {
+    nativeSetMouseCursor(kind: kind)
+  }
+}
+
+# Monotonic wall-clock seconds since process start (for scroll/animation timing).
+# Epoch seconds. Float64 deliberately: as f32 two calls one frame apart
+# return the SAME value (~1.7e9 has ~128s granularity), so every frame delta
+# would be exactly 0.0. See docs/primitive-types.md.
+func nativeNowSeconds() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
+
+func nowSeconds() ret Float64 {
+  unsafe {
+    ret nativeNowSeconds()
+  }
+}

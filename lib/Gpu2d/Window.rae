@@ -1,0 +1,238 @@
+# GPU 2D renderer, WebGPU render path (docs/webgpu-2d-ui-renderer.md). It OWNS
+# the window surface: SDL3 makes the window and Metal layer, wgpu-native wraps
+# it as a surface, and frames are rendered and presented on the GPU (the same
+# WGSL and API as the browser). Implemented in the RAE_HAS_WEBGPU + RAE_HAS_SDL3
+# block of compiler/runtime/rae_runtime.c. The window is shared with lib/Sdl3,
+# so its input functions work against this window. The window, input and
+# present calls are `mainThread` (docs/realtime-language-design.md §4.3).
+#
+# lib/Gpu2d/ is one module (docs/module-model-options.md): this file holds the window,
+# the surface and the coordinate system; Input, Frame, Shapes, Clipping, Images and Text
+# hold the rest, all called as `Gpu2d.`.
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- Window + surface ----------------------------------------------------
+# Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
+# configure its swapchain, with the program's icon (Gpu2dWindowIcon). Do not
+# also call sdl3.initWindow (its SDL_Renderer fights wgpu for the drawable).
+func nativeInitWindow(
+  width: Int
+  height: Int
+  title: String
+) mainThread unsafe extern("rae_ext_Gpu2d_initWindow")
+
+func initWindow(width: copy Int, height: copy Int, title: copy String) {
+  chooseDeviceFeatures()  # before the device exists (gpu/DeviceFeatures)
+  unsafe {
+    nativeInitWindow(width: width, height: height, title: title)
+  }
+  setProgramIcon()
+}
+
+# Pump the OS event queue; returns true once the user has asked to close the
+# window (or a headless time budget elapsed). Call once per frame.
+func nativePollClose() mainThread unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
+
+func pollClose() ret Bool {
+  unsafe {
+    ret nativePollClose()
+  }
+}
+
+# Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).
+func nativeWindowWidth() mainThread unsafe extern("rae_ext_Gpu2d_windowWidth") ret Int
+
+func windowWidth() ret Int {
+  unsafe {
+    ret nativeWindowWidth()
+  }
+}
+
+func nativeWindowHeight() mainThread unsafe extern("rae_ext_Gpu2d_windowHeight") ret Int
+
+func windowHeight() ret Int {
+  unsafe {
+    ret nativeWindowHeight()
+  }
+}
+
+func nativeSetWindowPosition(
+  x: Int
+  y: Int
+) mainThread unsafe extern("rae_ext_Gpu2d_setWindowPosition")
+
+func setWindowPosition(x: copy Int, y: copy Int) {
+  unsafe {
+    nativeSetWindowPosition(x: x, y: y)
+  }
+}
+
+func nativeSetWindowSize(w: Int, h: Int) mainThread unsafe extern("rae_ext_Gpu2d_setWindowSize")
+
+func setWindowSize(w: copy Int, h: copy Int) {
+  unsafe {
+    nativeSetWindowSize(w: w, h: h)
+  }
+}
+
+func nativeWindowPositionX() mainThread unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
+
+func windowPositionX() ret Int {
+  unsafe {
+    ret nativeWindowPositionX()
+  }
+}
+
+func nativeWindowPositionY() mainThread unsafe extern("rae_ext_Gpu2d_windowPositionY") ret Int
+
+func windowPositionY() ret Int {
+  unsafe {
+    ret nativeWindowPositionY()
+  }
+}
+
+# True once after the OS reports a window resize (edge-triggered; the flag
+# is cleared on read). The app recomputes its viewport/extent and rebuilds.
+func nativeWindowResized() mainThread unsafe extern("rae_ext_Gpu2d_windowResized") ret Bool
+
+func windowResized() ret Bool {
+  unsafe {
+    ret nativeWindowResized()
+  }
+}
+
+# One-shot, like windowResized: reading it clears it. Persisting where the user
+# put the window is built ON these in Rae (lib/ui/WindowGeometry.rae), not down
+# in the runtime.
+func nativeWindowMoved() mainThread unsafe extern("rae_ext_Gpu2d_windowMoved") ret Bool
+
+func windowMoved() ret Bool {
+  unsafe {
+    ret nativeWindowMoved()
+  }
+}
+
+# False while the window is hidden / minimized / occluded (app switched away or
+# fully covered). Apps should skip their render and park in waitEvents when this
+# is false: rendering while dark wastes power and, on macOS, leaks GPU memory
+# (the Metal layer stops recycling drawables while backgrounded). Not edge-
+# triggered — reflects the current state every call.
+func nativeWindowVisible() mainThread unsafe extern("rae_g2d_window_visible") ret Bool
+
+func windowVisible() ret Bool {
+  unsafe {
+    ret nativeWindowVisible()
+  }
+}
+
+# True under any of the headless-budget envs (RAE_UI_HEADLESS,
+# RAE_SDL_HEADLESS_MS, RAE_HEADLESS_FRAMES) -- the runtime's own definition,
+# the same one that creates the window hidden. A headless run renders to the
+# offscreen target and screenshots that, so it must NOT be treated as
+# "backgrounded" by the visibility rule below (#988): the drawable the rule
+# protects is already refused by the present path while the window is dark.
+func nativeHeadlessRequested() unsafe extern("rae_ext_Gpu2d_headlessRequested") ret Bool
+
+func headlessRequested() ret Bool {
+  unsafe {
+    ret nativeHeadlessRequested()
+  }
+}
+
+# The visibility rule as the render decision sees it: a hidden HEADLESS window
+# still renders (offscreen + screenshot); a hidden/minimized/occluded
+# interactive window does not.
+func renderableNow() ret Bool {
+  if headlessRequested() {
+    ret true
+  }
+  ret windowVisible()
+}
+
+# The universal per-frame render decision, so no app has to hand-roll it. Render
+# this frame only if the app wants to AND the window is actually visible. NEVER
+# render while hidden/minimized/occluded: it wastes power and, on macOS, leaks
+# GPU memory — the Metal drawable pool stops recycling while backgrounded, so
+# every frame allocates a fresh drawable and the deferred pipeline's driver
+# allocations pile up (measured 170MB -> 1.4GB across a few app switches). The
+# app passes its own "something changed" signal and branches: render, else park
+# in waitEvents. Folding the visibility rule in here is what stops that rule from
+# being a per-app footgun — the engine present path refuses to present while dark
+# as a hard backstop, but skipping the whole render is what avoids the waste.
+func shouldRenderFrame(appNeedsRender: view Bool) ret Bool {
+  if renderableNow() is false {
+    ret false
+  }
+  ret appNeedsRender
+}
+
+# Busy-loop convenience for apps that render every frame (games, always-on
+# animation): render this frame only if the window is visible. When hidden it
+# PARKS briefly and returns false, so `if Gpu2d.renderGate() { ...render... }`
+# gets both the macOS backgrounded-render leak fix AND avoids a busy spin, with
+# no else branch. Event-driven loops that already compute a needsRender should
+# use shouldRenderFrame + their own waitEvents instead.
+func renderGate() ret Bool {
+  if renderableNow() {
+    ret true
+  }
+  waitEvents(timeoutSeconds: 0.25)
+  ret false
+}
+
+# --- Coordinate system (#112) --------------------------------------------
+# Draw coordinates are in DESIGN units (du): 3 per logical point, origin top-left, y down, the
+# layout area = the window in points x 3, never a scaled fixed canvas for UI (the one model of
+# every Rae program, docs/ui-coordinate-and-responsive-layout.md rules 1-6; a fixed area is a
+# ScaleToFit subtree). The UI library sets the design resolution; pixels appear only here,
+# du -> px = dpr / unitScale. Layers: design units --(scale + offset / fit)--> px --> clip space.
+# fit: 0 = fit (contain, letterboxed), 1 = fill (cover, cropped), 2 = stretch.
+# Before a design resolution is set, or after width/height <= 0, a unit is one physical pixel:
+# the raw state of a window, not a layout model.
+func nativeSetDesignResolution(
+  width: Float
+  height: Float
+  fit: Int
+) unsafe extern("rae_ext_Gpu2d_setDesignResolution")
+
+func setDesignResolution(width: copy Float, height: copy Float, fit: copy Int) {
+  unsafe {
+    nativeSetDesignResolution(width: width, height: height, fit: fit)
+  }
+}
+
+# Current design-canvas size in design units (the window's physical size when
+# no design resolution is set). Lay out against these.
+func nativeDesignWidth() unsafe extern("rae_ext_Gpu2d_designWidth") ret Float
+
+func designWidth() ret Float {
+  unsafe {
+    ret nativeDesignWidth()
+  }
+}
+
+func nativeDesignHeight() unsafe extern("rae_ext_Gpu2d_designHeight") ret Float
+
+func designHeight() ret Float {
+  unsafe {
+    ret nativeDesignHeight()
+  }
+}
+
+# Device pixel ratio: physical pixels per logical point (2.0 on retina).
+func nativeDpr() mainThread unsafe extern("rae_ext_Gpu2d_dpr") ret Float
+
+func dpr() ret Float {
+  unsafe {
+    ret nativeDpr()
+  }
+}

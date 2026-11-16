@@ -1,0 +1,134 @@
+# Gpu2d: 2D primitives on the box uber-shader (lib/Gpu2d/ is one module, see Window.rae)
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- 2D primitives (#110, Box uber-shader) -------------------------------
+# Submit primitives between beginFrame and endFrame; they are batched and
+# drawn in one instanced draw at endFrame, in submission order (painter's).
+# Colors are 0xAARRGGBB — alpha in the top byte; use 0xFF...... for opaque.
+# Coordinates and sizes are in physical pixels (see windowWidth/windowHeight).
+# Rounded corners and borders are antialiased analytically (no MSAA).
+
+# Filled axis-aligned rectangle.
+# The primitives are queued on the app's Gpu2dCanvas (#913) — the CPU batch
+# and its GPU pass both live there; these are the Gpu2d-spelled entry points.
+func drawRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  color: copy Int
+) {
+  canvasDrawRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    color: color
+  )
+}
+
+# Filled rounded rectangle (uniform corner radius).
+func drawRoundedRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  color: copy Int
+) {
+  canvasDrawRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    color: color
+  )
+}
+
+# Rounded rectangle with a fill and a stroked border `borderWidth` px wide
+# (drawn inset from the edge). radius 0 gives a sharp-cornered box.
+func drawBox(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  fill: copy Int
+  borderWidth: copy Float
+  border: copy Int
+) {
+  canvasDrawBox(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    fill: fill
+    borderWidth: borderWidth
+    border: border
+  )
+}
+
+# Filled rounded rectangle with a linear gradient. `angleDeg` follows the UI
+# GradientFill convention: 0 = left-to-right, 90 = top-to-bottom.
+func drawGradientRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  from: copy Int
+  to: copy Int
+  angleDeg: copy Float
+) {
+  canvasDrawGradientRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    from: from
+    to: to
+    angleDeg: angleDeg
+  )
+}
+
+# Antialiased line from (x0,y0) to (x1,y1), `thickness` units wide, with
+# rounded caps (a rotated capsule). Works at any angle.
+func drawLine(
+  canvas: mod Gpu2dCanvas
+  x0: copy Float
+  y0: copy Float
+  x1: copy Float
+  y1: copy Float
+  thickness: copy Float
+  color: copy Int
+) {
+  canvasDrawLine(
+    canvas: canvas
+    x0: x0
+    y0: y0
+    x1: x1
+    y1: y1
+    thickness: thickness
+    color: color
+  )
+}

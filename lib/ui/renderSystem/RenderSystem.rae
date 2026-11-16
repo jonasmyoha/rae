@@ -36,7 +36,6 @@ open ui/renderSystem/RenderPaintCache
 open ui/renderSystem/RenderSprite
 open ui/renderSystem/RenderCanvasGuides
 import Gpu2d
-import Gpu2dImages
 import Math
 import Gpu2dText
 import SdfText
@@ -306,7 +305,7 @@ func paintEntityG(
   # about its origin — the transform pass already moved the origin so the
   # authored pivot is the fixed point.
   if wt.rotation is not 0.0 {
-    Gpu2dImages.setRotation(
+    Gpu2d.setRotation(
       canvas: canvas
       angle: wt.rotation
       pivotX: wt.position.x
@@ -493,7 +492,7 @@ func paintEntityG(
   # gpu2d has separate box/image/text pipelines; the canvas flushes by itself where a later item
   # would otherwise draw under an earlier one (Gpu2dCanvasFrame canvasKeepOrder), so a node needs no
   # flush of its own.
-  Gpu2dImages.clearRotation(canvas: canvas)
+  Gpu2d.clearRotation(canvas: canvas)
 }
 
 # True when every pixel of `entityId`'s subtree is inside its own box: it clips its descendants

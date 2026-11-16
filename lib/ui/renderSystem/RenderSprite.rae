@@ -14,7 +14,6 @@ open ui/renderSystem/RenderPlane
 open ui/renderSystem/RenderWires
 open ui/renderSystem/RenderPaintCache
 import Gpu2d
-import Gpu2dImages
 import Math
 import Gpu2dText
 import SdfText
@@ -183,11 +182,11 @@ func paintSpriteG(
       }
     }
   }
-  if Gpu2dImages.hasImageKey(canvas: canvas, key: sp.textureKey) {
+  if Gpu2d.hasImageKey(canvas: canvas, key: sp.textureKey) {
     # Nine-slice and tiling (#1003) take precedence over the scale mode: a
     # nine-slice keeps its authored borders, a tileScale repeats the image.
     if sp.hasNineSlice {
-      Gpu2dImages.drawImageKeyNineSlice(
+      Gpu2d.drawImageKeyNineSlice(
         canvas: canvas
         key: sp.textureKey
         x: imageX
@@ -203,7 +202,7 @@ func paintSpriteG(
       ret
     }
     if sp.tileScale.x is not 1.0 or sp.tileScale.y is not 1.0 {
-      Gpu2dImages.drawImageKeyTiled(
+      Gpu2d.drawImageKeyTiled(
         canvas: canvas
         key: sp.textureKey
         x: imageX
@@ -217,7 +216,7 @@ func paintSpriteG(
       )
       ret
     }
-    Gpu2dImages.drawImageKeyScaled(
+    Gpu2d.drawImageKeyScaled(
       canvas: canvas
       key: sp.textureKey
       x: imageX

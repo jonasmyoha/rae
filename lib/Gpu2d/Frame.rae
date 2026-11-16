@@ -1,0 +1,167 @@
+# Gpu2d: the idle wait of a hybrid loop, and the frame (lib/Gpu2d/ is one module, see Window.rae)
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- Idle wait (hybrid loop) ---------------------------------------------
+# Block up to `timeoutSeconds` for the next OS event (returns immediately if one is
+# already queued), without dequeuing it — the following pollClose drains it.
+# Park here when idle so the app sits at ~0% CPU; busy-render (timeout 0) while
+# animating. See docs/ui-render-loop-performance.md.
+func nativeWaitEvents(timeoutSeconds: Float) mainThread unsafe extern("rae_ext_Gpu2d_waitEvents")
+
+func waitEvents(timeoutSeconds: copy Float) {
+  unsafe {
+    nativeWaitEvents(timeoutSeconds: timeoutSeconds)
+  }
+}
+
+# Release the surface + window. The wgpu device stays cached for reuse.
+func nativeCloseWindow() mainThread unsafe extern("rae_ext_Gpu2d_closeWindow")
+
+func closeWindow() {
+  unsafe {
+    nativeCloseWindow()
+  }
+}
+
+# --- Frame ---------------------------------------------------------------
+# The frame command lifecycle is Rae (#504/#910/#915): the canvas opens a
+# manager Recording + a pass over the adopted offscreen target, endFrame
+# flushes the batches, submits it tracked and hands the platform present /
+# screenshot tail back to C. C keeps the present-flag reset (g2dFrameReset),
+# owns the persistent offscreen color target and does the present tail.
+func nativeG2dFrameReset() mainThread unsafe extern("rae_g2d_frame_reset")
+
+func g2dFrameReset() {
+  unsafe {
+    nativeG2dFrameReset()
+  }
+}
+
+# Present (#920): C copies the canvas's offscreen texture into the surface
+# drawable and presents (skipped while the window is dark — no drawable is
+# acquired; the wait for the GPU is gpu/FramePacer's, run after it), and in a headless run reads
+# the texture back for the
+# RAE_GPU2D_SCREENSHOT capture. The texture is the canvas's; C only borrows it.
+func nativeG2dPresent(
+  texture: Ptr
+  width: Int
+  height: Int
+) mainThread unsafe extern("rae_g2d_present")
+
+func g2dPresent(canvas: mod Gpu2dCanvas) {
+  unsafe {
+    let texture: Ptr = canvasOffscreenTexture(canvas: canvas)
+    if texture is webgpuNull() {
+      ret
+    }
+    nativeG2dPresent(texture: texture, width: canvas.offscreenWidth, height: canvas.offscreenHeight)
+    presentCanvasToSurface(canvas: canvas)  # the drawable last (render-perf-11)
+  }
+}
+
+func nativeG2dTick() mainThread unsafe extern("rae_g2d_tick")
+
+func g2dTick() {
+  unsafe {
+    nativeG2dTick()
+  }
+}
+
+# Acquire the offscreen target and begin a render pass that clears it to the
+# given linear RGBA color (components 0..1). Must be paired with endFrame.
+# #915: the frame is a manager Recording on the canvas — its pass stays open
+# for the flushes, endFrame submits it through the manager (tracked).
+func beginFrame(
+  canvas: mod Gpu2dCanvas
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  a: copy Float
+) {
+  g2dFrameReset()
+  canvasFrameBegin(canvas: canvas)
+  canvasOpenFrame(
+    canvas: canvas
+    clear: true
+    r: r
+    g: g
+    b: b
+    a: a
+  )
+}
+
+# Begin a 2D/UI overlay pass that preserves the persistent offscreen color
+# target produced by a preceding renderer pass. Pair with endFrame; this is the
+# only pass that should screenshot/present the composed frame.
+func beginFrameLoad(canvas: mod Gpu2dCanvas) {
+  g2dFrameReset()
+  canvasFrameBegin(canvas: canvas)
+  canvasOpenFrame(
+    canvas: canvas
+    clear: false
+    r: 0.0
+    g: 0.0
+    b: 0.0
+    a: 0.0
+  )
+}
+
+# Finish the render pass, submit the frame through the manager, present it
+# (C: copy the offscreen target into the surface drawable + present + poll,
+# still platform glue) and retire the frame's per-run objects behind the
+# tracked submission.
+func endFrame(canvas: mod Gpu2dCanvas) {
+  if endFrameSubmit(canvas: canvas) {
+    endFramePresent(canvas: canvas)
+  }
+}
+
+# endFrame in its two halves, for a caller that does something between them
+# (the deferred renderer's per-pass GPU timing marks the boundary): submit the
+# frame's 2D work, then copy it into the drawable and present. The first
+# answers false when no frame was open, and then the second must not run.
+func endFrameSubmit(canvas: mod Gpu2dCanvas) ret Bool {
+  # Advance the deterministic clock every frame, even one with no drawable yet.
+  g2dTick()
+  if not canvasFrameActive(canvas: canvas) {
+    ret false
+  }
+  flush(canvas: canvas)
+  canvasCloseFrame(canvas: canvas)
+  ret true
+}
+
+func endFramePresent(canvas: mod Gpu2dCanvas) {
+  notePresentStart(pacer: canvas.framePacer)
+  g2dPresent(canvas: canvas)
+  paceFrame(pacer: canvas.framePacer)
+  boxFrameEnd(canvas: canvas)
+}
+
+# True when the most recent endFrame copied to a surface drawable and presented.
+# Startup can render offscreen before the OS has a drawable; apps that skip idle
+# frames should keep their first frame dirty until this reports true.
+func nativeLastPresentOk() unsafe extern("rae_ext_Gpu2d_lastPresentOk") ret Bool
+
+func lastPresentOk() ret Bool {
+  unsafe {
+    ret nativeLastPresentOk()
+  }
+}
+
+# Flush queued primitives into the active render pass without ending the
+# frame. Use this when painter order must be preserved across primitive
+# pipelines (for example: image, then later shape, then text). Order within a
+# flush: boxes (the Rae box pass, #907), then images (#908), then text (#909).
+func flush(canvas: mod Gpu2dCanvas) {
+  canvasFlush(canvas: canvas)
+}

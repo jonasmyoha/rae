@@ -4,7 +4,6 @@
 # metadata; the decode is C and the textures + key table live on the app's
 # Gpu2dCanvas (#908), so every entry that touches an image takes the canvas.
 import Gpu2d
-import Gpu2dImages
 open Gpu2dCanvas
 
 enum ImageLoadStatus { none, pending, loaded, failed }
@@ -73,7 +72,7 @@ func imageRegistryHas(
     }
     # The canvas owns the render-time key table; consult it as the bridge for
     # images registered outside this registry.
-    ret Gpu2dImages.hasImageKey(canvas: canvas, key: key)
+    ret Gpu2d.hasImageKey(canvas: canvas, key: key)
   }
 }
 
@@ -194,7 +193,7 @@ func load(
     }
     let copiedKey: String = "{key}"
     let copiedPath: String = "{path}"
-    let handle: Int = Gpu2dImages.loadImageKey(canvas: canvas, key: copiedKey, path: copiedPath)
+    let handle: Int = Gpu2d.loadImageKey(canvas: canvas, key: copiedKey, path: copiedPath)
     upsertResult(
       reg: reg
       key: key

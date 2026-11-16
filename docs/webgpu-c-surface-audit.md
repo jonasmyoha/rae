@@ -234,7 +234,7 @@ lost the image texture table, `rae_g2d_init_img_pipeline`, `queue_image`,
 `flush_images`, the per-slot bind cache and every `rae_ext_Gpu2d_*Image*` entry
 point (`loadImage`, `loadImageKey`, `registerImageRgba`, `registerImageKeyHandle`,
 `hasImageKey`, `drawImage`, `drawImageKey`, `drawImageKeyScaled`, `imageView`);
-`Gpu2dImages.loadImage / loadImageKey / registerImageRgba / hasImageKey / drawImage*` (lib/Gpu2dImages, moved out of Gpu2d)
+`Gpu2d.loadImage / loadImageKey / registerImageRgba / hasImageKey / drawImage*` (lib/Gpu2d/Images.rae, a file of the module folder lib/Gpu2d/)
 now take `canvas`. The manager's dependency arena is compacted by relocation
 (`compactDependencies` copies the slices still owned by live / pending groups,
 submissions and readbacks) so the per-frame box groups and the cached image

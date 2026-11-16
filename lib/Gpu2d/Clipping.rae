@@ -1,0 +1,62 @@
+# Gpu2d: clipping with an axis-aligned scissor (lib/Gpu2d/ is one module, see Window.rae)
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- Clipping (#144, axis-aligned scissor) -------------------------------
+# Push a rectangular clip region (design units); subsequent draws are
+# clipped to it until the matching popClipRect. Clips nest — a pushed rect
+# intersects the current one — so a rounded card can hold a clipped scroll
+# list. Implemented as a render-pass scissor per contiguous same-clip run of
+# draws, preserving the box→image→text batch order. `popClipRect` restores
+# the previous region; an unmatched pop clears to no-clip. The stack lives on
+# the canvas (#915).
+func pushClipRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+) {
+  canvasPushClip(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: 0.0
+  )
+}
+
+# Rounded clip (#118): same as pushClipRect but the corners are rounded by
+# `radius` (design units). The box pipeline rounds the corners via a
+# fragment-shader SDF; the axis-aligned scissor still bounds every pipeline
+# to the clip bbox. Use for a rounded card that contains a scroll list.
+func pushClipRoundedRect(
+  canvas: mod Gpu2dCanvas
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+) {
+  canvasPushClip(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+  )
+}
+
+func popClipRect(canvas: mod Gpu2dCanvas) {
+  canvasPopClip(canvas: canvas)
+}

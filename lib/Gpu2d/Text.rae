@@ -1,0 +1,84 @@
+# Gpu2d: text as MSDF glyph quads (lib/Gpu2d/ is one module, see Window.rae)
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasText
+open Gpu2dCanvasFrame
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/FramePacer
+open gpu/DeviceFeatures
+open Gpu2dWindowIcon
+
+# --- Text (#111, MSDF glyph quads) ---------------------------------------
+# Low-level: submit one MSDF glyph quad on the canvas. Screen rect is
+# (sx0,sy0)-(sx1,sy1) in design units; UV rect is (u0,v0)-(u1,v1) NORMALIZED
+# into the atlas; `atlas` is the SdfText.loadAtlas handle (1-based); `pxRange`
+# is the screen-space px range (atlas pxRange * onScreenSize / atlasGlyphSize);
+# color is 0xAARRGGBB. Layout helper: lib/Gpu2dText.rae drawText.
+func drawGlyph(
+  canvas: mod Gpu2dCanvas
+  sx0: copy Float
+  sy0: copy Float
+  sx1: copy Float
+  sy1: copy Float
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+  atlas: copy Int
+  pxRange: copy Float
+  color: copy Int
+) {
+  canvasDrawGlyph(
+    canvas: canvas
+    sx0: sx0
+    sy0: sy0
+    sx1: sx1
+    sy1: sy1
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+    atlas: atlas
+    pxRange: pxRange
+    color: color
+  )
+}
+
+# With an outline (width px + color) and softness (edge falloff px; 1 = crisp).
+func drawGlyphEx(
+  canvas: mod Gpu2dCanvas
+  sx0: copy Float
+  sy0: copy Float
+  sx1: copy Float
+  sy1: copy Float
+  u0: copy Float
+  v0: copy Float
+  u1: copy Float
+  v1: copy Float
+  atlas: copy Int
+  pxRange: copy Float
+  color: copy Int
+  outlineWidth: copy Float
+  outlineColor: copy Int
+  softness: copy Float
+) {
+  canvasDrawGlyphEx(
+    canvas: canvas
+    sx0: sx0
+    sy0: sy0
+    sx1: sx1
+    sy1: sy1
+    u0: u0
+    v0: v0
+    u1: u1
+    v1: v1
+    atlas: atlas
+    pxRange: pxRange
+    color: color
+    outlineWidth: outlineWidth
+    outlineColor: outlineColor
+    softness: softness
+  )
+}

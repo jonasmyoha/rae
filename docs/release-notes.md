@@ -4,6 +4,27 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.0 (not released yet): module folders
+
+Named on 2026-11-16. Being built in the 0.3 line from 0.3.173; the task
+[release: modules, Rae 0.4.0, then push] completes this section and tags it.
+docs/module-model-options.md is the design.
+
+**Modules**
+- A module is a PascalCase file or a PascalCase folder (0.3.174): `import
+  Gpu2d` finds lib/Gpu2d.rae or the folder lib/Gpu2d/, whose files are one
+  module. A module that reaches the 1,000-line cap becomes a folder with no
+  change to the code that uses it. Refused: a file and a folder of one name, an
+  import of a file inside a module folder, the same function in two files of
+  one module, and a PascalCase folder with Rae files in a program's own tree.
+- Imports and qualifiers are spelled as on disk, with the same upper and lower
+  case, on every system (0.3.173): `import vec3` and `math.sqrt` are refused
+  with the right spelling. They used to work on macOS only.
+- lib/Gpu2d is a module folder (0.3.175), and its image functions are back in
+  it: `Gpu2d.loadImageKey`, `Gpu2d.drawImageKey` and the rest.
+  **`Gpu2dImages.` existed only in 0.3.172**; code written against it goes back
+  to `Gpu2d.` and drops `import Gpu2dImages`.
+
 ## 0.2.0, 2026-10-11: physics and servers
 
 The first milestone after 0.1.0 (2026-09-12). The 0.1 line ended at 0.1.268

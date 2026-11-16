@@ -6,7 +6,6 @@ open ui/Ecs
 open ui/UiSystems
 open ui/renderSystem/RenderPaintBox
 import Gpu2d
-import Gpu2dImages
 import ui/Components
 import ui/Theme
 import ui/ThemeResolved
@@ -200,10 +199,10 @@ func paintBackdropG(
   let drawH: Float = box.h
   let drawX: Float = box.x
   let drawY: Float = box.y
-  if Gpu2dImages.hasImageKey(canvas: canvas, key: bi.textureKey) {
+  if Gpu2d.hasImageKey(canvas: canvas, key: bi.textureKey) {
     let white: RgbaColor = { r: 255, g: 255, b: 255, a: 255 }
     let tint: RgbaColor = g2dChain(color: white, chain255: chain255)
-    Gpu2dImages.drawImageKey(
+    Gpu2d.drawImageKey(
       canvas: canvas
       key: bi.textureKey
       x: drawX
