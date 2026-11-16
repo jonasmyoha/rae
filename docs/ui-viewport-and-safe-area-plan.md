@@ -25,7 +25,7 @@
 - Lay groundwork for a future **editor view**: a portrait phone window centered inside a larger desktop window, with debug UI in the surrounding margin and a 2D camera (zoom/pan) over the phone for tooling.
 
 This is the structured port of the patterns observed in
-`game-proto1 pixi checkout`, applied to Rae's existing
+`game-proto4 pixi checkout`, applied to Rae's existing
 ECS-driven UI runtime under `lib/ui/`.
 
 ## Current Baseline
@@ -34,7 +34,7 @@ ECS-driven UI runtime under `lib/ui/`.
 - `lib/ui/layout.rae:30-31` carries module-level `screenWidth: Float = 600.0` / `screenHeight: Float = 1300.0` globals used as the parent-content extent for layout roots. No notion of "design coords" distinct from "window pixels".
 - `SafeArea` exists as a type in `lib/ui/components.rae` and is listed in `registry.rae:registeredComponentNames()` — but no system reads it, no `.raescene` uses it, and `LayoutSystem` does not fold safe insets into effective padding. Padding around the iPhone notch is currently hand-tuned in `examples/98_mobile_ui/config.rae:outerPad`.
 - No render-target indirection — the example renders directly to the back buffer at the OS window's framebuffer size. No editor camera. No simulator UI.
-- `rae/docs/game-proto1-ruics-ecs-reference.md` already describes the
+- `rae/docs/game-proto4-ruics-ecs-reference.md` already describes the
   intended `SafeArea` + `SafeAreaSystem` shape (lines 222 and 1102) but
   the implementation hasn't been done.
 
@@ -55,7 +55,7 @@ Source-of-truth references (read-only — used here as a study target):
 
 ### 1. Three Coordinate Systems
 
-Adopt game proto1 vocabulary, made explicit in a new `lib/ui/viewport.rae`:
+Adopt game proto4 vocabulary, made explicit in a new `lib/ui/viewport.rae`:
 
 | Name              | Meaning                                             | Drives                                |
 | ----------------- | --------------------------------------------------- | ------------------------------------- |
@@ -170,7 +170,7 @@ type DevicePreset {
 
 func devicePresets() ret List(DevicePreset) {
   let list: List(DevicePreset) = createList(DevicePreset)(initialCap: 16)
-  # Ported verbatim from game proto1 utils/layoutSimulation.ts.
+  # Ported verbatim from game proto4 utils/layoutSimulation.ts.
   list.add(value: { id: "iphone-15-pro",     label: "iPhone 15 Pro (393×852)",     width: 393.0, height: 852.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "iphone-15-pro-max", label: "iPhone 15 Pro Max (430×932)", width: 430.0, height: 932.0, safeTop: 59.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
   list.add(value: { id: "iphone-14",         label: "iPhone 14/13 (390×844)",      width: 390.0, height: 844.0, safeTop: 47.0, safeBottom: 34.0, safeLeft: 0.0, safeRight: 0.0 })
@@ -239,15 +239,15 @@ Phase 3 deliverable: dev can zoom in on a single button while the simulator keep
 ## What We're Explicitly Not Doing
 
 - **No multi-window simulator UI in Rae itself.** Picking the preset is an env var (phase 1) and later an in-app debug toggle (phase 2/3). A multi-pane editor with a tree, an inspector, and a properties panel is out of scope here — `rae-devtools-web` is the right home for that.
-- **No CSS `env(safe-area-inset-*)` fallback path.** Game proto1 uses it for real-iPhone Safari deployment; raylib + native phones use different APIs and we'll add it when the example actually ships on a device.
+- **No CSS `env(safe-area-inset-*)` fallback path.** Game proto4 uses it for real-iPhone Safari deployment; raylib + native phones use different APIs and we'll add it when the example actually ships on a device.
 - **No tablet / landscape preset support.** The `Viewport.scale` already does cover-fit so landscape works mathematically, but `SafeAreaSystem` assumes portrait-edge semantics. Landscape gets a follow-up when we have a landscape example.
 - **No automatic asset rescaling.** Bitmap assets (icons, album art) are loaded at fixed resolution. raylib's bilinear filter handles small zoom/pan; when an asset is consistently off it's a manual re-export. A "supply 1x/2x/3x and pick by `viewport.scale`" path is possible but premature.
 
 ## Open Questions
 
 - **Where does `Viewport` live?** Per-world (every `UiWorld` carries one) or per-app (a single global the world reads via `view`)? Per-app feels right because preset-switching should reflow *all* worlds consistently, but per-world is easier to test in isolation. Lean per-app.
-- **Cover-fit vs. exact-fit between design and viewport.** Game proto1 uses cover (`Math.max(viewW/designW, viewH/designH)`) so portrait designs always fill the phone width; this can cut off vertical content. For Rae's "design *is* the viewport" plan (393×852 ≡ design), `scale == 1` and the question is moot — but the moment someone authors at 1080×2280 and ships to a 393×852 phone, we have to pick. Defer until that case exists.
-- **Component-name collision: `SafeArea` is both a component type and an authored entity name in game proto1 scenes.** That's a convention, not enforced. We should document it as a convention but not require the entity's name to be literally `"SafeArea"`.
+- **Cover-fit vs. exact-fit between design and viewport.** Game proto4 uses cover (`Math.max(viewW/designW, viewH/designH)`) so portrait designs always fill the phone width; this can cut off vertical content. For Rae's "design *is* the viewport" plan (393×852 ≡ design), `scale == 1` and the question is moot — but the moment someone authors at 1080×2280 and ships to a 393×852 phone, we have to pick. Defer until that case exists.
+- **Component-name collision: `SafeArea` is both a component type and an authored entity name in game proto4 scenes.** That's a convention, not enforced. We should document it as a convention but not require the entity's name to be literally `"SafeArea"`.
 - **Live VM (bytecode) target.** This plan is written assuming the Compiled (C backend) target, since that's where the example runs today. Live target needs a parallel implementation of render-to-texture; raylib supports it identically, so the bindings carry over, but the VM bindings file (`vm_raylib.c`) needs the same handful of new natives.
 
 ## Recommended First Concrete Step

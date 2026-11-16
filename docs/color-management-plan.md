@@ -4,7 +4,7 @@ This document sets the long-term direction for color handling in the Rae
 UI/graphics stack. The driving constraint is that the same stack must
 serve two audiences:
 
-- **Day-to-day apps** (Game proto1, mobile UI demo, future general-
+- **Day-to-day apps** (Game proto4, mobile UI demo, future general-
   purpose apps) — needs *correct* sRGB / Display-P3 output on macOS
   and iOS today, with no perceptible difference from the reference
   versions of the same art viewed in a properly color-managed app
@@ -56,7 +56,7 @@ Layered bottom-up:
 
 ```
 ┌──────────────────────────────────────┐
-│  app code (game proto1, mobile_ui)    │
+│  app code (game proto4, mobile_ui)    │
 ├──────────────────────────────────────┤
 │  lib/ui — scene graph, ECS, layout,  │
 │           render API (existing)      │
@@ -174,7 +174,7 @@ and iOS.
 
 Set the `NSWindow.colorSpace` to sRGB on macOS in the raylib boot
 path so 8-bit sRGB content renders correctly on Display P3 macs.
-This fixes the immediate oversaturation in Game proto1 and (less
+This fixes the immediate oversaturation in Game proto4 and (less
 visibly) the mobile UI demo. Doesn't help wide-gamut or HDR yet —
 that needs the Metal backend — but unblocks visual iteration on
 existing apps today.
@@ -232,7 +232,7 @@ also pass a tone-mapped HDR signal to a Sony BVM.
 ## Key insight
 
 **Everything from Phase 1 onward is shared between UI apps and the
-grading app.** Game proto1 gets accidentally-correct color management
+grading app.** Game proto4 gets accidentally-correct color management
 for free once Phase 1 lands. Mobile UI does too. The video editor
 later doesn't need a separate render stack — it's just the same
 machine with more transforms in the chain.

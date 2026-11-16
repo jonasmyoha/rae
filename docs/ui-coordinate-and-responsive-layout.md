@@ -15,7 +15,7 @@ Current implementation target:
   `unitScale=3`, a 1080-wide phone frame, and desktop frames authored around
   5760×3240 du for a 1080p logical desktop.
 
-Combines: **Figma-style named frames + variants**, **Game proto1-style
+Combines: **Figma-style named frames + variants**, **Game proto4-style
 high-resolution virtual coordinates**, one shared entity/component model,
 phone/tablet/desktop/web/games, **no game mode**, and **no single scaling rule
 forced to solve every layout**.
@@ -522,7 +522,7 @@ explicit-`mod List`/parallel-array limits.
   boundaries? (Recommend no initially.)
 - **Frame-only heavy subtrees:** always-instantiated + `Active` toggle, or lazy
   build to avoid constructing large desktop-only trees on phone?
-- **`game proto1` alignment:** should game proto1 share this du space
+- **`game proto4` alignment:** should game proto4 share this du space
   (`unitScale=3`, 1080-wide phone reference) so its `1080×2280` art lines up 1:1?
 - **Multiple simultaneously-matching frames:** most-specific-then-declared-order
   (recommended) vs explicit numeric priority.

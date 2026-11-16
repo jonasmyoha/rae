@@ -236,7 +236,7 @@ Everything the app *waits* on runs on Rae workers, not runtime threads
 ## 7. Scenes, registry, theme
 
 Screens are authored in `assets/scenes/*.raescene` — the RUICS JSON format
-(`docs/game-proto1-ruics-ecs-reference.md`): a node tree where each node
+(`docs/game-proto4-ruics-ecs-reference.md`): a node tree where each node
 carries named components (`Rect`, `Layout`, `Text`, `Sprite`, `OnClick`,
 `ScrollRoot`, `ListView`, …), with `SceneInstance` for reuse (the nav tabs,
 the mini-player, a track row) and per-instance overrides. `lib/ui/Scene*`
@@ -339,7 +339,7 @@ leaving page than a person sees, as it is gone by 60% of the way in real time.
   `docs/event-driven-ui-loop-plan.md` — renderer and loop.
 - `docs/ui-coordinate-and-responsive-layout.md`,
   `docs/ui-viewport-and-safe-area-plan.md`, `docs/coordinate-system.md`.
-- `docs/ui-theme-system.md`, `docs/game-proto1-ruics-ecs-reference.md` —
+- `docs/ui-theme-system.md`, `docs/game-proto4-ruics-ecs-reference.md` —
   theme and scene format.
 - `docs/parallelism-first-plan.md` §5 — why the background I/O is shaped as
   it is.

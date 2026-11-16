@@ -72,12 +72,12 @@ Rae → TypeScript → run anywhere JS does (browser, Node, Electron, Bun, Deno,
 
 **Pros**
 
-- Largest deployable surface area instantly: web demos, devtools embedding, electron apps, hybrid mobile via Capacitor (game-proto1 pixi already ships iOS through this path).
+- Largest deployable surface area instantly: web demos, devtools embedding, electron apps, hybrid mobile via Capacitor (game-proto4 pixi already ships iOS through this path).
 - Browser fonts are *already* world-class — no font work to do for web target.
 - PixiJS / Canvas / WebGL / WebGPU are mature 2D backends with great AA and text.
 - Source-level deploy means no native build for web; iteration loop is instant.
 - TypeScript's structural-type system is compatible with Rae's types; transpile is fairly mechanical.
-- Game-proto1 pixi is an existing proof point that ECS-driven Rae-style UI works at scale in TS + Pixi.
+- Game-proto4 pixi is an existing proof point that ECS-driven Rae-style UI works at scale in TS + Pixi.
 
 **Cons**
 
@@ -195,10 +195,10 @@ When the target is TypeScript transpile, the renderer is whatever the
 browser provides:
 
 - **HTML Canvas2D**: built-in, fast enough for UIs of this complexity, world-class text via the browser.
-- **PixiJS**: WebGL-backed, fast, scene-graph-friendly, the choice in game proto1.
+- **PixiJS**: WebGL-backed, fast, scene-graph-friendly, the choice in game proto4.
 - **WebGPU**: emerging, useful for fancier effects later.
 
-For Rae's TS target, **PixiJS is the right pick**: it pairs naturally with an ECS, accepts texture handles, has good text support via the browser, and game proto1 proves the pattern.
+For Rae's TS target, **PixiJS is the right pick**: it pairs naturally with an ECS, accepts texture handles, has good text support via the browser, and game proto4 proves the pattern.
 
 ### Renderer comparison summary
 
@@ -243,7 +243,7 @@ writing the Swift bridge once.
 | ------------ | --------------------------------------- | ------------------------------------------------------- |
 | Compile      | Live (VM) + Compiled (C) + **add TS**   | TS gets us web deploy + devtools embedding cheaply.     |
 | Desktop renderer | raylib (with MSAA on)               | Works, simple, the gaps are visible but tolerable.      |
-| Web renderer | PixiJS via TS transpile                 | Game proto1-proven. Browser fonts are free.              |
+| Web renderer | PixiJS via TS transpile                 | Game proto4-proven. Browser fonts are free.              |
 | iOS          | Defer. (Live VM in a Swift host is feasible; native deploy via TS+Capacitor works today.) | Don't pay native-iOS cost until we have a product reason. |
 
 ### When raylib's gaps start blocking: phase in NanoVG or Blend2D
@@ -299,7 +299,7 @@ unblocks running Rae UIs in `rae-devtools-web` directly without raylib.
    Trade-off: brand consistency vs. native feel. Probably ship our fonts
    on every platform for a consistent product.
 
-5. **Animation primitives.** Not covered above. Game proto1 has them
+5. **Animation primitives.** Not covered above. Game proto4 has them
    (`AnimFrames`, `AnimTrigger`, `WobbleFx` etc.). The renderer-agnostic
    approach holds: animation components mutate scene values per frame;
    any renderer just draws the current frame. No change to this analysis.

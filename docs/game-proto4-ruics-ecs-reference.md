@@ -1,6 +1,6 @@
-# Game proto1 RUICS and ECS reference
+# Game proto4 RUICS and ECS reference
 
-This document describes the Game proto1 UI system in enough detail that another agent could recreate a similar system in Rae.
+This document describes the Game proto4 UI system in enough detail that another agent could recreate a similar system in Rae.
 
 The system is called RUICS in the codebase. It is a scene-driven UI runtime built on top of:
 
@@ -715,7 +715,7 @@ Example from `profile-avatar`:
 
 Runtime code can interpret variant strings and adjust specific nodes in the instance.
 
-In Game proto1 this is used to scale and offset the avatar art for different avatar sizes.
+In Game proto4 this is used to scale and offset the avatar art for different avatar sizes.
 
 ### 6.5 Overrides
 
@@ -1027,7 +1027,7 @@ Text is only re-sent to the backend when:
 
 If `Text.wrapWidthMode == 'NodeWidth'`, the render backend receives the node's computed width as wrap width.
 
-This is how Game proto1 removed one-off width helper code and made wrapping data-driven.
+This is how Game proto4 removed one-off width helper code and made wrapping data-driven.
 
 ## 9. Text measurement
 
@@ -1188,7 +1188,7 @@ The field paths are data-driven:
 
 ### 15.4 Pooling and virtualization
 
-Game proto1 does not instantiate one row entity per backend row.
+Game proto4 does not instantiate one row entity per backend row.
 
 Instead it:
 
@@ -1296,7 +1296,7 @@ Important editor-facing features:
 - round-trip serialization through `serializeLayoutV2` and `deserializeLayoutV2`
 - auto-generated inspector component availability from the component registry
 
-The Game proto1 inspector moved away from a stale hand-maintained list and now discovers components from the real registry. That is an important design lesson for Rae.
+The Game proto4 inspector moved away from a stale hand-maintained list and now discovers components from the real registry. That is an important design lesson for Rae.
 
 ## 18. Important design lessons for reimplementation in Rae
 
