@@ -1,6 +1,7 @@
 # Modules: a PascalCase file or a PascalCase folder
 
-Status: **main proposal, open for review** (2026-11-16). Not implemented.
+Status: **accepted** (2026-11-16, after a second review). Not implemented yet: the queued tasks
+[modules 1/5 ... 5/5] implement it.
 
 ## The proposal
 
@@ -11,21 +12,32 @@ tell which.
   `.rae` file inside it, one module.
 - A module that outgrows the 1,000-line cap becomes a folder. Nothing that uses it changes: the
   import, the qualifier (`Gpu2d.drawRect`) and every call stay as they were.
-- **PascalCase means a module** (a file or a folder). **camelCase means a plain folder**, part of a
-  path only (`ui/`, `ecs/`, `collections/`), as today.
+- **A module is one thing on disk**: one PascalCase file, or one PascalCase folder. So it can be
+  moved, deleted and searched as one thing.
+- **camelCase means a plain folder**, part of a path only (`ui/`, `ecs/`, `collections/`), as
+  today.
+- **A file is its own module only when no folder above it is PascalCase.** Inside a PascalCase
+  folder, a file is storage for that folder's module, whatever its name.
 - Calling code reads exactly as today: a module is always written in PascalCase (`Vec3.`, `Gpu2d.`,
   `RenderSystem.`), so it never looks like a variable.
 
 ### Rules
 
-1. **File or folder.** `Gpu2d.rae` and `Gpu2d/` must not both exist in one folder: that is an
-   error that names both.
+1. **File or folder, never both.** A file and a folder with the same name in the same place
+   (`Gpu2d.rae` beside `Gpu2d/`) is an error that names both. This holds inside a module folder
+   too (`Gpu2d/Images.rae` beside `Gpu2d/Images/`): otherwise creating the folder would move the
+   file's functions from `Gpu2d.` to `Images.`, and adding a folder must never rename existing
+   functions. A module that outgrows its file moves into its folder
+   (`git mv Gpu2d.rae Gpu2d/Gpu2d.rae`); no user of it changes.
 2. **One scope.** The files of a folder module share one scope, as one file does: a function in
    `Images.rae` calls a function in `Window.rae` with no import. Declaring the same name twice
    (the same parameters) is an error; overloads (other labels or parameter types) are fine.
 3. **Imports per file.** Each file keeps its own `import` / `open` lines: a file says what it uses.
 4. **File names inside a module do not matter.** Rename, split and merge them freely; they are
-   storage. (They stay PascalCase, like every `.rae` file.)
+   storage. (They stay PascalCase, like every `.rae` file.) A file named after the module
+   (`RenderSystem/RenderSystem.rae`) is allowed and is just one of its files. Importing a file of
+   a module folder (`import Gpu2d/Images` for `Gpu2d/Images.rae`) is an error that says
+   "import Gpu2d".
 5. **Subfolders follow the casing rule too.** Inside `Gpu2d/`, a camelCase subfolder
    (`Gpu2d/platform/Web.rae`) only organizes files: they are still part of `Gpu2d`. A PascalCase
    subfolder (`Gpu2d/Images/`) is a module of its own, imported as `import Gpu2d/Images` and
@@ -34,6 +46,12 @@ tell which.
    module only on that target. The per-platform code of a module can then live in its own files
    instead of `when` branches in one file.
 7. **Diagnostics** name the file and line where a declaration really is.
+8. **Names are checked against the disk exactly.** Casing carries meaning here, and macOS and
+   Windows ignore case in file names (today `import vec3` loads `lib/Vec3.rae` on a Mac). The
+   compiler compares every import path segment with the exact name on disk and reports a
+   mismatch as an error that gives the right spelling.
+9. **A PascalCase folder in a program's own tree is an error for now** ("module folders are for
+   lib/ and packages"), until the program rule below is decided.
 
 ### Before and after
 
@@ -108,6 +126,27 @@ let entityId: EntityId = createEntity(world: world)
 - A program's own folders keep today's rule (every project file sees every other; a folder name
   breaks a tie: `enemies.tick()`). Whether that should follow the same casing rule is a separate
   question.
+- The same file-and-folder pair that Rust allows (`foo.rs` beside `foo/`) was considered and
+  refused (rule 1): it saves one file move, and the module would live in two places.
+
+### What follows from it (second review, 2026-11-16)
+
+- **Merged files share all their names.** Rae has no file-private names, so when several modules
+  become one folder, two helpers with the same name and parameters become a duplicate error and
+  one is renamed. `lib/ui/renderSystem` (18 files, 3,805 lines) has no such pair.
+- **The system rule in AGENTS.md changes.** Today a system is a camelCase folder with a
+  PascalCase file (`relaySystem/RelaySystem.rae`); with this it is a PascalCase folder
+  (`RelaySystem/`) with freely named files, imported as `import net/RelaySystem`.
+- **"Package" means a `.raepack` package only.** A camelCase folder in an import path is a
+  folder, not a package; AGENTS.md's naming section says "package FOLDERS" and is reworded.
+- **A nested module is qualified by its last name** (`Images.loadImageKey` for `Gpu2d/Images`),
+  so general names (`Images`, `Text`) meet more often. The existing error for two imports with
+  one last name covers it (import one with `as`).
+- **Tools that work per file work per module:** the module build cache, and
+  `run_cases.sh --grep '<import path>'`.
+- **Rae keeps two folder rules for now:** module folders in `lib/` and packages, and a program's
+  own folders (next point).
+
 - The other layouts below (one shared math module, calling with the dot form, opening a whole
   package) are style choices that work with this proposal or without it, one folder at a time.
 
