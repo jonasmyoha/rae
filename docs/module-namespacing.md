@@ -173,6 +173,23 @@ in its folder. A qualifier is spelled exactly as its module or folder too:
 `math.sqrt` for the module `Math` is refused (`the module is 'Math'`), and so
 is `Particles.tick()` for the folder `particles/` (cases 1499-1502).
 
+### A module is a PascalCase file or a PascalCase folder (0.3.174)
+
+`import Gpu2d` finds `lib/Gpu2d.rae` or the folder `lib/Gpu2d/`
+(docs/module-model-options.md). A folder module is every `.rae` file in it and
+in its camelCase subfolders, ONE module: its files see each other with no
+import, each keeps its own imports, and they share one module name for
+qualifiers (`Gpu2d.drawRect`), consts and C names; a diagnostic names the file
+a declaration is in. A PascalCase subfolder is a module of its own
+(`import Gpu2d/Images`, `Images.x`), and an import of a module folder does not
+cover it. Refused: a file and a folder of one name in one place, at any depth;
+importing a file of a module folder (`import Gpu2d/Window`: "write `import
+Gpu2d`"); the same function with the same parameters in two files of one
+module; a PascalCase folder holding Rae files in a program's own tree (module
+folders are for `lib/` and packages, for now). A file whose whole body is in
+`when` is part of the module on that target only. `rae format` and the
+1,000-line cap stay per file.
+
 ### `import module`
 
 Makes the module available through its namespace, and makes its functions

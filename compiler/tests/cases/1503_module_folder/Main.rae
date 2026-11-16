@@ -1,0 +1,17 @@
+# A module is a PascalCase file or a PascalCase folder (docs/module-model-options.md). The
+# dependency `kit` holds the module folder Shapes/: its files (and those of its camelCase
+# subfolder platform/) are ONE module, reached as `Shapes.` with one import. Its files call each
+# other with no import, each keeps its own imports, a const is `Shapes.unit`, and the platform
+# file whose body is in `when` is part of the module on its target only. The PascalCase
+# subfolder Fancy/ is a module of its own: `import kit/Shapes/Fancy`, `Fancy.starPoints()`.
+import kit/Shapes
+import kit/Shapes/Fancy
+
+func main() {
+  log("circle {Shapes.circleArea(radius: 2.0)}")
+  log("square {Shapes.squareArea(side: 3.0)}")
+  log(Shapes.describe())
+  log("target {Shapes.shapeTarget()}")
+  log("unit {Shapes.unit}")
+  log("star {Fancy.starPoints()}")
+}

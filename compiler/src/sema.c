@@ -308,7 +308,12 @@ static bool sema_file_declares_package(const char* file, const AstDecl* d, bool 
         char ip[512]; size_t n = sema_norm_import_path(im->path, ip, sizeof ip);
         if (n == 0) continue;
         if (n == mlen && memcmp(ip, mod, n) == 0) return true;                       // exactly this module
-        if (n < mlen && memcmp(ip, mod, n) == 0 && mod[n] == '/') return true;        // the whole package
+        /* the whole package: a camelCase folder covers the modules under it; a module (a
+         * PascalCase file or folder) covers only itself (docs/module-model-options.md) */
+        const char* ip_last = strrchr(ip, '/');
+        ip_last = ip_last ? ip_last + 1 : ip;
+        bool ip_is_module = *ip_last >= 'A' && *ip_last <= 'Z';
+        if (!ip_is_module && n < mlen && memcmp(ip, mod, n) == 0 && mod[n] == '/') return true;
         // A PROJECT module's name is root-relative (`tests/x/alpha/Values`) and
         // depends on where the root was inferred, so its package path
         // (`open alpha/Values`) matches the end of it, as the file-component
@@ -10719,8 +10724,8 @@ static void sema_report_duplicate_type(AstModule* module, const AstDecl* first, 
     module->had_error = true;
 }
 
-/* Two functions of one file with the same name, parameter labels, modes
- * and types: every call would mean either, and the C backend emits
+/* Two functions of one file, or of two files of one module folder, with the same name,
+ * parameter labels, modes and types: every call would mean either, and the C backend emits
  * both under one name, so clang failed far from the cause ("redefinition of
  * 'rae_Float8_powerOfTwo_rae_Float8_'"). Reported at the later one, naming
  * the earlier one's line. Functions of different files may share a
@@ -10737,8 +10742,17 @@ static void sema_report_duplicate_functions(CompilerContext* ctx, AstModule* mod
             if (!earlier || earlier == d || earlier->kind != AST_DECL_FUNC) continue;
             if (earlier->as.func_decl.specialization_args) continue;
             const char* earlier_file = earlier->origin_file ? earlier->origin_file : fallback;
-            if (strcmp(file, earlier_file) != 0) continue;
-            if (earlier->line > d->line || (earlier->line == d->line && earlier->column >= d->column)) continue;
+            /* one file, or two files of one module folder: they share the module name, which
+             * no two other files do (docs/module-model-options.md rule 2) */
+            int file_order = strcmp(file, earlier_file);
+            bool one_module = file_order == 0
+                || (d->module_name && earlier->module_name && strcmp(d->module_name, earlier->module_name) == 0
+                    && !d->as.func_decl.is_extern && !earlier->as.func_decl.is_extern);
+            if (!one_module) continue;
+            /* reported once, at the later one: by file, then by line */
+            if (file_order < 0) continue;
+            if (file_order == 0
+                && (earlier->line > d->line || (earlier->line == d->line && earlier->column >= d->column))) continue;
             const AstParam* a = d->as.func_decl.params;
             const AstParam* b = earlier->as.func_decl.params;
             /* the same labels and the same modes: `view` and `mod` of one

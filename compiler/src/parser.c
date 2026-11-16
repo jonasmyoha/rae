@@ -3797,7 +3797,12 @@ AstModule* parse_module(Arena* arena, const char* file_path, TokenList tokens) {
       // `open ecs` + `open ecs/Tag`: the package form already covers the module.
       if (!str_eq(a->path, b->path)) {
         const AstImport* pk = a->path.len < b->path.len ? a : b; const AstImport* md = pk == a ? b : a;
-        if (pk->is_open == md->is_open && md->path.len > pk->path.len + 1
+        /* a module folder (PascalCase last segment) is one module: its PascalCase subfolders
+         * are modules of their own, not covered by it (docs/module-model-options.md) */
+        const char* pk_last = pk->path.data;
+        for (size_t k = 0; k < pk->path.len; k++) if (pk->path.data[k] == '/') pk_last = pk->path.data + k + 1;
+        bool pk_is_module = *pk_last >= 'A' && *pk_last <= 'Z';
+        if (!pk_is_module && pk->is_open == md->is_open && md->path.len > pk->path.len + 1
             && memcmp(md->path.data, pk->path.data, pk->path.len) == 0 && md->path.data[pk->path.len] == '/')
           parser_error(&parser, &at, "`%s %.*s` is already covered by `%s %.*s` (the package form covers every module in it)",
                        md->is_open ? "open" : "import", (int)md->path.len, md->path.data,

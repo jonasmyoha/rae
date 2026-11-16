@@ -1,7 +1,8 @@
 # Modules: a PascalCase file or a PascalCase folder
 
-Status: **accepted** (2026-11-16, after a second review). Not implemented yet: the queued tasks
-[modules 1/5 ... 5/5] implement it.
+Status: **accepted** (2026-11-16, after a second review). Implemented in the compiler: rule 8 in
+Rae 0.3.173, rules 1-7 and 9 in 0.3.174 (compiler/src/module_folder.c; cases 1503-1508, 721,
+729). The library and tools follow in the queued tasks [modules 3/5 ... 5/5].
 
 ## The proposal
 

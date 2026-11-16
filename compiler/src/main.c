@@ -44,6 +44,7 @@
 #include "rae_version.h"
 #include "rae_deps.h"
 #include "import_case.h"
+#include "module_folder.h"
 #include "rae_pack_edit.h"
 #include "rae_toolchain.h"
 #include "rae_package_native.h"
@@ -111,6 +112,9 @@ typedef struct ModuleNode {
   char* file_path;
   char* canonical_path;
   AstModule* module;
+  /* The module name its declarations take when it is one file of a module folder (`Gpu2d` for
+   * lib/Gpu2d/Images.rae); NULL for a module of its own (docs/module-model-options.md) */
+  char* logical_name;
   bool is_auto_loaded;
   bool is_prelude_import;  // loaded for every file but NOT opened: reached qualified only (`Target.os`)   // intentional stdlib prelude (core/string/math/io/sys) — implicitly opened everywhere; NOT incidentally-discovered deps (docs/module-namespacing.md)
   struct ModuleNode* next;
@@ -119,6 +123,8 @@ typedef struct ModuleNode {
 typedef struct {
   ModuleNode* head;
   ModuleNode* tail;
+  /* Set just before loading a file of a module folder: the module name its node takes */
+  const char* pending_logical;
   char* root_path;
   // True when root_path came from an EXPLICIT `--project` (scanned wholesale,
   // so an entry deep in it sees every file). False when it is the entry
@@ -1795,9 +1801,14 @@ static bool module_graph_load_module(ModuleGraph* graph,
     // module or dependency inversion (#743).
     return true;
   }
+  /* a file of a module folder takes the folder's module name (module_folder.c); taken before
+   * this file's own imports load, which must not inherit it */
+  char* logical_name = graph->pending_logical ? strdup(graph->pending_logical) : NULL;
+  graph->pending_logical = NULL;
   size_t file_size = 0;
   char* source = read_file(file_path, &file_size);
   if (!source) {
+    free(logical_name);
     fprintf(stderr, "error: could not read module file '%s'\n", file_path);
     module_stack_print_trace(stack, module_path);
     return false;
@@ -2027,6 +2038,54 @@ static bool module_graph_load_module(ModuleGraph* graph,
         return false;
       }
     }
+    /* docs/module-model-options.md: a module is a PascalCase file or a PascalCase folder */
+    {
+      char folder_dir[PATH_MAX];
+      char folder_message[PATH_MAX * 3];
+      int folder = module_folder_resolve(normalized, graph->root_path, compiler_stdlib_dir(),
+                                         folder_dir, sizeof folder_dir, folder_message,
+                                         sizeof folder_message);
+      if (folder < 0) {
+        diag_error(file_path, (int)import->line, (int)import->column, folder_message);
+        free(normalized);
+        return false;
+      }
+      if (folder > 0) {
+        ModuleFolderFiles files;
+        if (!module_folder_list(folder_dir, &files, folder_message, sizeof folder_message)) {
+          diag_error(file_path, (int)import->line, (int)import->column, folder_message);
+          module_folder_files_free(&files);
+          free(normalized);
+          return false;
+        }
+        for (int i = 0; i < files.count; i++) {
+          char part_path[2048];
+          snprintf(part_path, sizeof part_path, "%s/%s", normalized, files.items[i].stem);
+          graph->pending_logical = normalized;
+          bool loaded = module_graph_load_module(graph, part_path, files.items[i].path, &frame,
+                                                 hash_out, no_implicit);
+          graph->pending_logical = NULL;
+          if (!loaded) {
+            module_folder_files_free(&files);
+            free(normalized);
+            return false;
+          }
+        }
+        module_folder_files_free(&files);
+        free(normalized);
+        continue;
+      }
+      char owner[1024];
+      if (module_folder_owner(normalized, owner, sizeof owner)) {
+        snprintf(folder_message, sizeof folder_message,
+                 "'%s' is a file of the module folder '%s', not a module of its own: write "
+                 "`%s %s` (docs/module-model-options.md)", normalized, owner,
+                 import->is_open ? "open" : "import", owner);
+        diag_error(file_path, (int)import->line, (int)import->column, folder_message);
+        free(normalized);
+        return false;
+      }
+    }
     char* child_file = resolve_module_file(graph->root_path, normalized);
     if (!child_file || !file_exists(child_file)) {
       char* lib_file = try_resolve_lib_module(graph->root_path, normalized);
@@ -2079,10 +2138,25 @@ static bool module_graph_load_module(ModuleGraph* graph,
   }
   if (!module_graph_append(graph, module_path, file_path, module)) {
     free(source);
+    free(logical_name);
     return false;
   }
+  graph->tail->logical_name = logical_name;
   free(source);
   return true;
+}
+
+static bool directory_has_rae_file(const char* path) {
+  DIR* handle = opendir(path);
+  if (!handle) return false;
+  bool found = false;
+  struct dirent* entry;
+  while (!found && (entry = readdir(handle)) != NULL) {
+    size_t length = strlen(entry->d_name);
+    found = length > 4 && strcmp(entry->d_name + length - 4, ".rae") == 0;
+  }
+  closedir(handle);
+  return found;
 }
 
 static bool scan_directory_for_modules(ModuleGraph* graph,
@@ -2131,6 +2205,18 @@ static bool scan_directory_for_modules(ModuleGraph* graph,
       // (`import sdk/Greeting`), never as project source under its folder path
       if (rae_deps_owns_path(child_path)) {
         continue;
+      }
+      /* docs/module-model-options.md rule 9: a PascalCase folder is a module folder, and module
+       * folders are for lib/ and packages, not (yet) a program's own tree */
+      if (module_folder_name_is_module(entry->d_name, strlen(entry->d_name))
+          && directory_has_rae_file(child_path)) {
+        fprintf(stderr,
+                "error: %s/ is a PascalCase folder with Rae files in the program's own tree: a "
+                "PascalCase folder is a module folder, and module folders are for lib/ and "
+                "packages only for now; rename it in camelCase (docs/module-model-options.md "
+                "rule 9)\n", diag_simplify_path(child_path));
+        closedir(dir);
+        return false;
       }
       if (!scan_directory_for_modules(graph, child_path, skip_file, hash_out, no_implicit)) {
         closedir(dir);
@@ -2291,8 +2377,8 @@ static AstModule merge_module_graph(const ModuleGraph* graph) {
     // same-named MAIN module: its decls' logical module_name is retargeted from
     // `pkg/Helper` to `pkg/PascalCase(pkg)` (e.g. renderSystem/Helper -> renderSystem/
     // RenderSystem), so importing/opening the main module exposes them too.
-    const char* target_module_name = node->module_path;
-    if (node->module->export_to_main && node->module_path) {
+    const char* target_module_name = node->logical_name ? node->logical_name : node->module_path;
+    if (!node->logical_name && node->module->export_to_main && node->module_path) {
       const char* mp = node->module_path;
       const char* lastSlash = strrchr(mp, '/');
       if (lastSlash && lastSlash > mp) {
