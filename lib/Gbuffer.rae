@@ -665,18 +665,7 @@ func beginPass(
   light: view Light3d
   aspect: view Float
 ) pub {
-  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let viewM: Mat4 = mat4LookAt(
-    eyeX: camera.position.x
-    eyeY: camera.position.y
-    eyeZ: camera.position.z
-    atX: camera.target.x
-    atY: camera.target.y
-    atZ: camera.target.z
-    upX: worldUp.x
-    upY: worldUp.y
-    upZ: worldUp.z
-  )
+  let viewM: Mat4 = cameraViewMatrix(camera: camera)
   # Reverse-Z (#367): near maps to 1, far to 0, which is what the geometry
   # pass's Greater depth test and 0.0 clear expect. The forward frame keeps
   # mat4Perspective — the two conventions must not be mixed.

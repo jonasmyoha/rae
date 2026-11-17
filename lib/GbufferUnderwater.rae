@@ -173,18 +173,7 @@ func underwaterInverseViewProj(
   camera: view Camera3d
   aspect: copy Float
 ) {
-  let worldUp: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
-  let viewM: Mat4 = mat4LookAt(
-    eyeX: camera.position.x
-    eyeY: camera.position.y
-    eyeZ: camera.position.z
-    atX: camera.target.x
-    atY: camera.target.y
-    atZ: camera.target.z
-    upX: worldUp.x
-    upY: worldUp.y
-    upZ: worldUp.z
-  )
+  let viewM: Mat4 = cameraViewMatrix(camera: camera)
   let proj: Mat4 = mat4PerspectiveReverseZ(
     fovYDeg: camera.fovYDeg
     aspect: aspect

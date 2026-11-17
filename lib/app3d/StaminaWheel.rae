@@ -41,27 +41,23 @@ func staminaWheelColor(stamina: view Stamina, tuning: view StaminaTuning) ret In
   ret 4284404587
 }
 
-# The wheel for `stamina` beside the head at world point `head`, seen from a
-# camera at `eye` looking at `target` with `fovYDeg` on a `width` x `height`
-# pt screen; nothing when it does not show or the head is off screen
+# The wheel for `stamina` beside the head at world point `head`, seen by
+# `camera` (its roll too) on a `width` x `height` pt screen; nothing when it
+# does not show or the head is off screen
 func drawStaminaWheel(
   canvas: mod Gpu2dCanvas
   stamina: view Stamina
   tuning: view StaminaTuning
   head: view Vec3
-  eye: view Vec3
-  target: view Vec3
-  fovYDeg: view Float
+  camera: view Camera3d
   width: view Float
   height: view Float
 ) {
   if staminaWheelShows(stamina: stamina, tuning: tuning) is false or width <= 0.0 or height <= 0.0 {
     ret
   }
-  if let point: ScreenPoint = projectToScreen(
-    eye: eye
-    target: target
-    fovYDeg: fovYDeg
+  if let point: ScreenPoint = projectCameraPoint(
+    camera: camera
     aspect: width / height
     point: head
   ) {
@@ -122,9 +118,7 @@ func drawClimberStaminaWheel(
       stamina: stamina
       tuning: climbing.staminaTuning
       head: Vec3.create(x: feet.x, y: feet.y, z: feet.z + height * 0.9)
-      eye: camera.position
-      target: camera.target
-      fovYDeg: camera.fovYDeg
+      camera: camera
       width: windowExtentW()
       height: windowExtentH()
     )

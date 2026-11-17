@@ -4,6 +4,26 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.1, 2026-11-17: a camera that rolls
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.1` moves a project.
+
+- `Camera3d` has a `roll`: radians about the view direction, the right side
+  down above 0 (a drone banking into a right turn). It defaults to `0.0`, and
+  at 0 every view is exactly what it was.
+- `Scene3d.cameraViewMatrix(camera:)` is the camera's view matrix with its
+  roll; the deferred and forward frames and the underwater fog build their view
+  with it. `Math3d.viewUp(eye:, target:, roll:)` is the up reference it hands
+  `mat4LookAt`.
+- `app3d/WorldLabel.projectCameraPoint(camera:, aspect:, point:)` projects a
+  point the way the frame is drawn, roll included: use it for labels and a
+  reticle. `projectToScreen(eye:, target:, ...)` stays the unrolled form.
+- Changed: `app3d/StaminaWheel.drawStaminaWheel` takes `camera:` in place of
+  `eye:`, `target:` and `fovYDeg:`.
+- Unchanged with a roll, on purpose: the shadow cascades (spheres round the
+  view axis) and the camera-facing leaf cards and water drops, which stay
+  upright in the world.
+
 ## 0.4.0, 2026-11-17: module folders
 
 Named on 2026-11-16 and built in the 0.3 line from 0.3.173; the 0.3 line ended

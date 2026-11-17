@@ -454,6 +454,28 @@ func mat4LookAt(
   ret m
 }
 
+# The up reference mat4LookAt takes for a camera at `eye` looking at `target`
+# rolled by `roll` radians about its view direction (above 0 the right side
+# goes down, as a plane banking right). At roll 0 this is the world up
+# (0, 0, 1) itself, so an unrolled view is exactly what it always was. Else
+# it is the camera's unrolled up turned toward its right: up cos + right sin,
+# with the right built as mat4LookAt builds it (and its fallback when the
+# view is straight up or down).
+func viewUp(eye: view Vec3, target: view Vec3, roll: view Float) ret Vec3 {
+  let worldUp: Vec3 = { x: 0.0, y: 0.0, z: 1.0 }
+  if roll is 0.0 {
+    ret worldUp
+  }
+  let forward: Vec3 = vnorm(a: vsub(a: target, b: eye))
+  var right: Vec3 = vcross(a: forward, b: worldUp)
+  if vlen(a: right) < 0.000001 {
+    right = vcross(a: forward, b: Vec3 { x: 0.0, y: 1.0, z: 0.0 })
+  }
+  right = vnorm(a: right)
+  let up: Vec3 = vcross(a: right, b: forward)
+  ret vadd(a: vscale(a: up, s: Math.cos(x: roll)), b: vscale(a: right, s: Math.sin(x: roll)))
+}
+
 # Z-up orbit camera position from yaw/pitch/distance around a target.
 # Yaw is about +Z (0 puts the camera on -Y, Blender front view); positive
 # pitch raises the camera toward +Z.

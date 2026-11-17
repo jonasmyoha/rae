@@ -38,6 +38,11 @@ This is exactly Blender's world convention. A point `(1, 2, 3)` is 1 right,
   (right-handed; `worldUp = (0, 0, 1)`).
 - A degenerate look (camera pointing straight up/down `±Z`, parallel to
   `worldUp`) must be handled by choosing an alternate up reference.
+- A camera may **roll** (`Camera3d.roll`, radians, 0 by default): the basis
+  above turns about `forward`, `up' = up cos(roll) + right sin(roll)` and
+  `right' = right cos(roll) - up sin(roll)`, so a roll above 0 takes the right
+  side down. `Math3d.viewUp` gives `up'`, and `Scene3d.cameraViewMatrix`
+  builds every view of a `Camera3d` with it; at roll 0 it is `worldUp` itself.
 
 ## Rotations
 

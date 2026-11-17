@@ -25,6 +25,7 @@
 # fields reliably, so keeping components flat avoids that whole class of
 # aliasing bug.
 open Vec3
+open Math3d
 open LightUnits
 open ecs/Entity
 open ecs/World
@@ -108,6 +109,27 @@ type Camera3d {
   fovYDeg: Float
   nearZ: Float
   farZ: Float
+  # Radians about the view direction; above 0 the right side goes down (a
+  # drone banking into a right turn). 0 keeps the world's +Z up on screen.
+  roll: Float = 0.0
+}
+
+# The camera's view matrix: look-at from its position to its target, rolled
+# by its roll (Math3d.viewUp). Every view of the camera is built here, so the
+# picture, the underwater fog and the projected labels agree.
+func cameraViewMatrix(camera: view Camera3d) ret Mat4 {
+  let up: Vec3 = viewUp(eye: camera.position, target: camera.target, roll: camera.roll)
+  ret mat4LookAt(
+    eyeX: camera.position.x
+    eyeY: camera.position.y
+    eyeZ: camera.position.z
+    atX: camera.target.x
+    atY: camera.target.y
+    atZ: camera.target.z
+    upX: up.x
+    upY: up.y
+    upZ: up.z
+  )
 }
 
 # One directional sun + hemisphere ambient + exposure. This is exactly the

@@ -528,17 +528,7 @@ func endForwardMain(
 
 # The rasterised view-projection: the deferred one (reverse-Z, Z-up)
 func reverseZViewProj(camera: view Camera3d, aspect: view Float) ret Mat4 {
-  let viewMatrix: Mat4 = mat4LookAt(
-    eyeX: camera.position.x
-    eyeY: camera.position.y
-    eyeZ: camera.position.z
-    atX: camera.target.x
-    atY: camera.target.y
-    atZ: camera.target.z
-    upX: 0.0
-    upY: 0.0
-    upZ: 1.0
-  )
+  let viewMatrix: Mat4 = cameraViewMatrix(camera: camera)
   let projection: Mat4 = mat4PerspectiveReverseZ(
     fovYDeg: camera.fovYDeg
     aspect: aspect

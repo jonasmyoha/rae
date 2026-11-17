@@ -1,0 +1,160 @@
+# Camera3d.roll: the view the renderer draws (Scene3d.cameraViewMatrix with
+# the reverse-Z projection, as Gbuffer.beginPass builds it) and the labels'
+# projection (app3d/WorldLabel.projectCameraPoint) put a world point at the
+# same place on the screen, unrolled and rolled 0.5 rad; a roll above 0
+# takes the right side down, so a point to the right rises on the screen;
+# roll 0 is exactly the old unrolled view, and a camera looking straight
+# down still rolls.
+import Math
+import Vec3
+open Math3d
+open Scene3d
+open app3d/WorldLabel
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func element(m: view Mat4, row: view Int, column: view Int) ret Float {
+  ret m.m.copyAtFallback(index: column * 4 + row, fallback: 0.0)
+}
+
+# Where the rasterized view-projection puts `point`, 0..1 from the top left
+func rasterPoint(camera: view Camera3d, aspect: view Float, point: view Vec3) ret ScreenPoint {
+  let projection: Mat4 = mat4PerspectiveReverseZ(
+    fovYDeg: camera.fovYDeg
+    aspect: aspect
+    near: camera.nearZ
+    far: camera.farZ
+  )
+  let viewProjection: Mat4 = mat4Mul(a: projection, b: cameraViewMatrix(camera: camera))
+  let clipX: Float = element(m: viewProjection, row: 0, column: 0) * point.x + element(
+    m: viewProjection
+    row: 0
+    column: 1
+  ) * point.y + element(m: viewProjection, row: 0, column: 2) * point.z + element(
+    m: viewProjection
+    row: 0
+    column: 3
+  )
+  let clipY: Float = element(m: viewProjection, row: 1, column: 0) * point.x + element(
+    m: viewProjection
+    row: 1
+    column: 1
+  ) * point.y + element(m: viewProjection, row: 1, column: 2) * point.z + element(
+    m: viewProjection
+    row: 1
+    column: 3
+  )
+  let clipW: Float = element(m: viewProjection, row: 3, column: 0) * point.x + element(
+    m: viewProjection
+    row: 3
+    column: 1
+  ) * point.y + element(m: viewProjection, row: 3, column: 2) * point.z + element(
+    m: viewProjection
+    row: 3
+    column: 3
+  )
+  ret ScreenPoint { x: 0.5 + 0.5 * clipX / clipW, y: 0.5 - 0.5 * clipY / clipW, depth: clipW }
+}
+
+# Do the raster and the labels' projection agree on every one of `points`?
+func agree(camera: view Camera3d, aspect: view Float, points: view List(Vec3)) ret Bool {
+  loop let point: Vec3 in points {
+    let raster: ScreenPoint = rasterPoint(camera: camera, aspect: aspect, point: point)
+    if let label: ScreenPoint = projectCameraPoint(camera: camera, aspect: aspect, point: point) {
+      if near(a: raster.x, b: label.x) is false or near(a: raster.y, b: label.y) is false or near(
+        a: raster.depth
+        b: label.depth
+      ) is false {
+        log(
+          "  {point.x} {point.y} {point.z}: raster {raster.x} {raster.y}, label {label.x} {label.y}"
+        )
+        ret false
+      }
+    } else {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() {
+  let points: List(Vec3) = List(Vec3) {
+    Vec3 { x: 0.0, y: 0.0, z: 0.0 }
+    Vec3 { x: 2.0, y: 1.0, z: 0.5 }
+    Vec3 { x: -3.0, y: 4.0, z: -1.0 }
+    Vec3 { x: 1.0, y: -2.0, z: 2.5 }
+  }
+  var camera: Camera3d = {
+    position: { x: 1.0, y: -10.0, z: 3.0 }
+    target: { x: 0.0, y: 0.0, z: 0.5 }
+    fovYDeg: 60.0
+    nearZ: 0.1
+    farZ: 500.0
+  }
+  check(label: "a camera's roll is 0 unless it is set", ok: camera.roll is 0.0)
+  check(
+    label: "unrolled: the raster and the labels agree"
+    ok: agree(camera: camera, aspect: 1.6, points: points)
+  )
+  let upright: Vec3 = viewUp(eye: camera.position, target: camera.target, roll: 0.0)
+  check(
+    label: "unrolled: the view's up is the world's +Z, as before"
+    ok: upright.x is 0.0 and upright.y is 0.0 and upright.z is 1.0
+  )
+  var unrolledRight: ScreenPoint = { x: 0.0, y: 0.0, depth: 0.0 }
+  if let point: ScreenPoint = projectToScreen(
+    eye: camera.position
+    target: camera.target
+    fovYDeg: camera.fovYDeg
+    aspect: 1.6
+    point: { x: 2.0, y: 0.0, z: 0.5 }
+  ) {
+    unrolledRight = point
+  }
+  camera.roll = 0.5
+  check(
+    label: "rolled 0.5 rad: the raster and the labels agree"
+    ok: agree(camera: camera, aspect: 1.6, points: points)
+  )
+  let rolledRight: ScreenPoint = rasterPoint(
+    camera: camera
+    aspect: 1.6
+    point: { x: 2.0, y: 0.0, z: 0.5 }
+  )
+  check(
+    label: "rolled right side down: a point right of the middle rises on the screen"
+    ok: rolledRight.y < unrolledRight.y - 0.01 and rolledRight.x > 0.5
+  )
+  camera.roll = -0.5
+  let rolledLeft: ScreenPoint = rasterPoint(
+    camera: camera
+    aspect: 1.6
+    point: { x: 2.0, y: 0.0, z: 0.5 }
+  )
+  check(
+    label: "rolled the other way: it sinks below the middle"
+    ok: rolledLeft.y > unrolledRight.y + 0.01 and rolledLeft.y > 0.5
+  )
+  var overhead: Camera3d = {
+    position: { x: 0.0, y: 0.0, z: 20.0 }
+    target: { x: 0.0, y: 0.0, z: 0.0 }
+    fovYDeg: 60.0
+    nearZ: 0.1
+    farZ: 500.0
+    roll: 0.5
+  }
+  check(
+    label: "looking straight down, rolled: the raster and the labels agree"
+    ok: agree(camera: overhead, aspect: 1.0, points: points)
+  )
+}

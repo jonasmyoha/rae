@@ -10,6 +10,8 @@
 # tested in a fixture).
 import Math
 import Vec3
+open Math3d
+open Scene3d
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -47,9 +49,10 @@ type ScreenPoint {
 # A point nearer the eye than this along the view is not drawn (m)
 const labelNearestDepth: Float = 0.3
 
-# Where `point` lands for a camera at `eye` looking at `target` (+Z up) with
-# a vertical field of view of `fovYDeg` over a window `aspect` wide per tall;
-# none behind the eye
+# Where `point` lands for a camera at `eye` looking at `target` (+Z up, no
+# roll) with a vertical field of view of `fovYDeg` over a window `aspect` wide
+# per tall; none behind the eye. A camera that may roll uses
+# projectCameraPoint.
 func projectToScreen(
   eye: view Vec3
   target: view Vec3
@@ -57,8 +60,44 @@ func projectToScreen(
   aspect: view Float
   point: view Vec3
 ) ret opt ScreenPoint {
+  ret projectRolledPoint(
+    eye: eye
+    target: target
+    roll: 0.0
+    fovYDeg: fovYDeg
+    aspect: aspect
+    point: point
+  )
+}
+
+# Where `point` lands for `camera`, its roll included (the same view the
+# renderer draws, Scene3d.cameraViewMatrix), over a window `aspect` wide per
+# tall; none behind the eye
+func projectCameraPoint(
+  camera: view Camera3d
+  aspect: view Float
+  point: view Vec3
+) ret opt ScreenPoint {
+  ret projectRolledPoint(
+    eye: camera.position
+    target: camera.target
+    roll: camera.roll
+    fovYDeg: camera.fovYDeg
+    aspect: aspect
+    point: point
+  )
+}
+
+func projectRolledPoint(
+  eye: view Vec3
+  target: view Vec3
+  roll: view Float
+  fovYDeg: view Float
+  aspect: view Float
+  point: view Vec3
+) ret opt ScreenPoint {
   let forward: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: target, b: eye))
-  let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+  let up: Vec3 = viewUp(eye: eye, target: target, roll: roll)
   let right: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: forward, b: up))
   let cameraUp: Vec3 = Vec3.vcross(a: right, b: forward)
   let toPoint: Vec3 = Vec3.vsub(a: point, b: eye)
