@@ -649,8 +649,7 @@ func updateScrollRoot(
     drag.wheelIdleSeconds = drag.wheelIdleSeconds + step
   }
   if wheel is not 0.0 {
-    let unitsPerPoint: Float = input.touchTargetSize / touchTargetPoints
-    let raw: Float = wheel * scrollWheelStepPoints * unitsPerPoint
+    let raw: Float = uiUnitsFromPoints(input: input, points: wheel * scrollWheelStepPoints)
     state.y = state.y + dampedDelta(
       current: state.y
       delta: raw
@@ -658,7 +657,7 @@ func updateScrollRoot(
       high: 0.0
       dim: dim
     )
-    let overshoot: Float = scrollWheelOvershootPoints * unitsPerPoint
+    let overshoot: Float = uiUnitsFromPoints(input: input, points: scrollWheelOvershootPoints)
     if state.y < floor - overshoot {
       state.y = floor - overshoot
     }

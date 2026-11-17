@@ -33,6 +33,7 @@ open ecs/Event
 open ui/UiSystems
 open ui/ButtonSystem
 open ui/InputKind
+open ui/DesignUnits
 open ui/ScrollDrag
 open ui/Transform
 import Device
@@ -63,9 +64,10 @@ type UiInput {
   # The kind of the last pointer event, so a whole screen can switch density
   # (as iPadOS and Windows do when the keyboard comes off)
   lastInputKind: InputKind
-  # The smallest side a finger's target gets, in the UI's layout units. The
-  # default assumes one unit is one point; an app whose units differ sets it
-  # to `touchTargetPoints` in its own units.
+  # The smallest side a finger's target gets, in the UI's layout units: 44 pt
+  # in design units (ui/DesignUnits) by default. A program whose scenes are not
+  # yet in design units (example 106, until [ui coords 2d/7]) sets it in its
+  # own units, and uiUnitsFromPoints scales every distance by it.
   touchTargetSize: Float
   # Whether the device has a hovering pointer, kept current every frame
   deviceWatch: DeviceWatch
@@ -131,7 +133,7 @@ func createUiInput() pub ret UiInput {
     wheelTarget: noEntity()
     wheelBlocked: false
     lastInputKind: InputKind.mouse
-    touchTargetSize: touchTargetPoints
+    touchTargetSize: minTouchTargetDu
     deviceWatch: Device.createDeviceWatch()
   }
 }
@@ -623,11 +625,18 @@ func uiPointerScriptFrame(
 # drag, in points (iOS's pan gesture threshold)
 const scrollActivationPoints: Float = 10.0
 
-# The activation distance in the UI's layout units: an app whose units are
-# not points says so through the input's touch target size
-# (touchTargetPoints points in its units)
+# A distance of `points` in the UI's layout units: design units
+# (ui/DesignUnits), times the input's touch target size over its 44 pt in du
+# (1 unless a program lays out in units of its own). Every input distance
+# given in points (a drag threshold, a wheel step, an edge swipe) goes
+# through here.
+func uiUnitsFromPoints(input: view UiInput, points: view Float) ret Float {
+  ret duFromPoints(points: points) * input.touchTargetSize / minTouchTargetDu
+}
+
+# The activation distance in the UI's layout units
 func scrollActivationUnits(input: view UiInput) ret Float {
-  ret scrollActivationPoints * input.touchTargetSize / touchTargetPoints
+  ret uiUnitsFromPoints(input: input, points: scrollActivationPoints)
 }
 
 # Whether a scroll root's drag has claimed the press (ui/ScrollRootSystem):

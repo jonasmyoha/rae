@@ -144,7 +144,7 @@ func openPlaygroundWindow(title: view String) {
       y: placement.copyAtDefault(index: 1).toInt()
     )
   }
-  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+  syncDesignResolution()
 }
 
 func envFlag(name: view String) ret Bool {
@@ -318,7 +318,7 @@ func beginPlaygroundFrame(app: mod PlaygroundApp, uiWorld: mod UiWorld, uiSystem
     if width > 0.0 and height > 0.0 {
       app.extentW = width
       app.extentH = height
-      Gpu2d.setDesignResolution(width: width, height: height, fit: 0)
+      syncDesignResolution()
       resizePlaygroundUi(
         ui: app.ui
         world: uiWorld

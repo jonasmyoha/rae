@@ -1,0 +1,93 @@
+# lib/ui's input and insets in design units (points), whatever the display's
+# pixels per point: a window's framebuffer becomes the layout extent through
+# ui/DesignUnits, every input distance given in points (a drag threshold, an
+# edge swipe, a wheel step) goes through uiUnitsFromPoints, and a phone's safe
+# area reaches a SafeArea node in points at dpr 1 and 2.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/World
+open ui/Ecs
+open ui/UiSystems
+open ui/Components
+open ui/DesignUnits
+open ui/DevicePresets
+open ui/InputSystem
+open ui/PageTransitionSystem
+open ui/safeAreaSystem/SafeAreaSystem
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  # The extent: an iPhone 15 Pro's framebuffer at its dpr 3, the same window
+  # at dpr 2 and at dpr 1, all 393 x 852 points
+  check(
+    label: "extent: 1179 x 2556 px at dpr 3 is 393 x 852"
+    ok: near(a: duFromPixels(pixels: 1179.0, dpr: 3.0), b: 393.0) and near(
+      a: duFromPixels(pixels: 2556.0, dpr: 3.0)
+      b: 852.0
+    )
+  )
+  check(
+    label: "extent: 786 x 1704 px at dpr 2 and 393 x 852 px at dpr 1 are the same"
+    ok: near(a: duFromPixels(pixels: 786.0, dpr: 2.0), b: 393.0) and near(
+      a: duFromPixels(pixels: 852.0, dpr: 1.0)
+      b: 852.0
+    )
+  )
+  # Input distances in points
+  var input: UiInput = createUiInput()
+  check(label: "a finger's target is 44 du", ok: near(a: input.touchTargetSize, b: 44.0))
+  check(
+    label: "a drag starts after 10 points, 10 du"
+    ok: near(a: scrollActivationUnits(input: input), b: 10.0)
+  )
+  check(
+    label: "an edge swipe's 20 points are 20 du"
+    ok: near(a: edgeSwipeUnits(input: input, points: 20.0), b: 20.0)
+  )
+  # A program still laid out at 3 units per point says so by its touch target
+  input.touchTargetSize = 132.0
+  check(
+    label: "at 3 units per point the same distances are 30 and 60"
+    ok: near(a: scrollActivationUnits(input: input), b: 30.0) and near(
+      a: edgeSwipeUnits(input: input, points: 20.0)
+      b: 60.0
+    )
+  )
+  # Safe insets: the phone's, simulated, reach a SafeArea node in points
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = allocEntity(this: world.allocator)
+  componentSet(
+    this: world.safeAreas
+    entityId: root
+    data: SafeArea { extra: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 } }
+  )
+  setSimulatedSafeInsets(
+    world: world
+    insets: devicePresetSafeInsetsDu(preset: devicePresetById(id: "iphone-15-pro"))
+  )
+  feedSafeArea(world: world, uiSystems: uiSystems)
+  let insets: Insets = componentView(this: uiSystems.safeArea.safeInsets, entityId: root).insets
+  check(
+    label: "safe area: top 59, bottom 34"
+    ok: near(a: insets.t, b: 59.0) and near(a: insets.b, b: 34.0)
+  )
+  check(
+    label: "safe area: 118 px at dpr 2 and 59 px at dpr 1 are the same 59 du"
+    ok: near(a: duFromPixels(pixels: pixelsFromDu(du: insets.t, dpr: 2.0), dpr: 2.0), b: 59.0) and near(
+      a: pixelsFromDu(du: insets.t, dpr: 2.0)
+      b: 118.0
+    ) and near(a: pixelsFromDu(du: insets.t, dpr: 1.0), b: 59.0)
+  )
+}

@@ -128,9 +128,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       name: "window.{settings.appId}.geometry"
     )
     restoreWindowGeometry(windowGeometry: windowGeometry)
-    let extentW: Float = windowExtentW()
-    let extentH: Float = windowExtentH()
-    Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+    syncDesignResolution()
 
     # A "lib/..." folder (walkerAssets) from the Rae this app builds against
     let assets: String = Sys.stdlibPath(path: settings.assets)

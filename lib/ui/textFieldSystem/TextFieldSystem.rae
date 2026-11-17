@@ -33,6 +33,7 @@ open Keys
 open ui/Ecs
 open ui/Components
 open ui/BindingComponents
+open ui/DesignUnits
 open ui/UiSystems
 open ecs/Entity
 open ecs/Event
@@ -225,7 +226,8 @@ func textFieldSystem(
     textFieldSystem.textInputOn = stillFocused
     Gpu2dTextInput.setTextInput(active: stillFocused)
   }
-  textFieldSystem.keyboardHeight = Gpu2dTextInput.keyboardHeight()
+  # the OS reports points; layout is in design units
+  textFieldSystem.keyboardHeight = duFromPoints(points: Gpu2dTextInput.keyboardHeight())
   if changed {
     # an edit or a focus change shows the caret at once
     textFieldSystem.caretEpoch = now

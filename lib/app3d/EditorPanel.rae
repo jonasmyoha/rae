@@ -150,7 +150,7 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
     iconFontName: ""
     themeFile: "Theme.raescene"
   )
-  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+  syncDesignResolution()
   var world: UiWorld = create()
   var uiSystems: UiSystems = createUiSystems()
   seedWorldTheme(world: world, res: gpuUi)
@@ -387,7 +387,7 @@ func updateEditorPanel(
 ) ret EditorPanelFrame {
   var layoutChanged: Bool = false
   if resized and windowExtentW() > 0.0 and windowExtentH() > 0.0 {
-    Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+    syncDesignResolution()
     layoutChanged = true
   }
   updateUiInput(

@@ -53,22 +53,26 @@ open ecs/Entity
 open ecs/ComponentTable
 open ui/UiSystems
 open ui/safeAreaSystem/SafeAreaSystem
+open ui/DesignUnits
 
 # ----- window extent --------------------------------------------------
+# The window's size in design units: its framebuffer pixels over the display's
+# pixels per point (ui/DesignUnits), so a framebuffer pixel never reaches layout
 func windowExtentW() ret Float {
-  let ratio: Float = Gpu2d.dpr()
-  if ratio < 0.1 {
-    ret Gpu2d.windowWidth().toFloat()
-  }
-  ret Gpu2d.windowWidth().toFloat() / ratio
+  ret duFromPixels(pixels: Gpu2d.windowWidth().toFloat(), dpr: windowDpr())
 }
 
 func windowExtentH() ret Float {
+  ret duFromPixels(pixels: Gpu2d.windowHeight().toFloat(), dpr: windowDpr())
+}
+
+# The display's pixels per point, 1 when the window does not know yet
+func windowDpr() ret Float {
   let ratio: Float = Gpu2d.dpr()
   if ratio < 0.1 {
-    ret Gpu2d.windowHeight().toFloat()
+    ret 1.0
   }
-  ret Gpu2d.windowHeight().toFloat() / ratio
+  ret ratio
 }
 
 # Point the design resolution at the window's size, so the layout fills the window: no

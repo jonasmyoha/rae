@@ -108,7 +108,7 @@ type VehicleApp {
 # Open the window titled `title` (before the renderer is created).
 func openVehicleWindow(title: view String) {
   Gpu2d.initWindow(width: 1280, height: 800, title: title)
-  Gpu2d.setDesignResolution(width: windowExtentW(), height: windowExtentH(), fit: 0)
+  syncDesignResolution()
 }
 
 # The app's shared state with the course's terrain uploaded and its HUD
@@ -262,7 +262,7 @@ func beginVehicleFrame(app: mod VehicleApp, uiWorld: mod UiWorld, uiSystems: mod
     if width > 0.0 and height > 0.0 {
       app.extentW = width
       app.extentH = height
-      Gpu2d.setDesignResolution(width: width, height: height, fit: 0)
+      syncDesignResolution()
       resizeVehicleUi(
         ui: app.ui
         world: uiWorld

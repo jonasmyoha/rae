@@ -370,7 +370,11 @@ func timelineSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view U
       }
       # a trackpad: two fingers sideways pan, a pinch zooms about the pointer
       if input.wheelTarget is entityId and input.wheelX is not 0.0 {
-        timelinePan(state: state, pixels: -input.wheelX * 20.0, width: box.w)
+        timelinePan(
+          state: state
+          pixels: uiUnitsFromPoints(input: input, points: -input.wheelX * 20.0)
+          width: box.w
+        )
         changed = true
       }
       if input.wheelTarget is entityId and input.pinch is not 1.0 and input.pinch > 0.0 {
