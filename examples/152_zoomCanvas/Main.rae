@@ -1,0 +1,246 @@
+# A zooming node canvas, in two feels (docs/ui-scene-format.md "ZoomBehavior").
+#
+# Six nodes joined by wires on a Camera2D canvas: pinch, or the wheel with
+# Ctrl/Cmd held, zooms about the pointer; a drag pans (ui/CanvasComponents).
+# Every node has a title, a summary (a colored block, for far away) and
+# details (its parameters, for close up), and two ports. `F` switches the feel:
+#
+#   zoomy       the title scales with the canvas between 0.6 and 2.5 times its
+#               size (the parameters between 0.6 and 2), and the three levels (the bare card, the
+#               summary, the
+#               details) cross-fade over a zoom factor of 1.6 about their
+#               bounds (0.3 and 0.7): continuous,
+#               the canvas's own text growing as you come closer
+#   analytical  every text keeps its size on screen at every zoom, and the
+#               levels switch at a zoom (0.3 and 0.7) with no fade: the
+#               discrete feel of a tool that shows data
+#
+# The ports keep their size in both: a handle to grab is the same size at any
+# zoom. Each node's behavior is its `ZoomBehavior`; the scene holds the zoomy
+# one (assets/Canvas.raescene) and applyFeel writes the analytical one.
+#
+#   RAE_ZOOM_CANVAS_ZOOM=0.25 RAE_ZOOM_CANVAS_FEEL=analytical \
+#     RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/zoom.bmp \
+#     compiler/bin/rae run examples/152_zoomCanvas/Main.rae
+import Gpu2d
+import Math
+import Keys
+import Sdl3
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/UiSystems
+open ui/canvasGestureSystem/CanvasGestureSystem
+open ui/wireSystem/WireSystem
+open Gpu2dCanvas
+
+const windowW: Int = 1200
+
+const windowH: Int = 800
+
+const nodeCount: Int = 6
+
+# The point a run's starting zoom is about, in canvas units: the middle of
+# the Filter node, which stays in the window's middle at any zoom
+const focusX: Float = 550.0
+
+const focusY: Float = 185.0
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func setBehavior(world: mod UiWorld, nodeId: view String, behavior: view ZoomBehavior) {
+  let entityId: EntityId = nodeOf(world: world, nodeId: nodeId)
+  if isNone(this: entityId) is false {
+    componentSet(this: world.zoomBehaviors, entityId: entityId, data: behavior)
+  }
+}
+
+# Every node's ZoomBehavior for one feel. The levels: the bare card below
+# 0.3, the summary up to 0.7, the details above it.
+func applyFeel(world: mod UiWorld, zoomy: view Bool) {
+  var fade: Float = 1.0
+  if zoomy {
+    fade = 1.6
+  }
+  loop var k: Int = 1, k <= nodeCount, ++k {
+    var title: ZoomBehavior = { mode: ZoomMode.fixed, showFrom: 0.3, fade: fade }
+    var rowText: ZoomBehavior = { mode: ZoomMode.fixed }
+    if zoomy {
+      title = ZoomBehavior {
+        mode: ZoomMode.clamped
+        minScale: 0.6
+        maxScale: 2.5
+        showFrom: 0.3
+        fade: fade
+      }
+      rowText = ZoomBehavior { mode: ZoomMode.clamped, minScale: 0.6, maxScale: 2.0 }
+    }
+    setBehavior(world: world, nodeId: "N{k}Title", behavior: title)
+    setBehavior(
+      world: world
+      nodeId: "N{k}Summary"
+      behavior: ZoomBehavior { showTo: 0.7, fade: fade }
+    )
+    setBehavior(
+      world: world
+      nodeId: "N{k}Details"
+      behavior: ZoomBehavior { showFrom: 0.7, fade: fade }
+    )
+    loop var r: Int = 1, r <= 3, ++r {
+      setBehavior(world: world, nodeId: "N{k}Row{r}", behavior: rowText)
+    }
+  }
+}
+
+# The wires: right edges to left edges
+func connectNodes(world: mod UiWorld) {
+  let links: EntityId = nodeOf(world: world, nodeId: "Links")
+  let pairs: List(Int) = {
+    1
+    2
+    2
+    3
+    1
+    5
+    4
+    5
+    5
+    6
+    3
+    6
+  }
+  loop var pair: Int = 0, pair * 2 + 1 < pairs.length, ++pair {
+    let from: Int = pairs.copyAtFallback(index: pair * 2, fallback: 1)
+    let to: Int = pairs.copyAtFallback(index: pair * 2 + 1, fallback: 1)
+    let unusedWire: Int = wireConnect(
+      world: world
+      wiresEntityId: links
+      fromEntityId: nodeOf(world: world, nodeId: "N{from}")
+      toEntityId: nodeOf(world: world, nodeId: "N{to}")
+    )
+  }
+}
+
+# The camera at `zoom` about the focus point, placed in the window's middle
+func zoomAboutMiddle(world: mod UiWorld, zoom: view Float) {
+  let camera: mod Camera2D = componentMod(
+    this: world.cameras
+    entityId: nodeOf(world: world, nodeId: "Canvas")
+  )
+  camera.zoom = zoom
+  camera.offsetX = world.layoutW / 2.0 - zoom * focusX
+  camera.offsetY = world.layoutH / 2.0 - zoom * focusY
+}
+
+func hudText(world: view UiWorld, zoomy: view Bool) ret String {
+  let zoom: Float = componentView(
+    this: world.cameras
+    entityId: nodeOf(world: world, nodeId: "Canvas")
+  ).zoom
+  var feel: String = "analytical"
+  if zoomy {
+    feel = "zoomy"
+  }
+  ret "{feel} feel, zoom {Math.round(x: zoom * 100.0).toInt()} %   F switches the feel; pinch or Ctrl/Cmd + wheel zooms"
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: windowW, height: windowH, title: "152: a zooming node canvas")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  let scene: Scene = loadSceneFile(path: "examples/152_zoomCanvas/assets/Canvas.raescene")
+  if scene.ok is false {
+    log("[zoomCanvas] the scene did not load: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  # The canvas's own palette and text styles
+  gpuUi.theme = parseTheme(scene: scene)
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  syncDesignResolution()
+  world.layoutW = windowExtentW()
+  world.layoutH = windowExtentH()
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  connectNodes(world: world)
+
+  var zoomy: Bool = getEnv(name: "RAE_ZOOM_CANVAS_FEEL") is not "analytical"
+  applyFeel(world: world, zoomy: zoomy)
+  var startZoom: Float = getEnv(name: "RAE_ZOOM_CANVAS_ZOOM").toFloat()
+  if startZoom <= 0.0 {
+    startZoom = 1.0
+  }
+  zoomAboutMiddle(world: world, zoom: startZoom)
+  log("[zoomCanvas] {hudText(world: world, zoomy: zoomy)}")
+
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  var lastFrame: Float64 = Gpu2d.nowSeconds()
+  loop not Gpu2d.pollClose() {
+    let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
+    updateUiInput(input: input, world: world, uiSystems: uiSystems)
+    let now: Float64 = Gpu2d.nowSeconds()
+    let deltaTime: Float = (now - lastFrame) as Float
+    lastFrame = now
+    canvasGestureSystem(
+      world: world
+      uiSystems: uiSystems
+      gestures: canvasGesturesFrom(
+        input: input
+        canvasEntityId: nodeOf(world: world, nodeId: "Canvas")
+        deltaTime: deltaTime
+      )
+    )
+    if Sdl3.isKeyPressed(key: Keys.keyF) {
+      zoomy = zoomy is false
+      applyFeel(world: world, zoomy: zoomy)
+    }
+    setNodeText(world: world, nodeId: "Hud", value: hudText(world: world, zoomy: zoomy))
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    if resized or Gpu2d.shouldRenderFrame(appNeedsRender: true) {
+      Gpu2d.beginFrame(
+        canvas: canvas
+        r: 0.086
+        g: 0.102
+        b: 0.133
+        a: 1.0
+      )
+      renderSystemGpu2d(
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      )
+      Gpu2d.endFrame(canvas: canvas)
+    }
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  ret 0
+}

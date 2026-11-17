@@ -16,6 +16,7 @@ open ui/PlaneComponents
 open ui/WireComponents
 open ui/PaintCacheComponents
 open ui/CanvasComponents
+open ui/ZoomComponents
 import ui/Theme
 open ecs/Entity
 open ecs/ComponentTable
@@ -152,6 +153,8 @@ type UiWorld {
   canvasControls: ComponentTable(CanvasControls)
   canvasControlStates: ComponentTable(CanvasControlState)
   canvasDraggables: ComponentTable(CanvasDraggable)
+  # how a node under a camera behaves as it zooms (ui/ZoomComponents)
+  zoomBehaviors: ComponentTable(ZoomBehavior)
   backdropImages: ComponentTable(BackdropImage)
   backdropBlurs: ComponentTable(BackdropBlur)
   opticalAligns: ComponentTable(OpticalAlign)
@@ -391,6 +394,7 @@ func createUiWorld() ret UiWorld {
     canvasControls: ComponentTable.create(CanvasControls)
     canvasControlStates: ComponentTable.create(CanvasControlState)
     canvasDraggables: ComponentTable.create(CanvasDraggable)
+    zoomBehaviors: ComponentTable.create(ZoomBehavior)
     backdropImages: ComponentTable.create(BackdropImage)
     backdropBlurs: ComponentTable.create(BackdropBlur)
     opticalAligns: ComponentTable.create(OpticalAlign)

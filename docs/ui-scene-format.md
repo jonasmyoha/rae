@@ -1437,3 +1437,50 @@ code) is a hard line break; `"\r\n"` counts as one break, and so does a lone
 Case 1525 measures two- and three-line texts and draws start-aligned and
 centered ones in one frame.
 
+## 44. `ZoomBehavior`: how a node acts as its canvas zooms
+
+Under a `Camera2D` every node scales with the zoom, text included. A node with
+`ZoomBehavior` (lib/ui/ZoomComponents) chooses otherwise:
+
+```json
+"Port":   { "Rect": { ... }, "ZoomBehavior": { "mode": "Fixed", "pivotX": 0.5, "pivotY": 0.5 } },
+"Title":  { "Rect": { ... }, "Text": { ... },
+            "ZoomBehavior": { "mode": "Clamped", "minScale": 0.6, "maxScale": 2.5, "showFrom": 0.3 } },
+"Summary":{ "Rect": { ... }, "ZoomBehavior": { "showTo": 0.7, "fade": 1.6 } },
+"Details":{ "Rect": { ... }, "ZoomBehavior": { "showFrom": 0.7, "fade": 1.6 } }
+```
+
+- `mode`:
+  - `Scales` (the default) grows and shrinks with the camera, text too. This is
+    the zoomy feel: you come closer and the canvas's own words get bigger.
+  - `Fixed` keeps its authored size on screen at every zoom: handles, ports,
+    selection outlines, labels that must stay readable. Its children keep
+    theirs with it.
+  - `Clamped` follows the zoom between `minScale` and `maxScale` on screen
+    (1 is its authored size), then holds.
+- `pivotX`, `pivotY` (0..1 of its box, 0, 0 by default): the point that stays
+  where the camera puts it while the node's size is held. A port in the middle
+  of an edge uses 0.5, 0.5; a title at a card's corner 0, 0.
+- `showFrom`, `showTo`: the camera zooms the node shows between (0: no
+  bound). Across each bound it fades over a zoom factor of `fade`, centered
+  on the bound (from `bound / sqrt(fade)` to `bound * sqrt(fade)`); outside
+  its range it is hidden and not hit. Two levels of detail that share a bound
+  and a fade cross-fade, their alphas adding up to 1; `fade: 1` switches them
+  at the bound, the discrete feel of a tool that shows data.
+- The zoom a node sees is the product of the Camera2D zooms above it, up to an
+  ancestor with a ZoomBehavior of its own, which passes on the size it
+  settled on. The transform pass applies it (lib/ui/Transform): the node's
+  scale is multiplied by its wanted size over the zoom it sees, about its
+  pivot, and its alpha by its fade.
+
+Which to use is a choice per canvas. A data tool (a timeline, a profiler)
+reads best analytical: text at one size, levels that switch. A canvas you
+explore (a mood board, a node graph) feels better zoomy: text that scales
+within limits and levels that cross-fade. Example 152 (`examples/152_zoomCanvas`)
+is a node canvas with both, `F` switching between them; case 1526 checks
+each mode's size on screen at zoom 0.25, 1 and 4, the pivot, a fixed node's
+child and a cross-fade.
+
+A camera's zoom still moves in steps: a wheel notch or a pinch sets it
+directly (ui/CanvasComponents).
+

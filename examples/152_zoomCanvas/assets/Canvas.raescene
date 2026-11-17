@@ -1,0 +1,1149 @@
+{
+  "type": "Scene",
+  "version": 2,
+  "root": "Screen",
+  "palette": {
+    "canvasBg": {
+      "r": 22,
+      "g": 26,
+      "b": 34,
+      "a": 255
+    },
+    "card": {
+      "r": 44,
+      "g": 52,
+      "b": 68,
+      "a": 255
+    },
+    "cardEdge": {
+      "r": 90,
+      "g": 104,
+      "b": 130,
+      "a": 255
+    },
+    "port": {
+      "r": 250,
+      "g": 200,
+      "b": 80,
+      "a": 255
+    },
+    "lane1": {
+      "r": 80,
+      "g": 150,
+      "b": 210,
+      "a": 255
+    },
+    "lane2": {
+      "r": 200,
+      "g": 110,
+      "b": 160,
+      "a": 255
+    },
+    "lane3": {
+      "r": 110,
+      "g": 190,
+      "b": 120,
+      "a": 255
+    },
+    "hudText": {
+      "r": 230,
+      "g": 236,
+      "b": 245,
+      "a": 255
+    }
+  },
+  "text": {
+    "nodeTitle": {
+      "size": 17,
+      "weight": 600,
+      "color": "hudText"
+    },
+    "nodeBody": {
+      "size": 13,
+      "color": "hudText"
+    },
+    "hud": {
+      "size": 15,
+      "color": "hudText"
+    }
+  },
+  "nodes": {
+    "Screen": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Shape": {
+        "kind": "Rect",
+        "fill": "canvasBg"
+      },
+      "Children": [
+        "Canvas",
+        "Hud"
+      ]
+    },
+    "Canvas": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 0,
+        "h": 0
+      },
+      "Size": {
+        "w": {
+          "mode": "Fill"
+        },
+        "h": {
+          "mode": "Fill"
+        }
+      },
+      "Camera2D": {
+        "zoom": 1
+      },
+      "CanvasControls": {
+        "minZoom": 0.1,
+        "maxZoom": 8
+      },
+      "WheelTarget": {},
+      "Children": [
+        "Links",
+        "N1",
+        "N2",
+        "N3",
+        "N4",
+        "N5",
+        "N6"
+      ]
+    },
+    "Links": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1
+      },
+      "Wires": {
+        "color": "cardEdge",
+        "width": 2
+      }
+    },
+    "N1": {
+      "Rect": {
+        "x": 80,
+        "y": 120,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N1Title",
+        "N1Summary",
+        "N1Details",
+        "N1In",
+        "N1Out"
+      ]
+    },
+    "N1Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Source 1",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N1Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane1",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N1Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N1Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N1Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N1Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N1Row1",
+        "N1Row2",
+        "N1Row3"
+      ]
+    },
+    "N1In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N1Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N2": {
+      "Rect": {
+        "x": 440,
+        "y": 120,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N2Title",
+        "N2Summary",
+        "N2Details",
+        "N2In",
+        "N2Out"
+      ]
+    },
+    "N2Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Filter 2",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N2Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane2",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N2Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N2Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N2Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N2Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N2Row1",
+        "N2Row2",
+        "N2Row3"
+      ]
+    },
+    "N2In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N2Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N3": {
+      "Rect": {
+        "x": 800,
+        "y": 120,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N3Title",
+        "N3Summary",
+        "N3Details",
+        "N3In",
+        "N3Out"
+      ]
+    },
+    "N3Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Mixer 3",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N3Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane3",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N3Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N3Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N3Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N3Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N3Row1",
+        "N3Row2",
+        "N3Row3"
+      ]
+    },
+    "N3In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N3Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N4": {
+      "Rect": {
+        "x": 80,
+        "y": 420,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N4Title",
+        "N4Summary",
+        "N4Details",
+        "N4In",
+        "N4Out"
+      ]
+    },
+    "N4Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Noise 4",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N4Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane1",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N4Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N4Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N4Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N4Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N4Row1",
+        "N4Row2",
+        "N4Row3"
+      ]
+    },
+    "N4In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N4Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N5": {
+      "Rect": {
+        "x": 440,
+        "y": 420,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N5Title",
+        "N5Summary",
+        "N5Details",
+        "N5In",
+        "N5Out"
+      ]
+    },
+    "N5Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Blend 5",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N5Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane2",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N5Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N5Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N5Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N5Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N5Row1",
+        "N5Row2",
+        "N5Row3"
+      ]
+    },
+    "N5In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N5Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N6": {
+      "Rect": {
+        "x": 800,
+        "y": 420,
+        "w": 220,
+        "h": 130
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "card",
+        "radius": 12,
+        "stroke": "cardEdge",
+        "strokeWidth": 1.5
+      },
+      "Children": [
+        "N6Title",
+        "N6Summary",
+        "N6Details",
+        "N6In",
+        "N6Out"
+      ]
+    },
+    "N6Title": {
+      "Rect": {
+        "x": 12,
+        "y": 10,
+        "w": 196,
+        "h": 24
+      },
+      "Text": {
+        "text": "Output 6",
+        "styleId": "nodeTitle"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2.5,
+        "showFrom": 0.3,
+        "fade": 1.6
+      }
+    },
+    "N6Summary": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "lane3",
+        "radius": 8
+      },
+      "ZoomBehavior": {
+        "showTo": 0.7,
+        "fade": 1.6
+      }
+    },
+    "N6Row1": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "gain = 0.8",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N6Row2": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "cutoff = 1200 Hz",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N6Row3": {
+      "Rect": {
+        "x": 0,
+        "y": 0,
+        "w": 196,
+        "h": 20
+      },
+      "Text": {
+        "text": "mix = 35 %",
+        "styleId": "nodeBody"
+      },
+      "ZoomBehavior": {
+        "mode": "Clamped",
+        "minScale": 0.6,
+        "maxScale": 2
+      }
+    },
+    "N6Details": {
+      "Rect": {
+        "x": 12,
+        "y": 44,
+        "w": 196,
+        "h": 72
+      },
+      "Layout": {
+        "type": "Vertical",
+        "gap": 4
+      },
+      "ZoomBehavior": {
+        "showFrom": 0.7,
+        "fade": 1.6
+      },
+      "Children": [
+        "N6Row1",
+        "N6Row2",
+        "N6Row3"
+      ]
+    },
+    "N6In": {
+      "Rect": {
+        "x": -6,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "N6Out": {
+      "Rect": {
+        "x": 214,
+        "y": 59,
+        "w": 12,
+        "h": 12
+      },
+      "Shape": {
+        "kind": "RoundedRect",
+        "fill": "port",
+        "radius": 6
+      },
+      "ZoomBehavior": {
+        "mode": "Fixed",
+        "pivotX": 0.5,
+        "pivotY": 0.5
+      }
+    },
+    "Hud": {
+      "Rect": {
+        "x": 16,
+        "y": 12,
+        "w": 700,
+        "h": 24
+      },
+      "Text": {
+        "text": "",
+        "styleId": "hud"
+      }
+    }
+  }
+}

@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.8, 2026-11-17: zoom behavior per node
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.8` moves a project.
+
+- `ZoomBehavior` (lib/ui/ZoomComponents, docs/ui-scene-format.md §44): under a Camera2D a
+  node `Scales` with the zoom (the default), stays `Fixed` on screen, or is `Clamped`
+  between two sizes, about a pivot; `showFrom` / `showTo` show it in a range of zooms with
+  a cross-fade centered on each bound, so levels of detail cross-fade (or switch, with
+  `fade: 1`). Applied by the transform pass.
+- Example 152_zoomCanvas: a node canvas in the analytical and the zoomy feel.
+- A UiWorld has one more table (`zoomBehaviors`).
+
 ## 0.4.7, 2026-11-17: line breaks in a Text
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.7` moves a project.

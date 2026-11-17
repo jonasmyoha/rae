@@ -1,0 +1,111 @@
+# ZoomBehavior (docs/ui-scene-format.md "ZoomBehavior"): under a Camera2D at
+# zoom 0.25, 1 and 4, a node that `scales` is 0.25, 1 and 4 times its size on
+# screen; a `fixed` one keeps its size, and so do its children; a `clamped`
+# one (0.5..2) follows the zoom between those and holds past them. The pivot
+# stays where the camera puts it. Two levels of detail that share a bound
+# (shown from zoom 1 / shown up to zoom 1, a fade of 4) cross-fade from 0.5 to
+# 2: half each at 1.25, one or the other alone outside.
+import ui/Components
+import Math
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiSystems
+open ui/cameraSystem/CameraSystem
+open ecs/ComponentTable
+open ecs/Entity
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene", "version": 2, "root": "Canvas",
+    "nodes": {
+      "Canvas": { "Rect": {"x":0,"y":0,"w":800,"h":600}, "Camera2D": {"zoom": 1}, "Children": ["Scales","Fixed","Clamped","Detail","Simple"] },
+      "Scales": { "Rect": {"x":100,"y":100,"w":100,"h":20} },
+      "Fixed": { "Rect": {"x":100,"y":200,"w":100,"h":20}, "ZoomBehavior": {"mode": "Fixed", "pivotX": 0.5, "pivotY": 0.5}, "Children": ["FixedChild"] },
+      "FixedChild": { "Rect": {"x":10,"y":5,"w":40,"h":10} },
+      "Clamped": { "Rect": {"x":100,"y":300,"w":100,"h":20}, "ZoomBehavior": {"mode": "Clamped", "minScale": 0.5, "maxScale": 2} },
+      "Detail": { "Rect": {"x":400,"y":100,"w":100,"h":20}, "ZoomBehavior": {"showFrom": 1, "fade": 4} },
+      "Simple": { "Rect": {"x":400,"y":100,"w":100,"h":20}, "ZoomBehavior": {"showTo": 1, "fade": 4} }
+    }
+  }"#
+}
+
+func nodeEntityIdOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func round2(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+# The node's box on screen: its width and height, and where its middle is
+func onScreen(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let entityId: EntityId = nodeEntityIdOf(world: world, nodeId: nodeId)
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  let cr: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  ret "{round2(value: rect.w)} x {round2(value: rect.h)} at {round2(value: rect.x + rect.w / 2.0)},{round2(
+    value: rect.y + rect.h / 2.0
+  )}"
+}
+
+func alphaOf(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  let visual: WorldVisual = worldVisualOf(
+    world: world
+    uiSystems: uiSystems
+    entityId: nodeEntityIdOf(world: world, nodeId: nodeId)
+  )
+  if visual.visible {
+    ret "{round2(value: visual.alpha)}"
+  }
+  ret "{round2(value: visual.alpha)} hidden"
+}
+
+func frameAt(world: mod UiWorld, uiSystems: mod UiSystems, zoom: view Float) {
+  let camera: mod Camera2D = componentMod(
+    this: world.cameras
+    entityId: nodeEntityIdOf(world: world, nodeId: "Canvas")
+  )
+  camera.zoom = zoom
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("zoom {zoom}:")
+  log("  scales  {onScreen(world: world, uiSystems: uiSystems, nodeId: "Scales")}")
+  log("  fixed   {onScreen(world: world, uiSystems: uiSystems, nodeId: "Fixed")}")
+  log("  child   {onScreen(world: world, uiSystems: uiSystems, nodeId: "FixedChild")}")
+  log("  clamped {onScreen(world: world, uiSystems: uiSystems, nodeId: "Clamped")}")
+  log(
+    "  detail alpha {alphaOf(world: world, uiSystems: uiSystems, nodeId: "Detail")}, simple alpha {alphaOf(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Simple"
+    )}"
+  )
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  loadScene(world: world, uiSystems: uiSystems, scene: parseScene(source: sceneText()))
+  log("diagnostics: {world.sceneDiagnostics.length}")
+  frameAt(world: world, uiSystems: uiSystems, zoom: 0.25)
+  frameAt(world: world, uiSystems: uiSystems, zoom: 1.0)
+  frameAt(world: world, uiSystems: uiSystems, zoom: 4.0)
+  # the cross-fade between the two levels of detail
+  frameAt(world: world, uiSystems: uiSystems, zoom: 1.25)
+  frameAt(world: world, uiSystems: uiSystems, zoom: 0.5)
+}

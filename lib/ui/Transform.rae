@@ -126,6 +126,31 @@ func runtimeOffsetOf(
   ret ro.delta
 }
 
+# The camera zoom `entityId` sees: the product of the Camera2D zooms above it,
+# up to an ancestor with a ZoomBehavior, whose settled scale on screen it
+# passes on (so a fixed node's children are fixed with it). 1 with no camera.
+func zoomSeenBy(world: view UiWorld, uiSystems: view UiSystems, entityId: view EntityId) ret Float {
+  var zoom: Float = 1.0
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 64, ++depth {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret zoom
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    if componentHas(this: world.zoomBehaviors, entityId: at) {
+      let behavior: view ZoomBehavior = componentView(this: world.zoomBehaviors, entityId: at)
+      ret zoom * zoomTargetScale(
+        behavior: behavior
+        zoom: zoomSeenBy(world: world, uiSystems: uiSystems, entityId: at)
+      )
+    }
+    if componentHas(this: world.cameras, entityId: at) {
+      zoom = zoom * componentView(this: world.cameras, entityId: at).zoom
+    }
+  }
+  ret zoom
+}
+
 # Fold the parent's accumulated alpha/visible with this entity's own Opacity /
 # Active / TransformFx into a WorldVisual. Clamped to [0,1]. Roots start from
 # parentAlpha=1 / parentVisible=true. (Alpha/visible are the UI-specific concern
@@ -146,6 +171,21 @@ func composeVisual(
     visible = false
   }
   var alpha: Float = parentAlpha * opacity(world: world, entityId: entityId) * fx.alpha
+  # A ZoomBehavior's range of zooms: faded at its ends, gone (and not hit)
+  # outside it
+  if componentHas(this: world.zoomBehaviors, entityId: entityId) {
+    let behavior: view ZoomBehavior = componentView(this: world.zoomBehaviors, entityId: entityId)
+    if behavior.showFrom > 0.0 or behavior.showTo > 0.0 {
+      let shown: Float = zoomVisibility(
+        behavior: behavior
+        zoom: zoomSeenBy(world: world, uiSystems: uiSystems, entityId: entityId)
+      )
+      alpha = alpha * shown
+      if shown <= 0.0 {
+        visible = false
+      }
+    }
+  }
   if componentHas(this: uiSystems.animation.poses, entityId: entityId) {
     alpha = alpha * componentView(this: uiSystems.animation.poses, entityId: entityId).opacity
   }
@@ -167,6 +207,7 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
   # A page at rest pays nothing for animation: no pose, no lookup per node
   let anyPose: Bool = componentCount(this: uiSystems.animation.poses) > 0
   let anyCamera: Bool = componentCount(this: world.cameras) > 0
+  let anyZoomBehavior: Bool = componentCount(this: world.zoomBehaviors) > 0
   loop var i: Int = 0, i < componentCount(this: uiSystems.layout.computedRects), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.layout.computedRects, i: i)
     let cr: view ComputedRect = queryViewAt(table: uiSystems.layout.computedRects, denseIndex: i)
@@ -211,6 +252,26 @@ func buildLocalTransforms(world: mod UiWorld, uiSystems: mod UiSystems) {
       let sinR: Float = Math.sin(x: rotation)
       originX = originX + pivotX - (scaledX * cosR - scaledY * sinR)
       originY = originY + pivotY - (scaledX * sinR + scaledY * cosR)
+    }
+    # ZoomBehavior (ui/ZoomComponents): the node's scale times its wanted scale
+    # on screen over the zoom it sees, about its pivot. A box point q maps to
+    # origin + R S q; scaled by f about p it is origin + R S p (1 - f) + R (S f) q.
+    if anyZoomBehavior and componentHas(this: world.zoomBehaviors, entityId: entityId) {
+      let behavior: view ZoomBehavior = componentView(this: world.zoomBehaviors, entityId: entityId)
+      let seen: Float = zoomSeenBy(world: world, uiSystems: uiSystems, entityId: entityId)
+      if seen > 0.0 {
+        let factor: Float = zoomTargetScale(behavior: behavior, zoom: seen) / seen
+        if factor is not 1.0 {
+          let pivotX: Float = cr.size.x * behavior.pivotX * scaleX * (1.0 - factor)
+          let pivotY: Float = cr.size.y * behavior.pivotY * scaleY * (1.0 - factor)
+          let cosR: Float = Math.cos(x: rotation)
+          let sinR: Float = Math.sin(x: rotation)
+          originX = originX + pivotX * cosR - pivotY * sinR
+          originY = originY + pivotX * sinR + pivotY * cosR
+          scaleX = scaleX * factor
+          scaleY = scaleY * factor
+        }
+      }
     }
     let local: Transform2D = {
       position: { x: originX, y: originY }

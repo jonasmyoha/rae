@@ -1,0 +1,99 @@
+# ui/ZoomComponents — how a node under a Camera2D behaves as the camera zooms
+# (docs/ui-scene-format.md "ZoomBehavior"). A canvas (a node graph, a
+# timeline, the UI editor's document) scales everything under its camera; a
+# node with ZoomBehavior can keep its size on screen instead, or follow the
+# zoom only between two sizes, and can show only in a range of zooms, fading
+# in and out at its ends so two levels of detail cross-fade.
+#
+# The transform pass (ui/Transform) applies it: the node's scale is multiplied
+# by (its wanted scale on screen) / (the zoom it sees), about `pivotX` /
+# `pivotY`, and its alpha by its fade. The zoom a node sees is the product of
+# the Camera2D zooms above it, up to an ancestor with a ZoomBehavior of its
+# own, which passes on the scale it settled on.
+import Math
+
+enum ZoomMode {
+  # grows and shrinks with the camera, text too (the zoomy feel; the default)
+  scales
+  # keeps its authored size on screen at every zoom: handles, ports, outlines,
+  # labels that must stay readable
+  fixed
+  # follows the camera between `minScale` and `maxScale` on screen, then holds
+  clamped
+}
+
+type ZoomBehavior {
+  mode: ZoomMode = ZoomMode.scales
+  # clamped: the smallest and largest scale on screen (1: its authored size)
+  minScale: Float = 0.5
+  maxScale: Float = 2.0
+  # the point of the node's box that stays where the camera puts it while its
+  # scale is held (0, 0: the top-left; 0.5, 0.5: the middle)
+  pivotX: Float = 0.0
+  pivotY: Float = 0.0
+  # the camera zooms it shows between (0: no bound); it fades across each
+  # bound over a zoom factor of `fade`, centered on the bound (1: it switches
+  # at the bound)
+  showFrom: Float = 0.0
+  showTo: Float = 0.0
+  fade: Float = 1.25
+}
+
+# The scale on screen a node of `behavior` takes when it sees zoom `zoom`
+func zoomTargetScale(behavior: view ZoomBehavior, zoom: view Float) ret Float {
+  match behavior.mode {
+    case ZoomMode.fixed {
+      ret 1.0
+    }
+    case ZoomMode.clamped {
+      if zoom < behavior.minScale {
+        ret behavior.minScale
+      }
+      if zoom > behavior.maxScale {
+        ret behavior.maxScale
+      }
+      ret zoom
+    }
+    case ZoomMode.scales {
+      ret zoom
+    }
+  }
+  ret zoom
+}
+
+# How visible a node of `behavior` is at zoom `zoom`: 1 inside its range, 0
+# out of it, and a straight ramp across each bound, from `bound / sqrt(fade)`
+# to `bound * sqrt(fade)`. Two nodes that share a bound (one `showTo: 0.7`,
+# the other `showFrom: 0.7`, the same `fade`) cross-fade over the same zooms,
+# their alphas adding up to 1.
+func zoomVisibility(behavior: view ZoomBehavior, zoom: view Float) ret Float {
+  var alpha: Float = 1.0
+  let spread: Float = Math.sqrt(x: Math.max(a: behavior.fade, b: 1.0))
+  if behavior.showFrom > 0.0 {
+    alpha = alpha * zoomRamp(zoom: zoom, bound: behavior.showFrom, spread: spread)
+  }
+  if behavior.showTo > 0.0 {
+    alpha = alpha * (1.0 - zoomRamp(zoom: zoom, bound: behavior.showTo, spread: spread))
+  }
+  ret alpha
+}
+
+# 0 below `bound / spread`, 1 above `bound * spread`, a straight line between
+# (a step at the bound when `spread` is 1)
+func zoomRamp(zoom: view Float, bound: view Float, spread: view Float) ret Float {
+  if spread <= 1.0 {
+    if zoom < bound {
+      ret 0.0
+    }
+    ret 1.0
+  }
+  let low: Float = bound / spread
+  let high: Float = bound * spread
+  if zoom <= low {
+    ret 0.0
+  }
+  if zoom >= high {
+    ret 1.0
+  }
+  ret (zoom - low) / (high - low)
+}
