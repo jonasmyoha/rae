@@ -1,3 +1,4 @@
+import Gpu2d
 open ui/PageTransitionSystem
 open HotReload
 open ui/Ecs
@@ -67,6 +68,40 @@ type AppSession {
   lastRenderTime: Float64
   # Any activity keeps the loop rendering at display cadence until this deadline.
   renderUntil: Float64
+  # RAE_UI_TEST_RESIZE=<frames>:<W>x<H>: resize the window to W x H points
+  # after that many frames (-1: never), the headless check that a resize
+  # keeps the world (screenSystem/ScreenResize)
+  testResizeIn: Int = -1
+  testResizeW: Int = 0
+  testResizeH: Int = 0
+}
+
+# The RAE_UI_TEST_RESIZE hook into `session`
+func readTestResize(session: mod AppSession) {
+  let text: String = getEnv(name: "RAE_UI_TEST_RESIZE")
+  let parts: List(String) = text.split(sep: ":")
+  if parts.length is not 2 {
+    ret
+  }
+  let size: List(String) = parts.copyAtDefault(index: 1).split(sep: "x")
+  if size.length is not 2 {
+    ret
+  }
+  session.testResizeIn = parts.copyAtDefault(index: 0).toInt()
+  session.testResizeW = size.copyAtDefault(index: 0).toInt()
+  session.testResizeH = size.copyAtDefault(index: 1).toInt()
+}
+
+# Count the hook down once a frame; resize the window when it is due
+func testResizeStep(session: mod AppSession) {
+  if session.testResizeIn < 0 {
+    ret
+  }
+  if session.testResizeIn is 0 {
+    log("[ui] test resize to {session.testResizeW}x{session.testResizeH}")
+    Gpu2d.setWindowSize(w: session.testResizeW, h: session.testResizeH)
+  }
+  session.testResizeIn = session.testResizeIn - 1
 }
 
 type WorldFrame {
@@ -80,7 +115,8 @@ type WorldFrame {
   forceRender: Bool
   lastPressed: EntityId
   # True once something asked for an outer-loop world rebuild (screen
-  # switch, resize, theme, debug toggle, data hot reload).
+  # switch, theme, debug toggle, data hot reload; a resize is applied in
+  # place, screenSystem/ScreenResize).
   switching: Bool
 }
 
@@ -115,7 +151,7 @@ func createAppSession(app: mod App) ret AppSession {
     position: restoredScrollY
   )
   var debugOverlay: DebugOverlay = createBootDebugOverlay()
-  ret AppSession {
+  var session: AppSession = {
     running: true
     currentScreen: visibleScreen(state: app.appState)
     watcher: createSceneWatcher()
@@ -138,6 +174,8 @@ func createAppSession(app: mod App) ret AppSession {
     lastRenderTime: 0.0
     renderUntil: 0.0
   }
+  readTestResize(session: session)
+  ret session
 }
 
 func createFrameTick(session: view AppSession) ret FrameTick {

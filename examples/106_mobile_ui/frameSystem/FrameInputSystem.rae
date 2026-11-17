@@ -80,12 +80,13 @@ func frameInputSystem(
   }
   # Live-window resize. Detected by POLLING the live framebuffer-derived
   # extent every frame and comparing to the applied one — robust vs relying
-  # on OS resize-event delivery. When the extent changed, record it and
-  # request a rebuild; the gpu2d design resolution is applied next to
-  # buildAppWorld, so the current frame keeps rendering the old world at its
-  # matching resolution until the rebuild swaps both atomically.
+  # on OS resize-event delivery. When the extent changed, it is applied to
+  # the world in place (screenSystem/ScreenResize: page sizes, frames, side
+  # panel, safe areas and the gpu2d design resolution together, before this
+  # frame lays out), so every entity and its scroll position are kept.
   # Ctrl/Cmd + - 0 step the user zoom (ui/UiZoom); a new zoom is a new
-  # extent, so the world is rebuilt at it like after a resize
+  # extent, applied the same way
+  testResizeStep(session: session)
   var zoom: Float = app.viewport.uiZoom
   let zoomKey: Int = uiZoomKeyStep()
   if zoomKey is not -2 {
@@ -103,9 +104,20 @@ func frameInputSystem(
       "[ui] size class {input.windowSizeClass.sizeClass} ({input.windowSizeClass.widthPoints} pt)"
     )
   }
-  if extentChanged {
+  # A resize is seen for one frame with the new pixels per point but the old
+  # framebuffer (a 393x852 window read as 1440x3121): wait for the
+  # framebuffer, or that frame's extent clamps every scroll (a move to
+  # another display changes both)
+  let framebufferStale: Bool = liveViewport.framebufferPxW is app.viewport.framebufferPxW and liveViewport.framebufferPxH is app.viewport.framebufferPxH and liveViewport.dpr is not app.viewport.dpr
+  if extentChanged and framebufferStale is false {
+    # Applied in place (screenSystem/ScreenResize): the entities, their
+    # scroll positions and ids are kept; the bindings are observed again,
+    # since a re-applied frame resets its page's nodes to the scene first
+    let previous: Viewport = app.viewport
     app.viewport = liveViewport
-    frame.switching = true
+    resizeAppWorld(app: app, world: world, previous: previous)
+    frame.observation = createAppObservation(world: world)
+    frame.forceRender = true
   }
 
   # Seed any freshly mounted ScrollRoot and keep the scroll memory current,

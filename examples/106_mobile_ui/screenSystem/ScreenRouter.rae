@@ -305,9 +305,9 @@ func buildAppWorldFor(
   # (so an in-place re-mount — e.g. refreshHistoryViewsIfNeeded — keeps
   # the tag). Seed SafeInsets so the first layout (before the per-frame
   # `applySafeAreas`) already reflows, and lift the dock by the bottom
-  # inset. Runs on every rebuild, including the resize path (main.rae
-  # sets switching=true on viewport extent changes), so the active
-  # viewport's insets stay in sync with the selected simulator preset.
+  # inset. Runs on every rebuild, and a resize runs it again in place
+  # (ScreenResize.rae), so the active viewport's insets stay in sync with
+  # the selected simulator preset.
   let safe: Insets = applySafeAreas(world: world, uiSystems: uiSystems, viewport: viewport)
   # #978: the dock's bottom anchoring (and the safe-area lift) is the
   # AnchorBottom system's; run it once so the first layout is right.

@@ -122,16 +122,7 @@ func mountBottomDockOverlay(
   # Past the Desktop breakpoint the overlay activates the queue button and
   # strips the play button's circle. Reset-to-base replays the authored
   # placeholder texts; the TrackText binding below rewrites them.
-  let deviceFrame: DeviceFrame = activeDeviceFrame()
-  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
-  applySceneFramesToPage(
-    world: world
-    uiSystems: uiSystems
-    scene: scenes.miniPlayer
-    pageId: dockPageId
-    windowPtW: pointsFromDu(du: world.layoutW)
-    forcedFrameId: forcedName
-  )
+  applyMiniPlayerFrames(world: world, uiSystems: uiSystems, scenes: scenes)
 
   # First run of the dock's layer + nav-tab systems so the very first frame
   # is right; the playbackSystem bindings land in the frame's observation pass.
@@ -160,4 +151,19 @@ func mountBottomDockOverlay(
 # The dock's authored height: mini-player card + the shadow extension above.
 func dockHeight() ret Float {
   ret miniPlayerH + navTabsH + 72.2892
+}
+
+# The mini-player scene's frame for the window's width (its nodes live under
+# the dock's page id); re-run on a resize (ScreenResize.rae)
+func applyMiniPlayerFrames(world: mod UiWorld, uiSystems: mod UiSystems, scenes: view AlbumScenes) {
+  let deviceFrame: DeviceFrame = activeDeviceFrame()
+  let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
+  applySceneFramesToPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scenes.miniPlayer
+    pageId: dockPageId
+    windowPtW: pointsFromDu(du: world.layoutW)
+    forcedFrameId: forcedName
+  )
 }

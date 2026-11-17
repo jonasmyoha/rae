@@ -1,0 +1,191 @@
+# A resize or a zoom change, applied to the world in place
+# (docs/ui-coordinate-and-responsive-layout.md §4): the entities are kept, so
+# every page keeps its scroll position, its selection and its animation state
+# (and its entity ids); only what depends on the window's size changes.
+#
+#   - the layout extent (`world.layoutW/H`) and the gpu2d design resolution;
+#   - every page root's size, by what the page is: a screen page the page
+#     column, the side panel its own width, the dock the window's width, an
+#     overlay the whole window;
+#   - each scene's frame, re-applied where the window now picks another one
+#     (Home's and Library's `Wide`, the mini-player's, the canvas's and the
+#     settings dialog's);
+#   - the Library side panel of an expanded window, mounted or unmounted;
+#   - the safe-area insets and the dock's bottom anchoring.
+#
+# A screen switch still builds a new world (frameSystem/WorldBuildSystem).
+open ui/Ecs
+open ui/Components
+open ui/Scene
+open ui/SceneInstance
+open ecs/Query
+open ui/Frames
+open ui/UiSystems
+open ui/ScrollRootSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+# Whether `pageId` is one of the screen pages (mounted in the page column)
+func isScreenPageId(pageId: view String) ret Bool {
+  loop let page: view ScreenPage in createScreenPages() {
+    if page.pageId is pageId {
+      ret true
+    }
+  }
+  ret false
+}
+
+# Every page root at its size for `viewport`
+func resizePageRoots(world: mod UiWorld, viewport: view Viewport) {
+  let count: Int = componentCount(this: world.pageRoots)
+  loop var i: Int = 0, i < count, ++i {
+    let root: EntityId = componentEntityAt(this: world.pageRoots, i: i)
+    let pageRoot: view PageRoot = queryViewAt(table: world.pageRoots, denseIndex: i)
+    if componentHas(this: world.rects, entityId: root) is false {
+      continue
+    }
+    var w: Float = world.layoutW
+    var h: Float = world.layoutH
+    if isScreenPageId(pageId: pageRoot.id) {
+      w = viewport.areaDuW
+      h = viewport.areaDuH
+    } else if pageRoot.id is sidePanelPageId {
+      w = viewport.sidePanelDuW
+      h = viewport.areaDuH
+    } else if pageRoot.id is dockPageId {
+      h = componentView(this: world.rects, entityId: root).size.y
+    }
+    let rect: view Rect = componentView(this: world.rects, entityId: root)
+    if rect.size.x is not w or rect.size.y is not h {
+      let written: mod Rect = componentMod(this: world.rects, entityId: root)
+      written.size.x = w
+      written.size.y = h
+    }
+  }
+}
+
+# The frame a page scene picks for `viewport` (-1: none)
+func pickedFrameIndex(scene: view Scene, viewport: view Viewport) ret Int {
+  let frames: FrameSet = parseFrames(scene: scene)
+  if let index: Int = selectFrameForWindow(
+    frames: frames
+    window: frameWindowOf(viewport: viewport)
+    forcedFrameId: frameIdName(id: viewport.forcedFrameId)
+  ) {
+    ret index
+  }
+  ret -1
+}
+
+# The screen pages whose scene picks another frame for the new window get it
+# (re-applying a frame resets the page's nodes to the scene first, so a page
+# whose frame did not change is left alone). Returns how many changed.
+func reapplyScreenPageFrames(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view AlbumScenes
+  previous: view Viewport
+  viewport: view Viewport
+) ret Int {
+  var changed: Int = 0
+  loop let page: view ScreenPage in createScreenPages() {
+    if let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: page.pageId) {
+      let scene: view Scene = sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
+      if pickedFrameIndex(scene: scene, viewport: previous) is pickedFrameIndex(
+        scene: scene
+        viewport: viewport
+      ) {
+        continue
+      }
+      let noStates: List(String) = List.create(String, cap: 1)
+      applySceneFramesForWindow(
+        world: world
+        uiSystems: uiSystems
+        scene: scene
+        pageId: page.pageId
+        window: frameWindowOf(viewport: viewport)
+        forcedFrameId: frameIdName(id: viewport.forcedFrameId)
+        activeStates: noStates
+      )
+      changed = changed + 1
+    }
+  }
+  ret changed
+}
+
+# The Library side panel: mounted when the window now has room for it,
+# unmounted when it has not
+func syncSidePanel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view AlbumScenes
+  viewport: view Viewport
+) {
+  let mounted: Bool = isNone(this: findPageRootEntity(world: world, pageId: sidePanelPageId)) is false
+  if viewport.sidePanelDuW > 0.0 and mounted is false {
+    let root: EntityId = mountSidePanel(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      viewport: viewport
+    )
+    if isNone(this: root) is false {
+      log("[ui] side panel shown")
+    }
+  } else if viewport.sidePanelDuW <= 0.0 and mounted {
+    unmountPage(world: world, uiSystems: uiSystems, pageId: sidePanelPageId)
+    log("[ui] side panel hidden")
+  }
+}
+
+# Apply `app.viewport` (the window's new extent; `previous` the one the world
+# was laid out for) to `world` in place
+func resizeAppWorld(app: mod App, world: mod UiWorld, previous: view Viewport) {
+  logScrollRoot(world: world, uiSystems: app.uiSystems, label: "before")
+  let viewport: view Viewport = app.viewport
+  applyViewportExtent(world: world, viewport: viewport)
+  resizePageRoots(world: world, viewport: viewport)
+  syncSidePanel(
+    world: world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    viewport: viewport
+  )
+  let pagesChanged: Int = reapplyScreenPageFrames(
+    world: world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    previous: previous
+    viewport: viewport
+  )
+  applyMiniPlayerFrames(world: world, uiSystems: app.uiSystems, scenes: app.scenes)
+  applyCanvasState(
+    world: world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    state: app.appState
+  )
+  applySettingsState(
+    world: world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    state: app.appState
+  )
+  let safe: Insets = applySafeAreas(world: world, uiSystems: app.uiSystems, viewport: viewport)
+  anchorBottomSystem(world: world, bottomInset: safe.b)
+  uiSetDesignResolution(width: viewport.layoutW, height: viewport.layoutH, fit: 0)
+  log(
+    "[ui] resized in place: layout {viewport.layoutW}x{viewport.layoutH}, {pagesChanged} page frame(s) changed"
+  )
+  logScrollRoot(world: world, uiSystems: app.uiSystems, label: "after")
+}
+
+# The active page's scroll root, its entity and position (the resize keeps both)
+func logScrollRoot(world: view UiWorld, uiSystems: view UiSystems, label: view String) {
+  let root: EntityId = findScrollRoot(world: world, uiSystems: uiSystems)
+  var y: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: root) {
+    y = componentView(this: world.scrollStates, entityId: root).y
+  }
+  log("[ui] scroll root {label} resize: entity {root.index}.{root.generation} y {y}")
+}
