@@ -111,6 +111,15 @@ type ResolvedTheme {
   shadowOffX: List(Float)
   shadowOffY: List(Float)
   shadowSoft: List(Float)
+  # outline tokens (flattened): a palette slot ("" = the inline rgba) and the
+  # width in points around the glyphs (ui/ThemeParse Outline.rae).
+  outlineNames: List(String)
+  outlineColorSlots: List(String)
+  outlineR: List(Int)
+  outlineG: List(Int)
+  outlineB: List(Int)
+  outlineA: List(Int)
+  outlineWidths: List(Float)
   # text styles (flattened).
   textNames: List(String)
   # Load-time metadata retained until the complete page + imports table is
@@ -130,6 +139,8 @@ type ResolvedTheme {
   textColorA: List(Int)
   # "" => no shadow.
   textShadowNames: List(String)
+  # "" => no outline.
+  textOutlineNames: List(String)
   textAligns: List(Int)
   textVAligns: List(Int)
   # container/button styles (#237, M6): composite bundles that reference
@@ -170,6 +181,13 @@ func createResolvedTheme() pub ret ResolvedTheme {
     shadowOffX: List.create(Float, cap: 8)
     shadowOffY: List.create(Float, cap: 8)
     shadowSoft: List.create(Float, cap: 8)
+    outlineNames: List.create(String, cap: 4)
+    outlineColorSlots: List.create(String, cap: 4)
+    outlineR: List.create(Int, cap: 4)
+    outlineG: List.create(Int, cap: 4)
+    outlineB: List.create(Int, cap: 4)
+    outlineA: List.create(Int, cap: 4)
+    outlineWidths: List.create(Float, cap: 4)
     textNames: List.create(String, cap: 32)
     textExtends: List.create(String, cap: 32)
     textFieldMasks: List.create(Int, cap: 32)
@@ -184,6 +202,7 @@ func createResolvedTheme() pub ret ResolvedTheme {
     textColorB: List.create(Int, cap: 32)
     textColorA: List.create(Int, cap: 32)
     textShadowNames: List.create(String, cap: 32)
+    textOutlineNames: List.create(String, cap: 32)
     textAligns: List.create(Int, cap: 32)
     textVAligns: List.create(Int, cap: 32)
     containerNames: List.create(String, cap: 8)
@@ -384,6 +403,15 @@ func themeTextStyleIndex(theme: view ResolvedTheme, styleId: view String) ret op
     }
     ret none
   }
+}
+
+func themeOutlineIndex(theme: view ResolvedTheme, name: view String) ret opt Int {
+  loop var i: Int = 0, i < theme.outlineNames.length, ++i {
+    if theme.outlineNames.copyAtFallback(index: i, fallback: "") is name {
+      ret i
+    }
+  }
+  ret none
 }
 
 func themeShadowIndex(theme: view ResolvedTheme, name: view String) ret opt Int {

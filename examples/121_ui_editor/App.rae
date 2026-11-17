@@ -16,6 +16,7 @@ import Sys
 import Keys
 import Sdl3
 open ui/Ecs
+open ui/ThemeParse
 open ui/Components
 open ui/EventLoop
 open ui/SceneLoader
@@ -54,6 +55,11 @@ func reloadDocument(app: mod App) {
   let mounted: Bool = documentPrepareSystem(document: app.document, world: app.world)
   if mounted {
     applyDocumentTheme(gpuUi: app.gpuUi, document: app.document, quiet: true)
+    reportThemeTokenDiagnostics(
+      theme: app.gpuUi.theme
+      diagnostics: app.world.sceneDiagnostics
+      sceneLabel: app.document.fileName
+    )
     reseedWorldTheme(world: app.world, res: app.gpuUi)
     applyDocumentFonts(gpuUi: app.gpuUi, fonts: app.fonts, document: app.document)
     documentMountSystem(

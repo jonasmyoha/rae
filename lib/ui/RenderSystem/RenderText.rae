@@ -156,8 +156,32 @@ func paintTextG(
       drawY = rect.y + boxH / 2.0 - (bounds.top + bounds.bottom) / 2.0 + opticalBias.y
     }
   }
+  # The style's outline (its theme `outline` token), in physical pixels: the
+  # width in points, by the node's scale and the canvas's pixels per point
+  let outline: TextOutlineDraw = textStyleOutline(
+    world: world
+    res: res
+    styleId: t.styleId
+    chain255: chain255
+    scale: wt.scale.x * canvasPixelsPerUnit(canvas: canvas)
+  )
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+    if outline.width > 0.0 {
+      Gpu2dText.drawTextWrappedEx(
+        canvas: canvas
+        font: res.textFont
+        text: content
+        x: drawX
+        y: drawY
+        sizePx: size
+        color: outline.color
+        maxWidth: boxW
+        lineHeight: lineHeight
+        outlineWidth: boldWidth + outline.width
+        outlineColor: outline.color
+      )
+    }
     Gpu2dText.drawTextWrappedEx(
       canvas: canvas
       font: res.textFont
@@ -225,6 +249,53 @@ func paintTextG(
         }
       }
     }
+  }
+  if outline.width > 0.0 {
+    # The shadow (of the outlined glyphs), the outline, then the glyphs
+    if hasShadow {
+      var soft: Float = shSoft
+      if soft < 1.0 {
+        soft = 1.0
+      }
+      let shadowColor: Int = g2dColor(color: g2dChain(color: shCol, chain255: chain255))
+      Gpu2dText.emitRun(
+        canvas: canvas
+        font: res.textFont
+        text: content
+        x: drawX + shOffX * wt.scale.x
+        y: drawY + shOffY * wt.scale.y
+        sizePx: size
+        color: shadowColor
+        outlineWidth: boldWidth + outline.width
+        outlineColor: shadowColor
+        softness: soft
+      )
+    }
+    Gpu2dText.emitRun(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: outline.color
+      outlineWidth: boldWidth + outline.width
+      outlineColor: outline.color
+      softness: 1.0
+    )
+    Gpu2dText.emitRun(
+      canvas: canvas
+      font: res.textFont
+      text: content
+      x: drawX
+      y: drawY
+      sizePx: size
+      color: g2dColor(color: col)
+      outlineWidth: boldWidth
+      outlineColor: g2dColor(color: col)
+      softness: 1.0
+    )
+    ret
   }
   if hasShadow {
     let shChained: RgbaColor = g2dChain(color: shCol, chain255: chain255)
@@ -433,4 +504,53 @@ func paintTextWithGhost(
     Gpu2d.flush(canvas: canvas)
     Gpu2d.popClipRect(canvas: canvas)
   }
+}
+
+# A text style's outline as drawn: its color (0xAARRGGBB, faded with the node)
+# and its width in physical pixels (0: none)
+type TextOutlineDraw {
+  color: Int
+  width: Float
+}
+
+# The outline of style `styleId` (its theme `outline` token; ui/ThemeParse
+# Outline.rae), `scale` physical pixels a point
+func textStyleOutline(
+  world: view UiWorld
+  res: view Gpu2dUi
+  styleId: view String
+  chain255: view Int
+  scale: view Float
+) ret TextOutlineDraw {
+  let name: String = resolveTextOutlineName(theme: res.theme, styleId: styleId)
+  if name.length() is 0 {
+    ret TextOutlineDraw { color: 0, width: 0.0 }
+  }
+  if let index: Int = themeOutlineIndex(theme: res.theme, name: name) {
+    let slot: String = res.theme.outlineColorSlots.copyAtFallback(index: index, fallback: "")
+    var color: RgbaColor = {
+      r: res.theme.outlineR.copyAtFallback(index: index, fallback: 0)
+      g: res.theme.outlineG.copyAtFallback(index: index, fallback: 0)
+      b: res.theme.outlineB.copyAtFallback(index: index, fallback: 0)
+      a: res.theme.outlineA.copyAtFallback(index: index, fallback: 255)
+    }
+    if slot.length() > 0 {
+      color = uiThemeColor(theme: world.theme, name: slot)
+    }
+    let width: Float = res.theme.outlineWidths.copyAtFallback(index: index, fallback: 0.0) * scale
+    ret TextOutlineDraw {
+      color: g2dColor(color: g2dChain(color: color, chain255: chain255))
+      width: width
+    }
+  }
+  ret TextOutlineDraw { color: 0, width: 0.0 }
+}
+
+# Physical pixels a canvas unit (a point) is drawn at: the frame's scale
+func canvasPixelsPerUnit(canvas: view Gpu2dCanvas) ret Float {
+  let scale: Float = (xformAt(canvas: canvas, index: 2) + xformAt(canvas: canvas, index: 3)) / 2.0
+  if scale <= 0.0 {
+    ret 1.0
+  }
+  ret scale
 }

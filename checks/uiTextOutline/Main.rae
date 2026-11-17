@@ -1,0 +1,143 @@
+# Text outlines from the theme (docs/ui-scene-format.md "Text outlines"): two
+# text styles in one frame, each with its own outline token (a palette brown
+# 1.5 pt, a gold 3 pt). Exit 0 when the frame's glyphs carry both outlines:
+# each style's outline run in its color, at its width in pixels (the width in
+# points times the canvas's pixels per point), under the glyphs in the
+# style's own color.
+#
+#   RAE_HEADLESS_FRAMES=4 RAE_GPU2D_SCREENSHOT=/tmp/outline.bmp \
+#     compiler/bin/rae run checks/uiTextOutline/Main.rae
+#
+# The theme parsing is checked in compiler/tests/cases/1524_theme_text_outline.
+import Gpu2d
+import Math
+import ui/Scene
+open app3d/UiShell
+open ecs/Schedule
+open ui/Ecs
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/UiSystems
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+# One distinct outline seen in the frame's glyphs: its width (px) and color
+type SeenOutline {
+  width: Float
+  r: Float
+  g: Float
+  b: Float
+}
+
+# Every distinct outline (width > 0) among the canvas's queued glyphs whose
+# body color is the outline's color: the outline runs, not the fills
+func outlineRuns(canvas: view Gpu2dCanvas) ret List(SeenOutline) {
+  var seen: List(SeenOutline) = List.create(SeenOutline, cap: 4)
+  loop let atlas: view Gpu2dTextAtlas in canvas.textAtlases {
+    let count: Int = atlas.glyphs.length / 20
+    loop var i: Int = 0, i < count, ++i {
+      let base: Int = i * 20
+      let width: Float = atlas.glyphs.copyAtFallback(index: base + 13, fallback: 0.0)
+      let r: Float = atlas.glyphs.copyAtFallback(index: base + 8, fallback: 0.0)
+      let g: Float = atlas.glyphs.copyAtFallback(index: base + 9, fallback: 0.0)
+      let b: Float = atlas.glyphs.copyAtFallback(index: base + 10, fallback: 0.0)
+      let outlineR: Float = atlas.glyphs.copyAtFallback(index: base + 16, fallback: -1.0)
+      if width <= 0.0 or outlineR is not r {
+        continue
+      }
+      var known: Bool = false
+      loop let existing: view SeenOutline in seen {
+        if existing.width is width and existing.r is r and existing.g is g and existing.b is b {
+          known = true
+        }
+      }
+      if known is false {
+        seen.add(value: SeenOutline { width: width, r: r, g: g, b: b })
+      }
+    }
+  }
+  ret seen
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI text outline check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  let scene: Scene = loadSceneFile(path: "checks/uiTextOutline/page.raescene")
+  if scene.ok is false {
+    log("UI TEXT OUTLINE FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  # The page's own tokens are the theme (its palette, outline and text styles)
+  gpuUi.theme = parseTheme(scene: scene)
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var runs: List(SeenOutline) = List.create(SeenOutline, cap: 4)
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 4 {
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    runs = outlineRuns(canvas: canvas)
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  loop let run: view SeenOutline in runs {
+    log("outline run: width {run.width} px, rgb {run.r},{run.g},{run.b}")
+  }
+  # Two outline runs: brown (96,52,20) and gold (255,190,30), the gold twice
+  # as wide (3 pt against 1.5 pt)
+  var brownWidth: Float = 0.0
+  var goldWidth: Float = 0.0
+  loop let run: view SeenOutline in runs {
+    if run.r > 0.37 and run.r < 0.39 {
+      brownWidth = run.width
+    }
+    if run.r > 0.99 and run.g > 0.73 and run.g < 0.76 {
+      goldWidth = run.width
+    }
+  }
+  let ratio: Float = goldWidth / Math.max(a: brownWidth, b: 0.001)
+  if runs.length is not 2 or brownWidth <= 0.0 or ratio < 1.99 or ratio > 2.01 {
+    log("UI TEXT OUTLINE FAILED: {runs.length} runs, brown {brownWidth} px, gold {goldWidth} px")
+    ret 1
+  }
+  log("UI TEXT OUTLINE OK: brown {brownWidth} px, gold {goldWidth} px")
+  ret 0
+}

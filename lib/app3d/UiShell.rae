@@ -466,6 +466,11 @@ func mountSceneOnPage(
   )
 
   let theme: ResolvedTheme = sceneImportedTheme(entry: scene, assets: assets, registry: registry)
+  reportThemeTokenDiagnostics(
+    theme: theme
+    diagnostics: world.sceneDiagnostics
+    sceneLabel: sceneId
+  )
   resources.activeTheme = overlayPalette(base: lightTheme(), tokens: theme)
   resources.theme = own theme
   if assets.textFontPath.length() > 0 and assets.textFontPath is not resources.textFont.jsonPath {

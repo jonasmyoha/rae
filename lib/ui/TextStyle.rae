@@ -143,6 +143,15 @@ func resolveTextShadowName(theme: view ResolvedTheme, styleId: view String) pub 
   }
 }
 
+# The outline-token name a style references, or "" for no outline: the
+# renderer looks it up with themeOutlineIndex (color + width), like a shadow.
+func resolveTextOutlineName(theme: view ResolvedTheme, styleId: view String) ret String {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    ret theme.textOutlineNames.copyAtFallback(index: i, fallback: "")
+  }
+  ret ""
+}
+
 # Tier-2 override application (#236, theme §7). Layer a sparse
 # StyleOverride over a base value the resolvers produced. World-free
 # (takes the struct, not the world) so this module stays free of ECS

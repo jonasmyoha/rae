@@ -1,0 +1,142 @@
+# ThemeParse: the `outline` tokens of a theme and a text style's `outline`
+# (docs/ui-scene-format.md, "Text outlines"), and the check that a text style
+# names only tokens the theme declares.
+#
+#   "outline": {
+#     "label": { "color": "brown", "width": 2 },
+#     "labelGold": { "extends": "label", "color": { "r": 255, "g": 200, "b": 40, "a": 255 } }
+#   },
+#   "text": { "menu": { "size": 34, "outline": "label" } }
+#
+# `color` is a palette name (resolved when drawn, so it follows the light/dark
+# palette) or an rgba object; `width` is in points, around the glyphs. The
+# renderer draws the style's shadow, then the outline, then the glyphs
+# (ui/RenderSystem RenderText).
+import Json
+import ui/ScenePolicy
+open ui/ThemeResolved
+
+# A text style's field bit for `outline` (the others are 1..256, ThemeParse)
+const themeTextOutlineField: Int = 512
+
+# A width an outline token gets without one, in points
+const themeOutlineDefaultWidth: Float = 1.0
+
+func parseThemeOutlines(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonValue) {
+  let index: Int = Json.field(doc: doc, this: root, key: "outline")
+  if index < 0 {
+    ret
+  }
+  let section: JsonValue = Json.jsonValueAt(doc: doc, idx: index)
+  if section.kind is not JsonKind.object {
+    ret
+  }
+  loop var i: Int = 0, i < Json.objectLen(this: section), ++i {
+    let name: String = Json.objectKeyAt(doc: doc, this: section, idx: i)
+    # The extends chain, root first: a child's fields win
+    let chain: List(Int) = themeResolveChain(
+      doc: doc
+      section: section
+      name: name
+      kind: "outline"
+    )
+    var slot: String = ""
+    var r: Int = 0
+    var g: Int = 0
+    var b: Int = 0
+    var a: Int = 255
+    var width: Float = themeOutlineDefaultWidth
+    loop let bagIndex: view Int in chain {
+      let bag: JsonValue = Json.jsonValueAt(doc: doc, idx: bagIndex)
+      let colorIndex: Int = Json.field(doc: doc, this: bag, key: "color")
+      if colorIndex >= 0 {
+        let color: JsonValue = Json.jsonValueAt(doc: doc, idx: colorIndex)
+        if color.kind is JsonKind.string {
+          slot = Json.jsonString(this: color, fallback: "")
+        } else if color.kind is JsonKind.object {
+          slot = ""
+          r = themeReadIntField(
+            doc: doc
+            obj: color
+            key: "r"
+            fallback: r
+          )
+          g = themeReadIntField(
+            doc: doc
+            obj: color
+            key: "g"
+            fallback: g
+          )
+          b = themeReadIntField(
+            doc: doc
+            obj: color
+            key: "b"
+            fallback: b
+          )
+          a = themeReadIntField(
+            doc: doc
+            obj: color
+            key: "a"
+            fallback: a
+          )
+        }
+      }
+      width = themeReadFloatField(
+        doc: doc
+        obj: bag
+        key: "width"
+        fallback: width
+      )
+    }
+    out.outlineNames.add(value: name)
+    out.outlineColorSlots.add(value: slot)
+    out.outlineR.add(value: r)
+    out.outlineG.add(value: g)
+    out.outlineB.add(value: b)
+    out.outlineA.add(value: a)
+    out.outlineWidths.add(value: width)
+  }
+}
+
+# Every text style that names a `shadow` or `outline` token the theme does not
+# declare is an unknownToken diagnostic (the style draws without it). Run on
+# the resolved theme: the page's tokens and its imports' together.
+func reportThemeTokenDiagnostics(
+  theme: view ResolvedTheme
+  diagnostics: mod List(SceneDiagnostic)
+  sceneLabel: view String
+) {
+  loop var i: Int = 0, i < theme.textNames.length, ++i {
+    let style: String = theme.textNames.copyAtFallback(index: i, fallback: "")
+    let shadowName: String = theme.textShadowNames.copyAtFallback(index: i, fallback: "")
+    var shadowKnown: Bool = shadowName.length() is 0
+    if let found: Int = themeShadowIndex(theme: theme, name: shadowName) {
+      shadowKnown = found >= 0
+    }
+    if shadowKnown is false {
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneLabel
+        nodeId: ""
+        kind: SceneDiagnosticKind.unknownToken
+        name: "text.{style}.shadow"
+        message: "text style '{style}' names shadow '{shadowName}', which the theme does not declare"
+      )
+    }
+    let outlineName: String = theme.textOutlineNames.copyAtFallback(index: i, fallback: "")
+    var outlineKnown: Bool = outlineName.length() is 0
+    if let found: Int = themeOutlineIndex(theme: theme, name: outlineName) {
+      outlineKnown = found >= 0
+    }
+    if outlineKnown is false {
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneLabel
+        nodeId: ""
+        kind: SceneDiagnosticKind.unknownToken
+        name: "text.{style}.outline"
+        message: "text style '{style}' names outline '{outlineName}', which the theme does not declare"
+      )
+    }
+  }
+}

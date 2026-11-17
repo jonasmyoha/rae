@@ -53,6 +53,7 @@ func parseThemeInto(out: mod ResolvedTheme, scene: view Scene) {
   parseThemeMotion(out: out, doc: doc, root: root)
   parseThemePadding(out: out, doc: doc, root: root)
   parseThemeShadows(out: out, doc: doc, root: root)
+  parseThemeOutlines(out: out, doc: doc, root: root)
   parseThemeText(out: out, doc: doc, root: root)
   parseThemeContainer(out: out, doc: doc, root: root)
 
@@ -420,6 +421,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     var colorB: Int = 0
     var colorA: Int = 255
     var shadowName: String = ""
+    var outlineName: String = ""
     var align: Int = themeAlignStart
     var vAlign: Int = themeVAlignTop
 
@@ -528,6 +530,14 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
       )
       vAlign = themeParseVAlign(text: vAlignText, fallback: vAlign)
     }
+    let outlineIndex: Int = Json.field(doc: doc, this: bag, key: "outline")
+    if outlineIndex >= 0 {
+      fieldMask = fieldMask + themeTextOutlineField
+      outlineName = Json.jsonString(
+        this: Json.jsonValueAt(doc: doc, idx: outlineIndex)
+        fallback: ""
+      )
+    }
 
     out.textNames.add(value: name)
     out.textExtends.add(value: parentName)
@@ -543,6 +553,7 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     out.textColorB.add(value: colorB)
     out.textColorA.add(value: colorA)
     out.textShadowNames.add(value: shadowName)
+    out.textOutlineNames.add(value: outlineName)
     out.textAligns.add(value: align)
     out.textVAligns.add(value: vAlign)
   }
@@ -609,6 +620,7 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
     var colorB: Int = 0
     var colorA: Int = 255
     var shadowName: String = ""
+    var outlineName: String = ""
     var align: Int = themeAlignStart
     var vAlign: Int = themeVAlignTop
     loop var chainIndex: Int = 0, chainIndex < chain.length, ++chainIndex {
@@ -648,6 +660,10 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
       if themeTextMaskHas(mask: mask, field: 256) {
         vAlign = theme.textVAligns.copyAtDefault(index: source)
       }
+      if themeTextMaskHas(mask: mask, field: themeTextOutlineField) {
+        let sourceOutlineName: String = theme.textOutlineNames.copyAtDefault(index: source)
+        outlineName = "{sourceOutlineName}"
+      }
     }
     theme.textFonts.set(index: target, value: "{font}")
     theme.textSizes.set(index: target, value: size)
@@ -660,6 +676,7 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
     theme.textColorB.set(index: target, value: colorB)
     theme.textColorA.set(index: target, value: colorA)
     theme.textShadowNames.set(index: target, value: "{shadowName}")
+    theme.textOutlineNames.set(index: target, value: "{outlineName}")
     theme.textAligns.set(index: target, value: align)
     theme.textVAligns.set(index: target, value: vAlign)
   }

@@ -1,0 +1,62 @@
+# A text style's outline (docs/ui-scene-format.md "Text outlines"): an
+# `outline` section of tokens (a palette name or rgba `color`, a `width` in
+# points, `extends`) and `"outline": "<token>"` on a text style, inherited
+# through the style's `extends`. A style naming a token the theme does not
+# declare is an unknownToken diagnostic (a shadow too).
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/TextStyle
+open ui/Scene
+open ui/ScenePolicy
+
+func outlineLine(theme: view ResolvedTheme, styleId: view String) ret String {
+  let name: String = resolveTextOutlineName(theme: theme, styleId: styleId)
+  if let index: Int = themeOutlineIndex(theme: theme, name: name) {
+    let slot: String = theme.outlineColorSlots.copyAtFallback(index: index, fallback: "")
+    let r: Int = theme.outlineR.copyAtFallback(index: index, fallback: -1)
+    let g: Int = theme.outlineG.copyAtFallback(index: index, fallback: -1)
+    let b: Int = theme.outlineB.copyAtFallback(index: index, fallback: -1)
+    let a: Int = theme.outlineA.copyAtFallback(index: index, fallback: -1)
+    let width: Float = theme.outlineWidths.copyAtFallback(index: index, fallback: -1.0)
+    ret "{styleId}: outline '{name}' slot '{slot}' rgba {r},{g},{b},{a} width {width}"
+  }
+  ret "{styleId}: outline '{name}' (none)"
+}
+
+func main() {
+  let source: String = r#"{
+    "type": "Scene",
+    "palette": { "brown": {"r":96,"g":52,"b":20,"a":255} },
+    "shadow": { "soft": {"color":{"r":0,"g":0,"b":0,"a":120},"offsetY":2.0} },
+    "outline": {
+      "label": { "color": "brown", "width": 2 },
+      "labelGold": { "extends": "label", "color": {"r":255,"g":200,"b":40,"a":255} },
+      "thin": { "color": {"r":10,"g":20,"b":30} }
+    },
+    "text": {
+      "menu": { "size": 34, "outline": "label" },
+      "menuSmall": { "extends": "menu", "size": 20 },
+      "play": { "extends": "menu", "outline": "labelGold", "shadow": "soft" },
+      "plain": { "size": 17 },
+      "hint": { "size": 12, "outline": "thin" },
+      "typo": { "size": 12, "outline": "lable" },
+      "badShadow": { "size": 12, "shadow": "sofft" }
+    }
+  }"#
+  let theme: ResolvedTheme = parseTheme(scene: parseScene(source: source))
+  log("outline tokens: {theme.outlineNames.length}")
+  log(outlineLine(theme: theme, styleId: "menu"))
+  # extends: the style inherits its parent's outline
+  log(outlineLine(theme: theme, styleId: "menuSmall"))
+  # extends on the token: labelGold keeps label's width, its own color
+  log(outlineLine(theme: theme, styleId: "play"))
+  log(outlineLine(theme: theme, styleId: "plain"))
+  # no width: 1 pt; an rgba without `a`: opaque
+  log(outlineLine(theme: theme, styleId: "hint"))
+  var diagnostics: List(SceneDiagnostic) = List.create(SceneDiagnostic, cap: 4)
+  reportThemeTokenDiagnostics(theme: theme, diagnostics: diagnostics, sceneLabel: "theme")
+  log("diagnostics: {diagnostics.length}")
+  loop let diagnostic: view SceneDiagnostic in diagnostics {
+    log("  {diagnostic.name}: {diagnostic.message}")
+  }
+}

@@ -4,6 +4,21 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.6, 2026-11-17: text outlines in the theme
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.6` moves a project.
+
+- A theme has `outline` tokens (`color`: a palette name or rgba, `width` in points,
+  `extends`), and a text style names one with `"outline": "<token>"`, inherited through
+  the style's `extends` (docs/ui-scene-format.md §42). The renderer draws the shadow,
+  the outline, then the glyphs, from the font's distance field.
+- A text style naming an `outline` or `shadow` token the theme does not declare is an
+  `unknownToken` scene diagnostic (`ui/ThemeParse reportThemeTokenDiagnostics`, run by
+  `app3d/UiShell` and the UI editor); before, a misspelled shadow was silently dropped.
+- `lib/ui/ThemeParse` is a module folder now; imports are unchanged.
+- Also since 0.4.5: an instance override may set `Layout.columns` / `gap`; a call that
+  returns a reference cannot be the argument of a by-value parameter (bind it first).
+
 ## 0.4.5, 2026-11-17: saving edits into a frame
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.5` moves a project.

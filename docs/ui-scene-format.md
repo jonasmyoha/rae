@@ -174,7 +174,7 @@ roots.
 
 `import` brings the named scenes' **configuration** into scope — their
 `assets` block and their theme token sections (`palette`, `space`, `radius`,
-`padding`, `shadow`, `text`, `container`) — and mounts nothing, the way a Rae
+`padding`, `shadow`, `outline`, `text`, `container`) — and mounts nothing, the way a Rae
 `import` makes declarations available without running anything. Mounting is
 `SceneInstance`. There is no `open`: tokens and texture keys have no
 qualified/bare distinction.
@@ -1376,3 +1376,39 @@ Each frame, after `updateUiInput`, the app runs
 Case 1489 drives each gesture with scripted input: the zooms leave the point under the pointer
 within a hundredth of a pixel, the pans move by what they should, a released drag coasts and a
 tap stops it, and a dragged card snaps onto another's edge 3 points away but not 23.
+
+## 42. Text outlines: an `outline` token on a text style
+
+A text style draws an outline around its glyphs when it names an `outline`
+token, the way it names a `shadow` token. Both are theme data, in the scene or
+a scene it imports:
+
+    "palette": { "brown": { "r": 96, "g": 52, "b": 20, "a": 255 } },
+    "outline": {
+      "label":     { "color": "brown", "width": 2 },
+      "labelGold": { "extends": "label", "color": { "r": 255, "g": 190, "b": 30, "a": 255 } }
+    },
+    "text": {
+      "menu": { "size": 34, "outline": "label" },
+      "play": { "extends": "menu", "outline": "labelGold" }
+    }
+
+- `color` is a palette name (resolved when drawn, so it follows the light or
+  dark palette) or an `{r, g, b, a}` object (`a` defaults to 255).
+- `width` is in points, around the glyph's edge; a token without one is 1.
+- A token may `extends` another: it takes the parent's fields and overrides
+  the ones it names (`labelGold` above is 2 wide and gold).
+- A text style's `outline` is inherited through the style's `extends` like
+  its other fields; a child names another token, or none, to change it.
+- A style naming a token the theme does not declare draws without it and is
+  an `unknownToken` diagnostic (`text.<style>.outline`); a misspelled
+  `shadow` token is reported the same way (`text.<style>.shadow`).
+
+The renderer draws the style's shadow (of the outlined glyphs), then the
+outline, then the glyphs in the style's color, all from the font's distance
+field. The outline cannot reach past that field: about half the atlas's
+distance range, scaled to the text size (`distanceRange / 2 * size /
+atlasSize`; Roboto's atlas, range 12 at size 48, allows about 2 points at 17
+point text and 4 at 34). A wider outline is cut off at that distance. The
+check `checks/uiTextOutline` draws two outlined styles in one frame; case
+1524 checks the parsing.
