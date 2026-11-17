@@ -1,0 +1,84 @@
+# lib/ui/ResponsiveExtent: the layout is the window in points (a taller
+# window shows more), the page column follows the size class (compact the
+# whole width, medium a wider column, expanded the wider column and a side
+# panel), and a device preset emulates its phone's screen and safe area.
+open ui/ResponsiveExtent
+open ui/DevicePresets
+open ui/SizeClass
+
+func show(label: view String, extent: view ResponsiveExtent) {
+  log(
+    "{label}: layout {extent.layoutW}x{extent.layoutH}, column {extent.columnW}x{extent.columnH}, side panel {extent.sidePanelW}, {extent.sizeClass}, render scale {extent.renderScale}, emulated {extent.deviceEmulated}, safe top {extent.safeInsets.t}"
+  )
+}
+
+func main() {
+  let columns: ResponsiveColumns = {}
+  let noPreset: DevicePreset = devicePresetNone()
+  show(
+    label: "phone 360x780 at dpr 2"
+    extent: responsiveExtent(
+      windowW: 360.0
+      windowH: 780.0
+      framebufferW: 720.0
+      framebufferH: 1560.0
+      preset: noPreset
+      columns: columns
+    )
+  )
+  show(
+    label: "taller phone 360x900"
+    extent: responsiveExtent(
+      windowW: 360.0
+      windowH: 900.0
+      framebufferW: 720.0
+      framebufferH: 1800.0
+      preset: noPreset
+      columns: columns
+    )
+  )
+  show(
+    label: "medium 700x900"
+    extent: responsiveExtent(
+      windowW: 700.0
+      windowH: 900.0
+      framebufferW: 1400.0
+      framebufferH: 1800.0
+      preset: noPreset
+      columns: columns
+    )
+  )
+  show(
+    label: "expanded 1440x900"
+    extent: responsiveExtent(
+      windowW: 1440.0
+      windowH: 900.0
+      framebufferW: 2880.0
+      framebufferH: 1800.0
+      preset: noPreset
+      columns: columns
+    )
+  )
+  show(
+    label: "expanded but narrow 850x900"
+    extent: responsiveExtent(
+      windowW: 850.0
+      windowH: 900.0
+      framebufferW: 850.0
+      framebufferH: 900.0
+      preset: noPreset
+      columns: columns
+    )
+  )
+  show(
+    label: "iPhone 15 Pro emulated in 360x780"
+    extent: responsiveExtent(
+      windowW: 360.0
+      windowH: 780.0
+      framebufferW: 720.0
+      framebufferH: 1560.0
+      preset: devicePresetById(id: "iphone-15-pro")
+      columns: columns
+    )
+  )
+}

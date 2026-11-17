@@ -1011,7 +1011,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-project.log" 2>&1 \
              && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 23 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] mounted Album: [1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
-             && grep -qE '\[ui-editor\] frame: iphone-15-pro 1179x2556 column 1080 safe 0,177,0,102' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] frame: iphone-15-pro 393x852 column 360 safe 0,59,0,34' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] open Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Home.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \

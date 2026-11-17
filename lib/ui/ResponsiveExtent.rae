@@ -1,0 +1,102 @@
+# The window-filling layout of an app built around a phone-width page column
+# (docs/ui-coordinate-and-responsive-layout.md, rule 2): the layout is the
+# window in points, so a bigger window shows more, never a bigger UI. Inside
+# it the pages get a column by size class:
+#
+#   compact   the column is the whole width (a phone, a narrow window)
+#   medium    a wider column, centered (`wideColumnFactor` x the phone column)
+#   expanded  the wide column centered, and a side panel in the left gutter
+#             (at least `sidePanelMinW` wide; a window too narrow for both
+#             gives the column less room)
+#
+# A device preset (ui/DevicePresets, RAE_UI_DEVICE) emulates that phone
+# instead: the layout is its screen, its safe area comes with it, and the
+# page column is the phone column, centered. The program sets the design
+# resolution to `layoutW` x `layoutH`, mounts its pages `columnW` x
+# `columnH` (an ExtentAnchor centers them) and its side panel
+# `sidePanelW` wide.
+import Math
+import ui/Components
+open ui/DesignUnits
+open ui/SizeClass
+open ui/DevicePresets
+
+# The column sizes, in design units
+type ResponsiveColumns {
+  # The page column on a phone, and on an emulated device
+  phoneColumnW: Float = 360.0
+  # How much wider the column is past compact
+  wideColumnFactor: Float = 1.5
+  # The narrowest side panel worth showing
+  sidePanelMinW: Float = 150.0
+}
+
+type ResponsiveExtent {
+  layoutW: Float
+  layoutH: Float
+  columnW: Float
+  columnH: Float
+  # 0 when there is no side panel
+  sidePanelW: Float
+  sizeClass: SizeClass
+  # The emulated device's safe area (zero without one: the OS's own insets
+  # reach SafeArea nodes through safeAreaSystem)
+  safeInsets: Insets
+  deviceEmulated: Bool
+  # Framebuffer pixels per design unit
+  renderScale: Float
+}
+
+# The extent for a window `windowW` x `windowH` design units (its points)
+# with a framebuffer `framebufferW` x `framebufferH` pixels, emulating
+# `preset` when it is one (devicePresetNone for none)
+func responsiveExtent(
+  windowW: view Float
+  windowH: view Float
+  framebufferW: view Float
+  framebufferH: view Float
+  preset: view DevicePreset
+  columns: view ResponsiveColumns
+) ret ResponsiveExtent {
+  let emulated: Bool = preset.width > 0.0 and preset.height > 0.0
+  var layoutW: Float = windowW
+  var layoutH: Float = windowH
+  var safeInsets: Insets = { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  if emulated {
+    layoutW = devicePresetWidthDu(preset: preset)
+    layoutH = devicePresetHeightDu(preset: preset)
+    safeInsets = devicePresetSafeInsetsDu(preset: preset)
+  }
+  let sizeClass: SizeClass = sizeClassForDu(widthDu: layoutW)
+  var columnW: Float = columns.phoneColumnW
+  var sidePanelW: Float = 0.0
+  if emulated is false {
+    let wideColumn: Float = columns.phoneColumnW * columns.wideColumnFactor
+    if sizeClass is SizeClass.compact {
+      columnW = layoutW
+    } else if sizeClass is SizeClass.medium {
+      columnW = wideColumn
+    } else {
+      columnW = Math.min(a: wideColumn, b: layoutW - 2.0 * columns.sidePanelMinW)
+      sidePanelW = (layoutW - columnW) * 0.5
+    }
+  }
+  if columnW > layoutW {
+    columnW = layoutW
+  }
+  var renderScale: Float = 1.0
+  if layoutW > 0.0 and layoutH > 0.0 {
+    renderScale = Math.min(a: framebufferW / layoutW, b: framebufferH / layoutH)
+  }
+  ret ResponsiveExtent {
+    layoutW: layoutW
+    layoutH: layoutH
+    columnW: columnW
+    columnH: layoutH
+    sidePanelW: sidePanelW
+    sizeClass: sizeClass
+    safeInsets: safeInsets
+    deviceEmulated: emulated
+    renderScale: renderScale
+  }
+}

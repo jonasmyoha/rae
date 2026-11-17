@@ -37,10 +37,10 @@ of a point is simply 0.333. And almost every Rae program already laid out at 1 u
 
 Status of the code (2026-11-17): `ui/DesignUnits` holds `unitScale` (1) and the pt / du / px
 conversions; `ui/SizeClass.sizeClassForDu`; `ui/DevicePresets` gives a preset's screen and safe
-area in du. `app3d/UiShell.syncDesignResolution` already lays out in window points. Example 106
-is the exception: its scenes are authored at 3 units per point (`sceneUnitsPerPoint` in its
-Config.rae) and its responsive extent (`Viewport.rae`) is a fit-to-height canvas; [ui coords 2d/7]
-converts it. The sections below are the 2026-11-16 design this standard comes from: where they
+area in du; `app3d/UiShell` lays out in window points; `ui/ResponsiveExtent` is the window-filling
+layout of an app with a phone page column (the column by size class, a side panel when expanded, a
+device preset emulated). Example 106 uses it, its scenes and constants in points (converted with
+`tools/scale-ui-lengths.py --divide 3`, which reports any number it does not know). The sections below are the 2026-11-16 design this standard comes from: where they
 quote du sizes (a 1080x2280 phone frame, a 5760x3240 desktop frame), divide by 3 for today's
 unit.
 

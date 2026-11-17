@@ -1,4 +1,5 @@
 open ui/Ecs
+open ui/DesignUnits
 # The bottom dock and the floating back button — SCENE-DRIVEN (#978).
 #
 # assets/scenes/Dock.raescene owns the dock: a full-width root (ExtentAnchor
@@ -29,7 +30,7 @@ open ui/Layer
 open ui/Frames
 open ui/UiSystems
 
-const floatingDockInset: Float = 52.04819277108433
+const floatingDockInset: Float = 17.3494
 
 # Texture-registry key for the nav-tab band's frosted-glass blur.
 # The host renders content first, captures the strip of pixels behind
@@ -128,7 +129,7 @@ func mountBottomDockOverlay(
     uiSystems: uiSystems
     scene: scenes.miniPlayer
     pageId: dockPageId
-    windowPtW: world.layoutW / sceneUnitsPerPoint
+    windowPtW: pointsFromDu(du: world.layoutW)
     forcedFrameId: forcedName
   )
 
@@ -158,5 +159,5 @@ func mountBottomDockOverlay(
 
 # The dock's authored height: mini-player card + the shadow extension above.
 func dockHeight() ret Float {
-  ret miniPlayerH + navTabsH + 216.86746987951807
+  ret miniPlayerH + navTabsH + 72.2892
 }

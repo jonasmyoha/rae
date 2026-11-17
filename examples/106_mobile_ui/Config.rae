@@ -6,26 +6,16 @@ import ui/Spacing
 open ui/Theme
 
 # ----- screen + spacing ---------------------------------------------
-# Window dimensions are logical points for the SDL3 window. Scene/layout
-# dimensions below are design units (du), rendered into this window by
-# gpu2d's design-resolution transform.
-const windowW: Float = 498.0
+# Window dimensions and every length below are points, the design unit of
+# every Rae program (rae/docs/ui-coordinate-and-responsive-layout.md). They
+# were authored 1080 units wide, at 3 units per point, until 2026-11-17.
+const windowW: Float = 360.0
 
-const windowH: Float = 1079.0
+const windowH: Float = 780.0
 
-const phoneFrameW: Float = 1080.0
+const phoneFrameW: Float = 360.0
 
-const phoneFrameH: Float = 2280.0
-
-# 106's scenes are still authored at 3 units per point, from before the
-# standard made a unit one point (rae/docs/ui-coordinate-and-responsive-layout.md);
-# [ui coords 2d/7] converts them and deletes this. `designScale` is the
-# one-time migration multiplier from the old 498-wide scene space.
-const sceneUnitsPerPoint: Float = 3.0
-
-const designScale: Float = 2.1686746987951806
-
-const legacySceneScale: Float = 1.0
+const phoneFrameH: Float = 760.0
 
 # outerPad is the screen-edge inset — domain-specific, not a generic
 # spacing step. outerGap is the canonical "section gap" inside a
@@ -33,30 +23,30 @@ const legacySceneScale: Float = 1.0
 # initialize a module-level `let` from another module-level `let`,
 # so we keep it as a literal and rely on the spaceM comment to
 # document the intent.
-const outerPad: Float = 43.373493975903614
+const outerPad: Float = 14.4578
 
-const outerGap: Float = 26.024096385542165  # old spaceM
+const outerGap: Float = 8.6747  # old spaceM
 
 # ----- per-section heights ------------------------------------------
-const topBarH: Float = 104.09638554216868
+const topBarH: Float = 34.6988
 
-const heroBlockH: Float = 208.19277108433735
+const heroBlockH: Float = 69.3976
 
-const albumThumbSize: Float = 182.16867469879517
+const albumThumbSize: Float = 60.7229
 
-const actionsRowH: Float = 95.42168674698796
+const actionsRowH: Float = 31.8072
 
-const pillsRowH: Float = 121.44578313253012
+const pillsRowH: Float = 40.4819
 
-const trackRowH: Float = 130.12048192771084
+const trackRowH: Float = 43.3735
 
-const trackGap: Float = 8.674698795180722  # old spaceXS
+const trackGap: Float = 2.8916  # old spaceXS
 
-const miniPlayerH: Float = 173.49397590361446
+const miniPlayerH: Float = 57.8313
 
 # 10% taller than the legacy tab bar so the floating iOS-style capsule
 # has more top breathing room while the icon+label stack stays centered.
-const navTabsH: Float = 190.84337349397592
+const navTabsH: Float = 63.6145
 
 # ----- palette --------------------------------------------------------
 # The app's named colors are derived LIVE from the active theme — there is no

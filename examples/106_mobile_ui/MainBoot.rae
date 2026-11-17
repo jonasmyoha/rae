@@ -167,10 +167,6 @@ func createSceneWatcher() ret FileWatcher {
   )
 }
 
-# 106 lays out a 1080-unit-wide phone screen: 2.89 units to a point, the size
-# its debug button always had
-const debugOverlayScale: Float = 2.891566265060241
-
 # The standard debug widget (lib/ui/DebugOverlay), set up as every Rae UI app
 # sets it up (the UI editor, 121): the button, the frame rate, the memory and
 # the update indicator — a UI app idles when nothing changes, so a moving
@@ -185,7 +181,6 @@ func createBootDebugOverlay() ret DebugOverlay {
     memory: not headless
     heartbeat: not headless
   )
-  setDebugOverlayScale(debugOverlay: debugOverlay, scale: debugOverlayScale)
   let debugMenuEnv: String = getEnv(name: "RAE_UI_DEBUG_MENU")
   if debugMenuEnv is "open" {
     debugOverlay.wantButton = true

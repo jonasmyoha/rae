@@ -609,8 +609,9 @@ is what it demonstrates):
   units (metres); only their UI/HUD is in points.
 
 Convert through `ui/DesignUnits` (not a literal factor), so the coming user zoom (`1.25x`) changes
-one place. Example 106's scenes are still at 3 units per point (`sceneUnitsPerPoint`); the
-[ui coords] tasks convert it. Do not describe another model in a doc or comment.
+one place. An app with a phone page column takes its layout from `ui/ResponsiveExtent` (106 does).
+A scene or theme authored at another scale is converted with `tools/scale-ui-lengths.py`. Do not
+describe another model in a doc or comment.
 
 ## UI rendering loops & performance
 
