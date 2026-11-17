@@ -38,7 +38,8 @@ LENGTHS = {
     "Layout": {"gap", "rowGap", "columnGap"},
     "ListView": {"itemHeight", "itemWidth", "itemGap"},
     "ScrollRoot": {"endInset", "fixedFloor"},
-    "ScrollState": {"y"},
+    "ScrollState": {"y", "velocity"},
+    "BackgroundPan": {"speedX", "speedY", "amplitudeX", "amplitudeY"},
     "SheetPanel": {"rowHeight"},
     "BottomSheet": {"rowHeight"},
     "StatTable": {"rowHeight", "headerHeight"},
@@ -75,7 +76,8 @@ KEPT = {
     "WobbleFx": {"amp", "freq", "secondAmp", "secondFreq"},
     "SmokeFx": {"driftX", "driftY", "fadeMs", "jitter", "lifetimeMs", "scaleEnd", "scaleStart",
                 "spawnIntervalMs"},
-    "TouchStick": {"zoneShare"}, "OpticalAlign": {"bias.x", "bias.y"},
+    "TouchStick": {"zoneShare"},
+    "RadialGradientFill": {"centerX", "centerY", "radius", "stop"}, "OpticalAlign": {"bias.x", "bias.y"},
     "DataRequest": {"aroundAfter", "aroundBefore", "initialLimit", "pageLimit"},
 }
 

@@ -27,8 +27,8 @@
 #
 # The amber is 106's: it reads as instrumentation rather than as part of the app.
 #
-# SIZE. The sizes are points of a desktop window. An app that lays out in other
-# units (106 lays out a 1080-unit-wide phone) sets setDebugOverlayScale once.
+# SIZE. The sizes are points (design units), the unit of every Rae UI; a user
+# zoom (ui/UiZoom) makes them bigger with the rest of the UI.
 #
 # PLACEMENT. The button sits in the window's top-right corner, or where the app
 # puts it (placeDebugOverlay). A UI app whose scene marks a slot with a
@@ -87,8 +87,6 @@ type DebugOverlay {
   wantMemory: Bool
   wantHeartbeat: Bool
   open: Bool
-  # Sizes are points times this (setDebugOverlayScale)
-  scale: Float
   screenW: Float
   screenH: Float
   buttonSize: Float
@@ -146,7 +144,6 @@ func createDebugOverlay(
     wantMemory: memory and not hidden
     wantHeartbeat: heartbeat and not hidden
     open: false
-    scale: 1.0
     screenW: 0.0
     screenH: 0.0
     buttonSize: debugButtonPoints
@@ -182,14 +179,6 @@ func debugOverlayPerf(debugOverlay: mod DebugOverlay, profiler: mod Profiler) {
 # keeps drawing frames while it is (feed this into the loop's "animating" flag)
 func debugOverlayAnimating(debugOverlay: view DebugOverlay) ret Bool {
   ret debugOverlay.perfHud.open
-}
-
-# The widget's size, for an app that does not lay out in points: every size
-# (the button, the margin, the dialog, the text) is points times `scale`
-func setDebugOverlayScale(debugOverlay: mod DebugOverlay, scale: view Float) {
-  debugOverlay.scale = scale
-  debugOverlay.buttonSize = debugButtonPoints * scale
-  debugOverlay.margin = debugMarginPoints * scale
 }
 
 func debugTextWidth(text: view String, sizePx: view Float) ret Float {
@@ -370,11 +359,11 @@ const debugDialogTitleH: Float = 44.0
 const debugDialogRows: Int = 4
 
 func debugDialogWidth(debugOverlay: view DebugOverlay) ret Float {
-  ret debugDialogW * debugOverlay.scale
+  ret debugDialogW
 }
 
 func debugDialogRowHeight(debugOverlay: view DebugOverlay) ret Float {
-  ret debugDialogRowH * debugOverlay.scale
+  ret debugDialogRowH
 }
 
 # Does the widget open to the right? A button in the left half of the window
@@ -397,7 +386,7 @@ func debugDialogX(debugOverlay: view DebugOverlay) ret Float {
 
 # The readouts' text size
 func debugReadoutSize(debugOverlay: view DebugOverlay) ret Float {
-  ret 14.0 * debugOverlay.scale
+  ret 14.0
 }
 
 # Where a readout line starts: at the button's left edge when the widget opens
@@ -453,7 +442,7 @@ func debugBesideX(
     text: text
     sizePx: debugReadoutSize(debugOverlay: debugOverlay)
   )
-  let gap: Float = 8.0 * debugOverlay.scale
+  let gap: Float = 8.0
   var x: Float = debugButtonX(debugOverlay: debugOverlay) - gap - width
   if debugOpensRight(debugOverlay: debugOverlay) {
     x = debugButtonX(debugOverlay: debugOverlay) + debugOverlay.buttonSize + gap
@@ -469,17 +458,15 @@ func debugBesideBaseline(debugOverlay: view DebugOverlay) ret Float {
 }
 
 func debugDialogY(debugOverlay: view DebugOverlay) ret Float {
-  ret debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + 8.0 * debugOverlay.scale
+  ret debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + 8.0
 }
 
 func debugDialogH(debugOverlay: view DebugOverlay) ret Float {
-  ret (debugDialogTitleH + 12.0) * debugOverlay.scale + debugDialogRowHeight(
-    debugOverlay: debugOverlay
-  ) * debugDialogRows.toFloat()
+  ret (debugDialogTitleH + 12.0) + debugDialogRowHeight(debugOverlay: debugOverlay) * debugDialogRows.toFloat()
 }
 
 func debugDialogRowY(debugOverlay: view DebugOverlay, index: view Int) ret Float {
-  ret debugDialogY(debugOverlay: debugOverlay) + debugDialogTitleH * debugOverlay.scale + index.toFloat() * debugDialogRowHeight(
+  ret debugDialogY(debugOverlay: debugOverlay) + debugDialogTitleH + index.toFloat() * debugDialogRowHeight(
     debugOverlay: debugOverlay
   )
 }
@@ -610,26 +597,25 @@ func drawDebugToggleRow(
   label: view String
   on: view Bool
 ) {
-  let unit: Float = debugOverlay.scale
   let x: Float = debugDialogX(debugOverlay: debugOverlay)
   let y: Float = debugDialogRowY(debugOverlay: debugOverlay, index: index)
   Gpu2dText.drawText(
     canvas: canvas
     font: font
     text: label
-    x: x + 16.0 * unit
-    y: y + 24.0 * unit
-    sizePx: 14.0 * unit
+    x: x + 16.0
+    y: y + 24.0
+    sizePx: 14.0
     color: debugAmber
   )
   var fill: Int = debugOffFill
   if on {
     fill = debugOnFill
   }
-  let pillW: Float = 38.0 * unit
-  let pillH: Float = 20.0 * unit
-  let inset: Float = 2.0 * unit
-  let pillX: Float = x + debugDialogWidth(debugOverlay: debugOverlay) - pillW - 16.0 * unit
+  let pillW: Float = 38.0
+  let pillH: Float = 20.0
+  let inset: Float = 2.0
+  let pillX: Float = x + debugDialogWidth(debugOverlay: debugOverlay) - pillW - 16.0
   let pillY: Float = y + (debugDialogRowHeight(debugOverlay: debugOverlay) - pillH) * 0.5
   Gpu2d.drawBox(
     canvas: canvas
@@ -668,18 +654,18 @@ func drawDebugDialog(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
     y: y
     w: debugDialogWidth(debugOverlay: debugOverlay)
     h: debugDialogH(debugOverlay: debugOverlay)
-    radius: 10.0 * debugOverlay.scale
+    radius: 10.0
     fill: debugPanelFill
-    borderWidth: 1.0 * debugOverlay.scale
+    borderWidth: 1.0
     border: debugPanelBorder
   )
   Gpu2dText.drawText(
     canvas: canvas
     font: font
     text: "Debug"
-    x: x + 16.0 * debugOverlay.scale
-    y: y + 28.0 * debugOverlay.scale
-    sizePx: 16.0 * debugOverlay.scale
+    x: x + 16.0
+    y: y + 28.0
+    sizePx: 16.0
     color: debugAmber
   )
   drawDebugToggleRow(
@@ -724,9 +710,9 @@ func drawDebugHeartbeat(
   canvas: mod Gpu2dCanvas
   didRealWork: view Bool
 ) {
-  let size: Float = 8.0 * debugOverlay.scale
+  let size: Float = 8.0
   if didRealWork {
-    debugOverlay.heartbeatX = debugOverlay.heartbeatX + 2.0 * debugOverlay.scale
+    debugOverlay.heartbeatX = debugOverlay.heartbeatX + 2.0
     if debugOverlay.heartbeatX > debugOverlay.screenW {
       debugOverlay.heartbeatX = -size
     }
@@ -808,8 +794,8 @@ func drawDebugReadouts(
     }
     ret
   }
-  let lineH: Float = 18.0 * debugOverlay.scale
-  let gap: Float = 8.0 * debugOverlay.scale
+  let lineH: Float = 18.0
+  let gap: Float = 8.0
   var y: Float = debugTop(debugOverlay: debugOverlay) + debugOverlay.buttonSize + gap + fontSize
   if debugOverlay.open {
     # The dialog occupies that space; put the readouts under it rather than
@@ -879,7 +865,7 @@ func drawDebugPerfHud(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, f
   perfHudSampleFrame(perfHud: perfHud, pacer: canvas.framePacer)
   perfHudPeriod(perfHud: perfHud, now: frameClock(), nowNanoseconds: nowNs())
   # 380 points, or the window's width inside its margins when that is less (a phone)
-  var width: Float = perfHudWidth(scale: debugOverlay.scale)
+  var width: Float = perfHudWidth()
   if debugOverlay.screenW > 0.0 {
     width = Math.min(a: width, b: debugOverlay.screenW - debugOverlay.margin * 2.0)
   }
@@ -890,7 +876,7 @@ func drawDebugPerfHud(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, f
   x = debugClampX(debugOverlay: debugOverlay, x: x, width: width)
   var y: Float = debugDialogY(debugOverlay: debugOverlay)
   if debugOverlay.open {
-    y = y + debugDialogH(debugOverlay: debugOverlay) + 8.0 * debugOverlay.scale
+    y = y + debugDialogH(debugOverlay: debugOverlay) + 8.0
   }
   drawPerfHud(
     perfHud: perfHud
@@ -899,7 +885,6 @@ func drawDebugPerfHud(debugOverlay: mod DebugOverlay, canvas: mod Gpu2dCanvas, f
     x: x
     y: y
     width: width
-    scale: debugOverlay.scale
     now: frameClock()
     headline: "{displayFps(fps: debugOverlay.lastFps)} fps  {formatDebugMem(
       kb: debugOverlay.lastRssKb

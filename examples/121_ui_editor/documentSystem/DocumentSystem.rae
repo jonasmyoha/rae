@@ -39,9 +39,10 @@ open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
 
-const defaultDesignW: Float = 1080.0
+# The design size of a scene that gives none: the reference phone, in points
+const defaultDesignW: Float = 393.0
 
-const defaultDesignH: Float = 1920.0
+const defaultDesignH: Float = 852.0
 
 # How many placeholder rows a viewed ListView gets, so a list authored against
 # app data still shows its row scene in a passive viewer.
@@ -67,7 +68,7 @@ type SceneDocument {
   pageRoot: EntityId
   # The DESIGN extent the page is laid out in (the device frame for a page,
   # a root without a Rect, viewportSystem; else the root's Rect / the
-  # 1080x1920 default) and the page COLUMN mounted inside it.
+  # 393x852 default) and the page COLUMN mounted inside it.
   designW: Float
   designH: Float
   columnW: Float
@@ -315,7 +316,7 @@ func createEmptySceneDocument(path: view String) ret SceneDocument {
 }
 
 # The design extent: the root node's authored Rect when it has one, else
-# 1080x1920; RAE_UI_EDITOR_DESIGN=WxH wins over both. Then the DEVICE FRAME
+# 393x852; RAE_UI_EDITOR_DESIGN=WxH wins over both. Then the DEVICE FRAME
 # (viewportSystem): a page — a scene whose root has no Rect, laid out by the
 # window — is shown on a phone: its extent becomes the active preset's size,
 # its page a 360 pt column centered in it, with the preset's safe-area insets,

@@ -37,8 +37,8 @@ const perfHudGraphFill: Int = 0xFF101016
 # The panel's width in points
 const perfHudWidthPoints: Float = 380.0
 
-func perfHudWidth(scale: view Float) ret Float {
-  ret perfHudWidthPoints * scale
+func perfHudWidth() ret Float {
+  ret perfHudWidthPoints
 }
 
 # `value` with one decimal
@@ -80,12 +80,11 @@ func drawPerfHudGraph(
   x: view Float
   y: view Float
   width: view Float
-  scale: view Float
   now: view Float64
 ) ret Float {
-  let height: Float = 90.0 * scale
+  let height: Float = 90.0
   let budgetMs: Float = perfHudBudgetMs()
-  let columnWidth: Float = 2.0 * scale
+  let columnWidth: Float = 2.0
   let columns: Int = Math.max(a: 1, b: (width / columnWidth).toInt())
   var frameMs: List(Float) = List.create(Float, cap: columns)
   frameMs.addDefaults(count: columns)
@@ -123,7 +122,7 @@ func drawPerfHudGraph(
     slowest = Math.max(a: slowest, b: frame)
   }
   let top: Float = Math.max(a: budgetMs * 2.0, b: slowest * 1.1)
-  let textSize: Float = 12.0 * scale
+  let textSize: Float = 12.0
   perfHudLine(
     canvas: canvas
     font: font
@@ -135,7 +134,7 @@ func drawPerfHudGraph(
     sizePx: textSize
     color: perfHudText
   )
-  let graphY: Float = y + textSize + 6.0 * scale
+  let graphY: Float = y + textSize + 6.0
   Gpu2d.drawRect(
     canvas: canvas
     x: x
@@ -178,28 +177,28 @@ func drawPerfHudGraph(
     y0: budgetY
     x1: x + width
     y1: budgetY
-    thickness: 1.0 * scale
+    thickness: 1.0
     color: perfHudRed
   )
   perfHudLine(
     canvas: canvas
     font: font
     text: "budget {perfHudTenths(value: budgetMs)} ms ({(1000.0 / budgetMs + 0.5).toInt()} Hz)"
-    x: x + 4.0 * scale
-    y: graphY + 12.0 * scale
-    sizePx: 11.0 * scale
+    x: x + 4.0
+    y: graphY + 12.0
+    sizePx: 11.0
     color: perfHudRed
   )
   perfHudLine(
     canvas: canvas
     font: font
     text: "{perfHudTenths(value: top)} ms"
-    x: x + width - 60.0 * scale
-    y: graphY + 12.0 * scale
-    sizePx: 11.0 * scale
+    x: x + width - 60.0
+    y: graphY + 12.0
+    sizePx: 11.0
     color: perfHudDim
   )
-  ret textSize + 6.0 * scale + height
+  ret textSize + 6.0 + height
 }
 
 # A bar per thread: busy, waiting, idle; returns the height used
@@ -210,11 +209,10 @@ func drawPerfHudThreads(
   x: view Float
   y: view Float
   width: view Float
-  scale: view Float
 ) ret Float {
-  let textSize: Float = 12.0 * scale
-  let rowHeight: Float = 16.0 * scale
-  let labelWidth: Float = 110.0 * scale
+  let textSize: Float = 12.0
+  let rowHeight: Float = 16.0
+  let labelWidth: Float = 110.0
   perfHudLine(
     canvas: canvas
     font: font
@@ -224,7 +222,7 @@ func drawPerfHudThreads(
     sizePx: textSize
     color: perfHudText
   )
-  var rowY: Float = y + textSize + 6.0 * scale
+  var rowY: Float = y + textSize + 6.0
   let barWidth: Float = width - labelWidth
   loop let bar: view PerfHudBar in perfHud.bars {
     perfHudLine(
@@ -232,12 +230,12 @@ func drawPerfHudThreads(
       font: font
       text: bar.name
       x: x
-      y: rowY + textSize - 1.0 * scale
-      sizePx: 11.0 * scale
+      y: rowY + textSize - 1.0
+      sizePx: 11.0
       color: perfHudDim
     )
     let barX: Float = x + labelWidth
-    let barHeight: Float = rowHeight - 4.0 * scale
+    let barHeight: Float = rowHeight - 4.0
     Gpu2d.drawRect(
       canvas: canvas
       x: barX
@@ -278,10 +276,9 @@ func drawPerfHudNumbers(
   x: view Float
   y: view Float
   rssKb: view Int
-  scale: view Float
 ) ret Float {
-  let textSize: Float = 12.0 * scale
-  let lineHeight: Float = 17.0 * scale
+  let textSize: Float = 12.0
+  let lineHeight: Float = 17.0
   var lineY: Float = y + textSize
   if perfHud.fed {
     if perfHud.shares.length is 0 {
@@ -377,11 +374,11 @@ func drawPerfHudNumbers(
     color: perfHudText
   )
   lineY = lineY + lineHeight
-  ret lineY - y - textSize + 4.0 * scale
+  ret lineY - y - textSize + 4.0
 }
 
 # The panel's height: the same rows drawPerfHud draws
-func perfHudHeight(perfHud: view PerfHud, scale: view Float) ret Float {
+func perfHudHeight(perfHud: view PerfHud) ret Float {
   var points: Float = 40.0 + 12.0 + 6.0 + 90.0 + 10.0
   var numberLines: Int = 3
   if perfHud.fed {
@@ -390,7 +387,7 @@ func perfHudHeight(perfHud: view PerfHud, scale: view Float) ret Float {
   } else {
     points = points + 22.0
   }
-  ret (points + 17.0 * numberLines.toFloat() + 4.0 + 12.0) * scale
+  ret (points + 17.0 * numberLines.toFloat() + 4.0 + 12.0)
 }
 
 # The panel at (`x`, `y`), `headline` (the fps and memory readouts) in its first row; `now` the
@@ -402,14 +399,13 @@ func drawPerfHud(
   x: view Float
   y: view Float
   width: view Float
-  scale: view Float
   now: view Float64
   headline: view String
   rssKb: view Int
 ) {
-  let pad: Float = 12.0 * scale
+  let pad: Float = 12.0
   let inner: Float = width - pad * 2.0
-  let height: Float = perfHudHeight(perfHud: perfHud, scale: scale)
+  let height: Float = perfHudHeight(perfHud: perfHud)
   if height > 0.0 {
     Gpu2d.drawBox(
       canvas: canvas
@@ -417,9 +413,9 @@ func drawPerfHud(
       y: y
       w: width
       h: height
-      radius: 10.0 * scale
+      radius: 10.0
       fill: perfHudFill
-      borderWidth: 1.0 * scale
+      borderWidth: 1.0
       border: perfHudBorder
     )
   }
@@ -428,21 +424,21 @@ func drawPerfHud(
     font: font
     text: "Performance"
     x: x + pad
-    y: y + 26.0 * scale
-    sizePx: 16.0 * scale
+    y: y + 26.0
+    sizePx: 16.0
     color: perfHudAmber
   )
-  let headlineSize: Float = 14.0 * scale
+  let headlineSize: Float = 14.0
   perfHudLine(
     canvas: canvas
     font: font
     text: headline
     x: x + width - pad - Gpu2dText.measureText(font: font, text: headline, sizePx: headlineSize)
-    y: y + 26.0 * scale
+    y: y + 26.0
     sizePx: headlineSize
     color: perfHudAmber
   )
-  var rowY: Float = y + 40.0 * scale
+  var rowY: Float = y + 40.0
   rowY = rowY + drawPerfHudGraph(
     perfHud: perfHud
     canvas: canvas
@@ -450,9 +446,8 @@ func drawPerfHud(
     x: x + pad
     y: rowY
     width: inner
-    scale: scale
     now: now
-  ) + 10.0 * scale
+  ) + 10.0
   if perfHud.fed {
     rowY = rowY + drawPerfHudThreads(
       perfHud: perfHud
@@ -461,19 +456,18 @@ func drawPerfHud(
       x: x + pad
       y: rowY
       width: inner
-      scale: scale
-    ) + 6.0 * scale
+    ) + 6.0
   } else {
     perfHudLine(
       canvas: canvas
       font: font
       text: "threads, audio and saving: the app passes no profiler"
       x: x + pad
-      y: rowY + 12.0 * scale
-      sizePx: 12.0 * scale
+      y: rowY + 12.0
+      sizePx: 12.0
       color: perfHudDim
     )
-    rowY = rowY + 22.0 * scale
+    rowY = rowY + 22.0
   }
   rowY = rowY + drawPerfHudNumbers(
     perfHud: perfHud
@@ -482,19 +476,18 @@ func drawPerfHud(
     x: x + pad
     y: rowY
     rssKb: rssKb
-    scale: scale
   )
   perfHud.saveW = 0.0
   if perfHud.fed {
-    let buttonWidth: Float = 130.0 * scale
-    let buttonHeight: Float = 26.0 * scale
+    let buttonWidth: Float = 130.0
+    let buttonHeight: Float = 26.0
     Gpu2d.drawBox(
       canvas: canvas
       x: x + pad
       y: rowY
       w: buttonWidth
       h: buttonHeight
-      radius: 6.0 * scale
+      radius: 6.0
       fill: perfHudAmber
       borderWidth: 0.0
       border: 0x00000000
@@ -503,18 +496,18 @@ func drawPerfHud(
       canvas: canvas
       font: font
       text: "Save last 10 s"
-      x: x + pad + 12.0 * scale
-      y: rowY + 18.0 * scale
-      sizePx: 13.0 * scale
+      x: x + pad + 12.0
+      y: rowY + 18.0
+      sizePx: 13.0
       color: 0xFF101014
     )
     perfHudLine(
       canvas: canvas
       font: font
       text: perfHud.saveMessage
-      x: x + pad + buttonWidth + 10.0 * scale
-      y: rowY + 18.0 * scale
-      sizePx: 12.0 * scale
+      x: x + pad + buttonWidth + 10.0
+      y: rowY + 18.0
+      sizePx: 12.0
       color: perfHudText
     )
     perfHud.saveX = x + pad
