@@ -1783,8 +1783,13 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
               sed 's/^/    /' "$TMP_OUT/hash-diff.log" 2>/dev/null
             fi
           done
-          if (cd .. && RAE_VEHICLE_AUTOPILOT=1 RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
-             perl -e 'alarm shift; exec @ARGV' 60 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
+          # 180 frames of a fixed 1/60 s (RAE_FIXED_DT): the app's clock and
+          # the physics steps are the frames' time, so a slow or loaded
+          # machine runs the same 3 s drive, only slower (a wall-clock budget
+          # dropped steps under load and the car had not moved by its 2 s)
+          if (cd .. && RAE_VEHICLE_AUTOPILOT=1 RAE_FIXED_DT=0.0166667 RAE_HEADLESS_FRAMES=180 \
+             RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
+             perl -e 'alarm shift; exec @ARGV' 120 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=200 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
             :
@@ -1794,12 +1799,18 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | grep -v '^\[present\]' | tail -8 | sed 's/^/    /'
           fi
           # 125 lays tire tracks on the course (app3d/WheelTracks) and kicks up
-          # dust: by 2 s of the autopilot's drive both are there
+          # dust: by 2 s of the autopilot's drive (frame time) both are there.
+          # The line says how far the car went, so a failure tells a car that
+          # did not move from tracks that were not laid
           if [ "$EXAMPLE_NAME" = "125_vehicle_c" ] \
-             && ! grep -qE '^\[tracks\] after [0-9.]+ s: [1-9][0-9]* pieces, the longest trail [0-9.]+ m, [1-9][0-9]* dust puffs' "$TMP_OUT/render.log"; then
+             && ! grep -qE '^\[tracks\] after [0-9.]+ s, the car [0-9.]+ m from its start: [1-9][0-9]* pieces, the longest trail [0-9.]+ m, [1-9][0-9]* dust puffs' "$TMP_OUT/render.log"; then
             VEHICLE_OK=0
             echo "  tire track check failed (no [tracks] line with pieces and dust):"
-            grep -a '^\[tracks\]' "$TMP_OUT/render.log" | sed 's/^/    /'
+            if grep -qa '^\[tracks\]' "$TMP_OUT/render.log"; then
+              grep -a '^\[tracks\]' "$TMP_OUT/render.log" | sed 's/^/    /'
+            else
+              echo "    no [tracks] line: the run ended before 2 s of frame time"
+            fi
           fi
           if (cd .. && RAE_VEHICLE_CYCLE_SECONDS=4 RAE_VEHICLE_AUTOPILOT=1 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \

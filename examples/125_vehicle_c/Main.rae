@@ -24,9 +24,10 @@
 #                                    they differ
 # The window's settings (autopilot, respawn cycle, debug log) are listed in
 # packages/physicsScenes/VehicleApp.rae.
-# Headless screenshot, from the repository root:
-#   RAE_SDL_HEADLESS_MS=3000 RAE_GPU2D_SCREENSHOT=/tmp/vehicle.bmp \
-#     rae run examples/125_vehicle_c/Main.rae
+# Headless screenshot, from the repository root (180 frames of 1/60 s, so the
+# clock is the frames' time however slow the machine is):
+#   RAE_VEHICLE_AUTOPILOT=1 RAE_FIXED_DT=0.0166667 RAE_HEADLESS_FRAMES=180 \
+#     RAE_GPU2D_SCREENSHOT=/tmp/vehicle.bmp rae run examples/125_vehicle_c/Main.rae
 import Sys
 import Gpu2d
 import Parallel
@@ -221,6 +222,8 @@ func runWindowed() ret Int {
   giveWheelTracks(wheelTracks: wheelTracks, world: world, car: app.car)
   var trackRandom: Random = createRandom(seed: 125)
   var tracksLogged: Bool = false
+  # Where the car started: the [tracks] line says how far it went
+  let startPosition: Vec3 = chassisTransform(world: world).position
   var arcade: ArcadeVehicle = {
     car: app.car
     wheelJoints: world.wheelJoints
@@ -279,8 +282,9 @@ func runWindowed() ret Int {
       random: trackRandom
     )
     if tracksLogged is false and app.clock >= 2.0 {
+      let driven: Vec3 = vsub(a: chassisTransform(world: world).position, b: startPosition)
       log(
-        "[tracks] after {tenths(value: app.clock)} s: {wheelTrackPieceCount(
+        "[tracks] after {tenths(value: app.clock)} s, the car {tenths(value: vlen(a: driven))} m from its start: {wheelTrackPieceCount(
           wheelTracks: wheelTracks
         )} pieces, the longest trail {tenths(value: longestWheelTrail(wheelTracks: wheelTracks))} m, {liveGroundParticleCount(
           groundParticles: app.groundParticles
