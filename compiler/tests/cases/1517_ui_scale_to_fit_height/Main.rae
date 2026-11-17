@@ -1,0 +1,68 @@
+# ScaleToFit's modes on a fixed-size stage (a 1080x2280 game table) inside a
+# window-sized box: contain shows it whole (letterboxed), cover fills the box
+# (cropped), fitHeight always shows its full height (its sides cropped in a
+# box narrower than the stage's shape, pillarboxed in a wider one). A child
+# of the stage is scaled with it.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/fitSystem/FitSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func buildScene(mode: view String, boxW: view Int, boxH: view Int) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"stage\",\"root\":\"Box\",\"nodes\":\{\"Box\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":{boxW},\"h\":{boxH}\},\"Children\":[\"Stage\"]\},\"Stage\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1080,\"h\":2280\},\"ScaleToFit\":\{\"mode\":\"{mode}\"\},\"Children\":[\"Button\"]\},\"Button\":\{\"Rect\":\{\"x\":340,\"y\":2000,\"w\":400,\"h\":160\}\}\}\}"
+}
+
+func rectText(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    let rect: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: nodeEntityId(world: world, index: raw)
+    )
+    let x: Float = Math.round(x: rect.position.x * 10.0) / 10.0
+    let y: Float = Math.round(x: rect.position.y * 10.0) / 10.0
+    let w: Float = Math.round(x: rect.size.x * 10.0) / 10.0
+    let h: Float = Math.round(x: rect.size.y * 10.0) / 10.0
+    ret "{nodeId} at {x},{y} size {w}x{h}"
+  }
+  ret "{nodeId} missing"
+}
+
+func show(mode: view String, boxW: view Int, boxH: view Int) {
+  let scene: Scene = parseScene(source: buildScene(mode: mode, boxW: boxW, boxH: boxH))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = boxW.toFloat()
+  world.layoutH = boxH.toFloat()
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  fitSystem(world: world, uiSystems: uiSystems)
+  log(
+    "{mode} in {boxW}x{boxH}: {rectText(world: world, uiSystems: uiSystems, nodeId: "Stage")}; {rectText(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Button"
+    )}"
+  )
+}
+
+func main() {
+  # A phone window narrower than the stage's shape (393x852 is 0.46, the stage 0.47)
+  show(mode: "Contain", boxW: 393, boxH: 852)
+  show(mode: "Cover", boxW: 393, boxH: 852)
+  show(mode: "FitHeight", boxW: 393, boxH: 852)
+  # A desktop window, much wider than the stage
+  show(mode: "Contain", boxW: 1440, boxH: 900)
+  show(mode: "Cover", boxW: 1440, boxH: 900)
+  show(mode: "FitHeight", boxW: 1440, boxH: 900)
+}

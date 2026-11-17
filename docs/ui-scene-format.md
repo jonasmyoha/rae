@@ -8,13 +8,25 @@ token sections in docs/ui-theme-system.md.
 ## Units: design units, 3 per point
 
 Every size, position, font size, padding, radius and offset in a scene is in **design units
-(du)**: the one coordinate model of every Rae program (docs/ui-coordinate-and-responsive-layout.md,
-rules 1-6). `unitScale` is 3 du per logical point; the authored phone frame is 1080x2280 du; the
-layout fills the window (the window in points x 3), so a scene's root lays out into the real
-window and never scales as a whole. A fixed art-directed area (a game board, a splash) is a
-subtree at a fixed du size under `ScaleToFit`. Origin top-left, y down. A scene's units are not
-its own choice: the 20 scenes of example 106 still write `"unitScale": 3` (the editor reads it to
-know a phone scene), and [ui coords 7/7] makes du the only unit so no scene declares one.
+(du)**, and a design unit is a logical point: the one coordinate model of every Rae program
+(docs/ui-coordinate-and-responsive-layout.md, rules 1-6). A phone is about 393 wide (the
+reference frame is 393x852), a margin 16, body text 17, a touch target 44. The layout fills the
+window (the window in points, / the user zoom), so a scene's root lays out into the real window and
+never scales as a whole. Origin top-left, y down. A scene declares no unit; one authored at
+another scale is converted with `tools/scale-ui-lengths.py`.
+
+A fixed art-directed area (a game table, a board, a splash) is a subtree at its own fixed size,
+in any numbers, scaled as one block by `ScaleToFit` into its parent's box:
+
+```json
+"Table": { "Rect": { "x": 0, "y": 0, "w": 1080, "h": 2280 }, "ScaleToFit": { "mode": "FitHeight" } }
+```
+
+- `Contain` shows the whole area, letterboxed; `Cover` fills the box, cropped (the parent should
+  clip); `FitHeight` always shows the full height, its sides cropped in a box narrower than the
+  area's shape and pillarboxed in a wider one (a game table on any phone and on a desktop).
+- The area and its descendants keep their authored Rects; each descendant is scaled with it
+  (`fitSystem`, after layout). Case `1517_ui_scale_to_fit_height`.
 
 Today most programs still lay out at 1 unit per logical point (the transitional layout that the
 tasks [ui coords 2/7 ... 7/7] remove; example 106's scenes are already in du). The sizes this

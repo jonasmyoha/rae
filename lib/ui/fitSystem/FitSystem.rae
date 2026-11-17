@@ -12,7 +12,8 @@
 #                       tagged entity's authored Rect (design size in
 #                       du) fits its parent's content box, centered.
 #                       Contain letterboxes, Cover crops (parent
-#                       should clip for Cover).
+#                       should clip for Cover), FitHeight scales to the
+#                       height and crops or pillarboxes the sides.
 #
 # Idempotency contract: the pass recomputes every touched
 # ComputedRect from AUTHORED components (Rect, Padding), never from
@@ -182,6 +183,9 @@ func fitApplyOne(
     if sh > sw {
       s = sh
     }
+  }
+  if mode is FitMode.fitHeight {
+    s = sh
   }
   let w: Float = design.size.x * s
   let h: Float = design.size.y * s
