@@ -1,0 +1,448 @@
+# FrameWriter — edits made while a frame is shown, saved into that frame's
+# override bag (docs/ui-coordinate-and-responsive-layout.md §2, "Editing while
+# a frame is shown").
+#
+# The file is the author's text with ONE part replaced: the value of
+# `frames.<Name>`. The base `nodes`, the headers and every other frame stay
+# byte for byte. In the frame, each edited component of a node (a
+# `nodeId/Component` key of ui/SceneWriter's SceneEdits) is:
+#   - written whole into the node's bag, in the writer's grammar;
+#   - taken out of the bag when it now equals the base (a fresh decode of the
+#     scene without the frame), so the frame keeps only real differences;
+#   - when the edit removed a component the base has, named in the bag's
+#     `remove` list (lib/ui/Frames strips it for that frame).
+# Every other member of the frame (`when`, `viewport`, `default`, `root`,
+# bags of nodes not edited, components not edited) is the author's text.
+import Json
+import String
+open ui/Ecs
+open ui/Scene
+open ui/SceneEncode
+open ui/SceneWriter
+open ecs/Entity
+
+# A value's byte range in a JSON text: [start, end)
+type JsonSpan {
+  start: Int
+  end: Int
+}
+
+func jsonSkipSpace(source: view String, at: view Int) ret Int {
+  var i: Int = at
+  loop i < source.length() {
+    let b: Int = source.byteAt(index: i)
+    if b is not 32 and b is not 9 and b is not 10 and b is not 13 {
+      ret i
+    }
+    i = i + 1
+  }
+  ret i
+}
+
+# `at` is on a string's opening quote: the index after its closing one
+func jsonStringEnd(source: view String, at: view Int) ret Int {
+  var i: Int = at + 1
+  loop i < source.length() {
+    let b: Int = source.byteAt(index: i)
+    if b is 92 {
+      i = i + 2
+      continue
+    }
+    if b is 34 {
+      ret i + 1
+    }
+    i = i + 1
+  }
+  ret i
+}
+
+# `at` is on a value's first byte: the index after its last one
+func jsonValueEnd(source: view String, at: view Int) ret Int {
+  let first: Int = source.byteAt(index: at)
+  if first is 34 {
+    ret jsonStringEnd(source: source, at: at)
+  }
+  if first is 123 or first is 91 {
+    var depth: Int = 0
+    var i: Int = at
+    loop i < source.length() {
+      let b: Int = source.byteAt(index: i)
+      if b is 34 {
+        i = jsonStringEnd(source: source, at: i)
+        continue
+      }
+      if b is 123 or b is 91 {
+        depth = depth + 1
+      } else if b is 125 or b is 93 {
+        depth = depth - 1
+        if depth is 0 {
+          ret i + 1
+        }
+      }
+      i = i + 1
+    }
+    ret i
+  }
+  var i: Int = at
+  loop i < source.length() {
+    let b: Int = source.byteAt(index: i)
+    if b is 44 or b is 125 or b is 93 or b is 32 or b is 9 or b is 10 or b is 13 {
+      ret i
+    }
+    i = i + 1
+  }
+  ret i
+}
+
+# The span of member `key`'s value in the object that starts at `objectStart`
+func jsonMemberSpan(source: view String, objectStart: view Int, key: view String) ret opt JsonSpan {
+  if source.byteAt(index: objectStart) is not 123 {
+    ret none
+  }
+  var i: Int = objectStart + 1
+  loop i < source.length() {
+    i = jsonSkipSpace(source: source, at: i)
+    if i >= source.length() or source.byteAt(index: i) is not 34 {
+      ret none
+    }
+    let keyEnd: Int = jsonStringEnd(source: source, at: i)
+    let name: String = source.sub(start: i + 1, len: keyEnd - i - 2)
+    i = jsonSkipSpace(source: source, at: keyEnd)
+    if i >= source.length() or source.byteAt(index: i) is not 58 {
+      ret none
+    }
+    let valueStart: Int = jsonSkipSpace(source: source, at: i + 1)
+    let valueEnd: Int = jsonValueEnd(source: source, at: valueStart)
+    if name is key {
+      ret JsonSpan { start: valueStart, end: valueEnd }
+    }
+    i = jsonSkipSpace(source: source, at: valueEnd)
+    if i < source.length() and source.byteAt(index: i) is 44 {
+      i = i + 1
+    } else {
+      ret none
+    }
+  }
+  ret none
+}
+
+# The span of `frames.<frameName>` in a scene file's text
+func frameValueSpan(source: view String, frameName: view String) ret opt JsonSpan {
+  let rootStart: Int = jsonSkipSpace(source: source, at: 0)
+  if let frames: JsonSpan = jsonMemberSpan(source: source, objectStart: rootStart, key: "frames") {
+    ret jsonMemberSpan(source: source, objectStart: frames.start, key: frameName)
+  }
+  ret none
+}
+
+# One member of a bag being built: its key and its JSON text
+type BagMember {
+  key: String
+  json: String
+}
+
+# One node's bag in the frame: its members in order, and its `remove` list
+type FrameNodeBag {
+  nodeId: String
+  members: List(BagMember)
+  removes: List(String)
+}
+
+func bagMemberIndex(members: view List(BagMember), key: view String) ret Int {
+  loop var i: Int = 0, i < members.length, ++i {
+    if let member: BagMember = members.copyAt(index: i) {
+      if member.key is key {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func stringIndex(items: view List(String), item: view String) ret Int {
+  loop var i: Int = 0, i < items.length, ++i {
+    if items.copyAtFallback(index: i, fallback: "") is item {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# The frame's existing bag for `nodeId`, as the author wrote it
+func readFrameNodeBag(
+  doc: view JsonDoc
+  frameNodes: view JsonValue
+  hasNodes: view Bool
+  nodeId: view String
+) ret FrameNodeBag {
+  var bag: FrameNodeBag = {
+    nodeId: "{nodeId}"
+    members: List.create(BagMember, cap: 4)
+    removes: List.create(String, cap: 1)
+  }
+  if hasNodes is false {
+    ret bag
+  }
+  let bagIdx: Int = Json.field(doc: doc, this: frameNodes, key: nodeId)
+  if bagIdx < 0 {
+    ret bag
+  }
+  let value: JsonValue = Json.jsonValueAt(doc: doc, idx: bagIdx)
+  let count: Int = Json.objectLen(this: value)
+  loop var i: Int = 0, i < count, ++i {
+    let key: String = Json.objectKeyAt(doc: doc, this: value, idx: i)
+    let member: JsonValue = Json.objectValueAt(doc: doc, this: value, idx: i)
+    if key is "remove" and member.kind is JsonKind.array {
+      loop var r: Int = 0, r < Json.arrayLen(this: member), ++r {
+        bag.removes.add(
+          value: Json.jsonString(this: Json.arrayAt(doc: doc, this: member, idx: r), fallback: "")
+        )
+      }
+      continue
+    }
+    bag.members.add(value: BagMember { key: key, json: Json.stringify(doc: doc, value: member) })
+  }
+  ret bag
+}
+
+# A node's bag as text at the frame's node depth (8 spaces)
+func frameNodeBagText(bag: view FrameNodeBag) ret String {
+  var lines: List(String) = List.create(String, cap: bag.members.length + 1)
+  loop let member: view BagMember in bag.members {
+    lines.add(
+      value: "          {Json.quote(text: member.key)}: {prettyJsonText(
+        source: member.json
+        depth: 5
+      )}"
+    )
+  }
+  if bag.removes.length > 0 {
+    lines.add(value: "          \"remove\": {encodeStringList(items: bag.removes)}")
+  }
+  if lines.length is 0 {
+    ret "\{\}"
+  }
+  var text: String = "\{\n"
+  loop var i: Int = 0, i < lines.length, ++i {
+    var sep: String = ",\n"
+    if i is lines.length - 1 {
+      sep = "\n"
+    }
+    text = "{text}{lines.copyAtFallback(index: i, fallback: "")}{sep}"
+  }
+  ret "{text}        \}"
+}
+
+# The node ids `edits` names, in order, once each
+func editedNodeIds(edits: view SceneEdits) ret List(String) {
+  var ids: List(String) = List.create(String, cap: 4)
+  loop let key: view String in edits.keys {
+    if let slash: Int = key.indexOf(sub: "/") {
+      let nodeId: String = key.sub(start: 0, len: slash)
+      if stringIndex(items: ids, item: nodeId) < 0 {
+        ids.add(value: nodeId)
+      }
+    }
+  }
+  ret ids
+}
+
+# Apply the edits of `nodeId` to its frame bag: each edited component whole,
+# out of the bag when equal to the base, into `remove` when the edit removed
+# one the base has
+func applyNodeEdits(
+  bag: mod FrameNodeBag
+  world: view UiWorld
+  base: view UiWorld
+  pageId: view String
+  edits: view SceneEdits
+) {
+  var entityId: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: world, pageId: pageId, nodeId: bag.nodeId) {
+    entityId = nodeEntityId(world: world, index: index)
+  }
+  var baseEntityId: EntityId = noEntity()
+  if let index: Int = findNodeInPage(world: base, pageId: "", nodeId: bag.nodeId) {
+    baseEntityId = nodeEntityId(world: base, index: index)
+  }
+  if isNone(this: entityId) {
+    ret
+  }
+  let prefix: String = "{bag.nodeId}/"
+  loop let key: view String in edits.keys {
+    if key.startsWith(prefix: prefix) is false {
+      continue
+    }
+    let name: String = key.sub(start: prefix.length(), len: key.length() - prefix.length())
+    let live: String = machineComponentJson(world: world, entityId: entityId, name: name)
+    var baseJson: String = ""
+    if isNone(this: baseEntityId) is false {
+      baseJson = machineComponentJson(world: base, entityId: baseEntityId, name: name)
+    }
+    let at: Int = bagMemberIndex(members: bag.members, key: name)
+    let removeAt: Int = stringIndex(items: bag.removes, item: name)
+    if live.length() is 0 {
+      # Removed in this frame: the frame strips the base's component
+      if at >= 0 {
+        bag.members.removeAt(index: at)
+      }
+      if baseJson.length() > 0 and removeAt < 0 {
+        bag.removes.add(value: "{name}")
+      }
+      continue
+    }
+    if removeAt >= 0 {
+      bag.removes.removeAt(index: removeAt)
+    }
+    if live is baseJson {
+      if at >= 0 {
+        bag.members.removeAt(index: at)
+      }
+      continue
+    }
+    let json: String = authoredComponentJson(world: world, entityId: entityId, name: name)
+    if at >= 0 {
+      bag.members.set(index: at, value: BagMember { key: name, json: json })
+    } else {
+      bag.members.add(value: BagMember { key: name, json: json })
+    }
+  }
+}
+
+# The scene file `source` with `edits` saved into frame `frameName`'s bags.
+# `world` is the page as shown (that frame over the base, plus the edits),
+# `base` a fresh decode of the scene without any frame (ui/SceneWriter
+# freshDecodeOf). "" when the file has no such frame.
+func writeFrameEdits(
+  source: view String
+  scene: view Scene
+  world: view UiWorld
+  base: view UiWorld
+  pageId: view String
+  frameName: view String
+  edits: view SceneEdits
+) ret String {
+  let doc: view JsonDoc = scene.doc
+  let root: JsonValue = Json.root(doc: doc)
+  let framesIdx: Int = Json.field(doc: doc, this: root, key: "frames")
+  var span: JsonSpan = { start: -1, end: -1 }
+  if let found: JsonSpan = frameValueSpan(source: source, frameName: frameName) {
+    span = found
+  }
+  if framesIdx < 0 or span.start < 0 {
+    ret ""
+  }
+  let framesValue: JsonValue = Json.jsonValueAt(doc: doc, idx: framesIdx)
+  let frameIdx: Int = Json.field(doc: doc, this: framesValue, key: frameName)
+  if frameIdx < 0 {
+    ret ""
+  }
+  let frame: JsonValue = Json.jsonValueAt(doc: doc, idx: frameIdx)
+  let nodesIdx: Int = Json.field(doc: doc, this: frame, key: "nodes")
+  var frameNodes: JsonValue = frame
+  if nodesIdx >= 0 {
+    frameNodes = Json.jsonValueAt(doc: doc, idx: nodesIdx)
+  }
+  let hasNodes: Bool = nodesIdx >= 0 and frameNodes.kind is JsonKind.object
+  # Every node: the author's bags in the author's order, then the edited
+  # nodes the frame did not have yet
+  var nodeIds: List(String) = List.create(String, cap: 8)
+  if hasNodes {
+    loop var i: Int = 0, i < Json.objectLen(this: frameNodes), ++i {
+      nodeIds.add(value: Json.objectKeyAt(doc: doc, this: frameNodes, idx: i))
+    }
+  }
+  loop let nodeId: view String in editedNodeIds(edits: edits) {
+    if stringIndex(items: nodeIds, item: nodeId) < 0 {
+      nodeIds.add(value: "{nodeId}")
+    }
+  }
+  var nodesSpan: JsonSpan = { start: -1, end: -1 }
+  if let found: JsonSpan = jsonMemberSpan(source: source, objectStart: span.start, key: "nodes") {
+    nodesSpan = found
+  }
+  let editedIds: List(String) = editedNodeIds(edits: edits)
+  var nodeLines: List(String) = List.create(String, cap: nodeIds.length)
+  loop let nodeId: view String in nodeIds {
+    # A bag no edit touched: the author's text, byte for byte
+    if stringIndex(items: editedIds, item: nodeId) < 0 and nodesSpan.start >= 0 {
+      if let kept: JsonSpan = jsonMemberSpan(
+        source: source
+        objectStart: nodesSpan.start
+        key: nodeId
+      ) {
+        nodeLines.add(
+          value: "        {Json.quote(text: nodeId)}: {source.sub(
+            start: kept.start
+            len: kept.end - kept.start
+          )}"
+        )
+        continue
+      }
+    }
+    var bag: FrameNodeBag = readFrameNodeBag(
+      doc: doc
+      frameNodes: frameNodes
+      hasNodes: hasNodes
+      nodeId: nodeId
+    )
+    applyNodeEdits(
+      bag: bag
+      world: world
+      base: base
+      pageId: pageId
+      edits: edits
+    )
+    if bag.members.length is 0 and bag.removes.length is 0 {
+      continue
+    }
+    nodeLines.add(value: "        {Json.quote(text: nodeId)}: {frameNodeBagText(bag: bag)}")
+  }
+  # The frame: its other members verbatim, `nodes` rebuilt (last when new)
+  var members: List(String) = List.create(String, cap: 6)
+  var wroteNodes: Bool = false
+  var nodesText: String = "\{\}"
+  if nodeLines.length > 0 {
+    nodesText = "\{\n"
+    loop var i: Int = 0, i < nodeLines.length, ++i {
+      var sep: String = ",\n"
+      if i is nodeLines.length - 1 {
+        sep = "\n"
+      }
+      nodesText = "{nodesText}{nodeLines.copyAtFallback(index: i, fallback: "")}{sep}"
+    }
+    nodesText = "{nodesText}      \}"
+  }
+  loop var i: Int = 0, i < Json.objectLen(this: frame), ++i {
+    let key: String = Json.objectKeyAt(doc: doc, this: frame, idx: i)
+    if key is "nodes" {
+      members.add(value: "      \"nodes\": {nodesText}")
+      wroteNodes = true
+      continue
+    }
+    var valueText: String = prettyValue(
+      doc: doc
+      value: Json.objectValueAt(doc: doc, this: frame, idx: i)
+      depth: 3
+    )
+    if let kept: JsonSpan = jsonMemberSpan(source: source, objectStart: span.start, key: key) {
+      valueText = source.sub(start: kept.start, len: kept.end - kept.start)
+    }
+    members.add(value: "      {Json.quote(text: key)}: {valueText}")
+  }
+  if wroteNodes is false {
+    members.add(value: "      \"nodes\": {nodesText}")
+  }
+  var frameText: String = "\{\n"
+  loop var i: Int = 0, i < members.length, ++i {
+    var sep: String = ",\n"
+    if i is members.length - 1 {
+      sep = "\n"
+    }
+    frameText = "{frameText}{members.copyAtFallback(index: i, fallback: "")}{sep}"
+  }
+  frameText = "{frameText}    \}"
+  let head: String = source.sub(start: 0, len: span.start)
+  let tail: String = source.sub(start: span.end, len: source.length() - span.end)
+  ret "{head}{frameText}{tail}"
+}

@@ -136,6 +136,12 @@ func applyComponentAction(
       inspectorSystem.pendingRemoveComponent = ""
       if removed > 0 {
         inspectorSystem.edits = inspectorSystem.edits + 1
+        noteEdited(
+          keys: inspectorSystem.editedKeys
+          world: world
+          selection: inspectorSystem.selection
+          name: name
+        )
       }
       log("[ui-editor] removed {name} from {removed}")
     } else {
@@ -154,6 +160,12 @@ func applyComponentAction(
     inspectorSystem.pendingRemoveComponent = ""
     if added > 0 {
       inspectorSystem.edits = inspectorSystem.edits + 1
+      noteEdited(
+        keys: inspectorSystem.editedKeys
+        world: world
+        selection: inspectorSystem.selection
+        name: name
+      )
     }
     log("[ui-editor] added {name} to {added}")
     ret true

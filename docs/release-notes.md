@@ -4,6 +4,22 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.5, 2026-11-17: saving edits into a frame
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.5` moves a project.
+
+- `ui/FrameWriter` (new): `writeFrameEdits` saves edits made while a frame is shown
+  into that frame's override bags (docs/ui-coordinate-and-responsive-layout.md §2): each
+  edited component whole, out of the bag when it equals the base, a removed one in the
+  bag's `remove` list. The rest of the file stays byte for byte.
+- `ui/SceneWriter`: `writeSceneTextWith(..., edits: SceneEdits)` writes from the world
+  only the components an editor names (`"<nodeId>/<Component>"`); every other one stays
+  the author's text, so a camera's or an effect's runtime values are not saved.
+  `writeSceneText` is unchanged in what it writes.
+- Changed: a save keeps a header the author wrote after `nodes` (a `frames` or `states`
+  block) after `nodes`; it used to move every header before them.
+- The UI editor (121) saves an edit made in a frame into that frame.
+
 ## 0.4.4, 2026-11-17: frames picked by the whole window
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.4` moves a project.

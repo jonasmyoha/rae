@@ -70,6 +70,33 @@ func nodeIdOf(world: view UiWorld, entityId: view EntityId) ret String {
   ret "entity {entityId.index}"
 }
 
+# Note that `name` was edited on every node of `selection`: one
+# "<nodeId>/<Component>" key each in `keys` (ui/SceneWriter SceneEdits), so a
+# save writes those components from the world and nothing a runtime system
+# changed (FramePickerSystem.rae documentSceneEdits).
+func noteEdited(
+  keys: mod List(String)
+  world: view UiWorld
+  selection: view List(EntityId)
+  name: view String
+) {
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) or componentHas(this: world.nodeIdComponents, entityId: entityId) is false {
+      continue
+    }
+    let key: String = "{nodeIdOf(world: world, entityId: entityId)}/{name}"
+    var known: Bool = false
+    loop let listed: view String in keys {
+      if listed is key {
+        known = true
+      }
+    }
+    if known is false {
+      keys.add(value: key)
+    }
+  }
+}
+
 # First node in `entityId`'s subtree whose NodeId is `nodeId`.
 func findNodeByIdIn(
   world: view UiWorld

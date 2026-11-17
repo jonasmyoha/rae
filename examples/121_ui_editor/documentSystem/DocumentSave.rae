@@ -12,11 +12,17 @@ import Sys
 open ui/Ecs
 open ui/UiSystems
 open ui/SceneWriter
+open ui/FrameWriter
 open ecs/Entity
 open ecs/ComponentTable
 
-# The document page as `.raescene` text, what a save writes (the motion tokens
-# apart): "" when no document is mounted.
+# The document as `.raescene` text, what a save writes (the motion tokens
+# apart): "" when no document is mounted. Only the components the inspector
+# edited are written from the world (ui/SceneWriter SceneEdits), so what the
+# camera or an effect wrote meanwhile stays the author's text. In Base the
+# whole page is written; with a frame shown, the file is kept byte for byte
+# but for that frame's override bags, where the edits go (lib/ui/FrameWriter,
+# docs/ui-coordinate-and-responsive-layout.md §2).
 func documentSaveText(app: view App) ret String {
   if app.document.loaded is false or isNone(this: app.document.pageRoot) {
     ret ""
@@ -26,32 +32,45 @@ func documentSaveText(app: view App) ret String {
     uiSystems: app.uiSystems
     scene: app.document.scene
   )
-  ret writeSceneText(
+  let edits: SceneEdits = documentSceneEdits(app: app)
+  if app.document.frameName.length() > 0 {
+    var source: String = ""
+    if let text: String = Sys.readFile(path: app.document.path) {
+      source = text
+    }
+    ret writeFrameEdits(
+      source: source
+      scene: app.document.scene
+      world: app.world
+      base: fresh
+      pageId: "document"
+      frameName: app.document.frameName
+      edits: edits
+    )
+  }
+  ret writeSceneTextWith(
     world: app.world
     uiSystems: app.uiSystems
     fresh: fresh
     scene: app.document.scene
     pageRoot: app.document.pageRoot
     pageId: "document"
+    edits: edits
   )
 }
 
 # Write the document to `path`; the node count written, -1 on failure.
-# While a frame is shown nothing is written: the page holds that frame's
-# overrides, and an edit made there belongs in the frame's override bag
-# (docs/ui-coordinate-and-responsive-layout.md §2), which the writer does not
-# write yet. Show Base (the frame pill, V) to save.
 func saveDocumentTo(app: mod App, path: view String) ret Int {
   if app.document.loaded is false or isNone(this: app.document.pageRoot) {
     log("[ui-editor] nothing to save")
     ret -1
   }
-  if app.document.frameName.length() > 0 {
-    log("[ui-editor] not saved: frame {app.document.frameName} is shown; show Base to save")
-    app.chromeSystem.statusLine = "not saved: showing frame {app.document.frameName} (show Base to save)"
+  let text: String = documentSaveText(app: app)
+  if text.length() is 0 {
+    log("[ui-editor] not saved: the file has no frame {app.document.frameName}")
+    app.chromeSystem.statusLine = "not saved: no frame {app.document.frameName} in the file"
     ret -1
   }
-  let text: String = documentSaveText(app: app)
   let withTokens: String = motionTokensSave(
     system: app.motionTokens
     world: app.world
@@ -65,8 +84,12 @@ func saveDocumentTo(app: mod App, path: view String) ret Int {
   }
   markDocumentClean(app: app)
   let nodes: Int = app.document.nodeCount
-  log("[ui-editor] saved {path} ({nodes} nodes)")
-  app.chromeSystem.statusLine = "saved {app.document.fileName}"
+  var where: String = ""
+  if app.document.frameName.length() > 0 {
+    where = ", frame {app.document.frameName}"
+  }
+  log("[ui-editor] saved {path} ({nodes} nodes{where})")
+  app.chromeSystem.statusLine = "saved {app.document.fileName}{where}"
   ret nodes
 }
 

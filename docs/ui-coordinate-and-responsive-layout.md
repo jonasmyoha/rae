@@ -224,10 +224,13 @@ Base reaches every frame that does not override that component, like a
 breakpoint or a variant in a design tool. The editor says which one is shown
 in its top bar, since that decides where the edit goes.
 
-Today the UI editor shows frames (each at its `viewport`) but does not yet
-write an override bag: with a frame shown, a save is refused (show Base to
-save), and edits made there are dropped when another frame is shown. With
-unsaved edits in Base, showing a frame is refused until they are saved.
+The UI editor does this (FramePickerSystem.rae, lib/ui/FrameWriter, case
+1522): a save with a frame shown rewrites only that frame's value in the file,
+the base `nodes` and every other part byte for byte, and its bags keep the
+author's text where no edit touched them. A save writes only the components
+the inspector edited (lib/ui/SceneWriter `SceneEdits`), so what the camera or
+an effect wrote meanwhile is never saved. With unsaved edits, showing another
+frame is refused until they are saved.
 
 ---
 

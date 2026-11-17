@@ -1148,8 +1148,52 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
             echo "  save path failed:"
             cat "$TMP_OUT/render-save.log" "$TMP_OUT/render-saved.log" "$TMP_OUT/screenshot-saved.log" 2>/dev/null | grep -v '^\[present\]' | sed 's/^/    /'
           fi
+          # A save while a frame is shown (FramePickerSystem, lib/ui/FrameWriter,
+          # docs/ui-coordinate-and-responsive-layout.md §2), on a copy of the
+          # samples: Heading's height set to 40 with Tablet shown goes into
+          # Tablet's bag and nowhere else (the file outside it byte for byte),
+          # and the reopened file shows it with Tablet only. A Base save with no
+          # edit of the animated Coverage is the file again (as data): nothing
+          # the camera or an effect wrote is saved.
+          FRAME_DIR="$TMP_OUT/frameSave"
+          rm -rf "$FRAME_DIR" && cp -R ../examples/121_ui_editor/assets/samples "$FRAME_DIR"
+          if (cd .. && RAE_UI_EDITOR_SCENE="$FRAME_DIR/Coverage.raescene" RAE_UI_EDITOR_ROOT="$FRAME_DIR" \
+             RAE_UI_EDITOR_FRAME=Tablet RAE_UI_EDITOR_TEST_SELECT=Heading RAE_UI_EDITOR_TEST_SET_RECT=h=40 \
+             RAE_UI_EDITOR_TEST_SAVE="$FRAME_DIR/Coverage.raescene" \
+             RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=8 RAE_FIXED_DT=0.05 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-frame-save.log" 2>&1 \
+             && grep -qaF "saved $FRAME_DIR/Coverage.raescene (48 nodes, frame Tablet)" "$TMP_OUT/render-frame-save.log" \
+             && python3 -c "
+import json,sys
+old=open(sys.argv[1]).read(); new=open(sys.argv[2]).read()
+o=json.loads(old); n=json.loads(new)
+bag=n['frames']['Tablet']['nodes']
+ok=n['nodes']==o['nodes'] and bag.get('Heading')=={'Rect':{'x':0,'y':0,'w':0,'h':40}}
+ok=ok and {k:v for k,v in bag.items() if k!='Heading'}==o['frames']['Tablet']['nodes']
+start=new.index('\"Tablet\"'); end=new.index('\"Touch\"')
+ok=ok and new[:start]==old[:old.index('\"Tablet\"')] and new[end:]==old[old.index('\"Touch\"'):]
+sys.exit(0 if ok else 1)" ../examples/121_ui_editor/assets/samples/Coverage.raescene "$FRAME_DIR/Coverage.raescene" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="$FRAME_DIR/Coverage.raescene" RAE_UI_EDITOR_ROOT="$FRAME_DIR" \
+             RAE_UI_EDITOR_FRAME=Tablet RAE_UI_EDITOR_TEST_SELECT=Heading \
+             RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=5 RAE_FIXED_DT=0.05 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-frame-tablet.log" 2>&1 \
+             && grep -qaF "rect (1): x 0 layout  y 0 layout  w 0 fill  h 40" "$TMP_OUT/render-frame-tablet.log" \
+             && (cd .. && RAE_UI_EDITOR_SCENE="$FRAME_DIR/Coverage.raescene" RAE_UI_EDITOR_ROOT="$FRAME_DIR" \
+             RAE_UI_EDITOR_TEST_SELECT=Heading RAE_UI_EDITOR_TEST_SAVE="$FRAME_DIR/base.raescene" \
+             RAE_UI_HEADLESS=1 RAE_HEADLESS_FRAMES=12 RAE_FIXED_DT=0.05 \
+             perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-frame-base.log" 2>&1 \
+             && grep -qaF "rect (1): x 0 layout  y 0 layout  w 0 fill  h 30" "$TMP_OUT/render-frame-base.log" \
+             && python3 -c "
+import json,sys
+sys.exit(0 if json.load(open(sys.argv[1]))==json.load(open(sys.argv[2])) else 1)" "$FRAME_DIR/Coverage.raescene" "$FRAME_DIR/base.raescene"; then
+            :
+          else
+            UI_EDITOR_OK=0
+            echo "  frame save failed:"
+            cat "$TMP_OUT/render-frame-save.log" "$TMP_OUT/render-frame-tablet.log" "$TMP_OUT/render-frame-base.log" 2>/dev/null | grep -a "ui-editor\] \(saved\|rect\|not saved\|frame\)" | sed 's/^/    /'
+          fi
           if [ "$UI_EDITOR_OK" = "1" ]; then
-            echo "PASS: $EXAMPLE_NAME (8 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, hover leak, .raepack project open + switch, file picker, camera zoom, outline pools, save path)"
+            echo "PASS: $EXAMPLE_NAME (8 samples incl. nested sub-scenes and Coverage with 0 diagnostics + reference diffs, effect motion, watch reload, inspector select, composite multi-selection inspector, generated component widgets, value provenance, component add/remove/filter, select parent + identity, hierarchy collapse/expand, selected-row plate, row labels + tree filter, canvas click + marquee selection gestures, click-through cycling, hierarchy multi-selection, Rect widget multi-select read+write, Rect text inputs + lock, wheel routing, hover glow, hover leak, .raepack project open + switch, file picker, camera zoom, outline pools, save path, frame save)"
             ((PASSED++))
           else
             echo "FAIL: $EXAMPLE_NAME (ui editor sample gate)"

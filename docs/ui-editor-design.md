@@ -122,10 +122,12 @@ texture manifest, and a design-resolution + fit rule (now native:
   then each frame in declared order, forced over the base, at its `viewport` when it
   declares one (docs/ui-coordinate-and-responsive-layout.md §2-§3).
   `RAE_UI_EDITOR_FRAME=<name>` starts with a frame shown;
-  `RAE_UI_EDITOR_TEST_FRAMES=<n>` presses the pill n times headlessly. An edit made
-  while a frame is shown belongs in that frame's override bag (§2 of that doc), which
-  the writer does not write yet, so a save there is refused; with unsaved edits in
-  Base, showing a frame is refused until they are saved.
+  `RAE_UI_EDITOR_TEST_FRAMES=<n>` presses the pill n times headlessly. A save writes
+  an edit where it was made (§2 of that doc): in Base into the base nodes, with a frame
+  shown into that frame's override bags (lib/ui/FrameWriter, the rest of the file byte
+  for byte). A save writes only what the inspector edited (its `editedKeys`, ui/
+  SceneWriter `SceneEdits`), never what the camera or an effect changed. With unsaved
+  edits, showing another frame is refused until they are saved.
 - **Camera** (#99444501, `cameraSystem/`): the wheel zooms the DOCUMENT about the
   cursor (0.25x–5x, 10% per notch), a middle-button drag pans it, and the chrome's
   zoom pill (`−` / `100%` / `+`, authored `OnClick` rows in the top bar) steps ±10%

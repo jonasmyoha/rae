@@ -7,15 +7,16 @@
 # scene without frames. `RAE_UI_EDITOR_FRAME=<name>` shows a frame from the
 # start (the headless gate's hook).
 #
-# Showing another frame remounts the document, as a reload does, so it would
-# drop edits not yet saved: with unsaved edits in Base the switch is refused
-# (save first); edits made while a frame is shown cannot be saved yet (the
-# writer does not write a frame's override bag), so they are dropped, and the
-# status line says so.
+# An edit is saved where it was made (docs/ui-coordinate-and-responsive-
+# layout.md §2): in Base into the base nodes, with a frame shown into that
+# frame's override bags (documentSystem/DocumentSave, lib/ui/FrameWriter).
+# Showing another frame remounts the document, as a reload does, so with
+# unsaved edits the switch is refused until they are saved.
 open ui/Ecs
 open ui/Components
 open ui/Scene
 open ui/Frames
+open ui/SceneWriter
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -66,9 +67,26 @@ func documentHasUnsavedEdits(app: view App) ret Bool {
   ret documentEditCount(app: app) > app.document.cleanEdits
 }
 
-# Remember the page as clean: after a mount or a save
+# Remember the page as clean: after a mount or a save. The edited
+# components start over: the next save writes only what is edited after it.
 func markDocumentClean(app: mod App) {
   app.document.cleanEdits = documentEditCount(app: app)
+  app.inspectorSystem.editedKeys.clear()
+  app.inspectorSystem.labelEdit.editedKeys.clear()
+}
+
+# The components edited since the last mount or save, for the writer
+func documentSceneEdits(app: view App) ret SceneEdits {
+  var keys: List(String) = List.create(String, cap: 8)
+  loop let key: view String in app.inspectorSystem.editedKeys {
+    keys.add(value: "{key}")
+  }
+  loop let key: view String in app.inspectorSystem.labelEdit.editedKeys {
+    if listHas(items: keys, name: key) is false {
+      keys.add(value: "{key}")
+    }
+  }
+  ret SceneEdits { only: true, keys: keys }
 }
 
 # Show `frameName` ("" = Base): remount the document with it. Returns whether
@@ -78,12 +96,11 @@ func showDocumentFrame(app: mod App, frameName: view String) ret Bool {
     ret false
   }
   if documentHasUnsavedEdits(app: app) {
-    if app.document.frameName.length() is 0 {
-      log("[ui-editor] frame not changed: Base has unsaved edits; save first")
-      app.chromeSystem.statusLine = "unsaved edits: save (Cmd+S) before showing a frame"
-      ret false
-    }
-    log("[ui-editor] edits made in frame {app.document.frameName} dropped (not saved)")
+    log(
+      "[ui-editor] frame not changed: {frameChoiceLabel(frameName: app.document.frameName)} has unsaved edits; save first"
+    )
+    app.chromeSystem.statusLine = "unsaved edits: save (Cmd+S) before showing another frame"
+    ret false
   }
   app.document.frameName = "{frameName}"
   reloadDocument(app: app)

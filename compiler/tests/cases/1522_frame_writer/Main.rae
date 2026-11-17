@@ -1,0 +1,164 @@
+import String
+import ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneWriter
+open ui/FrameWriter
+open ui/Frames
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open Device
+
+# lib/ui/FrameWriter: an edit made while a frame is shown is saved into that
+# frame's override bag (docs/ui-coordinate-and-responsive-layout.md §2). The
+# rest of the file stays byte for byte; a component edited back to its base
+# value leaves the bag; a removed one goes into the bag's `remove` list.
+func sourceText() ret String {
+  ret r#"{
+  "type": "Scene",
+  "version": 2,
+  "root": "Root",
+  "nodes": {
+    "Root": {"Rect": {"x": 0, "y": 0, "w": 360, "h": 640}, "Children": ["Title", "Box"]},
+    "Title": {"Rect": {"x": 0, "y": 0, "w": 0, "h": 30}},
+    "Box": {"Rect": {"x": 0, "y": 0, "w": 50, "h": 50}, "Padding": {"l": 4, "t": 4, "r": 4, "b": 4}}
+  },
+  "frames": {
+    "Phone": {"default": true, "nodes": {}},
+    "Wide": {
+      "when": {"minWidthPt": 600},
+      "nodes": {
+        "Box": {"Rect": {"x": 0, "y": 0, "w": 80, "h": 50}}
+      }
+    }
+  }
+}
+"#
+}
+
+func nodeEntityIdOf(world: view UiWorld, name: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: name) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func setHeight(world: mod UiWorld, name: view String, h: view Float) {
+  let rect: mod Rect = componentMod(
+    this: world.rects
+    entityId: nodeEntityIdOf(world: world, name: name)
+  )
+  rect.size.y = h
+}
+
+# The file's text before the frame `Wide` and after it, compared with `text`'s
+func outsideWideKept(source: view String, text: view String) ret Bool {
+  if let before: JsonSpan = frameValueSpan(source: source, frameName: "Wide") {
+    if let after: JsonSpan = frameValueSpan(source: text, frameName: "Wide") {
+      let headSame: Bool = source.sub(start: 0, len: before.start) is text.sub(
+        start: 0
+        len: after.start
+      )
+      let tailSame: Bool = source.sub(start: before.end, len: source.length() - before.end) is text.sub(
+        start: after.end
+        len: text.length() - after.end
+      )
+      ret headSame and tailSame
+    }
+  }
+  ret false
+}
+
+func wideText(text: view String) ret String {
+  if let span: JsonSpan = frameValueSpan(source: text, frameName: "Wide") {
+    ret text.sub(start: span.start, len: span.end - span.start)
+  }
+  ret "(no Wide)"
+}
+
+func main() {
+  let source: String = sourceText()
+  let scene: Scene = parseScene(source: source)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  let noStates: List(String) = List.create(String, cap: 1)
+  applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+    window: FrameWindow { widthPt: 900.0, heightPt: 600.0, pointer: Pointer.fine }
+    forcedFrameId: "Wide"
+    activeStates: noStates
+  )
+  let base: UiWorld = freshDecodeOf(world: world, uiSystems: uiSystems, scene: scene)
+
+  # 1. Title's height edited in Wide: a new bag, the rest of the file kept
+  setHeight(world: world, name: "Title", h: 44.0)
+  var keys: List(String) = List.create(String, cap: 2)
+  keys.add(value: "Title/Rect")
+  let edits: SceneEdits = { only: true, keys: keys }
+  let first: String = writeFrameEdits(
+    source: source
+    scene: scene
+    world: world
+    base: base
+    pageId: "p"
+    frameName: "Wide"
+    edits: edits
+  )
+  log("1 outside Wide kept: {outsideWideKept(source: source, text: first)}")
+  log("1 Wide: {wideText(text: first)}")
+
+  # 2. Box's height set back to the base value in Wide while its width keeps
+  # the frame's 80: the whole Rect stays in the bag; then Title back to 30
+  setHeight(world: world, name: "Title", h: 30.0)
+  let second: String = writeFrameEdits(
+    source: first
+    scene: parseScene(source: first)
+    world: world
+    base: base
+    pageId: "p"
+    frameName: "Wide"
+    edits: edits
+  )
+  log("2 back to the base: same as the original: {second is source}")
+
+  # 3. Box's Padding removed in Wide: the bag names it in `remove`
+  componentRemove(this: world.paddings, entityId: nodeEntityIdOf(world: world, name: "Box"))
+  var removeKeys: List(String) = List.create(String, cap: 1)
+  removeKeys.add(value: "Box/Padding")
+  let third: String = writeFrameEdits(
+    source: source
+    scene: scene
+    world: world
+    base: base
+    pageId: "p"
+    frameName: "Wide"
+    edits: SceneEdits { only: true, keys: removeKeys }
+  )
+  log("3 outside Wide kept: {outsideWideKept(source: source, text: third)}")
+  log("3 Wide: {wideText(text: third)}")
+
+  # 4. The saved text parses, with both frames; an unknown frame writes nothing
+  let reloaded: Scene = parseScene(source: third)
+  let frames: FrameSet = parseFrames(scene: reloaded)
+  log("4 frames: {frames.count}")
+  log("no frame named Tall: '{writeFrameEdits(
+    source: source
+    scene: scene
+    world: world
+    base: base
+    pageId: "p"
+    frameName: "Tall"
+    edits: edits
+  )}'")
+}

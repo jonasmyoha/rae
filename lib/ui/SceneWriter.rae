@@ -13,6 +13,13 @@
 # their JSON) are written as they were read. Headers (`type`, `version`,
 # `import`, `assets`, `unitScale`, `bundles`, …) come from the parsed file.
 #
+# An editor that knows what it edited passes those edits (`SceneEdits`, a
+# `nodeId/Component` key per edited component): then ONLY those components are
+# encoded from the world, and every other one stays the author's text, so what
+# a runtime system wrote meanwhile (a camera's zoom, an effect's TransformFx,
+# an animation's current Sprite frame) is not saved as if the author had
+# written it. An edited component the world no longer has was removed.
+#
 # Layout of the output is canonical: 2-space indent, one node per block, a
 # component on one line when it is a flat object (the samples' style),
 # multi-line when nested.
@@ -163,6 +170,27 @@ func prettyJsonText(source: view String, depth: view Int) ret String {
 # The writer.
 # ---------------------------------------------------------------------------
 
+# What an editor edited: `only` = write from the world only the components
+# named in `keys` ("<nodeId>/<Component>"); false = every component that
+# differs from a fresh decode (the writer's rule without an editor).
+type SceneEdits {
+  only: Bool
+  keys: List(String)
+}
+
+func noSceneEdits() ret SceneEdits {
+  ret SceneEdits { only: false, keys: List.create(String, cap: 1) }
+}
+
+# The key of one edited component
+func sceneEditKey(nodeId: view String, name: view String) ret String {
+  ret "{nodeId}/{name}"
+}
+
+func sceneEdited(edits: view SceneEdits, nodeId: view String, name: view String) ret Bool {
+  ret listHas(items: edits.keys, name: sceneEditKey(nodeId: nodeId, name: name))
+}
+
 # A member line of a node's bag: `"Key": <value>` at node depth.
 func bagMember(key: view String, valueJson: view String) ret String {
   ret "      {Json.quote(text: key)}: {prettyJsonText(source: valueJson, depth: 3)}"
@@ -226,6 +254,7 @@ func writeNode(
   entityId: view EntityId
   pageId: view String
   visited: mod List(String)
+  edits: view SceneEdits
 ) {
   let nodeId: String = nodeIdOfEntity(world: world, entityId: entityId)
   if nodeId.length() is 0 {
@@ -277,6 +306,22 @@ func writeNode(
         continue
       }
       let live: String = machineComponentJson(world: world, entityId: entityId, name: key)
+      if edits.only {
+        if sceneEdited(edits: edits, nodeId: nodeId, name: key) {
+          if live.length() > 0 {
+            members.add(
+              value: bagMember(
+                key: key
+                valueJson: authoredComponentJson(world: world, entityId: entityId, name: key)
+              )
+            )
+          }
+        } else {
+          members.add(value: bagMember(key: key, valueJson: Json.stringify(doc: doc, value: value)))
+        }
+        written.add(value: "{key}")
+        continue
+      }
       if live.length() is 0 {
         # Not a table of this world (an app's component another app drained,
         # or the node's own override over a bundle): the author's text.
@@ -309,6 +354,9 @@ func writeNode(
   let names: List(String) = authoredNamesOf(world: world, entityId: entityId)
   loop let name: view String in names {
     if listHas(items: written, name: name) {
+      continue
+    }
+    if edits.only and sceneEdited(edits: edits, nodeId: nodeId, name: name) is false {
       continue
     }
     # What a bundle gave is the bundle's to write, until someone changed it. Then the node says so,
@@ -361,7 +409,16 @@ func writeNode(
         continue
       }
       let childId: String = nodeIdOfEntity(world: world, entityId: child)
-      if childId.length() > 0 {
+      # With an editor's edits, the nodes are this file's: a child another
+      # scene mounted (an instance's subtree) is not written here
+      var ownNode: Bool = true
+      if edits.only {
+        ownNode = false
+        if let sourceIndex: Int = sceneNodeIndex(this: scene, nodeId: childId) {
+          ownNode = sourceIndex >= 0
+        }
+      }
+      if childId.length() > 0 and ownNode {
         childIds.add(value: childId)
         childEntities.add(value: child)
       }
@@ -404,6 +461,7 @@ func writeNode(
       entityId: child
       pageId: pageId
       visited: visited
+      edits: edits
     )
   }
 }
@@ -429,16 +487,42 @@ func writeSceneText(
   pageRoot: view EntityId
   pageId: view String
 ) ret String {
+  ret writeSceneTextWith(
+    world: world
+    uiSystems: uiSystems
+    fresh: fresh
+    scene: scene
+    pageRoot: pageRoot
+    pageId: pageId
+    edits: noSceneEdits()
+  )
+}
+
+# The same, writing from the world only what `edits` names (SceneEdits).
+func writeSceneTextWith(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fresh: view UiWorld
+  scene: view Scene
+  pageRoot: view EntityId
+  pageId: view String
+  edits: view SceneEdits
+) ret String {
   let doc: view JsonDoc = scene.doc
   let root: JsonValue = Json.root(doc: doc)
   var text: String = "\{\n"
-  # Headers first, in the author's order; `root` follows the mounted root.
+  # Headers in the author's order, around `nodes` as the author placed them
+  # (a `frames` or `states` block after the nodes stays after them); `root`
+  # follows the mounted root.
   let rootId: String = nodeIdOfEntity(world: world, entityId: pageRoot)
   let count: Int = Json.objectLen(this: root)
   var wroteRoot: Bool = false
+  var afterNodes: Bool = false
+  var trailing: String = ""
   loop var i: Int = 0, i < count, ++i {
     let key: String = Json.objectKeyAt(doc: doc, this: root, idx: i)
     if key is "nodes" {
+      afterNodes = true
       continue
     }
     if key is "root" {
@@ -446,11 +530,16 @@ func writeSceneText(
       wroteRoot = true
       continue
     }
-    text = "{text}  {Json.quote(text: key)}: {prettyValue(
+    let member: String = "  {Json.quote(text: key)}: {prettyValue(
       doc: doc
       value: Json.objectValueAt(doc: doc, this: root, idx: i)
       depth: 1
-    )},\n"
+    )}"
+    if afterNodes {
+      trailing = "{trailing},\n{member}"
+    } else {
+      text = "{text}{member},\n"
+    }
   }
   if wroteRoot is false {
     text = "{text}  \"root\": {Json.quote(text: rootId)},\n"
@@ -468,6 +557,7 @@ func writeSceneText(
     entityId: pageRoot
     pageId: pageId
     visited: visited
+    edits: edits
   )
   # Nodes in the AUTHOR's order (the source file's), then the ones the world
   # added, in walk order.
@@ -501,7 +591,7 @@ func writeSceneText(
     }
     text = "{text}{ordered.copyAtFallback(index: i, fallback: "")}{sep}"
   }
-  ret "{text}  \}\n\}\n"
+  ret "{text}  \}{trailing}\n\}\n"
 }
 
 # The reference world for a save: the same scene freshly decoded with the
