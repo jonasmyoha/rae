@@ -482,3 +482,59 @@ func sdfDrawText(
     }
   }
 }
+
+# ----- hard line breaks ------------------------------------------------------
+# A "\n" in a text is a hard line break; "\r\n" counts as one break and a lone
+# "\r" as one too. Text layout measures and draws each part on its own line
+# (lib/ui RenderText, the layout measure in VisualBoundsSystem).
+
+# Whether `text` holds a hard line break
+func sdfHasHardBreak(text: view String) ret Bool {
+  loop var i: Int = 0, i < text.length(), ++i {
+    let b: Int = text.at(index: i).toInt()
+    if b is 10 or b is 13 {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The lines of `text` between its hard breaks (one line when it has none; an
+# empty line where two breaks follow each other)
+func sdfHardLines(text: view String) ret List(String) {
+  var lines: List(String) = List.create(String, cap: 4)
+  var start: Int = 0
+  var i: Int = 0
+  let n: Int = text.length()
+  loop i < n {
+    let b: Int = text.at(index: i).toInt()
+    if b is 10 or b is 13 {
+      lines.add(value: text.sub(start: start, len: i - start))
+      if b is 13 and i + 1 < n and text.at(index: i + 1).toInt() is 10 {
+        i = i + 1
+      }
+      start = i + 1
+    }
+    i = i + 1
+  }
+  lines.add(value: text.sub(start: start, len: n - start))
+  ret lines
+}
+
+# How many lines `text` is, and the widest line's pen advance at `sizePx`
+type SdfTextLines {
+  count: Int
+  widest: Float
+}
+
+func sdfMeasureLines(font: view SdfFont, text: view String, sizePx: view Float) ret SdfTextLines {
+  var widest: Float = 0.0
+  let lines: List(String) = sdfHardLines(text: text)
+  loop let line: view String in lines {
+    let advance: Float = sdfMeasureTextBounds(font: font, text: line, sizePx: sizePx).advance
+    if advance > widest {
+      widest = advance
+    }
+  }
+  ret SdfTextLines { count: lines.length, widest: widest }
+}

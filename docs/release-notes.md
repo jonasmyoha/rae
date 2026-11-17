@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.7, 2026-11-17: line breaks in a Text
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.7` moves a project.
+
+- A `"\n"` in `Text.text` is a hard line break (`"\r\n"` and `"\r"` count as one):
+  each line one line height (the style's `lineHeight`) below the one before, aligned on
+  its own; a `Hug` text measures the widest line and every line's height
+  (docs/ui-scene-format.md §43). It used to draw every part on one line with nothing
+  between them. A wrapping text treats `"\r\n"` as one break too.
+- `SdfText`: `sdfHasHardBreak`, `sdfHardLines`, `sdfMeasureLines`.
+
 ## 0.4.6, 2026-11-17: text outlines in the theme
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.6` moves a project.

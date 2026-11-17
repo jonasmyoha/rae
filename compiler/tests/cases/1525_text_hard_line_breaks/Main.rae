@@ -1,0 +1,213 @@
+# A "\n" in Text.text is a hard line break (docs/ui-scene-format.md "Line
+# breaks"); "\r\n" is one break. Layout measures the widest line, and the
+# font size plus one line height (the style's lineHeight) for each line after
+# the first. Drawing puts each line one line height below the one before,
+# aligned on its own: a centered style centers every line in the node, a
+# start-aligned one starts every line at the node's left.
+import SdfText
+import Gpu2d
+import Math
+import ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/Pipeline
+open ui/RenderSystem
+open ui/visualBoundsSystem/VisualBoundsSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open Gpu2dCanvas
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene", "version": 2, "root": "Screen",
+    "text": {
+      "body": { "size": 20, "lineHeight": 1.5 },
+      "tight": { "size": 20 },
+      "middle": { "size": 20, "lineHeight": 1.5, "align": "center" }
+    },
+    "nodes": {
+      "Screen": { "Rect": {"x":0,"y":0,"w":600,"h":800}, "Layout": {"type":"Vertical","gap":10}, "Children": ["Two","Three","Tight","One","Start","Centered"] },
+      "Two": { "Rect": {"x":0,"y":0,"w":0,"h":0}, "Size": {"w":{"mode":"Hug"},"h":{"mode":"Hug"}}, "Text": {"text":"Chest\nslot","styleId":"body"} },
+      "Three": { "Rect": {"x":0,"y":0,"w":0,"h":0}, "Size": {"w":{"mode":"Hug"},"h":{"mode":"Hug"}}, "Text": {"text":"First line\r\nSecond line\nThird line","styleId":"body"} },
+      "Tight": { "Rect": {"x":0,"y":0,"w":0,"h":0}, "Size": {"w":{"mode":"Hug"},"h":{"mode":"Hug"}}, "Text": {"text":"Chest\nslot","styleId":"tight"} },
+      "One": { "Rect": {"x":0,"y":0,"w":0,"h":0}, "Size": {"w":{"mode":"Hug"},"h":{"mode":"Hug"}}, "Text": {"text":"Second line","styleId":"body"} },
+      "Start": { "Rect": {"x":0,"y":0,"w":400,"h":80}, "Text": {"text":"A\nwide line","styleId":"body"} },
+      "Centered": { "Rect": {"x":0,"y":0,"w":400,"h":80}, "Text": {"text":"A\nwide line","styleId":"middle"} }
+    }
+  }"#
+}
+
+func nodeEntityIdOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func measured(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  let entityId: EntityId = nodeEntityIdOf(world: world, nodeId: nodeId)
+  let size: view MeasuredText = componentView(
+    this: uiSystems.layout.measuredTexts
+    entityId: entityId
+  )
+  log("{nodeId}: measured {Math.round(x: size.w)} x {size.h}")
+}
+
+# The queued glyphs as (x, baseline-ish y) rows: one row per distinct top y
+type GlyphRow {
+  top: Float
+  left: Float
+  right: Float
+}
+
+func glyphRows(canvas: view Gpu2dCanvas) ret List(GlyphRow) {
+  var rows: List(GlyphRow) = List.create(GlyphRow, cap: 8)
+  loop let atlas: view Gpu2dTextAtlas in canvas.textAtlases {
+    loop var i: Int = 0, i < atlas.glyphs.length / 20, ++i {
+      let x: Float = atlas.glyphs.copyAtFallback(index: i * 20, fallback: 0.0)
+      let y: Float = atlas.glyphs.copyAtFallback(index: i * 20 + 1, fallback: 0.0)
+      let w: Float = atlas.glyphs.copyAtFallback(index: i * 20 + 2, fallback: 0.0)
+      let h: Float = atlas.glyphs.copyAtFallback(index: i * 20 + 3, fallback: 0.0)
+      let bottom: Float = y + h
+      var found: Bool = false
+      loop var r: Int = 0, r < rows.length, ++r {
+        if let row: mod GlyphRow = rows.modAt(index: r) {
+          # a row by its glyph bottoms (baselines) within 6 units
+          if Math.abs(value: row.top - bottom) < 6.0 {
+            found = true
+            row.left = Math.min(a: row.left, b: x)
+            row.right = Math.max(a: row.right, b: x + w)
+          }
+        }
+      }
+      if found is false {
+        rows.add(value: GlyphRow { top: bottom, left: x, right: x + w })
+      }
+    }
+  }
+  ret rows
+}
+
+func main() {
+  # The lines of a text, by its breaks
+  log("lines of 'a\\r\\nb': {SdfText.sdfHardLines(text: "a\r\nb").length}")
+  log("lines of 'a\\rb': {SdfText.sdfHardLines(text: "a\rb").length}")
+  log("lines of 'a\\n\\nb': {SdfText.sdfHardLines(text: "a\n\nb").length}")
+  log("lines of 'ab': {SdfText.sdfHardLines(text: "ab").length}")
+
+  let scene: Scene = parseScene(source: sceneText())
+  var resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 800.0
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  measureTextForLayout(world: world, uiSystems: uiSystems, res: resources)
+  # body: 20 + 1 x 30 = 50, 20 + 2 x 30 = 80; tight (lineHeight 1): 40; one line: 20
+  measured(world: world, uiSystems: uiSystems, nodeId: "Two")
+  measured(world: world, uiSystems: uiSystems, nodeId: "Three")
+  measured(world: world, uiSystems: uiSystems, nodeId: "Tight")
+  measured(world: world, uiSystems: uiSystems, nodeId: "One")
+  let widest: Float = SdfText.sdfMeasureTextBounds(
+    font: resources.textFont
+    text: "Second line"
+    sizePx: 20.0
+  ).advance
+  let three: view MeasuredText = componentView(
+    this: uiSystems.layout.measuredTexts
+    entityId: nodeEntityIdOf(world: world, nodeId: "Three")
+  )
+  log("Three is as wide as its widest line: {three.w is widest}")
+
+  # One frame through the pipeline, then the queued glyphs of the two boxes
+  var schedule: Schedule = createUiPipeline(world: world)
+  runScheduledUiSystems(
+    schedule: schedule
+    world: world
+    uiSystems: uiSystems
+    res: resources
+  )
+  # Every text drawn in one frame (the design canvas is the screen, or the paint
+  # walk culls what lies past it); each box's lines are the glyph rows inside it
+  Gpu2d.setDesignResolution(width: 600.0, height: 800.0, fit: 0)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let rows: List(GlyphRow) = glyphRows(canvas: canvas)
+  drawnLines(
+    world: world
+    uiSystems: uiSystems
+    rows: rows
+    nodeId: "Start"
+  )
+  drawnLines(
+    world: world
+    uiSystems: uiSystems
+    rows: rows
+    nodeId: "Centered"
+  )
+  drawnLines(
+    world: world
+    uiSystems: uiSystems
+    rows: rows
+    nodeId: "Three"
+  )
+  canvasShutdown(canvas: canvas)
+}
+
+# Where each line of `nodeId` is: its glyphs' bottom from the box's top, its
+# left from the box's left, and its middle from the box's middle
+func drawnLines(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  rows: view List(GlyphRow)
+  nodeId: view String
+) {
+  let box: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: nodeEntityIdOf(world: world, nodeId: nodeId)
+  )
+  var lines: Int = 0
+  loop let row: view GlyphRow in rows {
+    if row.top > box.position.y and row.top < box.position.y + box.size.y + 8.0 {
+      lines = lines + 1
+    }
+  }
+  log("{nodeId}: {lines} lines")
+  loop let row: view GlyphRow in rows {
+    if row.top > box.position.y and row.top < box.position.y + box.size.y + 8.0 {
+      let left: Float = row.left - box.position.x
+      let middle: Float = (row.left + row.right) / 2.0 - (box.position.x + box.size.x / 2.0)
+      log(
+        "  bottom {Math.round(x: row.top - box.position.y)}, left {Math.round(x: left)}, middle {Math.round(
+          x: middle
+        )}"
+      )
+    }
+  }
+}

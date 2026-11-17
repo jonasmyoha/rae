@@ -34,6 +34,21 @@ func paintTextG(
   if content.length() is 0 {
     ret
   }
+  # Hard line breaks ("\n", "\r\n"): each line on its own (a wrapping text
+  # breaks there itself, drawTextWrappedEx)
+  if t.wrapWidthMode is WrapWidthMode.none and SdfText.sdfHasHardBreak(text: content) {
+    paintTextLines(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+      content: content
+    )
+    ret
+  }
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
   let weight: Float = resolveTextWeight(theme: res.theme, styleId: t.styleId)
   var baseCol: RgbaColor = resolveTextColor(
@@ -341,6 +356,60 @@ func paintTextG(
       y: drawY
       sizePx: size
       color: g2dColor(color: col)
+    )
+  }
+}
+
+# A text with hard line breaks: each line drawn as a text of its own, aligned
+# on its own (start, center or end of the node), one line height (the style's
+# lineHeight) below the one before. A style that centers vertically centers
+# the block of lines; otherwise the first line sits where a single line would.
+func paintTextLines(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  content: view String
+) {
+  let t: view Text = componentView(this: world.texts, entityId: entityId)
+  var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+  if componentHas(this: world.styleOverrides, entityId: entityId) {
+    let so: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
+    size = styleOverrideSize(base: size, so: so)
+  }
+  size = size * wt.scale.x
+  let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+  var centeredBlock: Bool = resolveTextIsVCentered(theme: res.theme, styleId: t.styleId)
+  if componentHas(this: world.opticalAligns, entityId: entityId) {
+    let optical: view OpticalAlign = componentView(this: world.opticalAligns, entityId: entityId)
+    if optical.enabled and optical.centerY {
+      centeredBlock = true
+    }
+  }
+  let lines: List(String) = SdfText.sdfHardLines(text: content)
+  var shift: Float = 0.0
+  if centeredBlock {
+    shift = 0.0 - (lines.length - 1).toFloat() * lineHeight / 2.0
+  }
+  loop var i: Int = 0, i < lines.length, ++i {
+    let line: String = lines.copyAtFallback(index: i, fallback: "")
+    if line.length() is 0 {
+      continue
+    }
+    var lineTransform: WorldTransform2D = wt
+    lineTransform.position.y = wt.position.y + shift + i.toFloat() * lineHeight
+    paintTextG(
+      world: world
+      entityId: entityId
+      wt: lineTransform
+      cr: cr
+      chain255: chain255
+      res: res
+      canvas: canvas
+      content: line
     )
   }
 }

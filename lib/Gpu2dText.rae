@@ -130,7 +130,7 @@ type WrapLine {
 }
 
 # Where the line that starts at byte `start` of `text` ends when it may be
-# `maxWidth` wide. It breaks at a newline, else at the last space that fits,
+# `maxWidth` wide. It breaks at a newline ("\n", "\r\n" or "\r"), else at the last space that fits,
 # else (a single word wider than the line) at the last character that fits;
 # a line holds at least one character.
 func nextWrapLine(
@@ -147,6 +147,13 @@ func nextWrapLine(
   loop i < n {
     let cp: Int = text.at(index: i).toInt()
     if cp is 10 {
+      ret WrapLine { end: i, next: i + 1 }
+    }
+    # "\r\n" is one break, a lone "\r" one too (SdfText sdfHardLines)
+    if cp is 13 {
+      if i + 1 < n and text.at(index: i + 1).toInt() is 10 {
+        ret WrapLine { end: i, next: i + 2 }
+      }
       ret WrapLine { end: i, next: i + 1 }
     }
     let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)

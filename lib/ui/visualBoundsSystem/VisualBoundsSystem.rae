@@ -175,7 +175,8 @@ func iconGlyphSize(
 # layoutSystem (not with visualBoundsSystem, which runs after layout for
 # centering): plain-text measurement needs only the font + style size, no
 # ComputedRect, so it is correct on the first frame. Writes MeasuredText
-# { w: pen advance, h: line box } for every non-empty Text node, comparing
+# { w: pen advance, h: line box } for every non-empty Text node (with hard
+# line breaks: the widest line, and a line height more per further line), comparing
 # before writing so a stable string does not bump the table generation and
 # re-dirty layout every frame.
 func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) pub {
@@ -198,8 +199,20 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
       # Width is the pen advance; height is the line box (the font size), not
       # the tighter ink bounds, so a chip keeps a stable height whether or not
       # the string has descenders.
-      let measuredW: Float = b.advance
-      let measuredH: Float = size
+      var measuredW: Float = b.advance
+      var measuredH: Float = size
+      # A hard line break ("\n", "\r\n"): the widest line, and one line
+      # height (the style's lineHeight) more for each line after the first
+      if SdfText.sdfHasHardBreak(text: t.text) {
+        let lines: SdfTextLines = SdfText.sdfMeasureLines(
+          font: res.textFont
+          text: t.text
+          sizePx: size
+        )
+        let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+        measuredW = lines.widest
+        measuredH = size + (lines.count - 1).toFloat() * lineHeight
+      }
       var write: Bool = true
       if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {
         let cur: view MeasuredText = componentView(

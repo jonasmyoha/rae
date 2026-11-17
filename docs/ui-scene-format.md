@@ -1412,3 +1412,28 @@ atlasSize`; Roboto's atlas, range 12 at size 48, allows about 2 points at 17
 point text and 4 at 34). A wider outline is cut off at that distance. The
 check `checks/uiTextOutline` draws two outlined styles in one frame; case
 1524 checks the parsing.
+
+## 43. Line breaks in a `Text`
+
+A `"\n"` in `Text.text` (a JSON newline in a `.raescene`, or one set from
+code) is a hard line break; `"\r\n"` counts as one break, and so does a lone
+`"\r"`.
+
+    "Label": { "Text": { "text": "Chest\nslot", "styleId": "slot" },
+               "Size": { "w": { "mode": "Hug" }, "h": { "mode": "Hug" } } }
+
+- Each line starts one line height below the one before: the style's
+  `lineHeight` (a factor of its size, 1 by default) times the size.
+- A `Hug` text measures every line: its width is the widest line, its height
+  the size plus one line height for each line after the first (two lines of
+  size 20 at `lineHeight` 1.5 are 50 high). Like a single line, the box ends
+  at the last line's baseline, and descenders hang below it.
+- Alignment applies per line: a centered style centers each line in the node,
+  an end-aligned one ends each line at the node's right. A style that centers
+  vertically (`vAlign`, or `OpticalAlign.centerY`) centers the block of lines.
+- A text that wraps (`wrapWidthMode: NodeWidth`) breaks at a hard break too and
+  wraps each part on its own.
+
+Case 1525 measures two- and three-line texts and draws start-aligned and
+centered ones in one frame.
+
