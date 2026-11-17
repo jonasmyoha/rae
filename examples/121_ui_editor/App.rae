@@ -9,7 +9,8 @@
 # (or the chrome's
 # Open pill) the OS file picker — its choice goes through the same opener as
 # the boot argument (documentOpenPath), so the picker is no second code
-# path, `H` toggles the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
+# path, `V` (or the frame pill) shows the scene's next frame (FramePickerSystem),
+# `H` toggles the chrome, and the same idle policy as 105 (repaint on wake, ~0% CPU idle).
 import Gpu2d
 import Sys
 import Keys
@@ -149,6 +150,10 @@ func reloadDocument(app: mod App) {
       registry: app.document.registry
     )
   }
+  if mounted {
+    markDocumentClean(app: app)
+  }
+  framePickerSync(app: app)
   let diagnostics: Int = app.world.sceneDiagnostics.length
   var kept: String = ""
   if app.world.pendingComponents.length > 0 {
@@ -175,6 +180,7 @@ func openPath(app: mod App, path: view String) {
     wantedScene: ""
     atBoot: false
   )
+  app.document.frameName = ""
   log("[ui-editor] open {path} -> {app.document.path}")
   reloadDocument(app: app)
   setEditorPanelOpen(
@@ -210,6 +216,7 @@ func openProjectScene(app: mod App, index: view Int) {
   }
   if let packagePath: String = app.document.projectScenes.copyAt(index: index) {
     setDocumentScene(document: app.document, packagePath: packagePath)
+    app.document.frameName = ""
     log("[ui-editor] open {packagePath} ({app.document.path})")
     reloadDocument(app: app)
     projectListSystem(
@@ -271,6 +278,8 @@ func effectSystems(
 
 func runApp(app: mod App) ret Int {
   var input: UiInput = createUiInput()
+  markDocumentClean(app: app)
+  framePickerSync(app: app)
   listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.document.registry)
   runScheduledUiSystems(
     schedule: app.schedule
@@ -416,6 +425,9 @@ func runApp(app: mod App) ret Int {
   # RAE_UI_EDITOR_TEST_SAVE=<path>: save the document there once after the
   # first frame, as Cmd+S would — the headless gate's hook.
   var testSavePath: String = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_SAVE")
+  # RAE_UI_EDITOR_TEST_FRAMES=<n>: press "next frame" n times, one per frame
+  # after the first (FramePickerSystem.rae) — the headless gate's hook.
+  var testFramePresses: Int = Sys.getEnv(name: "RAE_UI_EDITOR_TEST_FRAMES").toInt()
   # Whether the previous loop iteration painted: what the debug widget's fps
   # counts (an idle wait-loop iteration is not a frame).
   var renderedThisFrame: Bool = false
@@ -537,12 +549,28 @@ func runApp(app: mod App) ret Int {
         )
         changed = true
       }
+      # V: show the next frame of the scene (FramePickerSystem.rae)
+      if Sdl3.isKeyPressed(key: Keys.keyV) {
+        if showDocumentFrame(app: app, frameName: nextFrameName(document: app.document)) {
+          changed = true
+        }
+      }
       if Sdl3.isKeyPressed(key: Keys.keyP) {
         toggleEditorPanel(
           chromeSystem: app.chromeSystem
           world: app.world
           kind: EditorPanelKind.project
         )
+        changed = true
+      }
+    }
+    var nextFrameWanted: Bool = uiActionFired(world: app.world, actionId: "frame.next")
+    if testFramePresses > 0 and renderedOnce {
+      nextFrameWanted = true
+      testFramePresses = testFramePresses - 1
+    }
+    if nextFrameWanted {
+      if showDocumentFrame(app: app, frameName: nextFrameName(document: app.document)) {
         changed = true
       }
     }

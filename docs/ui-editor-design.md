@@ -117,6 +117,15 @@ texture manifest, and a design-resolution + fit rule (now native:
   toggles the camera-bearing frame subtree; `RAE_UI_EDITOR_GUIDES=0` starts it
   hidden without hiding the screen-space selection chrome. The safe-area guide shows
   only when the frame has insets.
+- **Frames** (`FramePickerSystem.rae`): a scene with `frames` gets a pill in the top
+  bar, `Frame: Base`; a click on it or `V` shows Base (the file's `nodes` alone),
+  then each frame in declared order, forced over the base, at its `viewport` when it
+  declares one (docs/ui-coordinate-and-responsive-layout.md §2-§3).
+  `RAE_UI_EDITOR_FRAME=<name>` starts with a frame shown;
+  `RAE_UI_EDITOR_TEST_FRAMES=<n>` presses the pill n times headlessly. An edit made
+  while a frame is shown belongs in that frame's override bag (§2 of that doc), which
+  the writer does not write yet, so a save there is refused; with unsaved edits in
+  Base, showing a frame is refused until they are saved.
 - **Camera** (#99444501, `cameraSystem/`): the wheel zooms the DOCUMENT about the
   cursor (0.25x–5x, 10% per notch), a middle-button drag pans it, and the chrome's
   zoom pill (`−` / `100%` / `+`, authored `OnClick` rows in the top bar) steps ±10%

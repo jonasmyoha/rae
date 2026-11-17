@@ -134,6 +134,9 @@ func applyComponentAction(
         name: name
       )
       inspectorSystem.pendingRemoveComponent = ""
+      if removed > 0 {
+        inspectorSystem.edits = inspectorSystem.edits + 1
+      }
       log("[ui-editor] removed {name} from {removed}")
     } else {
       inspectorSystem.pendingRemoveComponent = "{name}"
@@ -149,6 +152,9 @@ func applyComponentAction(
       name: name
     )
     inspectorSystem.pendingRemoveComponent = ""
+    if added > 0 {
+      inspectorSystem.edits = inspectorSystem.edits + 1
+    }
     log("[ui-editor] added {name} to {added}")
     ret true
   }

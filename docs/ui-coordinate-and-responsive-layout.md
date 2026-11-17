@@ -206,6 +206,29 @@ override bag: `Parent`, `order`, `Active`, and any component overrides). It is
 mechanically the same overlay used everywhere — replay `applyComponentByName`
 with the override bag — just grouped by frame.
 
+**Editing while a frame is shown (decided 2026-11-17).** The editor shows either
+**Base** (the file's `nodes` alone) or **one frame forced over them** (the UI
+editor's frame pill, or V; `RAE_UI_EDITOR_FRAME=<name>` at start). An edit is
+written into what is shown:
+
+- In **Base**, an edit writes the base `nodes`, which every frame inherits.
+- With a **frame shown**, an edit writes **that frame's override bag** for the
+  edited node, never the base: the whole component goes into the bag (a bag
+  holds whole components), and a component that ends equal to its base value
+  leaves the bag, so a frame holds only real differences. A structural edit
+  (show/hide, move to another parent, reorder) writes the frame's `Active`,
+  `Parent` and `order` for that node.
+
+So an edit made while looking at Tablet never changes Phone, and an edit in
+Base reaches every frame that does not override that component, like a
+breakpoint or a variant in a design tool. The editor says which one is shown
+in its top bar, since that decides where the edit goes.
+
+Today the UI editor shows frames (each at its `viewport`) but does not yet
+write an override bag: with a frame shown, a save is refused (show Base to
+save), and edits made there are dropped when another frame is shown. With
+unsaved edits in Base, showing a frame is refused until they are saved.
+
 ---
 
 ## 3. Frame selection (Q3)

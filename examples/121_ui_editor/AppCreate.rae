@@ -183,6 +183,9 @@ func createApp() ret App {
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
 
   var document: SceneDocument = createSceneDocument(path: resolveScenePath())
+  # RAE_UI_EDITOR_FRAME=<name>: show that frame of the scene from the start
+  # (FramePickerSystem.rae)
+  document.frameName = getEnv(name: "RAE_UI_EDITOR_FRAME")
   var gpuUi: Gpu2dUi = createEditorUi()
   var fonts: EditorFonts = { textFontPath: "", iconFontPath: "" }
   # One add per scene: the path and the id it registers under are written

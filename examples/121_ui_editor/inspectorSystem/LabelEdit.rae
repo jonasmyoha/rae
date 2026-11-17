@@ -71,6 +71,8 @@ type LabelEdit {
   field: String = ""
   draft: String = ""
   motionTokenCommits: List(MotionTokenCommit) = List.create(MotionTokenCommit, cap: 2)
+  # How many commits wrote into the document (InspectorSystem.edits)
+  edits: Int = 0
 }
 
 func labelFocus(editing: mod LabelEdit, field: view String) {
@@ -117,6 +119,9 @@ func labelCommit(
       text: draft
     )
     log("[ui-editor] motion commit {field}='{draft}' -> {changed}")
+    if changed > 0 {
+      editing.edits = editing.edits + 1
+    }
     ret changed
   }
   var written: Int = 0
@@ -133,6 +138,9 @@ func labelCommit(
     }
   }
   log("[ui-editor] label commit {field}='{draft}' -> {written}")
+  if written > 0 {
+    editing.edits = editing.edits + 1
+  }
   ret written
 }
 

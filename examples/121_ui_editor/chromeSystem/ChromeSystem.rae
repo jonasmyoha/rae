@@ -40,6 +40,8 @@ type ChromeSystem {
   projectTitle: String
   frameLabel: String
   safeAreaLabel: String
+  # The frame pill's label: the frame shown (FramePickerSystem.rae)
+  frameChoice: String = "Frame: Base"
   # The hierarchy panel's header: "Hierarchy (n)" plus the filter (#89663819).
   treeHeader: String
   inspectorNodeId: String
@@ -119,6 +121,9 @@ func editorTextFor(chromeSystem: view ChromeSystem, key: view String) ret String
   }
   if key is "editor.frameLabel" {
     ret "{chromeSystem.frameLabel}"
+  }
+  if key is "editor.frameChoice" {
+    ret "{chromeSystem.frameChoice}"
   }
   if key is "editor.safeAreaLabel" {
     ret "{chromeSystem.safeAreaLabel}"

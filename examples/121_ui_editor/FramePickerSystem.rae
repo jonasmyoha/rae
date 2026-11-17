@@ -1,0 +1,113 @@
+# The frame picker (docs/ui-coordinate-and-responsive-layout.md §2-§3): a
+# scene's `frames` are named layout variants over one set of nodes. The
+# top bar's frame pill (and V) shows the next one: Base (the file's `nodes`
+# alone), then each frame in declared order, then Base again. A shown frame is
+# forced (lib/ui/Frames), whatever its `when` says, and the document is laid
+# out at the frame's `viewport` when it declares one. The pill is hidden for a
+# scene without frames. `RAE_UI_EDITOR_FRAME=<name>` shows a frame from the
+# start (the headless gate's hook).
+#
+# Showing another frame remounts the document, as a reload does, so it would
+# drop edits not yet saved: with unsaved edits in Base the switch is refused
+# (save first); edits made while a frame is shown cannot be saved yet (the
+# writer does not write a frame's override bag), so they are dropped, and the
+# status line says so.
+open ui/Ecs
+open ui/Components
+open ui/Scene
+open ui/Frames
+open ecs/Entity
+open ecs/ComponentTable
+
+const framePillNodeId: String = "FramePill"
+
+# The scene's frame names, in declared order
+func documentFrameNames(document: view SceneDocument) ret List(String) {
+  ret parseFrames(scene: document.scene).names
+}
+
+# The frame after the shown one: Base, each frame, Base again
+func nextFrameName(document: view SceneDocument) ret String {
+  let names: List(String) = documentFrameNames(document: document)
+  if names.length is 0 {
+    ret ""
+  }
+  if document.frameName.length() is 0 {
+    ret names.copyAtFallback(index: 0, fallback: "")
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    if names.copyAtFallback(index: i, fallback: "") is document.frameName {
+      ret names.copyAtFallback(index: i + 1, fallback: "")
+    }
+  }
+  ret ""
+}
+
+# The pill's label
+func frameChoiceLabel(frameName: view String) ret String {
+  if frameName.length() is 0 {
+    ret "Frame: Base"
+  }
+  ret "Frame: {frameName}"
+}
+
+# How many edits the inspector has written into the document
+func documentEditCount(app: view App) ret Int {
+  ret app.inspectorSystem.edits + app.inspectorSystem.labelEdit.edits
+}
+
+# Whether the page has edits not saved: inspector edits since the last mount
+# or save, or motion tokens changed. (Not the save text: the camera and the
+# effect systems write into the page's components every frame.)
+func documentHasUnsavedEdits(app: view App) ret Bool {
+  if app.motionTokens.unsaved.length > 0 {
+    ret true
+  }
+  ret documentEditCount(app: app) > app.document.cleanEdits
+}
+
+# Remember the page as clean: after a mount or a save
+func markDocumentClean(app: mod App) {
+  app.document.cleanEdits = documentEditCount(app: app)
+}
+
+# Show `frameName` ("" = Base): remount the document with it. Returns whether
+# the frame changed.
+func showDocumentFrame(app: mod App, frameName: view String) ret Bool {
+  if frameName is app.document.frameName {
+    ret false
+  }
+  if documentHasUnsavedEdits(app: app) {
+    if app.document.frameName.length() is 0 {
+      log("[ui-editor] frame not changed: Base has unsaved edits; save first")
+      app.chromeSystem.statusLine = "unsaved edits: save (Cmd+S) before showing a frame"
+      ret false
+    }
+    log("[ui-editor] edits made in frame {app.document.frameName} dropped (not saved)")
+  }
+  app.document.frameName = "{frameName}"
+  reloadDocument(app: app)
+  log("[ui-editor] {frameChoiceLabel(frameName: app.document.frameName)}")
+  app.chromeSystem.statusLine = frameChoiceLabel(frameName: app.document.frameName)
+  ret true
+}
+
+# The pill: its label, and shown only for a scene with frames
+func framePickerSync(app: mod App) {
+  app.chromeSystem.frameChoice = frameChoiceLabel(frameName: app.document.frameName)
+  let hasFrames: Bool = documentFrameNames(document: app.document).length > 0
+  if let index: Int = findNodeInPage(world: app.world, pageId: "chrome", nodeId: framePillNodeId) {
+    let pillEntityId: EntityId = nodeEntityId(world: app.world, index: index)
+    var wasActive: Bool = true
+    if componentHas(this: app.world.actives, entityId: pillEntityId) {
+      wasActive = componentView(this: app.world.actives, entityId: pillEntityId).value
+    }
+    if wasActive is not hasFrames {
+      componentSet(
+        this: app.world.actives
+        entityId: pillEntityId
+        data: Active { value: hasFrames }
+      )
+    }
+  }
+}

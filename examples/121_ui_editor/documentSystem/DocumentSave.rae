@@ -15,18 +15,18 @@ open ui/SceneWriter
 open ecs/Entity
 open ecs/ComponentTable
 
-# Write the document to `path`; the node count written, -1 on failure.
-func saveDocumentTo(app: mod App, path: view String) ret Int {
+# The document page as `.raescene` text, what a save writes (the motion tokens
+# apart): "" when no document is mounted.
+func documentSaveText(app: view App) ret String {
   if app.document.loaded is false or isNone(this: app.document.pageRoot) {
-    log("[ui-editor] nothing to save")
-    ret -1
+    ret ""
   }
   let fresh: UiWorld = freshDecodeOf(
     world: app.world
     uiSystems: app.uiSystems
     scene: app.document.scene
   )
-  let text: String = writeSceneText(
+  ret writeSceneText(
     world: app.world
     uiSystems: app.uiSystems
     fresh: fresh
@@ -34,6 +34,24 @@ func saveDocumentTo(app: mod App, path: view String) ret Int {
     pageRoot: app.document.pageRoot
     pageId: "document"
   )
+}
+
+# Write the document to `path`; the node count written, -1 on failure.
+# While a frame is shown nothing is written: the page holds that frame's
+# overrides, and an edit made there belongs in the frame's override bag
+# (docs/ui-coordinate-and-responsive-layout.md §2), which the writer does not
+# write yet. Show Base (the frame pill, V) to save.
+func saveDocumentTo(app: mod App, path: view String) ret Int {
+  if app.document.loaded is false or isNone(this: app.document.pageRoot) {
+    log("[ui-editor] nothing to save")
+    ret -1
+  }
+  if app.document.frameName.length() > 0 {
+    log("[ui-editor] not saved: frame {app.document.frameName} is shown; show Base to save")
+    app.chromeSystem.statusLine = "not saved: showing frame {app.document.frameName} (show Base to save)"
+    ret -1
+  }
+  let text: String = documentSaveText(app: app)
   let withTokens: String = motionTokensSave(
     system: app.motionTokens
     world: app.world
@@ -45,6 +63,7 @@ func saveDocumentTo(app: mod App, path: view String) ret Int {
     app.chromeSystem.statusLine = "could not write {path}"
     ret -1
   }
+  markDocumentClean(app: app)
   let nodes: Int = app.document.nodeCount
   log("[ui-editor] saved {path} ({nodes} nodes)")
   app.chromeSystem.statusLine = "saved {app.document.fileName}"

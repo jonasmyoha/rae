@@ -38,6 +38,8 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
+open ui/Frames
+open Device
 
 # The design size of a scene that gives none: the reference phone, in points
 const defaultDesignW: Float = 393.0
@@ -83,6 +85,13 @@ type SceneDocument {
   # the theme), rebuilt per load — what the watcher polls.
   watchedPaths: List(String)
   reloads: Int
+  # The frame shown (the frame picker, FramePickerSystem.rae): one of the
+  # scene's `frames` by name, forced over the base nodes; "" = the base
+  # nodes alone, what the file's `nodes` say (Base).
+  frameName: String = ""
+  # The inspector's edit count when the document was last mounted or saved;
+  # a higher count now means unsaved edits (FramePickerSystem.rae).
+  cleanEdits: Int = 0
 }
 
 # The file to open — a `.raescene`, or a `.raepack` whose directory becomes the
@@ -366,6 +375,24 @@ func documentDesignSize(document: mod SceneDocument) {
   }
   document.columnW = document.designW
   document.safeInsets = Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  # A shown frame with a `viewport` (its reference size in points) is laid
+  # out at that size, the whole of it the page's column, no device around it
+  if document.frameName.length() > 0 {
+    let frames: FrameSet = parseFrames(scene: scene)
+    if let frameIndex: Int = frameIndexByName(frames: frames, name: document.frameName) {
+      let viewportW: Float = frames.viewportWs.copyAtFallback(index: frameIndex, fallback: -1.0)
+      let viewportH: Float = frames.viewportHs.copyAtFallback(index: frameIndex, fallback: -1.0)
+      if viewportW > 0.0 and viewportH > 0.0 {
+        document.designW = viewportW
+        document.designH = viewportH
+        document.columnW = viewportW
+        log(
+          "[ui-editor] frame {document.frameName}: viewport {viewportW.toInt()}x{viewportH.toInt()}"
+        )
+        ret
+      }
+    }
+  }
   let frame: DeviceFrame = editorDeviceFrame(pageScene: document.pageScene)
   if frame.enabled {
     document.designW = frame.extentW
@@ -633,9 +660,43 @@ func documentMountSystem(
     let registered: view Scene = sceneRegistryGet(reg: document.registry, idx: r)
     tagMountedNodeIds(world: world, scene: registered, pageId: "document")
   }
+  applyShownFrame(document: document, world: world, uiSystems: uiSystems)
   restoreDocumentScrolls(world: world, snapshot: scrolls)
   rebuildWatchedPaths(document: document)
   document.nodeCount = aliveCount(world: world) - before
   document.loaded = true
   document.status = "ok"
+}
+
+# The shown frame's overrides over the freshly mounted base nodes (lib/ui/
+# Frames, forced by name), picked for the document's design size. A name the
+# scene no longer declares (the file changed) falls back to Base.
+func applyShownFrame(document: mod SceneDocument, world: mod UiWorld, uiSystems: mod UiSystems) {
+  if document.frameName.length() is 0 {
+    ret
+  }
+  let frames: FrameSet = parseFrames(scene: document.scene)
+  var known: Bool = false
+  if let frameIndex: Int = frameIndexByName(frames: frames, name: document.frameName) {
+    known = frameIndex >= 0
+  }
+  if known is false {
+    log("[ui-editor] the scene has no frame {document.frameName}: showing Base")
+    document.frameName = ""
+    ret
+  }
+  let noStates: List(String) = List.create(String, cap: 1)
+  applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: document.scene
+    pageId: "document"
+    window: FrameWindow {
+      widthPt: document.designW
+      heightPt: document.designH
+      pointer: primaryPointer()
+    }
+    forcedFrameId: document.frameName
+    activeStates: noStates
+  )
 }
