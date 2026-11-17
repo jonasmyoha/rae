@@ -5,6 +5,8 @@ open ui/SizeClass
 open ui/DesignUnits
 open ui/ResponsiveExtent
 open ui/UiZoom
+open ui/Frames
+open Device
 
 # 106's coordinate spine: lib/ui's responsive extent (ui/ResponsiveExtent).
 # The layout is the window in points (docs/ui-coordinate-and-responsive-
@@ -150,6 +152,16 @@ func createViewportFromWindow(zoom: view Float) pub ret Viewport {
     framebufferPxH: framebufferH
     zoom: zoom
   )
+}
+
+# The window a scene's frames are picked for: the layout in points (after the
+# user zoom), and a finger while a phone is emulated
+func frameWindowOf(viewport: view Viewport) ret FrameWindow {
+  var pointer: Pointer = primaryPointer()
+  if viewport.devicePresetActive {
+    pointer = Pointer.coarse
+  }
+  ret FrameWindow { widthPt: viewport.layoutW, heightPt: viewport.layoutH, pointer: pointer }
 }
 
 func applyViewportExtent(world: mod UiWorld, viewport: view Viewport) pub {

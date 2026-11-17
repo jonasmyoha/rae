@@ -1,0 +1,218 @@
+import String
+import ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/Frames
+open ecs/Entity
+open ecs/ComponentTable
+open ui/UiSystems
+open Device
+
+# The frame selection rules of docs/ui-coordinate-and-responsive-layout.md §3,
+# and §4's shared identity. A frame's `when` names widths and heights in
+# points, an orientation and a pointer; the frame whose every condition holds
+# and that names the most wins, then the narrowest width range, then the one
+# declared first; with none, the default. A forced frame overrides all of it.
+# A height or orientation condition never holds when the height is unknown.
+# Switching frames keeps every entity and its ScrollState.
+func buildScene() ret String {
+  var s: String = r#"{"type":"Scene","version":2,"sceneId":"rules","root":"Root","#
+  s = s.concat(
+    other: r#""nodes":{"Root":{"Rect":{"x":0,"y":0,"w":393,"h":852},"Children":["List","Rail"]},"List":{},"Rail":{"Active":{"value":false}}},"#
+  )
+  s = s.concat(other: r#""frames":{"#)
+  s = s.concat(other: r#""Phone":{"default":true,"viewport":{"w":393,"h":852},"nodes":{}},"#)
+  s = s.concat(other: r#""TabletA":{"when":{"minWidthPt":600,"maxWidthPt":1023},"nodes":{}},"#)
+  s = s.concat(other: r#""TabletB":{"when":{"minPtW":600,"maxWidthPt":1023},"nodes":{}},"#)
+  s = s.concat(
+    other: r#""TabletPortrait":{"when":{"minWidthPt":600,"maxWidthPt":1023,"orientation":"portrait"},"nodes":{}},"#
+  )
+  s = s.concat(other: r#""Short":{"when":{"maxHeightPt":500},"nodes":{}},"#)
+  s = s.concat(
+    other: r#""Desktop":{"viewport":{"w":1440,"h":900},"when":{"minWidthPt":1024},"nodes":{"Rail":{"Active":{"value":true}}}},"#
+  )
+  s = s.concat(
+    other: r#""TallDesktop":{"when":{"minWidthPt":1024,"minHeightPt":1200},"nodes":{}},"#
+  )
+  s = s.concat(other: r#""Touch":{"when":{"inputType":"touch"},"nodes":{}}"#)
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func pick(
+  frames: view FrameSet
+  w: view Float
+  h: view Float
+  pointer: view Pointer
+) ret String {
+  let window: FrameWindow = { widthPt: w, heightPt: h, pointer: pointer }
+  if let index: Int = selectFrameForWindow(frames: frames, window: window, forcedFrameId: "") {
+    ret frames.names.copyAtFallback(index: index, fallback: "?")
+  }
+  ret "none"
+}
+
+func nodeEntityId(world: view UiWorld, name: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: name) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+func railActive(world: view UiWorld) ret Bool {
+  let railEntityId: EntityId = nodeEntityId(world: world, name: "Rail")
+  if componentHas(this: world.actives, entityId: railEntityId) {
+    ret componentView(this: world.actives, entityId: railEntityId).value
+  }
+  ret true
+}
+
+func main() {
+  let scene: Scene = parseScene(source: buildScene())
+  let frames: FrameSet = parseFrames(scene: scene)
+  log("frames: {frames.count}")
+  log("phone 393x852 fine: {pick(
+    frames: frames
+    w: 393.0
+    h: 852.0
+    pointer: Pointer.fine
+  )}")
+  log("phone 393x852 finger: {pick(
+    frames: frames
+    w: 393.0
+    h: 852.0
+    pointer: Pointer.coarse
+  )}")
+  # Two frames name the same two conditions: the one declared first wins
+  log("tablet landscape 1000x700: {pick(
+    frames: frames
+    w: 1000.0
+    h: 700.0
+    pointer: Pointer.fine
+  )}")
+  log("tablet portrait 820x1180: {pick(
+    frames: frames
+    w: 820.0
+    h: 1180.0
+    pointer: Pointer.fine
+  )}")
+  log("short window 393x400: {pick(
+    frames: frames
+    w: 393.0
+    h: 400.0
+    pointer: Pointer.fine
+  )}")
+  log("desktop 1440x900: {pick(
+    frames: frames
+    w: 1440.0
+    h: 900.0
+    pointer: Pointer.fine
+  )}")
+  log("tall desktop 1440x1300: {pick(
+    frames: frames
+    w: 1440.0
+    h: 1300.0
+    pointer: Pointer.fine
+  )}")
+  # Height unknown: a height or orientation condition does not hold
+  log("tablet, height unknown: {pick(
+    frames: frames
+    w: 820.0
+    h: -1.0
+    pointer: Pointer.fine
+  )}")
+  log("tall, height unknown: {pick(
+    frames: frames
+    w: 1440.0
+    h: -1.0
+    pointer: Pointer.fine
+  )}")
+  # The same inputs pick the same frame every time
+  var same: Bool = true
+  loop var i: Int = 0, i < 20, ++i {
+    if pick(
+      frames: frames
+      w: 820.0
+      h: 1180.0
+      pointer: Pointer.fine
+    ) is not "TabletPortrait" {
+      same = false
+    }
+  }
+  log("deterministic: {same}")
+  let window: FrameWindow = { widthPt: 393.0, heightPt: 852.0, pointer: Pointer.coarse }
+  if let forced: Int = selectFrameForWindow(
+    frames: frames
+    window: window
+    forcedFrameId: "Desktop"
+  ) {
+    log("forced: {frames.names.copyAtFallback(index: forced, fallback: "?")}")
+  }
+  if let unknown: Int = selectFrameForWindow(frames: frames, window: window, forcedFrameId: "Nope") {
+    log("forced unknown name: {frames.names.copyAtFallback(index: unknown, fallback: "?")}")
+  }
+  if let phone: Int = frameIndexByName(frames: frames, name: "Phone") {
+    log(
+      "Phone viewport: {frames.viewportWs.copyAtFallback(index: phone, fallback: 0.0)} x {frames.viewportHs.copyAtFallback(
+        index: phone
+        fallback: 0.0
+      )}"
+    )
+  }
+  if let tablet: Int = frameIndexByName(frames: frames, name: "TabletA") {
+    log("TabletA viewport: {frames.viewportWs.copyAtFallback(index: tablet, fallback: 0.0)}")
+  }
+
+  # §4: a frame switch keeps every entity and its scroll position
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  let noStates: List(String) = List.create(String, cap: 1)
+  let phoneWindow: FrameWindow = { widthPt: 393.0, heightPt: 852.0, pointer: Pointer.fine }
+  let desktopWindow: FrameWindow = { widthPt: 1440.0, heightPt: 900.0, pointer: Pointer.fine }
+  applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+    window: phoneWindow
+    forcedFrameId: ""
+    activeStates: noStates
+  )
+  let listEntityId: EntityId = nodeEntityId(world: world, name: "List")
+  componentSet(
+    this: world.scrollStates
+    entityId: listEntityId
+    data: ScrollState { y: -240.0, velocity: 0.0 }
+  )
+  log("phone: rail {railActive(world: world)}")
+  applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+    window: desktopWindow
+    forcedFrameId: ""
+    activeStates: noStates
+  )
+  log("desktop: rail {railActive(world: world)}")
+  applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+    window: phoneWindow
+    forcedFrameId: ""
+    activeStates: noStates
+  )
+  log("phone again: rail {railActive(world: world)}")
+  let afterEntityId: EntityId = nodeEntityId(world: world, name: "List")
+  log("same List entity: {afterEntityId is listEntityId}")
+  log("scroll kept: {componentView(this: world.scrollStates, entityId: afterEntityId).y}")
+}

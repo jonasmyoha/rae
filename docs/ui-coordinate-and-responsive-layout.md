@@ -210,9 +210,9 @@ with the override bag — just grouped by frame.
 
 ## 3. Frame selection (Q3)
 
-**Conditions are in logical points** (device-independent; not du which is 3×,
-not framebuffer px which is DPR-dependent). The brief's worry about numeric
-breakpoints misbehaving under authoring scale is resolved by breaking on pt.
+**Conditions are in logical points** (device-independent, the same unit as du;
+not framebuffer px, which is DPR-dependent), measured on the layout: the window
+in points over the user zoom.
 
 ```json
 "PhonePortrait": { "when": { "maxWidthPt": 599 } },
@@ -220,16 +220,21 @@ breakpoints misbehaving under authoring scale is resolved by breaking on pt.
 "Desktop":       { "when": { "minWidthPt": 1024 }, "default": true }
 ```
 
-Inputs — **core now:** `minWidthPt`/`maxWidthPt`, `minHeightPt`/`maxHeightPt`,
-`aspect` (min/max h:w), `orientation`. **Now, cheap:** `inputType`
-(touch|pointer), `windowMode` (named class). **Deferred:** true physical size.
+Inputs — **implemented** (lib/ui/Frames/Selection.rae, case 1521):
+`minWidthPt`/`maxWidthPt` (`minPtW` is the older spelling of `minWidthPt`),
+`minHeightPt`/`maxHeightPt`, `orientation` (portrait when higher than wide),
+`pointer` (coarse|fine|none) and `inputType` (touch = coarse, pointer = fine).
+A height or orientation condition never holds when the caller passes no height
+(the width-only entry points). **Not yet:** `aspect` (min/max h:w),
+`windowMode` (named class). **Deferred:** true physical size.
 Runtime **state** (e.g. `canvasOpen`) is *not* a frame selector — it's a
 within-frame condition (§4), so frame choice stays a pure function of the
 window.
 
 Determinism: evaluate every frame's `when`; among matches pick the **most
-specific** (most bounded predicate), ties broken by **declared order**; if none
-match, the `default` frame. **Editor force-select** overrides everything
+specific** (the most conditions named, then the largest minimum width, then the
+smallest maximum width), ties broken by **declared order**; if none match, the
+`default` frame. **Editor force-select** overrides everything
 (`forcedFrameId`), and the simulator sets it per preset.
 
 ---
@@ -353,10 +358,9 @@ fullscreen game *or* a board beside a sidebar, with no global mode.
 {
   "scene": {
     "type": "Scene", "version": 3,
-    "unitScale": 3,
     "frames": {
       "PhonePortrait": {
-        "viewport": { "w": 1080, "h": 2280 },
+        "viewport": { "w": 393, "h": 852 },
         "when": { "maxWidthPt": 599 },
         "root": "SafeRoot",
         "nodes": {
@@ -365,21 +369,21 @@ fullscreen game *or* a board beside a sidebar, with no global mode.
           "LibraryPanel":{ "Parent": "PhoneStack", "Size": { "w": {"mode":"Fill"}, "h": {"mode":"Fill"} } },
           "CanvasArea":  { "Parent": "PhoneStack", "Active": { "value": false } },
           "Navigation":  { "Parent": "PhoneStack", "order": 99,
-                           "Size": { "w": {"mode":"Fill"}, "h": {"mode":"Fixed"} }, "Rect": { "h": 240 },
+                           "Size": { "w": {"mode":"Fill"}, "h": {"mode":"Fixed"} }, "Rect": { "h": 80 },
                            "Layout": { "kind": "Horizontal", "alignMain": "SpaceBetween" } }
         }
       },
       "Desktop": {
-        "viewport": { "w": 5760, "h": 3240 },
+        "viewport": { "w": 1440, "h": 900 },
         "when": { "minWidthPt": 1024 }, "default": true,
         "nodes": {
           "SafeRoot":    { "Children": ["DesktopSplit"] },
           "DesktopSplit":{ "Layout": { "kind": "Horizontal" }, "Children": ["Navigation", "LibraryPanel", "CanvasArea"] },
           "Navigation":  { "Parent": "DesktopSplit", "order": 0,
-                           "Size": { "w": {"mode":"Fixed"}, "h": {"mode":"Fill"} }, "Rect": { "w": 660 },
+                           "Size": { "w": {"mode":"Fixed"}, "h": {"mode":"Fill"} }, "Rect": { "w": 220 },
                            "Layout": { "kind": "Vertical", "alignMain": "Start" } },
           "LibraryPanel":{ "Parent": "DesktopSplit", "order": 1,
-                           "Size": { "w": {"mode":"Fixed"}, "h": {"mode":"Fill"} }, "Rect": { "w": 1080 } },
+                           "Size": { "w": {"mode":"Fixed"}, "h": {"mode":"Fill"} }, "Rect": { "w": 360 } },
           "CanvasArea":  { "Parent": "DesktopSplit", "order": 2, "Active": { "value": true },
                            "Size": { "w": {"mode":"Fill"}, "h": {"mode":"Fill"} } },
           "DesktopTools":{ "Parent": "Navigation", "Active": { "value": true } }

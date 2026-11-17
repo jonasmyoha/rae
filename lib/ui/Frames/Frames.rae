@@ -19,14 +19,14 @@
 #
 # Each frame names per-node component OVERRIDE bags plus an optional
 # "remove" list of component names to strip for that frame. Selection
-# is by condition: a frame's `when` may name `minPtW` (the window is at
-# least this many points wide) and `pointer` (the main pointer is
-# "coarse" — a finger —, "fine" — a mouse, trackpad or pen — or "none";
-# Device.primaryPointer, docs/platform-conditional-code.md §3.1). A frame
-# applies when every condition it names holds; among those, the one naming
-# more conditions wins, then the widest minPtW. `forcedFrameId` (simulator /
-# RAE_UI_FRAME) overrides; a frame tagged `"default": true` is the
-# fallback. So a touch-only control is a frame
+# is by condition (Selection.rae has the full list): a frame's `when` may
+# name window widths and heights in points, an orientation and `pointer`
+# (the main pointer is "coarse" — a finger —, "fine" — a mouse, trackpad or
+# pen — or "none"; Device.primaryPointer, docs/platform-conditional-code.md
+# §3.1). A frame applies when every condition it names holds; among those,
+# the most specific wins, then the one declared first. `forcedFrameId`
+# (editor, simulator, RAE_UI_FRAME) overrides; a frame tagged
+# `"default": true` is the fallback. So a touch-only control is a frame
 #
 #   "Touch": { "when": { "pointer": "coarse" },
 #              "nodes": { "JumpButton": { "Active": { "value": true } } } }
@@ -105,92 +105,6 @@ open ui/SceneBundles
 open ui/FramesHierarchy
 open ui/UiSystems
 open ui/nodeBindingSystem/NodeBindingSystem
-
-type FrameSet {
-  names: List(String)
-  # `when.minPtW` per frame; -1.0 = no width condition.
-  minPtWs: List(Float)
-  # `when.pointer` per frame ("coarse", "fine", "none"); "" = no pointer
-  # condition.
-  pointers: List(String)
-  # 1 = `"default": true`; parallel to names.
-  defaultFlags: List(Int)
-  # JsonDoc pool index of `frames.<Name>.nodes` (-1 = frame has none).
-  nodesValueIdxs: List(Int)
-  count: Int
-}
-
-func emptyFrameSet() ret FrameSet {
-  ret FrameSet {
-    names: List.create(String, cap: 4)
-    minPtWs: List.create(Float, cap: 4)
-    pointers: List.create(String, cap: 4)
-    defaultFlags: List.create(Int, cap: 4)
-    nodesValueIdxs: List.create(Int, cap: 4)
-    count: 0
-  }
-}
-
-# Read the optional "frames" table from a parsed Scene. A scene
-# without frames returns count == 0 and every caller short-circuits —
-# pre-frames scenes behave exactly as before.
-func parseFrames(scene: view Scene) ret FrameSet {
-  var out: FrameSet = emptyFrameSet()
-  if scene.ok is false {
-    ret out
-  }
-  let doc: view JsonDoc = scene.doc
-  let root: JsonValue = Json.root(doc: doc)
-  let framesIdx: Int = Json.field(doc: doc, this: root, key: "frames")
-  if framesIdx < 0 {
-    ret out
-  }
-  let framesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: framesIdx)
-  if framesVal.kind is not JsonKind.object {
-    ret out
-  }
-  let n: Int = Json.objectLen(this: framesVal)
-  var i: Int = 0
-  loop i < n {
-    let frameName: String = Json.objectKeyAt(doc: doc, this: framesVal, idx: i)
-    let frameVal: JsonValue = Json.objectValueAt(doc: doc, this: framesVal, idx: i)
-    var minPtW: Float = -1.0
-    var pointer: String = ""
-    var isDefault: Int = 0
-    var nodesIdx: Int = -1
-    if frameVal.kind is JsonKind.object {
-      let whenIdx: Int = Json.field(doc: doc, this: frameVal, key: "when")
-      if whenIdx >= 0 {
-        let whenVal: JsonValue = Json.jsonValueAt(doc: doc, idx: whenIdx)
-        let minIdx: Int = Json.field(doc: doc, this: whenVal, key: "minPtW")
-        if minIdx >= 0 {
-          let minVal: JsonValue = Json.jsonValueAt(doc: doc, idx: minIdx)
-          minPtW = Json.jsonFloat(this: minVal, fallback: -1.0)
-        }
-        let pointerIdx: Int = Json.field(doc: doc, this: whenVal, key: "pointer")
-        if pointerIdx >= 0 {
-          pointer = Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: pointerIdx), fallback: "")
-        }
-      }
-      let defIdx: Int = Json.field(doc: doc, this: frameVal, key: "default")
-      if defIdx >= 0 {
-        let defVal: JsonValue = Json.jsonValueAt(doc: doc, idx: defIdx)
-        if Json.jsonBool(this: defVal, fallback: false) {
-          isDefault = 1
-        }
-      }
-      nodesIdx = Json.field(doc: doc, this: frameVal, key: "nodes")
-    }
-    out.names.add(value: frameName)
-    out.minPtWs.add(value: minPtW)
-    out.pointers.add(value: pointer)
-    out.defaultFlags.add(value: isDefault)
-    out.nodesValueIdxs.add(value: nodesIdx)
-    i = i + 1
-  }
-  out.count = out.names.length
-  ret out
-}
 
 # Within-frame states (S5): parallel primitive lists, same storage
 # discipline as FrameSet.
@@ -276,115 +190,6 @@ func stateNodeBagIdx(
     ret none
   }
   ret bagIdx
-}
-
-func frameIndexByName(frames: view FrameSet, name: view String) ret opt Int {
-  var i: Int = 0
-  loop i < frames.count {
-    if let candidate: String = frames.names.copyAt(index: i) {
-      if candidate is name {
-        ret i
-      }
-    }
-    i = i + 1
-  }
-  ret none
-}
-
-# Pick the active frame for the device's main pointer as it is now.
-func selectFrameIndex(
-  frames: view FrameSet
-  windowPtW: view Float
-  forcedFrameId: view String
-) ret opt Int {
-  ret selectFrameIndexFor(
-    frames: frames
-    windowPtW: windowPtW
-    pointer: primaryPointer()
-    forcedFrameId: forcedFrameId
-  )
-}
-
-# A main pointer as a frame's `when.pointer` names it.
-func pointerConditionName(pointer: view Pointer) ret String {
-  match pointer {
-    case Pointer.fine {
-      ret "fine"
-    }
-    case Pointer.coarse {
-      ret "coarse"
-    }
-    case Pointer.none {
-      ret "none"
-    }
-  }
-  ret ""
-}
-
-# Pick the active frame for a window `windowPtW` points wide and a main
-# `pointer`. Precedence:
-#   1. `forcedFrameId` when non-empty and known (simulator override);
-#   2. among frames that name conditions and whose every condition holds,
-#      the one naming the MOST conditions, then the LARGEST minPtW (the
-#      most specific frame wins);
-#   3. the frame tagged `"default": true`;
-#   4. none (caller applies nothing — authored base only).
-func selectFrameIndexFor(
-  frames: view FrameSet
-  windowPtW: view Float
-  pointer: view Pointer
-  forcedFrameId: view String
-) ret opt Int {
-  if frames.count is 0 {
-    ret none
-  }
-  if forcedFrameId.length() > 0 {
-    if let forced: Int = frameIndexByName(frames: frames, name: forcedFrameId) {
-      ret forced
-    }
-  }
-  let pointerName: String = pointerConditionName(pointer: pointer)
-  var best: Int = -1
-  var bestConditions: Int = 0
-  var bestMin: Float = -1.0
-  var i: Int = 0
-  loop i < frames.count {
-    let minWidth: Float = frames.minPtWs.copyAtFallback(index: i, fallback: -1.0)
-    let wantsPointer: String = frames.pointers.copyAtFallback(index: i, fallback: "")
-    var conditions: Int = 0
-    var holds: Bool = true
-    if minWidth >= 0.0 {
-      conditions = conditions + 1
-      if windowPtW < minWidth {
-        holds = false
-      }
-    }
-    if wantsPointer.length() > 0 {
-      conditions = conditions + 1
-      if wantsPointer is not pointerName {
-        holds = false
-      }
-    }
-    if conditions > 0 and holds {
-      if conditions > bestConditions or (conditions is bestConditions and minWidth > bestMin) {
-        best = i
-        bestConditions = conditions
-        bestMin = minWidth
-      }
-    }
-    i = i + 1
-  }
-  if best >= 0 {
-    ret best
-  }
-  var j: Int = 0
-  loop j < frames.count {
-    if frames.defaultFlags.copyAt(index: j) is 1 {
-      ret j
-    }
-    j = j + 1
-  }
-  ret none
 }
 
 # True when `bag` (a node's component object) has a field named `key`.
@@ -856,6 +661,30 @@ func applySceneFramesToPageWithStatesFor(
   forcedFrameId: view String
   activeStates: view List(String)
 ) ret opt Int {
+  ret applySceneFramesForWindow(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: pageId
+    window: FrameWindow { widthPt: windowPtW, heightPt: -1.0, pointer: pointer }
+    forcedFrameId: forcedFrameId
+    activeStates: activeStates
+  )
+}
+
+# The full form: the frame picked for `window` (its width, height and main
+# pointer in points, ui/Frames selectFrameForWindow), then `activeStates`
+# overlaid. Re-run on a resize: entities are kept, only the frames' overrides
+# change, so scroll positions and other runtime state stay (§4).
+func applySceneFramesForWindow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scene: view Scene
+  pageId: view String
+  window: view FrameWindow
+  forcedFrameId: view String
+  activeStates: view List(String)
+) ret opt Int {
   let frames: FrameSet = parseFrames(scene: scene)
   let states: StateSet = parseStates(scene: scene)
   if frames.count is 0 {
@@ -863,10 +692,9 @@ func applySceneFramesToPageWithStatesFor(
       ret none
     }
   }
-  let idx: opt Int = selectFrameIndexFor(
+  let idx: opt Int = selectFrameForWindow(
     frames: frames
-    windowPtW: windowPtW
-    pointer: pointer
+    window: window
     forcedFrameId: forcedFrameId
   )
   applyFrameToPage(

@@ -1,0 +1,408 @@
+# ui/Frames: reading a scene's frame table and picking the active frame
+# (docs/ui-coordinate-and-responsive-layout.md §2-§3).
+#
+# A frame's `when` is in logical points and names any of:
+#
+#   minWidthPt, maxWidthPt    the window is at least / at most this wide
+#                             (`minPtW` is the older spelling of minWidthPt)
+#   minHeightPt, maxHeightPt  the window is at least / at most this high
+#   orientation               "portrait" (higher than wide) or "landscape"
+#   pointer                   "coarse" (a finger), "fine" (a mouse, trackpad
+#                             or pen) or "none"; `inputType` "touch" is
+#                             "coarse" and "pointer" is "fine"
+#
+# A frame applies when every condition it names holds. Among those, the most
+# specific wins: the one naming the most conditions, then the narrowest width
+# range (the largest minimum width, then the smallest maximum width), then the
+# one declared first. With none, the frame tagged `"default": true`, else
+# none. `forcedFrameId` (the editor's or simulator's choice) overrides all of
+# it. A height or orientation condition never holds for a window of unknown
+# height (`heightPt` below 0, the width-only entry points).
+#
+# A frame's optional `viewport: { "w": 393, "h": 852 }` is its reference
+# rectangle in points: the size an editor shows the frame at and a headless
+# run lays it out at. It is not a runtime canvas; the frame's root lays out in
+# the real window.
+import Json
+open Device
+
+# The window a frame is picked for, in logical points (after the user zoom)
+type FrameWindow {
+  widthPt: Float
+  # Below 0: unknown, so no height or orientation condition holds
+  heightPt: Float
+  pointer: Pointer
+}
+
+# Compiler limits respected (§11): FrameSet is parallel PRIMITIVE lists (no
+# List(struct) by-index, no StringMap in structs); override bags stay in the
+# scene's resident flat-pool JsonDoc, referenced by pool index.
+type FrameSet {
+  names: List(String)
+  # `when.minWidthPt` (or `minPtW`) per frame; -1.0 = no condition.
+  minPtWs: List(Float)
+  # `when.maxWidthPt` per frame; -1.0 = no condition.
+  maxPtWs: List(Float)
+  # `when.minHeightPt` / `maxHeightPt` per frame; -1.0 = no condition.
+  minPtHs: List(Float)
+  maxPtHs: List(Float)
+  # `when.orientation` ("portrait", "landscape"); "" = no condition.
+  orientations: List(String)
+  # `when.pointer` per frame ("coarse", "fine", "none"); "" = no pointer
+  # condition.
+  pointers: List(String)
+  # `viewport.w` / `viewport.h` in points; -1.0 = the frame declares none.
+  viewportWs: List(Float)
+  viewportHs: List(Float)
+  # 1 = `"default": true`; parallel to names.
+  defaultFlags: List(Int)
+  # JsonDoc pool index of `frames.<Name>.nodes` (-1 = frame has none).
+  nodesValueIdxs: List(Int)
+  count: Int
+}
+
+func emptyFrameSet() ret FrameSet {
+  ret FrameSet {
+    names: List.create(String, cap: 4)
+    minPtWs: List.create(Float, cap: 4)
+    maxPtWs: List.create(Float, cap: 4)
+    minPtHs: List.create(Float, cap: 4)
+    maxPtHs: List.create(Float, cap: 4)
+    orientations: List.create(String, cap: 4)
+    pointers: List.create(String, cap: 4)
+    viewportWs: List.create(Float, cap: 4)
+    viewportHs: List.create(Float, cap: 4)
+    defaultFlags: List.create(Int, cap: 4)
+    nodesValueIdxs: List.create(Int, cap: 4)
+    count: 0
+  }
+}
+
+# The number field `key` of object `this`, or `fallback`
+func frameNumberField(
+  doc: view JsonDoc
+  this: view JsonValue
+  key: view String
+  fallback: view Float
+) ret Float {
+  let idx: Int = Json.field(doc: doc, this: this, key: key)
+  if idx < 0 {
+    ret fallback
+  }
+  ret Json.jsonFloat(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: fallback)
+}
+
+# The string field `key` of object `this`, or ""
+func frameStringField(doc: view JsonDoc, this: view JsonValue, key: view String) ret String {
+  let idx: Int = Json.field(doc: doc, this: this, key: key)
+  if idx < 0 {
+    ret ""
+  }
+  ret Json.jsonString(this: Json.jsonValueAt(doc: doc, idx: idx), fallback: "")
+}
+
+# A `when.inputType` as the pointer it names
+func pointerFromInputType(inputType: view String) ret String {
+  if inputType is "touch" {
+    ret "coarse"
+  }
+  if inputType is "pointer" {
+    ret "fine"
+  }
+  ret ""
+}
+
+# Read the optional "frames" table from a parsed Scene. A scene
+# without frames returns count == 0 and every caller short-circuits —
+# pre-frames scenes behave exactly as before.
+func parseFrames(scene: view Scene) ret FrameSet {
+  var out: FrameSet = emptyFrameSet()
+  if scene.ok is false {
+    ret out
+  }
+  let doc: view JsonDoc = scene.doc
+  let root: JsonValue = Json.root(doc: doc)
+  let framesIdx: Int = Json.field(doc: doc, this: root, key: "frames")
+  if framesIdx < 0 {
+    ret out
+  }
+  let framesVal: JsonValue = Json.jsonValueAt(doc: doc, idx: framesIdx)
+  if framesVal.kind is not JsonKind.object {
+    ret out
+  }
+  let n: Int = Json.objectLen(this: framesVal)
+  var i: Int = 0
+  loop i < n {
+    let frameName: String = Json.objectKeyAt(doc: doc, this: framesVal, idx: i)
+    let frameVal: JsonValue = Json.objectValueAt(doc: doc, this: framesVal, idx: i)
+    var minPtW: Float = -1.0
+    var maxPtW: Float = -1.0
+    var minPtH: Float = -1.0
+    var maxPtH: Float = -1.0
+    var orientation: String = ""
+    var pointer: String = ""
+    var viewportW: Float = -1.0
+    var viewportH: Float = -1.0
+    var isDefault: Int = 0
+    var nodesIdx: Int = -1
+    if frameVal.kind is JsonKind.object {
+      let whenIdx: Int = Json.field(doc: doc, this: frameVal, key: "when")
+      if whenIdx >= 0 {
+        let whenVal: JsonValue = Json.jsonValueAt(doc: doc, idx: whenIdx)
+        minPtW = frameNumberField(
+          doc: doc
+          this: whenVal
+          key: "minPtW"
+          fallback: -1.0
+        )
+        minPtW = frameNumberField(
+          doc: doc
+          this: whenVal
+          key: "minWidthPt"
+          fallback: minPtW
+        )
+        maxPtW = frameNumberField(
+          doc: doc
+          this: whenVal
+          key: "maxWidthPt"
+          fallback: -1.0
+        )
+        minPtH = frameNumberField(
+          doc: doc
+          this: whenVal
+          key: "minHeightPt"
+          fallback: -1.0
+        )
+        maxPtH = frameNumberField(
+          doc: doc
+          this: whenVal
+          key: "maxHeightPt"
+          fallback: -1.0
+        )
+        orientation = frameStringField(doc: doc, this: whenVal, key: "orientation")
+        pointer = pointerFromInputType(
+          inputType: frameStringField(doc: doc, this: whenVal, key: "inputType")
+        )
+        let pointerName: String = frameStringField(doc: doc, this: whenVal, key: "pointer")
+        if pointerName.length() > 0 {
+          pointer = pointerName
+        }
+      }
+      let viewportIdx: Int = Json.field(doc: doc, this: frameVal, key: "viewport")
+      if viewportIdx >= 0 {
+        let viewportVal: JsonValue = Json.jsonValueAt(doc: doc, idx: viewportIdx)
+        viewportW = frameNumberField(
+          doc: doc
+          this: viewportVal
+          key: "w"
+          fallback: -1.0
+        )
+        viewportH = frameNumberField(
+          doc: doc
+          this: viewportVal
+          key: "h"
+          fallback: -1.0
+        )
+      }
+      let defIdx: Int = Json.field(doc: doc, this: frameVal, key: "default")
+      if defIdx >= 0 {
+        let defVal: JsonValue = Json.jsonValueAt(doc: doc, idx: defIdx)
+        if Json.jsonBool(this: defVal, fallback: false) {
+          isDefault = 1
+        }
+      }
+      nodesIdx = Json.field(doc: doc, this: frameVal, key: "nodes")
+    }
+    out.names.add(value: frameName)
+    out.minPtWs.add(value: minPtW)
+    out.maxPtWs.add(value: maxPtW)
+    out.minPtHs.add(value: minPtH)
+    out.maxPtHs.add(value: maxPtH)
+    out.orientations.add(value: orientation)
+    out.pointers.add(value: pointer)
+    out.viewportWs.add(value: viewportW)
+    out.viewportHs.add(value: viewportH)
+    out.defaultFlags.add(value: isDefault)
+    out.nodesValueIdxs.add(value: nodesIdx)
+    i = i + 1
+  }
+  out.count = out.names.length
+  ret out
+}
+
+func frameIndexByName(frames: view FrameSet, name: view String) ret opt Int {
+  var i: Int = 0
+  loop i < frames.count {
+    if let candidate: String = frames.names.copyAt(index: i) {
+      if candidate is name {
+        ret i
+      }
+    }
+    i = i + 1
+  }
+  ret none
+}
+
+# Pick the active frame for the device's main pointer as it is now.
+func selectFrameIndex(
+  frames: view FrameSet
+  windowPtW: view Float
+  forcedFrameId: view String
+) ret opt Int {
+  ret selectFrameIndexFor(
+    frames: frames
+    windowPtW: windowPtW
+    pointer: primaryPointer()
+    forcedFrameId: forcedFrameId
+  )
+}
+
+# A main pointer as a frame's `when.pointer` names it.
+func pointerConditionName(pointer: view Pointer) ret String {
+  match pointer {
+    case Pointer.fine {
+      ret "fine"
+    }
+    case Pointer.coarse {
+      ret "coarse"
+    }
+    case Pointer.none {
+      ret "none"
+    }
+  }
+  ret ""
+}
+
+# The window's orientation as a frame's `when.orientation` names it ("" when
+# its height is unknown)
+func windowOrientationName(window: view FrameWindow) ret String {
+  if window.heightPt < 0.0 {
+    ret ""
+  }
+  if window.heightPt > window.widthPt {
+    ret "portrait"
+  }
+  ret "landscape"
+}
+
+# The width-only form (the height unknown): see selectFrameForWindow.
+func selectFrameIndexFor(
+  frames: view FrameSet
+  windowPtW: view Float
+  pointer: view Pointer
+  forcedFrameId: view String
+) ret opt Int {
+  ret selectFrameForWindow(
+    frames: frames
+    window: FrameWindow { widthPt: windowPtW, heightPt: -1.0, pointer: pointer }
+    forcedFrameId: forcedFrameId
+  )
+}
+
+# Pick the active frame for `window`. Precedence (the file's head):
+#   1. `forcedFrameId` when non-empty and known (editor / simulator);
+#   2. among frames that name conditions and whose every condition holds,
+#      the one naming the MOST conditions, then the largest minimum width,
+#      then the smallest maximum width, then the one declared first;
+#   3. the frame tagged `"default": true`;
+#   4. none (caller applies nothing — authored base only).
+# A pure function of the frame table and the window: the same inputs pick
+# the same frame.
+func selectFrameForWindow(
+  frames: view FrameSet
+  window: view FrameWindow
+  forcedFrameId: view String
+) ret opt Int {
+  if frames.count is 0 {
+    ret none
+  }
+  if forcedFrameId.length() > 0 {
+    if let forced: Int = frameIndexByName(frames: frames, name: forcedFrameId) {
+      ret forced
+    }
+  }
+  let pointerName: String = pointerConditionName(pointer: window.pointer)
+  let orientationName: String = windowOrientationName(window: window)
+  let heightKnown: Bool = window.heightPt >= 0.0
+  var best: Int = -1
+  var bestConditions: Int = 0
+  var bestMin: Float = -1.0
+  var bestMax: Float = -1.0
+  var i: Int = 0
+  loop i < frames.count {
+    let minWidth: Float = frames.minPtWs.copyAtFallback(index: i, fallback: -1.0)
+    let maxWidth: Float = frames.maxPtWs.copyAtFallback(index: i, fallback: -1.0)
+    let minHeight: Float = frames.minPtHs.copyAtFallback(index: i, fallback: -1.0)
+    let maxHeight: Float = frames.maxPtHs.copyAtFallback(index: i, fallback: -1.0)
+    let wantsOrientation: String = frames.orientations.copyAtFallback(index: i, fallback: "")
+    let wantsPointer: String = frames.pointers.copyAtFallback(index: i, fallback: "")
+    var conditions: Int = 0
+    var holds: Bool = true
+    if minWidth >= 0.0 {
+      conditions = conditions + 1
+      if window.widthPt < minWidth {
+        holds = false
+      }
+    }
+    if maxWidth >= 0.0 {
+      conditions = conditions + 1
+      if window.widthPt > maxWidth {
+        holds = false
+      }
+    }
+    if minHeight >= 0.0 {
+      conditions = conditions + 1
+      if heightKnown is false or window.heightPt < minHeight {
+        holds = false
+      }
+    }
+    if maxHeight >= 0.0 {
+      conditions = conditions + 1
+      if heightKnown is false or window.heightPt > maxHeight {
+        holds = false
+      }
+    }
+    if wantsOrientation.length() > 0 {
+      conditions = conditions + 1
+      if wantsOrientation is not orientationName {
+        holds = false
+      }
+    }
+    if wantsPointer.length() > 0 {
+      conditions = conditions + 1
+      if wantsPointer is not pointerName {
+        holds = false
+      }
+    }
+    if conditions > 0 and holds {
+      var better: Bool = false
+      if best < 0 or conditions > bestConditions {
+        better = true
+      } else if conditions is bestConditions {
+        if minWidth > bestMin {
+          better = true
+        } else if minWidth is bestMin and maxWidth >= 0.0 {
+          better = bestMax < 0.0 or maxWidth < bestMax
+        }
+      }
+      if better {
+        best = i
+        bestConditions = conditions
+        bestMin = minWidth
+        bestMax = maxWidth
+      }
+    }
+    i = i + 1
+  }
+  if best >= 0 {
+    ret best
+  }
+  var j: Int = 0
+  loop j < frames.count {
+    if frames.defaultFlags.copyAt(index: j) is 1 {
+      ret j
+    }
+    j = j + 1
+  }
+  ret none
+}

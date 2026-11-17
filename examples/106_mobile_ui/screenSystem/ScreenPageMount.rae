@@ -13,6 +13,7 @@ open ui/Scene
 open ecs/Entity
 open ui/SceneInstance
 open ui/UiSystems
+open ui/Frames
 
 func mountScreenPage(
   world: mod UiWorld
@@ -25,7 +26,7 @@ func mountScreenPage(
   let overrides: List(SceneOverride) = emptyOverrides()
   if let sceneIndex: Int = sceneRegistryIndex(reg: scenes.pages, key: page.pageId) {
     let scene: view Scene = sceneRegistryGet(reg: scenes.pages, idx: sceneIndex)
-    ret mountPageOrError(
+    let root: EntityId = mountPageOrError(
       world: world
       uiSystems: uiSystems
       pageId: own pageIdCopy
@@ -36,6 +37,19 @@ func mountScreenPage(
       sceneLabel: page.label
       subScenes: scenes.subScenes
     )
+    # The page's frames for this window (a wider grid past compact is a
+    # `Wide` frame in Home.raescene and Library.raescene)
+    let noStates: List(String) = List.create(String, cap: 1)
+    applySceneFramesForWindow(
+      world: world
+      uiSystems: uiSystems
+      scene: scene
+      pageId: page.pageId
+      window: frameWindowOf(viewport: viewport)
+      forcedFrameId: frameIdName(id: viewport.forcedFrameId)
+      activeStates: noStates
+    )
+    ret root
   } else {
     log("[scene-error] no page scene registered for {page.pageId}")
     let missing: Scene = parseScene(source: "")

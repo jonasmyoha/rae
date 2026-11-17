@@ -4,6 +4,24 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.4, 2026-11-17: frames picked by the whole window
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.4` moves a project.
+
+- A scene frame's `when` (`ui/Frames`, docs/ui-coordinate-and-responsive-layout.md §3)
+  names `minWidthPt` / `maxWidthPt`, `minHeightPt` / `maxHeightPt`, `orientation`
+  (`portrait` / `landscape`), `pointer` and `inputType` (`touch` / `pointer`).
+  `minPtW` still works as the older spelling of `minWidthPt`.
+- The most specific matching frame wins (the most conditions, then the largest
+  minimum width, then the smallest maximum width), then the one declared first; then
+  the `default` frame. `forcedFrameId` overrides all of it.
+- A frame may declare its reference `viewport: { "w": 393, "h": 852 }` in points
+  (`FrameSet.viewportWs` / `viewportHs`).
+- `FrameWindow { widthPt, heightPt, pointer }`, `selectFrameForWindow` and
+  `applySceneFramesForWindow` pick and apply by the window's width and height. The
+  width-only functions stay; with them a height or orientation condition does not hold.
+- `lib/ui/Frames` is a module folder now; imports are unchanged.
+
 ## 0.4.3, 2026-11-17: one UI coordinate model, in points
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.3` moves a project

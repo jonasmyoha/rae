@@ -1,12 +1,11 @@
-# What the window's size class adds to the layout (Viewport.rae decides the
-# widths): past compact the page grids gain columns, and an expanded window
-# shows the Library in a side panel left of the page column, like a desktop
-# music player. The dock stays a full-width bar under both.
+# What an expanded window adds to the layout (Viewport.rae decides the
+# widths): the Library in a side panel left of the page column, like a desktop
+# music player. (Past compact the page grids gain columns through the `Wide`
+# frame of Home.raescene and Library.raescene.) The dock stays a full-width bar under both.
 open ui/Ecs
 open ui/Components
 open ui/Scene
 open ui/SceneInstance
-open ui/SizeClass
 open ui/UiSystems
 open ecs/Entity
 open ecs/ComponentTable
@@ -30,26 +29,6 @@ func setGridColumns(
       layout.columns = columns
     }
   }
-}
-
-# Past compact the page column is wider, so its grids show half as many
-# columns again (Home 2 -> 3, Library 3 -> 4)
-func widenGrids(world: mod UiWorld, viewport: view Viewport) {
-  if viewport.sizeClass is SizeClass.compact {
-    ret
-  }
-  setGridColumns(
-    world: world
-    pageId: homePageId
-    nodeId: coverGridNodeId
-    columns: 3
-  )
-  setGridColumns(
-    world: world
-    pageId: libraryPageId
-    nodeId: coverGridNodeId
-    columns: 4
-  )
 }
 
 # The Library scene as a panel in the left gutter of an expanded window, one
