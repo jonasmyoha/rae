@@ -3,7 +3,8 @@
 # time, the probe under the pointer staying within a hundredth of a pixel on every frame; zoom
 # keys pressed during an ease add to its target; a target past maxZoom stops there with no
 # frame beyond it; a pinch let go while zooming coasts, slows and stops, and one coasting toward
-# minZoom stops at it.
+# minZoom stops at it. With `wheelZooms` the wheel zooms with no modifier, and a drag with the
+# middle mouse button pans.
 import Math
 open ecs/ComponentTable
 open ecs/Entity
@@ -320,6 +321,64 @@ func main() ret Int {
       world: world
       canvas: canvas
     ).zoomCoasting}"
+  )
+
+  # wheelZooms: two notches with no modifier zoom (eased), the probe staying under the pointer
+  world.canvasControls.componentMod(entityId: canvas).wheelZooms = true
+  let resting: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: resting.x, y: resting.y, wheel: 2.0, deltaTime: frame }
+  )
+  let plain: EaseRun = easeUntilDone(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    probe: probe
+    anchor: resting
+    limit: 100
+  )
+  log(
+    "wheelZooms, 2 notches with no modifier: zoom {Math.round(
+      x: zoomOfCamera(world: world, canvas: canvas) * 1000.0
+    ) / 1000.0} (0.5 x 1.1 x 1.1 = 0.605), the probe at most {plain.drift} hundredths off"
+  )
+
+  # the middle button held over the probe, dragged 4 frames of 10 points right and 5 down
+  let before: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  loop var i: Int = 0, i <= 4, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: {
+        x: before.x + i.toFloat() * 10.0
+        y: before.y + i.toFloat() * 5.0
+        middleDown: true
+        deltaTime: frame
+      }
+    )
+  }
+  let dragged: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  log(
+    "a middle-button drag of 40, 20: the canvas moved {Math.round(x: dragged.x - before.x)}, {Math.round(
+      x: dragged.y - before.y
+    )}, the zoom kept at {Math.round(x: zoomOfCamera(world: world, canvas: canvas) * 1000.0) / 1000.0}"
+  )
+  # let go while moving: it coasts on, slows and stops
+  loop var i: Int = 0, i < 300, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: dragged.x + 40.0, y: dragged.y + 20.0, deltaTime: frame }
+    )
+  }
+  let after: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  log(
+    "let go: it coasted on past the drag: {after.x > dragged.x and after.y > dragged.y}, and stopped: {controlState(
+      world: world
+      canvas: canvas
+    ).coasting is false}"
   )
   ret 0
 }

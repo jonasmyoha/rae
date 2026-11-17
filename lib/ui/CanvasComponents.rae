@@ -1,7 +1,8 @@
 # ui/CanvasComponents — the gestures of a canvas (ui/canvasGestureSystem), on the node that holds
 # its Camera2D: pinch to zoom about the fingers (a trackpad's pinch, two fingers on a touch screen),
-# the wheel with Ctrl or Command held to zoom about the pointer (without it the wheel pans), a drag
-# on the canvas to pan and inertia when it is let go (a tap stops it), and dragging a node that has
+# the wheel with Ctrl or Command held to zoom about the pointer (without it the wheel pans, unless
+# `wheelZooms`), a drag on the canvas with the left or the middle mouse button to pan and inertia
+# when it is let go (a tap stops it), and dragging a node that has
 # `CanvasDraggable` (and an OnClick, so the hit test finds it), its edges snapping to the other
 # clickable nodes' edges (ui/HitIndex) with a guide line drawn where they meet.
 open ecs/Entity
@@ -13,6 +14,9 @@ type CanvasControls {
   wheelZoom: Float = 1.1
   # how far a wheel notch without the modifier pans, in screen points
   wheelPan: Float = 40.0
+  # the wheel zooms with no modifier held (as in a node editor or a map); a sideways wheel
+  # still pans
+  wheelZooms: Bool = false
   # how fast inertia dies away (its speed shrinks by e every 1 / friction seconds)
   friction: Float = 4.0
   # how close an edge snaps, in screen points (0: no snapping)
@@ -40,6 +44,8 @@ type CanvasGestures {
   down: Bool = false
   pressed: Bool = false
   released: Bool = false
+  # the middle mouse button held: a drag with it pans, over a node too
+  middleDown: Bool = false
   # wheel notches this frame, down and sideways, and whether Ctrl or Command is held
   wheel: Float = 0.0
   wheelX: Float = 0.0
@@ -65,6 +71,9 @@ type CanvasControlState {
   velocityX: Float = 0.0
   velocityY: Float = 0.0
   coasting: Bool = false
+  # a pan with the middle mouse button, and whether that button was held last frame
+  middlePanning: Bool = false
+  middleWasDown: Bool = false
   # two fingers: where their middle was last frame
   twoFingersDown: Bool = false
   fingersX: Float = 0.0

@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.11, 2026-11-18: middle-button pan and wheel zoom on a canvas
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.11` moves a project.
+
+- A drag with the middle mouse button pans a canvas (ui/canvasGestureSystem), begun
+  anywhere inside it, over a node too, and coasts when let go
+  (`CanvasGestures.middleDown`).
+- `CanvasControls.wheelZooms`: the mouse wheel zooms about the pointer with no modifier held
+  (a sideways wheel still pans). Off by default (docs/ui-scene-format.md §41). Example 152
+  uses both.
+
 ## 0.4.10, 2026-11-17: reliable messages no longer lost past the receive window
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.10` moves a project.

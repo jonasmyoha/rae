@@ -1375,7 +1375,12 @@ Each frame, after `updateUiInput`, the app runs
   - `pinchCoasts` (false): a pinch follows the fingers 1:1, and let go while zooming it keeps
     its zoom speed about the same point and slows with `friction`, as a released pan coasts;
     it stops when slow, or at `minZoom` / `maxZoom`.
-- The wheel without the modifier pans (`wheelPan` points a notch, down and sideways).
+- The wheel without the modifier pans (`wheelPan` points a notch, down and sideways), unless
+  `wheelZooms` (false) is set: then the wheel zooms about the pointer with no modifier, as in a
+  node editor or a map, and only a sideways wheel pans.
+- A drag with the middle mouse button pans the canvas, begun anywhere inside it, over a node
+  too (the middle button never drags a node), and coasts when let go while moving
+  (`CanvasGestures.middleDown`).
 - A drag on the canvas (on nothing clickable inside its box, or on a node of it that is not
   draggable) pans it. Let go while moving, it coasts and slows (`friction`); a tap stops it.
 - A drag on a `CanvasDraggable` node moves its `Rect`. Its left or right edge snaps onto the

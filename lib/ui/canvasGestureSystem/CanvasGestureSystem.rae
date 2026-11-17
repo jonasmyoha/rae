@@ -24,7 +24,8 @@ const canvasCoastStart: Float = 40.0
 const canvasCoastStop: Float = 8.0
 
 # A frame's gestures for the canvas node `canvasEntityId` from the ui input: the wheel when it was
-# routed to that node or to nothing (give the node a WheelTarget), Ctrl or Command held
+# routed to that node or to nothing (give the node a WheelTarget), Ctrl or Command held, and the
+# middle mouse button
 func canvasGesturesFrom(
   input: view UiInput
   canvasEntityId: view EntityId
@@ -44,6 +45,7 @@ func canvasGesturesFrom(
     down: input.pointer.down
     pressed: input.pointer.pressed
     released: input.pointer.released
+    middleDown: Sdl3.isMouseButtonDown(button: 2)
     wheel: wheel
     wheelX: wheelX
     zoomModifier: Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui) or Sdl3.isKeyDown(
@@ -485,6 +487,16 @@ func canvasGestureStep(
       state.lastY = gestures.y
     }
   }
+  canvasMiddlePan(
+    world: world
+    uiSystems: uiSystems
+    canvasEntityId: entityId
+    camera: camera
+    state: state
+    base: base
+    gestures: gestures
+    deltaTime: deltaTime
+  )
   # two fingers pan by their middle and zoom about it; one pointer's pan waits
   if gestures.twoFingers {
     state.panning = false
@@ -565,7 +577,7 @@ func canvasGestureStep(
   }
   # the wheel: with the modifier it zooms about the pointer, without it pans
   if gestures.wheel is not 0.0 or gestures.wheelX is not 0.0 {
-    if gestures.zoomModifier {
+    if gestures.zoomModifier or (controls.wheelZooms and gestures.wheel is not 0.0) {
       canvasZoomStep(
         camera: camera
         state: state
@@ -574,6 +586,13 @@ func canvasGestureStep(
         factor: Math.pow(base: controls.wheelZoom, exp: gestures.wheel)
         x: gestures.x
         y: gestures.y
+      )
+    } else if controls.wheelZooms {
+      canvasPanBy(
+        camera: camera
+        base: base
+        dx: gestures.wheelX * controls.wheelPan
+        dy: 0.0
       )
     } else {
       canvasPanBy(
@@ -728,4 +747,57 @@ func canvasPinchCoast(
     state.zoomCoasting = false
     state.zoomSpeed = 0.0
   }
+}
+
+# A drag with the middle mouse button pans the canvas, begun anywhere inside it (over a node
+# too: the middle button never drags a node), and coasts when let go while moving, as a drag
+# with the left button does. Run before `state.lastX` / `lastY` take this frame's pointer.
+func canvasMiddlePan(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvasEntityId: view EntityId
+  camera: mod Camera2D
+  state: mod CanvasControlState
+  base: view CanvasBase
+  gestures: view CanvasGestures
+  deltaTime: view Float
+) {
+  if gestures.middleDown and not state.middleWasDown {
+    if canvasTakesPress(
+      world: world
+      uiSystems: uiSystems
+      canvasEntityId: canvasEntityId
+      base: base
+      hitEntityId: uiHitTest(
+        world: world
+        uiSystems: uiSystems
+        x: gestures.x
+        y: gestures.y
+      )
+      x: gestures.x
+      y: gestures.y
+    ) {
+      state.middlePanning = true
+      state.coasting = false
+      state.velocityX = 0.0
+      state.velocityY = 0.0
+    }
+  } else if gestures.middleDown and state.middlePanning {
+    let dx: Float = gestures.x - state.lastX
+    let dy: Float = gestures.y - state.lastY
+    canvasPanBy(
+      camera: camera
+      base: base
+      dx: dx
+      dy: dy
+    )
+    state.velocityX = state.velocityX * 0.5 + dx / deltaTime * 0.5
+    state.velocityY = state.velocityY * 0.5 + dy / deltaTime * 0.5
+  } else if not gestures.middleDown and state.middlePanning {
+    state.middlePanning = false
+    state.coasting = Math.sqrt(
+      x: state.velocityX * state.velocityX + state.velocityY * state.velocityY
+    ) >= canvasCoastStart
+  }
+  state.middleWasDown = gestures.middleDown
 }
