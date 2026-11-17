@@ -14,6 +14,11 @@ type RigidBody {
   bodyId: BodyId
   bodyType: BodyType
   syncedTransformStamp: Int
+  # A kinematic body's last pushed pose, and whether it is still on its way
+  # there: the push aims it again on every step of a frame that wrote no new
+  # pose, so it stops at the pose instead of keeping the velocity
+  target: Transform
+  aimed: Bool = false
 }
 
 type Collider {

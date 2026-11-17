@@ -1,0 +1,124 @@
+# A kinematic body whose pose is written once a frame, in a frame that runs
+# several fixed steps (box3d/ecs physicsPushSystem): b3Body_SetTargetTransform
+# gives the velocity that reaches the pose in ONE step, so on the frame's
+# other steps the body must be aimed at the pose again and stopped there.
+# Before, it kept the first step's velocity, overshot, got a bigger
+# correction the next frame, and at 3 or more steps a frame swung to the
+# world's top speed (seen as a walker passing through a kinematic box).
+import Math
+import Vec3
+import Quat
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/Box3d
+open box3d/Box3dTypes
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open box3d/ecs/PhysicsSystems
+open box3d/ecs/PhysicsQueries
+
+type GameWorld {
+  allocator: EntityAllocator
+  transforms: ComponentTable(Transform3D)
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  characters: ComponentTable(CharacterBody)
+  physics: Physics
+}
+
+func createGameWorld() ret GameWorld {
+  ret GameWorld {
+    allocator: createEntityAllocator()
+    transforms: createComponentTable(Transform3D)
+    rigidBodies: createComponentTable(RigidBody)
+    colliders: createComponentTable(Collider)
+    characters: createComponentTable(CharacterBody)
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: 1.0 / 60.0, subSteps: 4)
+  }
+}
+
+func spawnKinematicBox(world: mod GameWorld) ret EntityId {
+  let entityId: EntityId = allocEntity(this: world.allocator)
+  var def: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  def.bodyType = BodyType.kinematicBody
+  def.position = Vec3 { x: 0.0, y: 0.0, z: 1.0 }
+  spawnRigidBody(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    transforms: world.transforms
+    entityId: entityId
+    def: def
+  )
+  addBoxCollider(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    colliders: world.colliders
+    entityId: entityId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: Vec3 { x: 0.5, y: 0.5, z: 0.5 }
+    transform: transformIdentity()
+  )
+  ret entityId
+}
+
+func step(world: mod GameWorld) {
+  physicsFixedStep(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    characters: world.characters
+    transforms: world.transforms
+  )
+}
+
+func bodyX(world: view GameWorld, entityId: view EntityId) ret Float {
+  ret componentView(this: world.transforms, entityId: entityId).position.x
+}
+
+func main() {
+  var world: GameWorld = createGameWorld()
+  let boxId: EntityId = spawnKinematicBox(world: world)
+
+  # Written once (x 0 -> 1), then four steps
+  let pose: mod Transform3D = componentMod(this: world.transforms, entityId: boxId)
+  pose.position = Vec3 { x: 1.0, y: 0.0, z: 1.0 }
+  var line: String = "written once, four steps: x"
+  loop var i: Int = 0, i < 4, ++i {
+    step(world: world)
+    line = "{line} {Math.round(x: bodyX(world: world, entityId: boxId) * 1000.0) / 1000.0}"
+  }
+  log(line)
+  let velocity: Vec3 = entityLinearVelocity(
+    physics: world.physics
+    rigidBodies: world.rigidBodies
+    entityId: boxId
+  )
+  log(
+    "at its pose with no velocity: {Math.abs(value: bodyX(world: world, entityId: boxId) - 1.0) < 0.0001 and Vec3.vlen(
+      a: velocity
+    ) < 0.0001}"
+  )
+
+  # Moved half a metre every frame, three steps a frame, for ten frames: the
+  # body stays within one frame's move of its written pose
+  var written: Float = 1.0
+  var worst: Float = 0.0
+  loop var frame: Int = 0, frame < 10, ++frame {
+    written = written + 0.5
+    let moved: mod Transform3D = componentMod(this: world.transforms, entityId: boxId)
+    moved.position = Vec3 { x: written, y: 0.0, z: 1.0 }
+    loop var i: Int = 0, i < 3, ++i {
+      step(world: world)
+      worst = Math.max(a: worst, b: Math.abs(value: bodyX(world: world, entityId: boxId) - written))
+    }
+  }
+  log(
+    "moved every frame of three steps: within a frame's move {worst <= 0.5}, at its pose after each frame {Math.abs(
+      value: bodyX(world: world, entityId: boxId) - written
+    ) < 0.0001}"
+  )
+  destroyPhysics(physics: world.physics)
+}

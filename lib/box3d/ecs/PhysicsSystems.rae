@@ -6,6 +6,7 @@
 # and the event system turns the step's contact, hit and sensor events into
 # entity events. Box3D's event arrays are read one element at a time through
 # the glue (Box3dGlue).
+import Math
 open Vec2
 open Vec3
 open Quat
@@ -88,7 +89,10 @@ func characterSystem(
 
 # Hand the poses game code wrote since the last sync to the bodies: a
 # kinematic body is driven to its new pose over the fixed step, any other
-# body is moved there. Untouched entities cost one stamp compare.
+# body is moved there. Untouched entities cost one stamp compare. A frame
+# that runs several steps writes a pose once: on its other steps a kinematic
+# body is aimed at that pose again and stopped there, instead of keeping the
+# first step's velocity and overshooting.
 func physicsPushSystem(
   physics: mod Physics
   rigidBodies: mod ComponentTable(RigidBody)
@@ -102,16 +106,20 @@ func physicsPushSystem(
     }
     let rigidBody: RigidBody = componentCopyAtDefault(this: rigidBodies, i: i)
     if stamp is rigidBody.syncedTransformStamp {
+      # No new pose this step: a kinematic body still on its way is aimed at
+      # its target again (b3Body_SetTargetTransform's velocity is for one step)
+      if rigidBody.aimed {
+        aimKinematicBody(physics: physics, rigidBodies: rigidBodies, entityId: entityId)
+      }
       continue
     }
     let transform: view Transform3D = componentView(this: transforms, entityId: entityId)
+    let pose: Transform = { position: transform.position, rotation: transform.rotation }
     unsafe {
       if rigidBody.bodyType is BodyType.kinematicBody {
         b3Body_SetTargetTransform(
           bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
-          target: toB3Transform(
-            transform: Transform { position: transform.position, rotation: transform.rotation }
-          )
+          target: toB3Transform(transform: pose)
           timeStep: physics.fixedStep
           wake: true
         )
@@ -125,6 +133,47 @@ func physicsPushSystem(
     }
     let synced: mod RigidBody = componentMod(this: rigidBodies, entityId: entityId)
     synced.syncedTransformStamp = stamp
+    if rigidBody.bodyType is BodyType.kinematicBody {
+      synced.target = pose
+      synced.aimed = true
+    }
+  }
+}
+
+# How close a kinematic body must be to its target to have arrived (m, and
+# 1 - the rotations' dot product)
+const kinematicArrivedDistance: Float = 0.00001
+
+const kinematicArrivedTurn: Float = 0.0000001
+
+# Aim a kinematic body at its remembered target for the next step; when it is
+# there, stop it (zero velocities) and stop aiming
+func aimKinematicBody(
+  physics: view Physics
+  rigidBodies: mod ComponentTable(RigidBody)
+  entityId: view EntityId
+) {
+  let rigidBody: mod RigidBody = componentMod(this: rigidBodies, entityId: entityId)
+  unsafe {
+    let bodyId: b3BodyId = toB3BodyId(bodyId: rigidBody.bodyId)
+    let now: Transform = fromB3Transform(transform: b3Body_GetTransform(bodyId: bodyId))
+    let offset: Vec3 = vsub(a: rigidBody.target.position, b: now.position)
+    let dot: Float = Math.abs(
+      value: now.rotation.x * rigidBody.target.rotation.x + now.rotation.y * rigidBody.target.rotation.y + now.rotation.z * rigidBody.target.rotation.z + now.rotation.w * rigidBody.target.rotation.w
+    )
+    if vlen(a: offset) <= kinematicArrivedDistance and 1.0 - dot <= kinematicArrivedTurn {
+      let zero: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+      b3Body_SetLinearVelocity(bodyId: bodyId, linearVelocity: toB3Vector(vector: zero))
+      b3Body_SetAngularVelocity(bodyId: bodyId, angularVelocity: toB3Vector(vector: zero))
+      rigidBody.aimed = false
+    } else {
+      b3Body_SetTargetTransform(
+        bodyId: bodyId
+        target: toB3Transform(transform: rigidBody.target)
+        timeStep: physics.fixedStep
+        wake: false
+      )
+    }
   }
 }
 

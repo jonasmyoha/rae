@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.2, 2026-11-17: kinematic bodies stop at their pose
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.2` moves a project.
+
+- A kinematic box3d/ecs body whose Transform3D is written once a frame now
+  stops at that pose when the frame runs several fixed steps. The push gave it
+  the velocity that reaches the pose in one step and left it there for the
+  frame's other steps, so it overshot, and at 3 or more steps a frame swung to
+  the world's top speed. `RigidBody` remembers the pose; on a step with no new
+  pose the body is aimed at it again and stopped once there. A program that
+  touched every kinematic Transform3D before each step to avoid this can stop.
+- A kinematic body riding a platform can end elsewhere than before in a
+  program that ran several steps a frame (the platform no longer overshoots).
+
 ## 0.4.1, 2026-11-17: a camera that rolls
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.1` moves a project.
