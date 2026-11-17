@@ -19,6 +19,7 @@
 #
 # Reading and writing are deliberately separate functions over the same set,
 # so the write path cannot drift from what the widget displays.
+import Math
 open ui/Ecs
 open ui/Components
 open ui/UiSystems
@@ -195,12 +196,14 @@ func selectionRectField(
     if isNone(this: entityId) {
       continue
     }
-    let value: Int = rectFieldValue(
+    # rounded, not truncated: a third of a point (42.67) shows as 43, and an
+    # aspect-locked 229.99995 as 230
+    let value: Int = Math.round(x: rectFieldValue(
       world: world
       uiSystems: uiSystems
       entityId: entityId
       field: field
-    ).toInt()
+    )).toInt()
     let entityDriver: String = rectFieldDriver(
       world: world
       uiSystems: uiSystems

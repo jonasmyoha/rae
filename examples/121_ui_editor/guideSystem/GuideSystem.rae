@@ -28,6 +28,14 @@ const guideLabelInset: Float = 8.0
 # label sits just above it.
 const statusBarClearance: Float = 72.0
 
+# The labels' sizes above are for a document 1920 high. The guides are drawn
+# in the document's space and the editor fits a document to its height, so
+# they are scaled by designH / guideReferenceHeight: a fitted document shows
+# its labels at the same size on screen whatever its design size.
+const guideReferenceHeight: Float = 1920.0
+
+const guideLabelTextSize: Float = 20.0
+
 # The guide system owns the guides overlay's authored `GuideRect` components
 # (its table, docs/ecs-systems-own-their-tables.md §3) and its page.
 type GuideSystem {
@@ -110,6 +118,29 @@ func setGuideRects(
   }
 }
 
+# Every guide label's text size (its StyleOverride, authored in Guides.raescene)
+func setGuideLabelTextSize(guideSystem: view GuideSystem, world: mod UiWorld, size: view Float) {
+  let count: Int = componentCount(this: guideSystem.guideRects)
+  loop var i: Int = 0, i < count, ++i {
+    let entityId: EntityId = componentEntityAt(this: guideSystem.guideRects, i: i)
+    let guide: view GuideRect = queryViewAt(table: guideSystem.guideRects, denseIndex: i)
+    if guide.kind is not GuideRectKind.frameLabel and guide.kind is not GuideRectKind.safeAreaLabel {
+      continue
+    }
+    if componentHas(this: world.styleOverrides, entityId: entityId) {
+      let style: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
+      if style.size is not size {
+        let written: mod StyleOverride = componentMod(
+          this: world.styleOverrides
+          entityId: entityId
+        )
+        written.size = size
+        written.hasSize = true
+      }
+    }
+  }
+}
+
 # Write the guides from the document's frame: the column centered in the
 # design extent, the safe area inset from it. Call after every load. The
 # labels' text goes through the status (TextBinding editor.frameLabel /
@@ -128,6 +159,15 @@ func syncGuides(
     rect.size.x = designW
     rect.size.y = designH
   }
+  var labelScale: Float = 1.0
+  if designH > 0.0 {
+    labelScale = designH / guideReferenceHeight
+  }
+  setGuideLabelTextSize(
+    guideSystem: guideSystem
+    world: world
+    size: guideLabelTextSize * labelScale
+  )
   var columnX: Float = (designW - columnW) / 2.0
   if columnX < 0.0 {
     columnX = 0.0
@@ -146,10 +186,10 @@ func syncGuides(
     guideSystem: guideSystem
     world: world
     kind: GuideRectKind.frameLabel
-    x: columnX + guideLabelInset
-    y: designH - 28.0 - guideLabelInset - statusBarClearance
-    w: 400.0
-    h: 28.0
+    x: columnX + guideLabelInset * labelScale
+    y: designH - (28.0 + guideLabelInset + statusBarClearance) * labelScale
+    w: 400.0 * labelScale
+    h: 28.0 * labelScale
     active: true
   )
   chromeSystem.frameLabel = "frame {columnW.toInt()} x {designH.toInt()}"
@@ -172,10 +212,10 @@ func syncGuides(
     guideSystem: guideSystem
     world: world
     kind: GuideRectKind.safeAreaLabel
-    x: safeX + guideLabelInset
-    y: safeY + guideLabelInset
-    w: 400.0
-    h: 28.0
+    x: safeX + guideLabelInset * labelScale
+    y: safeY + guideLabelInset * labelScale
+    w: 400.0 * labelScale
+    h: 28.0 * labelScale
     active: hasSafe
   )
   chromeSystem.safeAreaLabel = "safe area {safeInsets.l.toInt()},{safeInsets.t.toInt()},{safeInsets.r.toInt()},{safeInsets.b.toInt()}"

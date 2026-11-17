@@ -264,7 +264,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              && grep -qE '\[ui-editor\] mounted NestedPage: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-NestedPage.log" \
              && grep -qF 'ParentMount - Scene  nested/Parent' "$TMP_OUT/render-NestedPage.log" \
              && grep -qF 'ChildRoot - Scene  nested/Child' "$TMP_OUT/render-NestedPage.log" \
-             && grep -qF 'gap=24 · from spaceM' "$TMP_OUT/render-NestedPage.log" \
+             && grep -qF 'gap=8 · from spaceM' "$TMP_OUT/render-NestedPage.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-NestedPage.log" 2>&1; then
             :
@@ -381,9 +381,9 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=800 RAE_UI_EDITOR_TEST_SELECT=Title \
              RAE_UI_EDITOR_TEST_WHEEL="TreePanel:-3 EditArea:2 InsWidgets:-1" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-Wheel.log" 2>&1 \
-             && grep -qF 'wheel TreePanel -3: routed TreeList zoom 38->38 tree 0->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
-             && grep -qF 'wheel EditArea 2: routed EditArea zoom 38->46 tree -144->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
-             && grep -qF 'wheel InsWidgets -1: routed ComponentList zoom 46->46 tree -144->-144 components 0->-48' "$TMP_OUT/render-Wheel.log"; then
+             && grep -qF 'wheel TreePanel -3: routed TreeList zoom 115->115 tree 0->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
+             && grep -qF 'wheel EditArea 2: routed EditArea zoom 115->138 tree -144->-144 components 0->0' "$TMP_OUT/render-Wheel.log" \
+             && grep -qF 'wheel InsWidgets -1: routed ComponentList zoom 138->138 tree -144->-144 components 0->-48' "$TMP_OUT/render-Wheel.log"; then
             :
           else
             UI_EDITOR_OK=0
@@ -675,7 +675,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-widgets1.log" 2>&1 \
-             && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=128; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=16 · from spaceS" "$TMP_OUT/render-widgets1.log" \
+             && grep -qaF "select parent:; filter: / to search components:; Rect: lock w/h=off x=0 layout y=0 layout w=0 fill h=43; Size: w=SizeAxis { mode: fill, min: -1, max: -1 } h=SizeAxis { mode: fixed, min: -1, max: -1 }; Layout: kind=horizontal [none|horizontal|vertical|grid|stack] gap=5.3333 · from spaceS" "$TMP_OUT/render-widgets1.log" \
              && grep -qaF "; OnClick: actionId=menu.play maxDelayMs=250 label=Start a run labelDouble=(no label) labelTriple=(no label); Name: label=PlayButton · computed; NodeId: id=PlayButton · computed" "$TMP_OUT/render-widgets1.log" \
              && ! grep -qaF "Children:" "$TMP_OUT/render-widgets1.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
@@ -904,7 +904,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayButton" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-driver.log" 2>&1 \
              && grep -qaF "Name: label=PlayButton · computed" "$TMP_OUT/render-driver.log" \
-             && grep -qaF "gap=16 · from spaceS" "$TMP_OUT/render-driver.log" \
+             && grep -qaF "gap=5.3333 · from spaceS" "$TMP_OUT/render-driver.log" \
              && grep -qaF "fill=RgbaColor { r: 72, g: 180, b: 152, a: 255 } · from accent" "$TMP_OUT/render-driver.log" \
              && grep -qaF "stroke=RgbaColor { r: 0, g: 0, b: 0, a: 0 } · from #00000000" "$TMP_OUT/render-driver.log" \
              && grep -qaF "kind=roundedRect [rect|roundedRect|circle] fill=" "$TMP_OUT/render-driver.log"; then
