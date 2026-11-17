@@ -8,7 +8,8 @@
 #    dropped.
 # 4. The window: 3000 events into a window of 1000 keep the newest 1000; the frame index has
 #    each frame's events; with a window of one second, events two seconds old are let go.
-# 5. Off: a write is ignored. The cost of one million zones on and off is checked loosely here
+# 5. Off: a write is ignored. The cost of one million zones on and off is checked loosely here,
+#    a zone's cost taken from the fastest of 125 batches so a loaded machine does not fail it
 #    (RAE_PERF_COST=1 prints it; docs/perf-tools-design.md §3.5 records it).
 import Realtime
 open Atomic
@@ -160,25 +161,40 @@ func cost() {
   )
   let zone: PerfName = hub.perfName(name: "zone")
   let ring: PerfRing = hub.perfThreadRing(name: "main")
+  # The cost of a zone is the fastest batch's: a batch the machine preempted (a loaded
+  # machine, ThreadSanitizer) is slower, but the fastest one is the zone's own cost
   var spent: Int = 0
+  var fastestOn: Int = -1
   loop var batch: Int = 0, batch < 125, ++batch {
     let started: Int = nowNs()
     loop var i: Int = 0, i < 8000, ++i {
       perfZoneBegin(ring: ring, name: zone)
       perfZoneEnd(ring: ring, name: zone)
     }
-    spent = spent + nowNs() - started
+    let took: Int = nowNs() - started
+    spent = spent + took
+    if fastestOn < 0 or took < fastestOn {
+      fastestOn = took
+    }
     hub.perfFrame()
   }
-  let onNs: Int = spent / 1000000
+  let onNs: Int = fastestOn / 8000
   hub.perfSetRecording(on: false)
-  let offStarted: Int = nowNs()
-  loop var i: Int = 0, i < 1000000, ++i {
-    perfZoneBegin(ring: ring, name: zone)
-    perfZoneEnd(ring: ring, name: zone)
+  var offTotal: Int = 0
+  var fastestOff: Int = -1
+  loop var batch: Int = 0, batch < 125, ++batch {
+    let started: Int = nowNs()
+    loop var i: Int = 0, i < 8000, ++i {
+      perfZoneBegin(ring: ring, name: zone)
+      perfZoneEnd(ring: ring, name: zone)
+    }
+    let took: Int = nowNs() - started
+    offTotal = offTotal + took
+    if fastestOff < 0 or took < fastestOff {
+      fastestOff = took
+    }
   }
-  let offTotal: Int = nowNs() - offStarted
-  let offNs: Int = offTotal / 1000000
+  let offNs: Int = fastestOff / 8000
   let writtenOff: Int = hub.perfWritten()
   hub.perfFrame()
   if getEnv(name: "RAE_PERF_COST") is "1" {

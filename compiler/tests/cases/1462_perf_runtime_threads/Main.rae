@@ -123,8 +123,16 @@ func main() ret Int {
     let second: Task(Int) = spawn spin(rounds: 2000000)
   }
   hub.perfFrame()
+  # A task is done inside its run, and its worker writes the run's end just after
+  # (Scheduler.runTask): the main thread can get here between the two. Wait for the
+  # ends, a bounded number of 1 ms steps, so a loaded machine sees the same pairs.
+  var runs: NameCount = countName(hub: hub, name: "task")
+  loop var tries: Int = 0, tries < 2000 and runs.balanced is false, ++tries {
+    sleep(ms: 1)
+    hub.perfFrame()
+    runs = countName(hub: hub, name: "task")
+  }
   let gets: NameCount = countName(hub: hub, name: "Task.get")
-  let runs: NameCount = countName(hub: hub, name: "task")
   log(
     "Task.get waits on the main lane: {gets.lanes.copyAtDefault(index: 0)}, paired: {gets.balanced}"
   )
