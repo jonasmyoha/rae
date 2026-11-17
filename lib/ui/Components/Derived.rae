@@ -1,0 +1,75 @@
+# ui/Components: derived, runtime-only components (never authored).
+
+# -----------------------------------------------------------------
+# Derived / runtime-only components
+# -----------------------------------------------------------------
+type MeasuredSize {
+  w: Float
+  h: Float
+}
+
+# #1004: the font measure of a Text leaf's string (width = pen advance, height
+# = the line box), written before layout by the visual-bounds/text-measure pass
+# so a `Size: Hug` text node hugs its glyphs instead of its authored Rect (which
+# a designer leaves 0). A RUNTIME/derived table: not authorable, never
+# serialized. measureNode reads it for a text leaf; the writer compares before
+# writing so a stable string does not re-dirty layout every frame.
+type MeasuredText {
+  w: Float
+  h: Float
+}
+
+# Layout output: the resolved on-screen box. #724: `position`/`size` Vec2 pair,
+# mirroring the authored Rect.
+type ComputedRect {
+  position: Vec2
+  size: Vec2
+}
+
+# #725: alpha/visible are NOT part of a transform — they are their own derived
+# cache. The transform pass accumulates them down the tree (parent alpha ×
+# child, ancestor-inactive hides the subtree) and writes them here, beside the
+# entity's WorldTransform2D. Split out of the old scalar WorldTransform so the
+# geometry cache can be the general WorldTransform2D. Derived / runtime-only:
+# registered WITHOUT serialize, rebuilt every transform pass.
+type WorldVisual {
+  alpha: Float
+  visible: Bool
+}
+
+type RuntimeOffset {
+  delta: Vec2
+}
+
+type LayoutScale {
+  scale: Float
+}
+
+type SafeInsets {
+  insets: Insets
+}
+
+type AnimState {
+  playing: Bool
+  elapsedMs: Float
+  frameIndex: Int
+}
+
+# #1005 runtime state of a SmokeFx: one age (ms, < 0 = idle) per pooled child,
+# and the time since the last spawn. Derived, never authored or serialized.
+type SmokeState {
+  ages: List(Float)
+  spawnTimerMs: Float
+}
+
+# #1005 runtime state of a Carousel: the current page, the eased scroll offset
+# (design units, <= 0), the live drag, and the auto-advance timer.
+type CarouselState {
+  page: Int
+  offset: Float
+  dragging: Bool
+  dragStartX: Float
+  dragStartOffset: Float
+  autoTimerSeconds: Float
+  velocity: Float = 0.0
+}

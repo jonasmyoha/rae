@@ -1,0 +1,107 @@
+# ui/Components: the default values of the primitive components.
+
+# -----------------------------------------------------------------
+# Default-value constructors for primitive components
+#
+# Authored .raescene files may omit fields. Phase 1c's deserializer
+# starts from these defaults and overlays whatever the JSON specifies.
+# -----------------------------------------------------------------
+func defaultSizeAxis() ret SizeAxis {
+  ret SizeAxis { mode: SizeMode.fixed, min: -1, max: -1 }
+}
+
+func defaultSize() ret Size {
+  ret Size { w: defaultSizeAxis(), h: defaultSizeAxis() }
+}
+
+func defaultInsets() ret Insets {
+  ret Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+}
+
+func defaultLayout() ret Layout {
+  ret Layout {
+    kind: LayoutType.none
+    gap: 0.0
+    alignMain: AlignKind.start
+    alignCross: AlignKind.start
+    columns: 0
+    rowGap: 0.0
+    columnGap: 0.0
+  }
+}
+
+func defaultPadding() ret Padding {
+  ret Padding { insets: defaultInsets() }
+}
+
+func defaultAlign() ret Align {
+  ret Align { x: AlignKind.start, y: AlignKind.start, hasX: false, hasY: false }
+}
+
+func defaultTransformFx() ret TransformFx {
+  ret TransformFx {
+    scaleX: 1.0
+    scaleY: 1.0
+    rotation: 0.0
+    alpha: 1.0
+    visible: true
+    pivot: Vec2 { x: 0.5, y: 0.5 }
+    anchor: Vec2 { x: 0.5, y: 0.5 }
+  }
+}
+
+func defaultSprite() ret Sprite {
+  ret Sprite {
+    textureKey: ""
+    tint: RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    tintSlot: ""
+    scaleMode: ScaleMode.fit
+    tileScale: Vec2 { x: 1.0, y: 1.0 }
+    nineSlice: defaultInsets()
+    hasNineSlice: false
+  }
+}
+
+func defaultText() ret Text {
+  ret Text { text: "", styleId: "", wrapWidthMode: WrapWidthMode.none }
+}
+
+func defaultTextShadow() ret TextShadow {
+  ret TextShadow {
+    color: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    offset: Vec2 { x: 0.0, y: 0.0 }
+    softness: 1.0
+  }
+}
+
+func defaultStyleOverride() ret StyleOverride {
+  ret StyleOverride {
+    hasSize: false
+    size: 0.0
+    hasColor: false
+    color: RgbaColor { r: 0, g: 0, b: 0, a: 255 }
+    colorSlot: ""
+  }
+}
+
+func defaultShape() ret Shape {
+  ret Shape {
+    kind: ShapeKind.rect
+    fill: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    stroke: RgbaColor { r: 0, g: 0, b: 0, a: 0 }
+    fillSlot: ""
+    strokeSlot: ""
+    strokeWidth: 0.0
+    strokeDash: 0.0
+    strokeGap: 0.0
+    radius: 0.0
+  }
+}
+
+func defaultActive() ret Active {
+  ret Active { value: true }
+}
+
+func defaultOpacity() ret Opacity {
+  ret Opacity { value: 1.0 }
+}

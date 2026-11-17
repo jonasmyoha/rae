@@ -1,0 +1,100 @@
+# ui/Components: the authored geometry and layout components.
+
+# -----------------------------------------------------------------
+# Authored components (persisted in .raescene)
+# -----------------------------------------------------------------
+
+# Geometry / layout
+
+# Authored absolute placement. #724: geometry is carried as two Vec2 (top-left
+# `position` and `size` extent) instead of loose x/y/w/h floats, so the same
+# vector helpers apply to a rect's corner and its extent. The .raescene wire
+# format stays flat {x,y,w,h} — the registry fixup bridges it to these fields (#961).
+type Rect {
+  position: Vec2
+  size: Vec2
+}
+
+type Size {
+  w: SizeAxis
+  h: SizeAxis
+}
+
+type Layout {
+  kind: LayoutType
+  gap: Float
+  alignMain: AlignKind
+  alignCross: AlignKind
+  columns: Int
+  rowGap: Float
+  columnGap: Float
+}
+
+type Padding {
+  insets: Insets
+}
+
+type Margin {
+  insets: Insets
+}
+
+type SafeArea {
+  enabled: Bool = true
+  apply: Insets = Insets { l: 1.0, t: 1.0, r: 1.0, b: 1.0 }
+  extra: Insets
+}
+
+# Art direction (§10 S6). FitMode mirrors CSS object-fit vocabulary:
+# contain letterboxes (whole content visible), cover crops (content
+# fills the box), fitHeight scales to the box's height whatever its width
+# (the sides are cropped on a narrow box and pillarboxed on a wide one: a
+# game table that always shows its full height).
+enum FitMode { contain, cover, fitHeight }
+
+# Post-layout aspect lock: height is derived from resolved width as
+# `h = w / ratio` (ratio = w/h). Applied by fitSystem AFTER layout,
+# so siblings do not reflow around the corrected height.
+type Aspect {
+  ratio: Float = 1.0
+}
+
+# Uniform-scale a fixed-design subtree to fit its parent's box,
+# centered. The tagged entity and every descendant must carry
+# authored fixed Rects (absolute placement) — fitSystem recomputes
+# each ComputedRect as `authored Rect * s` so the pass is idempotent.
+type ScaleToFit {
+  mode: FitMode
+}
+
+type Align {
+  x: AlignKind
+  y: AlignKind
+  hasX: Bool
+  hasY: Bool
+}
+
+type Offset {
+  delta: Vec2
+}
+
+type Constraints {
+  minW: Float
+  maxW: Float
+  minH: Float
+  maxH: Float
+  hasMinW: Bool
+  hasMaxW: Bool
+  hasMinH: Bool
+  hasMaxH: Bool
+}
+
+type OverflowPolicy {
+  mode: OverflowMode
+}
+
+# Extent-relative horizontal placement for a layout root. See HExtent.
+# Only meaningful on parentless roots (the layout entry point reads it);
+# ignored on child entities, which are placed by their parent's layout.
+type ExtentAnchor {
+  h: HExtent
+}

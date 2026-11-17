@@ -1,0 +1,159 @@
+# ui/Components: pages, scrolling, widget state and data binding.
+
+# Marks an entity as the root of a page subtree. The `id` is the
+# stable page identifier (e.g. "now-playing", "album:beaches") used to
+# scope nodeIds in `world.nodeIds` under a `"<id>/<nodeId>"` prefix so
+# two resident pages can author the same nodeId without colliding.
+# Descendants belong to the page implicitly via the Parent chain —
+# walk up with `pageOf(uiSystems: uiSystems, world, entityId)` to find which page owns an
+# entity. There should be exactly one PageRoot per page subtree.
+# `presentation`: how presentPage shows it (ui/dialogSystem): full-screen,
+# or a dialog (a card over a scrim). The one field that turns one into the other.
+enum PagePresentation { page, dialog }
+
+type PageRoot {
+  id: String
+  presentation: PagePresentation
+}
+
+# The ONE authored scroll component. Put it on the node that MOVES: the
+# scrolled body of a page, or the Hug content inside a clipped viewport. The
+# `scrollRootSystem` (ui/ScrollRootSystem) seeds its `ScrollState` on mount
+# (restored from a `ScrollMemory` by page id) and the position is applied as a
+# `RuntimeOffset` on the same entity — a transform-time translation, never a
+# relayout. The scroll FLOOR (the most-negative position) is computed from the
+# laid-out geometry, not authored: with `floor: content` it is how far the
+# root's content — its own box, or the children that overflow it — extends past
+# the window its parent shows (the smaller of the root's box and its parent's
+# content box), minus `endInset`, the far-end length an overlay (a dock, a
+# toolbar) covers. `floor: fixed` uses `fixedFloor` verbatim. A root whose
+# content fits is inert: floor 0, nothing to scroll.
+#
+#     "Body": { "ScrollRoot": { "axis": "y", "floor": "content", "endInset": 390 } }
+#
+# Authored as `"axis": "y"` / `"x"` and `"floor": "content"` / `"fixed"`;
+# `"anchor": "end"` holds the content's end in view (ui/ScrollAnchor).
+enum ScrollAxis { y, x }
+
+enum ScrollFloorMode { content, fixed }
+
+type ScrollRoot {
+  axis: ScrollAxis
+  floor: ScrollFloorMode
+  fixedFloor: Float
+  endInset: Float
+  anchor: ScrollAnchor = ScrollAnchor.start
+}
+
+# Per-root scroll position. Lives on the `ScrollRoot` entity, so a
+# persistent UiWorld preserves scroll across page switches — the position
+# survives as long as the entity does. `y` is the position along the root's
+# axis (more negative = content shifted up / left; 0 = at rest at the start;
+# it may overshoot the [floor, 0] range while rubber-banding); `velocity` is
+# the momentum in points a second, retained so a fling continues across a dip.
+# A virtual `ListView` host reads it too (ui/ListViewSystem).
+type ScrollState {
+  y: Float
+  velocity: Float
+}
+
+# Stable widget metadata for data-oriented UI updates. These components
+# intentionally carry app/backend-neutral data only: renderers do not
+# read them directly, and app systems can query them to rebuild or patch
+# dependent UI narrowly when data revisions change.
+type WidgetId {
+  id: String
+  kind: String
+}
+
+type WidgetState {
+  enabled: Bool = true
+  selected: Bool
+  loading: Bool
+  error: Bool
+}
+
+enum DataResourceId {
+  none
+  albums
+  history
+  library
+  playback
+  playlists
+  spotify
+  settings
+  debug
+}
+
+enum DataFieldId {
+  none
+  all
+  isPlaying
+  likedTrack
+  playingTrack
+  nowPlayingArt
+  debugToggle
+}
+
+# Currently-playing cover art key — the now-playing / mini-player cover
+# widgets observe this to re-point their Sprite.textureKey by identity.
+type DataDependency {
+  resource: DataResourceId
+  field: DataFieldId
+  observedRevision: Int
+}
+
+type ActionBinding {
+  actionId: String
+  role: String
+}
+
+type RefreshRegion {
+  regionKey: String
+  resource: DataResourceId
+  observedRevision: Int
+  dirty: Bool = true
+}
+
+# Declarative state -> visual mapping. Carries the visual variants a
+# widget shows per WidgetState, so app systems flip WidgetState flags
+# and `widgetStyleSystem` (ui/widget_style) applies the matching
+# variant — no imperative per-widget sprite/text patching.
+#
+# Empty-string fields mean "leave that visual alone"; `hasTint` gates
+# the tint pair the same way. `hasShapeFill` and `hasOffset` let the
+# same state system drive simple shape toggles such as switch pills and
+# knobs. `disabledAlpha` / `loadingAlpha` / `errorAlpha` are applied
+# through the Opacity component for the matching WidgetState flags
+# (1.0 = no dim).
+#
+# Theme references (#237, M6): each color pair may name a palette SLOT
+# instead of carrying a baked RGBA. A non-empty `*Slot` wins over the
+# literal and resolves against the active theme when the variant is
+# applied (widget_style.rae), so a state color tracks light/dark like
+# scene colors do (M5). Empty slot (the default) = use the literal —
+# state-specific brand colors that map to no slot (e.g. the coral
+# like-red) stay raw. `textStyle`/`textStyleSelected` were already
+# style references, completing "reference theme, don't bake values".
+type StateStyle {
+  spriteKey: String
+  spriteKeySelected: String
+  tint: RgbaColor
+  tintSelected: RgbaColor
+  tintSlot: String
+  tintSelectedSlot: String
+  hasTint: Bool
+  shapeFill: RgbaColor
+  shapeFillSelected: RgbaColor
+  shapeFillSlot: String
+  shapeFillSelectedSlot: String
+  hasShapeFill: Bool
+  offset: Vec2
+  offsetSelected: Vec2
+  hasOffset: Bool
+  textStyle: String
+  textStyleSelected: String
+  disabledAlpha: Float
+  loadingAlpha: Float
+  errorAlpha: Float
+}

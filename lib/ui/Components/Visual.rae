@@ -1,0 +1,258 @@
+# ui/Components: the authored visual and interaction components.
+
+# Visual / interaction
+type TransformFx {
+  scaleX: Float
+  scaleY: Float
+  rotation: Float
+  alpha: Float
+  visible: Bool
+  pivot: Vec2
+  anchor: Vec2
+}
+
+type Sprite {
+  textureKey: String
+  tint: RgbaColor = RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+  # Palette slot the tint came from (#235). Non-empty => the renderer
+  # resolves `tint` from the ACTIVE theme at paint time, so a
+  # dark/light toggle is a repaint, not a scene re-parse. Empty => the
+  # `tint` RGBA is a literal. `tint` still holds the baked color as a
+  # first-frame value / literal fallback.
+  tintSlot: String
+  scaleMode: ScaleMode
+  tileScale: Vec2 = Vec2 { x: 1.0, y: 1.0 }
+  nineSlice: Insets
+  hasNineSlice: Bool
+}
+
+type Text {
+  text: String
+  styleId: String
+  wrapWidthMode: WrapWidthMode
+  # A line wider than the node is drawn smaller to fit (TextStyle.shrinkTextSizeToFit)
+  shrinkToFit: Bool = false
+}
+
+type TextShadow {
+  color: RgbaColor
+  offset: Vec2
+  softness: Float = 1.0
+}
+
+# Tier-2 override in the theme friction ladder (docs/ui-theme-system.md
+# §7): a sparse, per-entity patch over the resolved text style that
+# KEEPS the base `styleId` (the link to the theme is annotated, never
+# severed). Authored nested in a scene Text bag as `"styleOverride":
+# { "size": .., "color": .. }`, stored ONLY on entities that carry one
+# (no cost to the nodes without one). Covers exactly the style scalars
+# that have no dedicated per-entity component — size and color; a
+# different alignment or shadow already has its own tier-3 component
+# (Align / TextShadow). `hasSize`/`hasColor` gate which fields patch;
+# a non-empty `colorSlot` resolves against the active theme at paint
+# (M5-consistent), else the literal `color` is used. #236.
+type StyleOverride {
+  hasSize: Bool
+  size: Float
+  hasColor: Bool
+  color: RgbaColor
+  colorSlot: String
+}
+
+type Shape {
+  kind: ShapeKind
+  fill: RgbaColor
+  stroke: RgbaColor
+  # Palette slots for fill/stroke (#235). Non-empty => resolve from
+  # the active theme at paint (live theme switch); empty => the RGBA
+  # is a literal. See Sprite.tintSlot.
+  fillSlot: String
+  strokeSlot: String
+  strokeWidth: Float
+  # A dashed stroke (0: solid), in design units, along the four edges from the
+  # top-left corner, with square corners: a guide, not a pill.
+  strokeDash: Float
+  strokeGap: Float
+  radius: Float
+  # True: the stroke keeps this width on screen at any zoom (non-scaling-stroke).
+  strokeFixed: Bool = false
+}
+
+type Shadow {
+  blur: Float
+  # More layers soften the approximation; defaults preserve existing scenes.
+  layers: Int = 3
+  opacity: Float = 1.0
+  color: RgbaColor
+  hasColor: Bool = false
+  centered: Bool = false
+  # Hover: `hoverOnly` shows the shadow only under the pointer (at `opacity`);
+  # a `hoverOpacity` above 0 keeps it at `opacity` at rest and brightens it to
+  # `hoverOpacity` under the pointer. The ButtonSystem fades between the two.
+  hoverOnly: Bool = false
+  hoverOpacity: Float = 0.0
+}
+
+type Opacity {
+  value: Float = 1.0
+}
+
+type PointerEvents {
+  enabled: Bool
+  cursor: String
+  blockChildren: Bool
+}
+
+type HitArea {
+  kind: HitAreaKind
+  radius: Float
+}
+
+# A tap's action, and what it does in words (ui/ClickTargets): `label` for
+# the single tap, `labelDouble` / `labelTriple` for those ids when set;
+# sentence case ("Play", "Open settings"). A voice command and a screen
+# reader say and match the label (docs/ui-scene-format.md "OnClick labels").
+type OnClick {
+  actionId: String
+  actionIdDouble: String
+  actionIdTriple: String
+  maxDelayMs: Int = 250
+  label: String = ""
+  labelDouble: String = ""
+  labelTriple: String = ""
+}
+
+type Button {
+  role: String
+}
+
+type Active {
+  value: Bool = true
+}
+
+type EditorVisible {
+  value: Bool
+}
+
+type EditorLocked {
+  value: Bool
+}
+
+# `HeroWidget` marks an entity as participating in a shared-element
+# (hero) transition between screens. Entities on the OUTGOING and
+# INCOMING screens that share the same `key` get visually animated
+# from one position+size to the other instead of disappearing and
+# popping into the new layout: another way to write a `SharedElement`
+# with mode morph (ui/AnimationSystem/SharedElements).
+type HeroWidget {
+  key: String
+}
+
+# Marks a Sprite as rendering with rounded corners of the given pixel
+# radius. The renderer routes the lookup from `<textureKey>` to a
+# pre-baked variant registered under `<textureKey>.r<radius>` (see
+# `loadRoundedCroppedTexture` + the asset loader, which pre-bakes the
+# variants at boot). When the variant is missing the renderer falls
+# back to the un-rounded texture so a forgotten pre-bake doesn't
+# crash — it just shows square corners.
+type CornerRadius {
+  radius: Float
+}
+
+# A scale by the pointer: `current` goes to restScale, hoverScale or pressedScale,
+# by the spring `motion` names, or with none by an ease at `speed` per second.
+type HoverScale {
+  restScale: Float = 1.0
+  hoverScale: Float = 1.0
+  pressedScale: Float = 1.0
+  speed: Float = 12.0
+  current: Float = 1.0
+  target: Float = 1.0
+  motion: String = ""
+  velocity: Float = 0.0
+}
+
+# Linear gradient; angle is degrees. It replaces Shape.fill on the same
+# entity: it rounds with the Shape's radius (a Circle: half its smaller side),
+# else a CornerRadius, and the Shape's stroke is painted over it. `from` /
+# `to` may be palette names; fromSlot / toSlot name a palette color directly
+# (an unknown name is a diagnostic and paints magenta).
+type GradientFill {
+  from: RgbaColor
+  to: RgbaColor
+  # Optional live theme slots; empty keeps the literal color.
+  fromSlot: String
+  toSlot: String
+  angle: Float = 90.0
+}
+
+# Texture painted at the entity's full bounds BEFORE its children
+# paint, so it acts as a backdrop for the subtree. Same registry as
+# `Sprite.textureKey`; missing textures silently render nothing.
+# Used for frosted-glass backdrops where the host captures and blurs
+# the framebuffer just before the entity paints, registers the result
+# under a known key, and the BackdropImage points at it.
+type BackdropImage {
+  textureKey: String
+}
+
+type OpticalAlign {
+  enabled: Bool = true
+  centerX: Bool = true
+  centerY: Bool = true
+  bias: Vec2
+}
+
+# Derived, cached visual bounds of a node's rendered glyphs (#219).
+# `left/top/right/bottom` are the glyph-plane extents relative to the
+# text pen origin (baseline at y=0), in framebuffer px at
+# `measuredSize`; `advance` is the total pen advance. This is the
+# measured-centering input the paint path reads INSTEAD of remeasuring
+# every frame — visualBoundsSystem (ui/render_gpu2d) writes it once
+# per change. `measuredText` + `measuredSize` + `measuredIcon` form the
+# invalidation key: when the node's rendered string, size, or
+# text-vs-icon font changes, the system recomputes. NEVER authored in
+# a scene — it is pure derived state.
+type VisualBounds {
+  hasBounds: Bool
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+  advance: Float
+  measuredText: String
+  measuredSize: Float
+  measuredIcon: Bool
+  measuredKey: String = ""  # an icon's Sprite key: same key and size reuse the glyph
+}
+
+# A layer is a real entity. `LayerRoot` is what makes one — it carries
+# the layer's stable id (used for lookup from app code) and its paint
+# order (ascending = painted on top of lower orders, hit-tested
+# top-down). Layer-root entities don't have Rect / Layout / Sprite —
+# they're labels for grouping other roots.
+type LayerRoot {
+  id: String
+  order: Int
+}
+
+# Soft link from a root entity to the layer it lives on. The renderer
+# groups parentless roots by their `LayerRef.layer`, looks up each
+# group's `LayerRoot.order`, and paints in ascending order. Roots
+# without a `LayerRef` fall back to the content layer (lookup by
+# id `"content"`), so the default for ordinary screen pages stays
+# zero-config.
+type LayerRef {
+  layer: EntityId
+}
+
+# `DebugAnchor` marks an entity as the placement slot for the shared
+# debug widget's button (ui/DebugOverlay): ui/DebugPlacement's
+# followDebugAnchor puts the button on the first shown anchor's laid-out
+# rectangle each frame, and in the window's top-right corner when no page
+# shows one (106's top bar has one in its leading slot, so a page's own
+# corner control stays clickable). The `value` field is just a presence-tag
+# (Rae has no zero-field structs); it's not read.
+type DebugAnchor {
+  value: Bool = true
+}

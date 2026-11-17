@@ -1,0 +1,100 @@
+# ui/Components, a module folder: every type the .raescene format can name plus the derived
+# runtime types the layout / transform / render systems write. Its files by topic: Values (the
+# shared enums and value types, here), Layout, Visual, Pages, Scenes, Effects, Derived, Defaults.
+
+# -----------------------------------------------------------------
+# Sub-types and enums shared across components
+# -----------------------------------------------------------------
+
+# #723: UI geometry uses the canonical `Vec2` from lib/vec2.rae (the UI no longer
+# defines its own). Import pulls vec2 into the build graph so its struct is
+# emitted; the type name itself is globally visible to every UI file.
+import Vec2
+# #725: the UI's derived world-transform cache is the general Transform2D / WorldTransform2D
+# from lib/ecs, not a bespoke struct. The imports pull EntityId and it into the build graph.
+import ecs/Transform
+import ecs/Entity
+import ui/ScrollAnchor
+
+enum SizeMode { fixed, hug, fill }
+
+# Per-axis sizing policy. `min` and `max` are signed; -1 means "no
+# clamp" since Rae lacks an inline `opt Int` literal.
+type SizeAxis {
+  mode: SizeMode
+  min: Int = -1
+  max: Int = -1
+}
+
+enum LayoutType {
+  none
+  horizontal
+  vertical
+  grid
+  stack
+}
+
+enum AlignKind {
+  start
+  center
+  end
+  spaceBetween
+  stretch
+}
+
+enum OverflowMode { none, clip, scaleToFitY }
+
+# Horizontal placement of a layout ROOT within the layout extent
+# (world.layoutW). Lets a phone-width app stay a centered column on a
+# wide desktop window while specific roots (a bottom toolbar / header)
+# break out edge-to-edge.
+#   left   — root left-aligned at x=0 (default; overlays self-position
+#            via their own Offset)
+#   center — root centered: x = (extentW - ownW) / 2 (the content column)
+#   fill   — root spans the full extent: width = extentW, x = 0
+enum HExtent { left, center, fill }
+
+enum ShapeKind { rect, roundedRect, circle }
+
+enum ScaleMode { fit, fill, stretch }
+
+enum WrapWidthMode { none, nodeWidth }
+
+enum HitAreaKind { rect, roundedRect }
+
+enum MaskKind { circle, roundedRect }
+
+enum ResolverMode { fixed, random, hash, direct }
+
+enum TextFormat {
+  plain
+  number
+  percent1
+  coins
+  handRank
+}
+
+enum DataMode { top, aroundSelf }
+
+enum AccountIdSource { none, activeAccountId }
+
+# A 4-sided box: padding, margin, etc.
+type Insets {
+  l: Float
+  t: Float
+  r: Float
+  b: Float
+}
+
+# RGBA in 0..255 ints. Backend renderers convert this into their native
+# color representation at the draw boundary.
+type RgbaColor {
+  r: Int
+  g: Int
+  b: Int
+  a: Int
+}
+
+# Reused literal for "no value". Rae's opt T storage is awkward for
+# struct types right now, so most numeric-optional fields use a
+# sentinel (`min = -1`, `radius = -1.0`, etc.).

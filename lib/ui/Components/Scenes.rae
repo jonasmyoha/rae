@@ -1,0 +1,151 @@
+# ui/Components: node identity, scene instances, image and text binding, list views.
+
+# Identity / metadata
+type Name {
+  label: String
+}
+
+type PrimaryType {
+  typeName: String
+}
+
+type NodeId {
+  id: String
+}
+
+type SceneScope {
+  scope: String
+}
+
+type SceneSource {
+  sceneId: String
+  nodeId: String
+  root: Bool
+}
+
+type RuntimeOnly {
+  value: Bool
+}
+
+# Dynamic scene + data binding
+type SceneInstance {
+  sceneId: String
+  overrideNodeIds: List(String)
+  overrideComponents: List(String)
+  overrideFields: List(String)
+  overrideValues: List(String)
+}
+
+type ImageSourceResolver {
+  mode: ResolverMode
+  textureKeys: List(String)
+  seed: String
+  once: Bool
+  sharedHash: String
+}
+
+type TextBinding {
+  key: String
+  format: TextFormat
+  prefix: String
+  suffix: String
+}
+
+type MaskShape {
+  kind: MaskKind
+  sourceNodeId: String
+  radius: Float
+}
+
+type DataRequest {
+  endpoint: String
+  mode: DataMode
+  initialLimit: Int
+  aroundBefore: Int
+  aroundAfter: Int
+  pageLimit: Int
+  accountIdSource: AccountIdSource
+  itemsField: String
+  cursorBeforeField: String
+  cursorAfterField: String
+}
+
+type ListViewBinding {
+  nodeId: String
+  componentName: String
+  fieldName: String
+  itemField: String
+  prefix: String
+  suffix: String
+}
+
+# How a ListView materializes its rows (#996):
+#   * `virtual` — a windowed, recycled pool of rows the system positions itself
+#     (Offset per row, the scroll as the list's RuntimeOffset); for long lists.
+#   * `flow` — EVERY row is a live child and the container's own authored
+#     `Layout` places them (a `Grid` with `columns`, a `Horizontal` strip, a
+#     `Vertical` stack); rows are KEYED, so a data change re-binds the rows
+#     whose key stayed and creates/destroys only the difference — entity ids,
+#     hover state and hero captures survive. For the short lists a screen
+#     shows whole: a cover grid, a recently-played strip, a track list.
+enum ListViewMode { virtual, flow }
+
+# One entry of `ListView.rowScenes`: the sub-scene to mount for rows whose
+# `rowKindField` cell equals `kind`. Authored as an object:
+#   "rowScenes": { "album": "CoverTile", "playlist": "PlaylistTile" }
+type ListViewRowScene {
+  kind: String
+  sceneId: String
+}
+
+type ListView {
+  itemSceneId: String
+  # The row cell that identifies a row across data changes (flow mode: a
+  # rebind reuses the row entity whose key matches). "" = the row index.
+  itemKeyField: String
+  itemHeight: Float
+  itemGap: Float
+  visibleItemCount: Int
+  overscanRows: Int
+  bindings: List(ListViewBinding)
+  loadingSceneId: String
+  emptySceneId: String
+  errorSceneId: String
+  mode: ListViewMode
+  # The row cell naming the row's KIND, looked up in `rowScenes`; rows whose
+  # kind has no entry (or an empty cell) mount `itemSceneId`.
+  rowKindField: String
+  rowScenes: List(ListViewRowScene)
+  # Flow-mode row size. `itemWidth` 0 = the container's inner width (a
+  # full-width row), `itemHeight` 0 = square; with `fitToColumns` the side is
+  # the container's inner width split by its Grid layout's `columns` /
+  # `columnGap` (a cover grid's tile side).
+  itemWidth: Float
+  fitToColumns: Bool
+  animateMoves: Bool = false
+}
+
+# Runtime (#996): the key + sub-scene a flow-mode row entity was materialized
+# for, so a rebind can reuse it. On the row root; never authored.
+type ListViewRowKey {
+  key: String
+  sceneId: String
+}
+
+# ----- ListView data model (#945) ------------------------------------------
+# The rows a `ListView` virtualises. Kept as a per-row pair of PARALLEL
+# String lists (keys[i] -> values[i]) rather than a List of {key,value}
+# structs: the parallel-List(String) shape is the one the C backend reads back
+# from a component table without the struct-by-list-index corruption the
+# SceneInstance overrides note calls out. A binding's `itemField` is looked up
+# by scanning `keys`; the matching `values` entry is the cell text. `ListViewData`
+# is a sibling component on the same entity as the `ListView`, so the system
+# reads the two together.
+type ListViewRow {
+  keys: List(String)
+  values: List(String)
+}
+
+type ListViewData {
+  rows: List(ListViewRow)
+}

@@ -1,0 +1,61 @@
+# ui/Components: effects and motion.
+
+# Effects / motion (declared so .raescene can carry them; runtime
+# systems for these arrive in later phases).
+type BackgroundPan {
+  speedX: Float
+  speedY: Float
+  amplitudeX: Float
+  amplitudeY: Float
+}
+
+type Carousel {
+  axis: AlignKind
+  swipeThreshold: Float
+  transitionDuration: Float
+  travelFactor: Float
+  previewScale: Float
+  # #1005: seconds between automatic page advances; 0 = pages only by swipe.
+  autoAdvanceSeconds: Float
+}
+
+type SmokeFx {
+  spawnIntervalMs: Float
+  jitter: Float
+  lifetimeMs: Float
+  driftX: Float
+  driftY: Float
+  scaleStart: Float
+  scaleEnd: Float
+  fadeMs: Float
+}
+
+type AnimFrames {
+  baseKey: String
+  frames: List(Int)
+  textureKeys: List(String)
+  fps: Float
+  loopForever: Bool
+  onEndTextureKey: String
+  # #1005: with no `textureKeys` the frames are `<baseKey><i>` for i < frameCount
+  # (a sprite-sheet convention, and the only way to author a sequence until
+  # #1006 lets a scene's List fields decode).
+  frameCount: Int
+}
+
+type AnimTrigger {
+  event: String
+  actionId: String
+  restartOnTrigger: Bool
+}
+
+type WobbleFx {
+  amp: Float
+  freq: Float
+  secondAmp: Float
+  secondFreq: Float
+}
+
+# Hierarchy: `Children` and `Parent` are now defined ONCE in lib/ecs/hierarchy.rae
+# (#710) so any World can share them; the UI sees them via `open ecs/hierarchy`
+# in ecs.rae.
