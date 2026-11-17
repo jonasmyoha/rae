@@ -24,6 +24,8 @@ type AlbumScenes {
   canvas: Scene
   settings: Scene
   bottomSheet: Scene
+  # The expanded window's Library side panel (screenSystem/SidePanel)
+  sidePanel: Scene
 }
 
 func loadSubScenes() ret SceneRegistry {
@@ -41,6 +43,8 @@ func loadSubScenes() ret SceneRegistry {
     scene: loadSceneFile(path: sheetActionRowPath)
   )
   registerScene(reg: subScenes, key: "MiniPlayer", scene: loadSceneFile(path: miniPlayerPath))
+  # The Library page as a sub-scene: SidePanel.raescene instances it
+  registerScene(reg: subScenes, key: "Library", scene: loadSceneFile(path: libraryPath))
   ret subScenes
 }
 
@@ -67,5 +71,6 @@ func loadAllScenes() pub ret AlbumScenes {
     canvas: loadSceneFile(path: canvasPath)
     settings: loadSceneFile(path: settingsPath)
     bottomSheet: loadSceneFile(path: bottomSheetPath)
+    sidePanel: loadSceneFile(path: sidePanelPath)
   }
 }

@@ -903,6 +903,30 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     }
     ret
   }
+  # `Layout.columns` / `gap`: an instance shown at another width lays its
+  # grid out with another column count (106's Library side panel, one cover
+  # a row)
+  if override.componentName is "Layout" {
+    if componentHas(this: world.layouts, entityId: entityId) is false {
+      reportUnknownOverride(world: world, override: override, message: "the node has no Layout")
+      ret
+    }
+    let layout: mod Layout = componentMod(this: world.layouts, entityId: entityId)
+    if override.fieldName is "columns" {
+      layout.columns = override.valueString.toInt()
+      ret
+    }
+    if override.fieldName is "gap" {
+      layout.gap = override.valueString.toFloat()
+      ret
+    }
+    reportUnknownOverride(
+      world: world
+      override: override
+      message: "a Layout override sets `columns` or `gap`"
+    )
+    ret
+  }
 }
 
 # Mount `scene` as a resident page identified by `pageId`. Creates a

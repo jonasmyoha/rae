@@ -1009,7 +1009,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              RAE_UI_EDITOR_TEST_OPEN=9 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-project.log" 2>&1 \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 23 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 24 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] mounted Album: [1-9][0-9]* nodes' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] frame: iphone-15-pro 393x852 column 360 safe 0,59,0,34' "$TMP_OUT/render-project.log" \
              && grep -qE '\[ui-editor\] open Home \(examples/106_mobile_ui/assets/scenes/Home.raescene\)' "$TMP_OUT/render-project.log" \
@@ -1036,7 +1036,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=1500 RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-picker.log" 2>&1 \
              && grep -qE '\[ui-editor\] mounted MainMenu: [1-9][0-9]* nodes, 0 diagnostics' "$TMP_OUT/render-picker.log" \
-             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 23 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-picker.log" \
+             && grep -qE '\[ui-editor\] project examples/106_mobile_ui/106_mobile_ui.raepack: 24 scenes under examples/106_mobile_ui/assets/scenes/' "$TMP_OUT/render-picker.log" \
              && grep -qE '\[ui-editor\] reloaded examples/106_mobile_ui/assets/scenes/Album.raescene \(\+[1-9][0-9]* -[1-9][0-9]* nodes' "$TMP_OUT/render-picker.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=20 \
                 > "$TMP_OUT/screenshot-picker.log" 2>&1; then
