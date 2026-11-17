@@ -1,0 +1,107 @@
+# The user zoom of a whole UI (docs/ui-coordinate-and-responsive-layout.md,
+# rule 2): a multiplier written `1.25x` (never dpi, never a percent), 1x by
+# default, kept by the program's settings and set on its UiWorld
+# (`world.uiZoom`; app3d/UiShell.applyUiZoom lays the UI out again). The
+# layout area is the window in points / zoom, so 2x lays a 393 pt phone out
+# 196.5 wide and draws everything twice as big; pointer input and the safe
+# area follow through the design resolution, and the size class is measured
+# in zoomed points (ui/DesignUnits).
+#
+# Ctrl/Cmd + and - step through `uiZoomSteps`, Ctrl/Cmd 0 goes back to 1x
+# (uiZoomKeyStep, an opt-in helper a program calls once a frame).
+import Math
+import Sdl3
+import String
+open Keys
+open ui/DesignUnits
+
+# The zoom steps a program offers
+func uiZoomSteps() ret List(Float) {
+  ret List(Float) {
+    1.0
+    1.1
+    1.25
+    1.5
+    1.75
+    2.0
+    2.5
+    3.0
+  }
+}
+
+# The next step up (`direction` 1) or down (-1) from `zoom`; 0 is back to 1x.
+# A zoom between two steps goes to the next one in that direction.
+func nextUiZoom(zoom: view Float, direction: view Int) ret Float {
+  if direction is 0 {
+    ret 1.0
+  }
+  let steps: List(Float) = uiZoomSteps()
+  if direction > 0 {
+    loop let step: Float in steps {
+      if step > zoom + 0.001 {
+        ret step
+      }
+    }
+    ret steps.copyAtDefault(index: steps.length - 1)
+  }
+  var below: Float = steps.copyAtDefault(index: 0)
+  loop let step: Float in steps {
+    if step < zoom - 0.001 {
+      below = step
+    }
+  }
+  ret below
+}
+
+# `zoom` as written: "1x", "1.25x", "2.6x"
+func formatUiZoom(zoom: view Float) ret String {
+  let hundredths: Int = Math.round(x: clampUiZoom(zoom: zoom) * 100.0).toInt()
+  let whole: Int = hundredths / 100
+  let rest: Int = hundredths % 100
+  if rest is 0 {
+    ret "{whole}x"
+  }
+  if rest % 10 is 0 {
+    ret "{whole}.{rest / 10}x"
+  }
+  if rest < 10 {
+    ret "{whole}.0{rest}x"
+  }
+  ret "{whole}.{rest}x"
+}
+
+# The zoom `text` writes ("1.25x", "2x"), within the bounds; 0 when it is
+# not a zoom (no trailing x, not a number, not above 0)
+func parseUiZoom(text: view String) ret Float {
+  let trimmed: String = text.trim()
+  if trimmed.length() < 2 or trimmed.endsWith(suffix: "x") is false {
+    ret 0.0
+  }
+  let number: String = trimmed.sub(start: 0, len: trimmed.length() - 1)
+  let value: Float = number.toFloat()
+  if value <= 0.0 {
+    ret 0.0
+  }
+  ret clampUiZoom(zoom: value)
+}
+
+# This frame's zoom key: 1 for Ctrl/Cmd + (or =), -1 for Ctrl/Cmd -, 0 for
+# Ctrl/Cmd 0 (back to 1x), and -2 when none was pressed
+func uiZoomKeyStep() ret Int {
+  let modifier: Bool = Sdl3.isKeyDown(key: keyLCtrl) or Sdl3.isKeyDown(key: keyRCtrl) or Sdl3.isKeyDown(
+    key: keyLGui
+  ) or Sdl3.isKeyDown(key: keyRGui)
+  if modifier is false {
+    ret -2
+  }
+  if Sdl3.isKeyPressed(key: keyEquals) {
+    ret 1
+  }
+  if Sdl3.isKeyPressed(key: keyMinus) {
+    ret -1
+  }
+  if Sdl3.isKeyPressed(key: key0) {
+    ret 0
+  }
+  ret -2
+}

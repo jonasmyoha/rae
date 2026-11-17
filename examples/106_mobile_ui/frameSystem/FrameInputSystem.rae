@@ -1,5 +1,6 @@
 open HotReload
 open ui/Ecs
+open ui/UiZoom
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
@@ -83,10 +84,18 @@ func frameInputSystem(
   # request a rebuild; the gpu2d design resolution is applied next to
   # buildAppWorld, so the current frame keeps rendering the old world at its
   # matching resolution until the rebuild swaps both atomically.
-  let liveViewport: Viewport = createViewportFromWindow()
+  # Ctrl/Cmd + - 0 step the user zoom (ui/UiZoom); a new zoom is a new
+  # extent, so the world is rebuilt at it like after a resize
+  var zoom: Float = app.viewport.uiZoom
+  let zoomKey: Int = uiZoomKeyStep()
+  if zoomKey is not -2 {
+    zoom = nextUiZoom(zoom: zoom, direction: zoomKey)
+    log("[ui] zoom {formatUiZoom(zoom: zoom)}")
+  }
+  let liveViewport: Viewport = createViewportFromWindow(zoom: zoom)
   # A size class change re-lays out too (a move to a display with another
   # scale changes the points without changing the pixels)
-  let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH or liveViewport.sizeClass is not app.viewport.sizeClass
+  let extentChanged: Bool = liveViewport.layoutW is not app.viewport.layoutW or liveViewport.layoutH is not app.viewport.layoutH or liveViewport.sizeClass is not app.viewport.sizeClass or liveViewport.uiZoom is not app.viewport.uiZoom
   # The size class in points follows the window (a resize, or a move to a
   # display with another scale); an iPad in Split View is compact
   if updateInputSizeClass(input: input) {

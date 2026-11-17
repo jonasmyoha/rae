@@ -4,6 +4,7 @@ open ui/DevicePresets
 open ui/SizeClass
 open ui/DesignUnits
 open ui/ResponsiveExtent
+open ui/UiZoom
 
 # 106's coordinate spine: lib/ui's responsive extent (ui/ResponsiveExtent).
 # The layout is the window in points (docs/ui-coordinate-and-responsive-
@@ -34,6 +35,8 @@ type Viewport {
   # adds the Library side panel left of the column (0 when there is none)
   sizeClass: SizeClass
   sidePanelDuW: Float
+  # The user zoom (ui/UiZoom): the layout is the window in points / uiZoom
+  uiZoom: Float
 }
 
 # The page column is the phone frame's width; past compact it is 1.5 times
@@ -88,10 +91,11 @@ func createViewport(
   windowPtH: view Float
   framebufferPxW: view Float
   framebufferPxH: view Float
+  zoom: view Float
 ) pub ret Viewport {
   let extent: ResponsiveExtent = responsiveExtent(
-    windowW: duFromPoints(points: windowPtW)
-    windowH: duFromPoints(points: windowPtH)
+    windowW: duFromPointsAt(points: windowPtW, zoom: zoom)
+    windowH: duFromPointsAt(points: windowPtH, zoom: zoom)
     framebufferW: framebufferPxW
     framebufferH: framebufferPxH
     preset: active106DevicePreset()
@@ -118,12 +122,23 @@ func createViewport(
     safeInsetsDu: extent.safeInsets
     sizeClass: extent.sizeClass
     sidePanelDuW: extent.sidePanelW
+    uiZoom: clampUiZoom(zoom: zoom)
   }
 }
 
-# The viewport of the live window: its framebuffer, which tracks runtime
-# resizes, over the display's pixels per point
-func createViewportFromWindow() pub ret Viewport {
+# The zoom 106 starts at: `RAE_UI_ZOOM=2x` (ui/UiZoom), else 1x. Ctrl/Cmd
+# + - 0 change it while it runs (FrameInputSystem).
+func startUiZoom() ret Float {
+  let zoom: Float = parseUiZoom(text: getEnv(name: "RAE_UI_ZOOM"))
+  if zoom <= 0.0 {
+    ret 1.0
+  }
+  ret zoom
+}
+
+# The viewport of the live window at `zoom`: its framebuffer, which tracks
+# runtime resizes, over the display's pixels per point
+func createViewportFromWindow(zoom: view Float) pub ret Viewport {
   let framebufferW: Float = uiFramebufferWidth().toFloat()
   let framebufferH: Float = uiFramebufferHeight().toFloat()
   var dprValue: Float = Gpu2d.dpr()
@@ -135,10 +150,12 @@ func createViewportFromWindow() pub ret Viewport {
     windowPtH: pointsFromDu(du: duFromPixels(pixels: framebufferH, dpr: dprValue))
     framebufferPxW: framebufferW
     framebufferPxH: framebufferH
+    zoom: zoom
   )
 }
 
 func applyViewportExtent(world: mod UiWorld, viewport: view Viewport) pub {
   world.layoutW = viewport.layoutW
   world.layoutH = viewport.layoutH
+  world.uiZoom = viewport.uiZoom
 }

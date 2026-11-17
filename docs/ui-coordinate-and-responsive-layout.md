@@ -12,8 +12,16 @@ versions of every app share as much code and `.raescene` data as possible. Six r
    a screen margin 16, body text 17, the minimum touch target 44; the reference phone frame is the
    iPhone 15 Pro's 393x852. `200` is the same physical size on every device and in every frame.
 2. **The layout fills the window.** The layout area is the window in points. A bigger window
-   shows more, never a bigger UI. Size classes, safe areas and touch targets are in points. (A
-   user zoom, written like `1.25x`, will divide the area: [ui coords: user zoom].)
+   shows more, never a bigger UI. Size classes, safe areas and touch targets are in points.
+   **A user zoom** makes the whole UI bigger for reading comfort without changing any authored
+   number: it is written `1.25x` (never dpi, never a percent), 1x by default, set on the UiWorld
+   (`world.uiZoom`) from the program's settings, and the layout area is the window in points /
+   zoom (at 2x a 393 pt phone lays out 196.5 wide, each unit drawn twice as big). The pointer and
+   the safe area follow through the design resolution, and the size class is measured in zoomed
+   points (at 2x a 1440 pt window is medium). `ui/DesignUnits` converts (`duFromPointsAt`,
+   `renderScaleAt`), `ui/UiZoom` has the steps (1x, 1.1x, 1.25x, 1.5x, 1.75x, 2x, 2.5x, 3x), the
+   `1.25x` text form and the Ctrl/Cmd + - 0 keys, and `app3d/UiShell.applyUiZoom` /
+   `handleUiZoomKeys` lay a UiShell program out at it.
 3. **Fixed art-directed areas are subtrees, not the canvas.** A game table, a board or a
    splash is a subtree authored at its own fixed size (any numbers, a 1080x2280 game table
    included) and scaled as one block with `ScaleToFit`. There is never a global scaled canvas

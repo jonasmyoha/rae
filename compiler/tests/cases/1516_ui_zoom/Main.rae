@@ -1,0 +1,51 @@
+# lib/ui's user zoom (ui/UiZoom, ui/DesignUnits): written `1.25x`, it makes
+# the layout area the window in points / zoom, a pointer at a window point
+# lands at point / zoom in design units, the size class is measured in
+# zoomed points, and the Ctrl/Cmd steps go through 1x ... 3x.
+open ui/DesignUnits
+open ui/SizeClass
+open ui/UiZoom
+
+func area(label: view String, zoom: view Float) {
+  log(
+    "{formatUiZoom(zoom: zoom)}: a 393x852 pt phone lays out {Math.round(
+      x: duFromPointsAt(points: 393.0, zoom: zoom) * 10.0
+    ) / 10.0}x{Math.round(x: duFromPointsAt(points: 852.0, zoom: zoom) * 10.0) / 10.0}, a pointer at 300 pt is at {Math.round(
+      x: duFromPointsAt(points: 300.0, zoom: zoom) * 10.0
+    ) / 10.0} du, a 1440 pt window is {sizeClassForDu(
+      widthDu: duFromPointsAt(points: 1440.0, zoom: zoom)
+    )}, {label}"
+  )
+}
+
+func main() {
+  area(label: "the window as it is", zoom: 1.0)
+  area(label: "everything half as big again", zoom: 1.5)
+  area(label: "twice as big", zoom: 2.0)
+  area(label: "2.6 times", zoom: 2.6)
+  log(
+    "a design unit at 2x on a dpr 2 display is {renderScaleAt(dpr: 2.0, zoom: 2.0)} px, back at 2x: 196.5 du is {pointsFromDuAt(
+      du: 196.5
+      zoom: 2.0
+    )} pt"
+  )
+  log(
+    "written: {formatUiZoom(zoom: 1.0)} {formatUiZoom(zoom: 1.1)} {formatUiZoom(zoom: 1.25)} {formatUiZoom(
+      zoom: 2.6
+    )} {formatUiZoom(zoom: 1.05)}"
+  )
+  log(
+    "read: 1.25x {parseUiZoom(text: "1.25x")}, 2x {parseUiZoom(text: " 2x ")}, 125% {parseUiZoom(
+      text: "125%"
+    )}, 9x {parseUiZoom(text: "9x")}"
+  )
+  log(
+    "steps: up from 1x {nextUiZoom(zoom: 1.0, direction: 1)}, from 1.3x {nextUiZoom(
+      zoom: 1.3
+      direction: 1
+    )}, from 3x {nextUiZoom(zoom: 3.0, direction: 1)}; down from 1.3x {nextUiZoom(
+      zoom: 1.3
+      direction: -1
+    )}, from 1x {nextUiZoom(zoom: 1.0, direction: -1)}; 0 {nextUiZoom(zoom: 2.5, direction: 0)}"
+  )
+}

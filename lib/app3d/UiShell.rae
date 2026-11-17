@@ -54,6 +54,7 @@ open ecs/ComponentTable
 open ui/UiSystems
 open ui/safeAreaSystem/SafeAreaSystem
 open ui/DesignUnits
+open ui/UiZoom
 
 # ----- window extent --------------------------------------------------
 # The window's size in design units: its framebuffer pixels over the display's
@@ -64,6 +65,16 @@ func windowExtentW() ret Float {
 
 func windowExtentH() ret Float {
   ret duFromPixels(pixels: Gpu2d.windowHeight().toFloat(), dpr: windowDpr())
+}
+
+# The layout extent of `world`'s window at its user zoom (ui/UiZoom): the
+# window in design units / world.uiZoom
+func layoutExtentW(world: view UiWorld) ret Float {
+  ret duFromPointsAt(points: pointsFromDu(du: windowExtentW()), zoom: world.uiZoom)
+}
+
+func layoutExtentH(world: view UiWorld) ret Float {
+  ret duFromPointsAt(points: pointsFromDu(du: windowExtentH()), zoom: world.uiZoom)
 }
 
 # The display's pixels per point, 1 when the window does not know yet
@@ -608,13 +619,20 @@ func runScheduledUiSystems(
 }
 
 # Re-fit the world to the window after a resize. Returns whether anything
-# changed, which the caller feeds into its redraw decision.
+# changed, which the caller feeds into its redraw decision. The layout is the
+# window in points / the world's user zoom (ui/UiZoom).
 func resizeUiToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) ret Bool {
   if Gpu2d.windowResized() is false {
     ret false
   }
-  let w: Float = windowExtentW()
-  let h: Float = windowExtentH()
+  ret fitUiToWindow(world: world, uiSystems: uiSystems, res: res)
+}
+
+# Set the design resolution and the world's layout to the window at its zoom,
+# and lay the UI out again
+func fitUiToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) ret Bool {
+  let w: Float = layoutExtentW(world: world)
+  let h: Float = layoutExtentH(world: world)
   if w <= 0.0 or h <= 0.0 {
     ret false
   }
@@ -623,6 +641,38 @@ func resizeUiToWindow(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gp
   world.layoutH = h
   runUiSystems(world: world, uiSystems: uiSystems, res: res)
   ret true
+}
+
+# Set the world's user zoom (`1.25x` is 1.25, kept within ui/DesignUnits'
+# bounds) and lay the UI out at it; false when it did not change
+func applyUiZoom(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+  zoom: view Float
+) ret Bool {
+  let next: Float = clampUiZoom(zoom: zoom)
+  if next is world.uiZoom {
+    ret false
+  }
+  world.uiZoom = next
+  ret fitUiToWindow(world: world, uiSystems: uiSystems, res: res)
+}
+
+# The opt-in zoom keys: Ctrl/Cmd + and - step the world's zoom through
+# ui/UiZoom's steps, Ctrl/Cmd 0 goes back to 1x. True when the zoom changed;
+# the program keeps world.uiZoom in its settings.
+func handleUiZoomKeys(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) ret Bool {
+  let keyStep: Int = uiZoomKeyStep()
+  if keyStep is -2 {
+    ret false
+  }
+  ret applyUiZoom(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    zoom: nextUiZoom(zoom: world.uiZoom, direction: keyStep)
+  )
 }
 
 # ----- window placement snapshot --------------------------------------

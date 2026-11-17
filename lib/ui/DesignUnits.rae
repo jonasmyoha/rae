@@ -55,3 +55,37 @@ func insetsDuFromPoints(insets: view Insets) ret Insets {
     b: duFromPoints(points: insets.b)
   }
 }
+
+# ----- user zoom ----------------------------------------------------------
+# A user zoom (ui/UiZoom, written like `1.25x`) makes the whole UI bigger for
+# reading comfort without changing any authored number: the layout area is
+# the window in points / zoom, and every design unit is drawn `zoom` points
+# big. 1 is no zoom; it is kept within these bounds.
+const minUiZoom: Float = 0.5
+
+const maxUiZoom: Float = 4.0
+
+func clampUiZoom(zoom: view Float) ret Float {
+  if zoom < minUiZoom {
+    ret minUiZoom
+  }
+  if zoom > maxUiZoom {
+    ret maxUiZoom
+  }
+  ret zoom
+}
+
+# `points` of the window in design units at `zoom` (a layout extent, a
+# pointer position, an inset the OS gave in points)
+func duFromPointsAt(points: view Float, zoom: view Float) ret Float {
+  ret duFromPoints(points: points) / clampUiZoom(zoom: zoom)
+}
+
+func pointsFromDuAt(du: view Float, zoom: view Float) ret Float {
+  ret pointsFromDu(du: du) * clampUiZoom(zoom: zoom)
+}
+
+# Pixels per design unit on a display of `dpr` pixels per point at `zoom`
+func renderScaleAt(dpr: view Float, zoom: view Float) ret Float {
+  ret renderScale(dpr: dpr) * clampUiZoom(zoom: zoom)
+}
