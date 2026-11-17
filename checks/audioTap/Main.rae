@@ -1,0 +1,87 @@
+# The output tap on the real default output (audio/AudioTap, docs/audio-design.md
+# §8.3): a 440 Hz tone plays for a little over 2 s while the main thread takes
+# the tapped output every 2 ms. Passes when the frames taken over 2 s are 2 s at
+# the device's rate (within a period's worth of callbacks), each take starts
+# where the last one ended (no gap), and nothing was dropped. With
+# RAE_REALTIME_CHECK=1 it also fails if the tap allocated or locked on the
+# audio thread. With no output device it says so and passes.
+import Math
+import Sys
+open audio/Audio
+open audio/AudioClock
+open audio/AudioMixer
+open audio/AudioTap
+open audio/AudioTypes
+open audio/Sound
+
+func main() ret Int {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.outputTap = true
+  var audio: AudioEngine = audioStart(settings: settings)
+  if audio.offline {
+    log("audioTap: no output device, nothing to test")
+    let unusedBlocks: Int = stopAudio(this: audio)
+    ret 0
+  }
+  let rate: Int = audio.sampleRate
+  let frames: Int = rate * 3
+  let samples: Buffer(Float) = createSampleBuffer(count: frames * 2)
+  loop var i: Int = 0, i < frames, ++i {
+    let value: Float = Math.sin(x: 6.283185307179586 * 440.0 * (i as Float) / (rate as Float)) * 0.2
+    setSampleAt(samples: samples, index: i * 2, value: value)
+    setSampleAt(samples: samples, index: i * 2 + 1, value: value)
+  }
+  let tone: Sound = audio.addSound(data: SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 2
+    sampleRate: rate
+    error: ""
+  })
+  let unusedVoice: VoiceId = audio.play(sound: tone, bus: AudioBusKind.effects, gainDecibels: -6.0)
+  var taken: Int = 0
+  var dropped: Int = 0
+  var gaps: Int = 0
+  var takes: Int = 0
+  var next: Int = -1
+  var firstNs: Int = -1
+  var lastNs: Int = 0
+  loop taken < 2 * rate {
+    sleep(ms: 2)
+    audio.update()
+    let tapped: TappedOutput = audio.takeOutput()
+    dropped = dropped + tapped.dropped
+    if tapped.frames > 0 {
+      if firstNs < 0 {
+        firstNs = nowNs()
+      } else {
+        if tapped.firstSample is not next {
+          gaps = gaps + 1
+        }
+        taken = taken + tapped.frames
+      }
+      next = tapped.firstSample + tapped.frames
+      takes = takes + 1
+      lastNs = nowNs()
+    }
+  }
+  let seconds: Float = ((lastNs - firstNs) as Float) / 1000000000.0
+  let period: Int = audio.periodFrames
+  let unusedBlocks: Int = stopAudio(this: audio)
+  log(
+    "audioTap: {taken} frames taken in {takes} takes over {Math.round(x: seconds * 1000.0) / 1000.0} s at {rate} Hz ({Math.round(
+      x: (taken as Float) / (rate as Float) * 1000.0
+    ) / 1000.0} s of output), {gaps} gaps, {dropped} frames dropped"
+  )
+  # the frames taken against the wall clock: within a few callbacks' worth
+  let expected: Float = seconds * (rate as Float)
+  let slack: Float = (4 * period) as Float + (rate as Float) * 0.02
+  if gaps > 0 or dropped > 0 or Math.abs(value: (taken as Float) - expected) > slack {
+    log(
+      "AUDIO TAP FAILED: {taken} frames over {seconds} s (expected about {expected}), {gaps} gaps, {dropped} dropped"
+    )
+    ret 1
+  }
+  log("AUDIO TAP OK")
+  ret 0
+}

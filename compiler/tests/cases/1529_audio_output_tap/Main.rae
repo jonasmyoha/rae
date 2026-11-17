@@ -1,0 +1,94 @@
+# The output tap (audio/AudioTap, AudioSettings.outputTap): the engine copies
+# every block it renders into a lock-free ring, and the main thread takes the
+# frames since its last take with the output sample time of the first. Offline,
+# the tap's frames equal renderOffline's answers sample for sample, each take
+# placed at the right sample; a main thread that does not take for 3 s (more
+# than the tap's 2 s) loses whole blocks, counted, and the frames after the gap
+# come in their own take at their own sample time. RAE_REALTIME_CHECK is on.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioTap
+open audio/AudioTypes
+open audio/Sound
+
+const sampleRate: Int = 48000
+
+func sineSound(audio: mod AudioEngine, frames: view Int) ret Sound {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames * 2)
+  loop var i: Int = 0, i < frames, ++i {
+    let value: Float = Math.sin(x: 6.283185307179586 * 440.0 * (i as Float) / (sampleRate as Float)) * 0.5
+    setSampleAt(samples: samples, index: i * 2, value: value)
+    setSampleAt(samples: samples, index: i * 2 + 1, value: value * 0.25)
+  }
+  ret audio.addSound(data: SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 2
+    sampleRate: sampleRate
+    error: ""
+  })
+}
+
+func main() {
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = true
+  settings.sampleRate = sampleRate
+  settings.periodFrames = 128
+  settings.outputTap = true
+  var audio: AudioEngine = audioStart(settings: settings)
+  let sine: Sound = sineSound(audio: audio, frames: sampleRate)
+  let voice: VoiceId = audio.play(sound: sine, bus: AudioBusKind.music, gainDecibels: 0.0)
+
+  # renders of several sizes, each taken after it: the same samples, in place
+  let sizes: List(Int) = {
+    128
+    37
+    300
+    1
+    1000
+    256
+  }
+  var rendered: Int = 0
+  var equal: Bool = true
+  var placed: Bool = true
+  var takes: Int = 0
+  loop let frames: Int in sizes {
+    let answer: List(Float) = audio.renderOffline(frames: frames)
+    let tapped: TappedOutput = audio.takeOutput()
+    takes = takes + 1
+    if tapped.frames is not frames or tapped.firstSample is not rendered or tapped.dropped is not 0 {
+      placed = false
+    }
+    loop var i: Int = 0, i < answer.length(), ++i {
+      if answer.copyAtFallback(index: i, fallback: 0.0) is not tapped.samples.copyAtFallback(
+        index: i
+        fallback: -9.0
+      ) {
+        equal = false
+      }
+    }
+    rendered = rendered + frames
+  }
+  log(
+    "{takes} renders of 128, 37, 300, 1, 1000 and 256 frames: the tap's frames equal renderOffline's sample for sample {equal}, each take at its first output sample with nothing dropped {placed}"
+  )
+
+  # nothing taken for 3 s: the tap keeps its first 2 s, drops the rest whole
+  var lateStart: Int = rendered
+  loop var block: Int = 0, block < 3 * sampleRate / 128, ++block {
+    let unusedAnswer: List(Float) = audio.renderOffline(frames: 128)
+  }
+  let late: Int = 3 * sampleRate / 128 * 128
+  let first: TappedOutput = audio.takeOutput()
+  let second: TappedOutput = audio.takeOutput()
+  log(
+    "3 s not taken: the first take {first.frames} frames from sample {first.firstSample - lateStart} (of the run), {first.dropped} frames dropped; the next take {second.frames} frames"
+  )
+  let after: List(Float) = audio.renderOffline(frames: 128)
+  let resumed: TappedOutput = audio.takeOutput()
+  log(
+    "rendering again: a take of {resumed.frames} frames from sample {resumed.firstSample - lateStart} (the run's {late}), taken + dropped = rendered {first.frames + first.dropped is late}"
+  )
+  let unusedBlocks: Int = stopAudio(this: audio)
+}
