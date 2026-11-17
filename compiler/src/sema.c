@@ -10262,6 +10262,24 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
                 if (str_eq(q->name, a->name)) { named = q; break; }
         }
         sema_reject_view_to_mod(module, symbols, named, a->value);
+        /* The `let x: T = f()` rule for an argument too: a parameter that
+         * takes a VALUE (not `view`/`mod`) cannot take a reference-returning
+         * call. `list.add(value: queryViewAt(...))` passed every check and
+         * reached the C compiler as a pointer handed to a struct parameter. */
+        if (named && named->type && !named->type->is_view && !named->type->is_mod
+            && a->value
+            && (a->value->kind == AST_EXPR_CALL
+                || (a->value->kind == AST_EXPR_METHOD_CALL && a->value->decl_link))
+            && sema_call_returns_reference(module, a->value)) {
+            char message[320];
+            snprintf(message, sizeof message,
+                     "this call returns a reference, and '%.*s' takes a value; copying what it "
+                     "refers to must be spelled out: bind it first ('let source: view T = ...'), "
+                     "then pass the named binding",
+                     (int)named->name.len, named->name.data);
+            diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, message);
+            module->had_error = true;
+        }
         /* `type_needs_cascade_drop`, not `type_owns_heap_storage`: the
          * latter does not count a bare String (it only reports types whose
          * FIELDS own heap), and String is the single most common `own`

@@ -1,0 +1,49 @@
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Query
+
+# A call that returns a reference cannot be the argument of a parameter that
+# takes a value, the same rule as `let x: T = f()`, `x = f()` and
+# `ret f()` (cases 619, 1221, 1003): the copy is spelled out by binding the
+# reference first. `list.add(value: queryViewAt(...))` used to pass every
+# check and stop at the C compiler (a pointer handed to a struct parameter).
+type Point {
+  x: Float
+  y: Float
+}
+
+type Holder {
+  point: Point
+}
+
+func pointView(holder: view Holder) ret view Point {
+  ret holder.point
+}
+
+func takePoint(point: copy Point) ret Float {
+  ret point.x
+}
+
+func takePointView(point: view Point) ret Float {
+  ret point.x
+}
+
+func main() {
+  let holder: Holder = { point: { x: 1.0, y: 2.0 } }
+  var table: ComponentTable(Point) = ComponentTable.create(Point)
+  let entityId: EntityId = id(v: 3)
+  componentSet(this: table, entityId: entityId, data: Point { x: 3.0, y: 4.0 })
+  var copies: List(Point) = List.create(Point, cap: 2)
+
+  # Refused: a reference-returning call for a value parameter
+  log("{takePoint(point: pointView(holder: holder))}")
+  copies.add(value: queryViewAt(table: table, denseIndex: 0))
+  copies.add(value: componentView(this: table, entityId: entityId))
+
+  # Allowed: the reference bound first, then the named binding; a `view`
+  # parameter; a field read through the call
+  let source: view Point = queryViewAt(table: table, denseIndex: 0)
+  copies.add(value: source)
+  log("{takePointView(point: pointView(holder: holder))}")
+  log("{takePoint(point: Point { x: pointView(holder: holder).x, y: 0.0 })}")
+}
