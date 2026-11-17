@@ -506,6 +506,12 @@ function pushStatusItem(message, timestamp = new Date().toISOString()) {
 }
 
 let isBuildingAndTesting = false;
+// Declared before the startup code below: setActiveView() runs during module
+// evaluation and calls stopPerfLive(), so a `let` further down the file would
+// still be uninitialized then and abort the whole script (no tab would work).
+let perfLiveTimer = null;
+// The stress case whose README panel is shown (renderStressPanel).
+let stressPanelFor = null;
 
 pushStatusItem("Waiting for server heartbeat…");
 setHeartbeatWaiting();
@@ -4770,7 +4776,6 @@ function renderStressVerdictLine(verdict) {
 // THE PERF TAB'S LIVE PROGRAMS. While the Perf tab shows, the viewer's status (/api/perf/live) is
 // read every 2 s into the heading: whether Rae Perf runs, its port, and each program streaming to
 // it. "Open Rae Perf" runs the viewer (the tab's one example) as the Run button would.
-let perfLiveTimer = null;
 
 function startPerfLive() {
   renderPerfLive();
@@ -4857,7 +4862,6 @@ function recordStressRun(results) {
 
 // The case's README (rendered markdown) and the "elsewhere" table from its
 // pack — a real table, the Rae row highlighted — above the source viewer.
-let stressPanelFor = null;
 async function renderStressPanel(example) {
   const panel = document.getElementById("example-stress-panel");
   if (!panel) return;
