@@ -1632,10 +1632,11 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           #    test pointer aims the balls into the scene, where the pool's
           #    capacity and age limits retire them). A round of all six
           #    scenes is 24 s. `[mem:live]` is sampled every 2 s, and the PEAK
-          #    of a later round must match the peak of the round after
-          #    warm-up. Peaks, not single samples, because the sampler's
-          #    clock starts at process launch and the app's at its first
-          #    frame, so a timestamp does not tell which scene is loaded. The
+          #    after cycle 12 must match the peak of cycles 6-12 (a round of
+          #    six scenes each). Peaks, not single samples, and grouped by
+          #    the cycles they fall between, not by their timestamps
+          #    (tools/check_cycle_memory.py): a loaded machine runs the same
+          #    cycles in the same wall time, only with fewer frames. The
           #    5-minute version of this run is in the doc: the peaks were
           #    identical over four rounds. Rae's counters do not see Box3D's
           #    C heap (123), so at every scene switch the app also logs the
@@ -1687,24 +1688,25 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           if (cd .. && RAE_PLAYGROUND_CYCLE_SECONDS=4 RAE_PLAYGROUND_AUTOFIRE=1 \
              RAE_GPU2D_TEST_POINTER="sweep:640,300,560,60" \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
-             perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
-             && [ "$(grep -c '^\[playground\] cycle' "$TMP_OUT/live-growth.log")" -ge 18 ] \
-             && [ "$(grep -c '^\[playground\] engine bytes between worlds' "$TMP_OUT/live-growth.log")" -ge 18 ] \
-             && [ "$(sed -n 's/^\[playground\] engine bytes between worlds //p' "$TMP_OUT/live-growth.log" | sort -u | wc -l)" -eq 1 ] \
-             && awk '
-                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
-                  /^\[mem:live\]/ {
-                    t = field($0, "t"); bufs = field($0, "bufs"); bytes = field($0, "buf_bytes")
-                    if (t >= 26000 && t < 50000) { baseSeen++; if (bufs > baseBufs) baseBufs = bufs; if (bytes > baseBytes) baseBytes = bytes }
-                    if (t >= 50000 && t < 74000) { lastSeen++; if (bufs > lastBufs) lastBufs = bufs; if (bytes > lastBytes) lastBytes = bytes }
-                  }
-                  END { exit !(baseSeen >= 10 && lastSeen >= 10 && lastBufs - baseBufs <= 64 && lastBytes - baseBytes <= 262144) }
-                ' "$TMP_OUT/live-growth.log"; then
+             perl -e 'alarm shift; exec @ARGV' 300 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1; then
+            LIVE_STATUS=0
+          else
+            LIVE_STATUS=$?
+          fi
+          # Memory flat over the respawns, the samples grouped by cycle, not by wall time
+          # (tools/check_cycle_memory.py), so a loaded machine gives the same windows
+          if [ "$LIVE_STATUS" -eq 0 ] \
+             && python3 tools/check_cycle_memory.py "$TMP_OUT/live-growth.log" \
+                  --tag '[playground]' --engine '[playground] engine bytes between worlds' > "$TMP_OUT/live-growth-check.log" 2>&1; then
             :
           else
             PLAYGROUND_OK=0
-            echo "  live growth check failed (scene switches + autofire; the peak of a later round must match an earlier one):"
-            grep -a '^\[mem:live\]\|^\[playground\]' "$TMP_OUT/live-growth.log" | tail -40 2>/dev/null | sed 's/^/    /'
+            echo "  live growth check failed (scene switches + autofire; the peak after cycle 12 must match cycles 6-12):"
+            if [ "$LIVE_STATUS" -ne 0 ]; then
+              echo "    the run ended with exit code $LIVE_STATUS (142: the 300 s limit)"
+            fi
+            cat "$TMP_OUT/live-growth-check.log" 2>/dev/null
+            grep -a '^\[mem:live\]\|^\[playground\] \(cycle\|engine\)' "$TMP_OUT/live-growth.log" 2>/dev/null | tail -12 | sed 's/^/    /'
           fi
           if command -v leaks >/dev/null 2>&1; then
             (cd .. && RAE_PLAYGROUND_CYCLE_SECONDS=3 RAE_PLAYGROUND_AUTOFIRE=1 \
@@ -1743,8 +1745,9 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           #    on 125 its tire tracks and dust laid by then ([tracks]).
           # 3. Memory flat WHILE running: RAE_VEHICLE_CYCLE_SECONDS=4 respawns
           #    the car (five bodies, five joints) and its nine crates every 4 s
-          #    under the autopilot; the [mem:live] peak of a later 24 s window
-          #    must match the window after warm-up, and the engine's own bytes
+          #    under the autopilot; the [mem:live] peak after cycle 12 must
+          #    match the peak of cycles 6-12 (grouped by cycle, not wall time:
+          #    tools/check_cycle_memory.py), and the engine's own bytes
           #    (b3GetByteCount on 125, 0 on the port) must be the same at every
           #    respawn. A 5-minute run of this is in the doc.
           # 4. `leaks --atExit` over a 20 s run of the same kind.
@@ -1814,24 +1817,25 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
           fi
           if (cd .. && RAE_VEHICLE_CYCLE_SECONDS=4 RAE_VEHICLE_AUTOPILOT=1 \
              RAE_UI_HEADLESS=1 RAE_SDL_HEADLESS_MS=78000 RAE_MEM_STATS=1 RAE_MEM_STATS_EVERY_MS=2000 \
-             perl -e 'alarm shift; exec @ARGV' 150 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1 \
-             && [ "$(grep -c '^\[vehicle\] cycle' "$TMP_OUT/live-growth.log")" -ge 18 ] \
-             && [ "$(grep -c '^\[vehicle\] engine bytes between respawns' "$TMP_OUT/live-growth.log")" -ge 18 ] \
-             && [ "$(sed -n 's/^\[vehicle\] engine bytes between respawns //p' "$TMP_OUT/live-growth.log" | sort -u | wc -l)" -eq 1 ] \
-             && awk '
-                  function field(line, key) { sub(".*" key "=", "", line); sub(/ .*/, "", line); return line + 0 }
-                  /^\[mem:live\]/ {
-                    t = field($0, "t"); bufs = field($0, "bufs"); bytes = field($0, "buf_bytes")
-                    if (t >= 26000 && t < 50000) { baseSeen++; if (bufs > baseBufs) baseBufs = bufs; if (bytes > baseBytes) baseBytes = bytes }
-                    if (t >= 50000 && t < 74000) { lastSeen++; if (bufs > lastBufs) lastBufs = bufs; if (bytes > lastBytes) lastBytes = bytes }
-                  }
-                  END { exit !(baseSeen >= 10 && lastSeen >= 10 && lastBufs - baseBufs <= 64 && lastBytes - baseBytes <= 262144) }
-                ' "$TMP_OUT/live-growth.log"; then
+             perl -e 'alarm shift; exec @ARGV' 300 "$TMP_OUT/app") > "$TMP_OUT/live-growth.log" 2>&1; then
+            LIVE_STATUS=0
+          else
+            LIVE_STATUS=$?
+          fi
+          # Memory flat over the respawns, the samples grouped by cycle, not by wall time
+          # (tools/check_cycle_memory.py), so a loaded machine gives the same windows
+          if [ "$LIVE_STATUS" -eq 0 ] \
+             && python3 tools/check_cycle_memory.py "$TMP_OUT/live-growth.log" \
+                  --tag '[vehicle]' --engine '[vehicle] engine bytes between respawns' > "$TMP_OUT/live-growth-check.log" 2>&1; then
             :
           else
             VEHICLE_OK=0
-            echo "  live growth check failed (car + crates respawned every 4 s; the peak of a later window must match an earlier one):"
-            grep -a '^\[mem:live\]\|^\[vehicle\] \(cycle\|engine\)' "$TMP_OUT/live-growth.log" 2>/dev/null | tail -40 | sed 's/^/    /'
+            echo "  live growth check failed (car + crates respawned every 4 s; the peak after cycle 12 must match cycles 6-12):"
+            if [ "$LIVE_STATUS" -ne 0 ]; then
+              echo "    the run ended with exit code $LIVE_STATUS (142: the 300 s limit)"
+            fi
+            cat "$TMP_OUT/live-growth-check.log" 2>/dev/null
+            grep -a '^\[mem:live\]\|^\[vehicle\] \(cycle\|engine\)' "$TMP_OUT/live-growth.log" 2>/dev/null | tail -12 | sed 's/^/    /'
           fi
           if command -v leaks >/dev/null 2>&1; then
             (cd .. && RAE_VEHICLE_CYCLE_SECONDS=3 RAE_VEHICLE_AUTOPILOT=1 \
