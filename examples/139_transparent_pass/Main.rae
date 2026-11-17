@@ -16,6 +16,7 @@
 import Gpu2d
 import Sys
 import Vec3
+open app3d/UiShell
 open Gbuffer
 open Math3d
 open Mesh3d
@@ -127,7 +128,8 @@ func queueTransparents(transparent: mod TransparentPassCache, box: view MeshHand
 
 func main() ret Int {
   Gpu2d.initWindow(width: 960, height: 600, title: "139: Rae Transparent Pass — Deferred")
-  Gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
+  # 2D (the debug overlay) is drawn in the window's points (app3d/UiShell)
+  syncDesignResolution()
 
   let boxData: MeshData = makeBox(size: 1.0)
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
@@ -150,6 +152,9 @@ func main() ret Int {
   let fixedTestFrame: Bool = Sys.getEnv(name: "RAE_TRANSPARENT_TEST_FRAME").length() > 0
   var transparentFrames: Int = 0
   loop not Gpu2d.pollClose() {
+    if Gpu2d.windowResized() {
+      syncDesignResolution()
+    }
     let aspect: Float = Gpu2d.windowWidth().toFloat() / Gpu2d.windowHeight().toFloat()
     if Gpu2d.renderGate() {
       var passIndex: Int = 0

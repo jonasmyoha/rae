@@ -66,7 +66,6 @@ func buildScene(sphere: view MeshHandle, ground: view MeshHandle) ret World3d {
 
 func main() ret Int {
   Gpu2d.initWindow(width: 960, height: 600, title: "96: Rae Easing 3D — Deferred")
-  Gpu2d.setDesignResolution(width: 960.0, height: 600.0, fit: 0)
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let planeData: MeshData = makePlane(size: 30.0, segments: 1)
@@ -93,6 +92,8 @@ func main() ret Int {
   var uiSystems: UiSystems = createUiSystems()
   # #764: install the app's theme (palette + scene tokens) onto this world.
   seedWorldTheme(world: world, res: uiResources)
+  # The UI lays out in the window's points (app3d/UiShell), like every Rae UI
+  fitUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
     uiSystems: uiSystems
