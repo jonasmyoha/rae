@@ -1,0 +1,325 @@
+# Smooth zoom on a canvas (ui/canvasGestureSystem, CanvasControls.zoomEaseSeconds, keyZoom,
+# pinchCoasts), scripted and headless: a wheel notch eases the camera to its target in the set
+# time, the probe under the pointer staying within a hundredth of a pixel on every frame; zoom
+# keys pressed during an ease add to its target; a target past maxZoom stops there with no
+# frame beyond it; a pinch let go while zooming coasts, slows and stops, and one coasting toward
+# minZoom stops at it.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/CanvasComponents
+open ui/Components
+open ui/Ecs
+open ui/Transform
+open ui/UiSystems
+open ui/cameraSystem/CameraSystem
+open ui/canvasGestureSystem/CanvasGestureSystem
+open ui/InputSystem
+open ui/LayoutSystem
+
+const frame: Float = 0.016666668
+
+func node(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parent: view EntityId
+  x: view Float
+  y: view Float
+  w: view Float
+  h: view Float
+) ret EntityId {
+  let entityId: EntityId = createEntity(world: world)
+  world.rects.componentSet(
+    entityId: entityId
+    data: { position: { x: x, y: y }, size: { x: w, y: h } }
+  )
+  if not isNone(this: parent) {
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: entityId
+      parent: parent
+    )
+  }
+  ret entityId
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  cameraSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  hitIndexSync(world: world, uiSystems: uiSystems)
+}
+
+func step(world: mod UiWorld, uiSystems: mod UiSystems, gestures: view CanvasGestures) {
+  canvasGestureSystem(world: world, uiSystems: uiSystems, gestures: gestures)
+  place(world: world, uiSystems: uiSystems)
+}
+
+func at(uiSystems: view UiSystems, entityId: view EntityId) ret Vec2 {
+  ret componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId).position
+}
+
+func hundredths(value: view Float) ret Int {
+  ret Math.round(x: Math.abs(value: value) * 100.0) as Int
+}
+
+# How far (hundredths of a pixel) the probe moved from the pointer after one frame of `gestures`
+func probeDrift(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  probe: view EntityId
+  gestures: view CanvasGestures
+) ret Int {
+  let before: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  var moved: CanvasGestures = gestures
+  moved.x = before.x
+  moved.y = before.y
+  step(world: world, uiSystems: uiSystems, gestures: moved)
+  let after: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  ret Math.max(a: hundredths(value: after.x - before.x), b: hundredths(value: after.y - before.y))
+}
+
+func zoomOf(world: view UiWorld, canvas: view EntityId) ret String {
+  let camera: view Camera2D = componentView(this: world.cameras, entityId: canvas)
+  let thousandths: Int = Math.round(x: camera.zoom * 1000.0) as Int
+  let fraction: Int = thousandths % 1000
+  var padded: String = "{fraction}"
+  if fraction < 10 {
+    padded = "00{fraction}"
+  } else if fraction < 100 {
+    padded = "0{fraction}"
+  }
+  ret "{thousandths / 1000}.{padded}"
+}
+
+func offsetOf(world: view UiWorld, canvas: view EntityId) ret String {
+  let camera: view Camera2D = componentView(this: world.cameras, entityId: canvas)
+  ret "{Math.round(x: camera.offsetX) as Int}, {Math.round(x: camera.offsetY) as Int}"
+}
+
+func zoomOfCamera(world: view UiWorld, canvas: view EntityId) ret Float {
+  ret componentView(this: world.cameras, entityId: canvas).zoom
+}
+
+func controlState(world: view UiWorld, canvas: view EntityId) ret CanvasControlState {
+  if let state: CanvasControlState = componentCopy(
+    this: world.canvasControlStates
+    entityId: canvas
+  ) {
+    ret state
+  }
+  ret CanvasControlState {}
+}
+
+# Frames with no input until the ease ends (at most `limit`): how many, and the probe's largest
+# drift from `anchor` (hundredths of a pixel) on any of them
+type EaseRun {
+  frames: Int
+  drift: Int
+  highest: Float
+}
+
+func easeUntilDone(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  canvas: view EntityId
+  probe: view EntityId
+  anchor: view Vec2
+  limit: view Int
+) ret EaseRun {
+  var run: EaseRun = { frames: 0, drift: 0, highest: 0.0 }
+  loop run.frames < limit and controlState(world: world, canvas: canvas).easing {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: anchor.x, y: anchor.y, deltaTime: frame }
+    )
+    run.frames = run.frames + 1
+    let now: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+    run.drift = Math.max(
+      a: run.drift
+      b: Math.max(a: hundredths(value: now.x - anchor.x), b: hundredths(value: now.y - anchor.y))
+    )
+    run.highest = Math.max(a: run.highest, b: zoomOfCamera(world: world, canvas: canvas))
+  }
+  ret run
+}
+
+func main() ret Int {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let page: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: noEntity()
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 600.0
+  )
+  let canvas: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: page
+    x: 50.0
+    y: 40.0
+    w: 700.0
+    h: 520.0
+  )
+  world.cameras.componentSet(entityId: canvas, data: { zoom: 1.0, offsetX: 0.0, offsetY: 0.0 })
+  world.canvasControls.componentSet(
+    entityId: canvas
+    data: {
+      minZoom: 0.5
+      maxZoom: 3.0
+      zoomEaseSeconds: 0.2
+      keyZoom: 1.25
+      pinchCoasts: true
+    }
+  )
+  let probe: EntityId = node(
+    world: world
+    uiSystems: uiSystems
+    parent: canvas
+    x: 333.3
+    y: 222.2
+    w: 1.0
+    h: 1.0
+  )
+  place(world: world, uiSystems: uiSystems)
+
+  # three wheel notches with the modifier, the pointer on the probe
+  let anchor: Vec2 = at(uiSystems: uiSystems, entityId: probe)
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: {
+      x: anchor.x
+      y: anchor.y
+      wheel: 3.0
+      zoomModifier: true
+      deltaTime: frame
+    }
+  )
+  let first: Float = zoomOfCamera(world: world, canvas: canvas)
+  let notch: EaseRun = easeUntilDone(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    probe: probe
+    anchor: anchor
+    limit: 100
+  )
+  log(
+    "3 notches: the first frame at zoom {Math.round(x: first * 1000.0) / 1000.0} (between 1 and 1.331: {first > 1.0 and first < 1.331}), at 1.331 after {notch.frames + 1} frames of 1/60 s, the probe at most {notch.drift} hundredths of a pixel off on any frame"
+  )
+  log("  then zoom {Math.round(x: zoomOfCamera(world: world, canvas: canvas) * 1000.0) / 1000.0}")
+
+  # a zoom key, and another while it eases: the target is both steps on
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: anchor.x, y: anchor.y, zoomKeys: 1, deltaTime: frame }
+  )
+  step(world: world, uiSystems: uiSystems, gestures: { x: anchor.x, y: anchor.y, deltaTime: frame })
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: { x: anchor.x, y: anchor.y, zoomKeys: 1, deltaTime: frame }
+  )
+  let keys: EaseRun = easeUntilDone(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    probe: probe
+    anchor: anchor
+    limit: 100
+  )
+  log(
+    "2 zoom key presses, the second mid-ease: zoom {Math.round(
+      x: zoomOfCamera(world: world, canvas: canvas) * 1000.0
+    ) / 1000.0} (1.331 x 1.25 x 1.25 = 2.080), the probe at most {keys.drift} hundredths off"
+  )
+
+  # a notch far past maxZoom: it eases to 3 and no frame goes past it
+  step(
+    world: world
+    uiSystems: uiSystems
+    gestures: {
+      x: anchor.x
+      y: anchor.y
+      wheel: 20.0
+      zoomModifier: true
+      deltaTime: frame
+    }
+  )
+  let past: EaseRun = easeUntilDone(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    probe: probe
+    anchor: anchor
+    limit: 100
+  )
+  log(
+    "20 notches in: zoom {zoomOfCamera(world: world, canvas: canvas)}, the highest on any frame {past.highest}"
+  )
+
+  # a pinch out over 5 frames, let go: it coasts on, slows and stops
+  loop var i: Int = 0, i < 5, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: anchor.x, y: anchor.y, pinch: 0.97, deltaTime: frame }
+    )
+  }
+  let released: Float = zoomOfCamera(world: world, canvas: canvas)
+  var coasted: Int = 0
+  var still: Float = released
+  loop var i: Int = 0, i < 300, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: anchor.x, y: anchor.y, deltaTime: frame }
+    )
+    let now: Float = zoomOfCamera(world: world, canvas: canvas)
+    if now is not still {
+      coasted = coasted + 1
+    }
+    still = now
+  }
+  log(
+    "a pinch out let go at zoom {Math.round(x: released * 1000.0) / 1000.0}: it coasted {coasted} frames to {Math.round(
+      x: still * 1000.0
+    ) / 1000.0} and stopped: {controlState(world: world, canvas: canvas).zoomCoasting is false}"
+  )
+
+  # a fast pinch out toward minZoom: the coast stops at 0.5
+  loop var i: Int = 0, i < 5, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: anchor.x, y: anchor.y, pinch: 0.8, deltaTime: frame }
+    )
+  }
+  var lowest: Float = zoomOfCamera(world: world, canvas: canvas)
+  loop var i: Int = 0, i < 300, ++i {
+    step(
+      world: world
+      uiSystems: uiSystems
+      gestures: { x: anchor.x, y: anchor.y, deltaTime: frame }
+    )
+    lowest = Math.min(a: lowest, b: zoomOfCamera(world: world, canvas: canvas))
+  }
+  log(
+    "a fast pinch out: zoom {zoomOfCamera(world: world, canvas: canvas)}, the lowest on any frame {lowest}, coasting {controlState(
+      world: world
+      canvas: canvas
+    ).zoomCoasting}"
+  )
+  ret 0
+}

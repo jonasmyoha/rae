@@ -50,11 +50,110 @@ func canvasGesturesFrom(
       key: keyLCtrl
     ) or Sdl3.isKeyDown(key: keyRCtrl)
     pinch: input.pinch
+    zoomKeys: canvasZoomKeys()
     twoFingers: input.twoFingers
     twoFingerX: input.twoFingerX
     twoFingerY: input.twoFingerY
     twoFingerScale: input.twoFingerScale
     deltaTime: deltaTime
+  }
+}
+
+# This frame's zoom key presses: `=` a step in, `-` a step out, with no
+# modifier held (Ctrl/Cmd + - is the user zoom, ui/UiZoom)
+func canvasZoomKeys() ret Int {
+  if Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui) or Sdl3.isKeyDown(key: keyLCtrl) or Sdl3.isKeyDown(
+    key: keyRCtrl
+  ) {
+    ret 0
+  }
+  var steps: Int = 0
+  if Sdl3.isKeyPressed(key: keyEquals) {
+    steps = steps + 1
+  }
+  if Sdl3.isKeyPressed(key: keyMinus) {
+    steps = steps - 1
+  }
+  ret steps
+}
+
+# A pinch's zoom speed below this (the zoom's natural log a second) does not coast, and a coasting
+# zoom stops below the second
+const canvasZoomCoastStart: Float = 0.3
+
+const canvasZoomCoastStop: Float = 0.05
+
+# The share of an eased zoom done at `progress` (0..1) of its time: a cubic ease-out, fast at
+# first and settling
+func canvasEaseOut(progress: view Float) ret Float {
+  let left: Float = 1.0 - Math.min(a: 1.0, b: Math.max(a: 0.0, b: progress))
+  ret 1.0 - left * left * left
+}
+
+# A zoom step by `factor` about (x, y): eased toward a target when the controls ask for it (a new
+# step during an ease starts again from where the camera is, toward the further target), else at
+# once
+func canvasZoomStep(
+  camera: mod Camera2D
+  state: mod CanvasControlState
+  controls: view CanvasControls
+  base: view CanvasBase
+  factor: view Float
+  x: view Float
+  y: view Float
+) {
+  if controls.zoomEaseSeconds <= 0.0 {
+    canvasZoomAbout(
+      camera: camera
+      controls: controls
+      base: base
+      factor: factor
+      x: x
+      y: y
+    )
+    ret
+  }
+  var target: Float = camera.zoom * factor
+  if state.easing {
+    target = state.easeTo * factor
+  }
+  state.easing = true
+  state.easeFrom = camera.zoom
+  state.easeTo = Math.max(a: controls.minZoom, b: Math.min(a: controls.maxZoom, b: target))
+  state.easeTime = 0.0
+  state.easeX = x
+  state.easeY = y
+  state.zoomCoasting = false
+}
+
+# One frame of an eased zoom: the camera at the eased zoom between its from and its target (in
+# the zoom's log, so each frame is the same share of a step), about the ease's point
+func canvasEaseFrame(
+  camera: mod Camera2D
+  state: mod CanvasControlState
+  controls: view CanvasControls
+  base: view CanvasBase
+  deltaTime: view Float
+) {
+  state.easeTime = state.easeTime + deltaTime
+  let progress: Float = state.easeTime / Math.max(a: 0.0001, b: controls.zoomEaseSeconds)
+  let share: Float = canvasEaseOut(progress: progress)
+  var zoom: Float = state.easeFrom * Math.exp(
+    x: Math.naturalLog(x: state.easeTo / state.easeFrom) * share
+  )
+  if progress >= 1.0 {
+    zoom = state.easeTo
+    state.easing = false
+  }
+  if camera.zoom > 0.0 {
+    canvasZoomAbout(
+      camera: camera
+      controls: controls
+      base: base
+      factor: zoom / camera.zoom
+      x: state.easeX
+      y: state.easeY
+    )
   }
 }
 
@@ -467,8 +566,9 @@ func canvasGestureStep(
   # the wheel: with the modifier it zooms about the pointer, without it pans
   if gestures.wheel is not 0.0 or gestures.wheelX is not 0.0 {
     if gestures.zoomModifier {
-      canvasZoomAbout(
+      canvasZoomStep(
         camera: camera
+        state: state
         controls: controls
         base: base
         factor: Math.pow(base: controls.wheelZoom, exp: gestures.wheel)
@@ -484,8 +584,34 @@ func canvasGestureStep(
       )
     }
   }
-  # a trackpad's pinch zooms about the pointer
+  # the zoom keys step about the pointer
+  if gestures.zoomKeys is not 0 {
+    canvasZoomStep(
+      camera: camera
+      state: state
+      controls: controls
+      base: base
+      factor: Math.pow(base: controls.keyZoom, exp: gestures.zoomKeys.toFloat())
+      x: gestures.x
+      y: gestures.y
+    )
+  }
+  if state.easing {
+    canvasEaseFrame(
+      camera: camera
+      state: state
+      controls: controls
+      base: base
+      deltaTime: deltaTime
+    )
+  }
+  # a trackpad's pinch zooms about the pointer, two touch fingers about their middle (above);
+  # both follow the fingers 1:1, and their speed is kept for a coast when they let go
+  var pinchFactor: Float = 1.0
+  var pinchAtX: Float = gestures.x
+  var pinchAtY: Float = gestures.y
   if gestures.pinch is not 1.0 and gestures.pinch > 0.0 {
+    pinchFactor = gestures.pinch
     canvasZoomAbout(
       camera: camera
       controls: controls
@@ -494,7 +620,21 @@ func canvasGestureStep(
       x: gestures.x
       y: gestures.y
     )
+  } else if gestures.twoFingers and gestures.twoFingerScale > 0.0 {
+    pinchFactor = gestures.twoFingerScale
+    pinchAtX = gestures.twoFingerX
+    pinchAtY = gestures.twoFingerY
   }
+  canvasPinchCoast(
+    camera: camera
+    state: state
+    controls: controls
+    base: base
+    factor: pinchFactor
+    x: pinchAtX
+    y: pinchAtY
+    deltaTime: deltaTime
+  )
   # written only when it changed, so a still canvas leaves the camera's table alone
   var changed: Bool = true
   if let known: Camera2D = componentCopy(this: world.cameras, entityId: entityId) {
@@ -530,5 +670,62 @@ func canvasGestureSystem(
       entityId: entityId
       gestures: gestures
     )
+  }
+}
+
+# A pinch's momentum (pinchCoasts): while it zooms its speed is measured, smoothed over the last
+# frames; when it stops while still fast, the zoom keeps that speed about the same point and slows
+# with `friction` until it is slow, or until it meets minZoom or maxZoom, where it stops
+func canvasPinchCoast(
+  camera: mod Camera2D
+  state: mod CanvasControlState
+  controls: view CanvasControls
+  base: view CanvasBase
+  factor: view Float
+  x: view Float
+  y: view Float
+  deltaTime: view Float
+) {
+  if not controls.pinchCoasts {
+    ret
+  }
+  if factor is not 1.0 {
+    let speed: Float = Math.naturalLog(x: factor) / deltaTime
+    if state.pinching {
+      state.zoomSpeed = state.zoomSpeed * 0.5 + speed * 0.5
+    } else {
+      state.zoomSpeed = speed
+    }
+    state.pinching = true
+    state.zoomCoasting = false
+    state.easing = false
+    state.pinchX = x
+    state.pinchY = y
+    ret
+  }
+  if state.pinching {
+    state.pinching = false
+    state.zoomCoasting = Math.abs(value: state.zoomSpeed) >= canvasZoomCoastStart
+    if not state.zoomCoasting {
+      state.zoomSpeed = 0.0
+    }
+    ret
+  }
+  if not state.zoomCoasting {
+    ret
+  }
+  let before: Float = camera.zoom
+  canvasZoomAbout(
+    camera: camera
+    controls: controls
+    base: base
+    factor: Math.exp(x: state.zoomSpeed * deltaTime)
+    x: state.pinchX
+    y: state.pinchY
+  )
+  state.zoomSpeed = state.zoomSpeed * Math.exp(x: 0.0 - controls.friction * deltaTime)
+  if camera.zoom is before or Math.abs(value: state.zoomSpeed) < canvasZoomCoastStop {
+    state.zoomCoasting = false
+    state.zoomSpeed = 0.0
   }
 }

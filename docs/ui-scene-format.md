@@ -1364,6 +1364,17 @@ Each frame, after `updateUiInput`, the app runs
 - A trackpad's pinch, and the wheel with Ctrl or Command held, zoom about the pointer
   (`wheelZoom` a notch, within `minZoom`..`maxZoom`); the canvas point under the pointer stays
   where it is. Two fingers on a touch screen zoom about their middle and pan with it.
+- Smooth zoom (all off by default, so the zoom jumps as before):
+  - `zoomEaseSeconds` (0): a wheel notch or a zoom key sets a target zoom that the camera
+    eases to over this time (a cubic ease-out, even steps in the zoom's log), the canvas point
+    under the pointer staying put on every frame of it. A notch during an ease starts again
+    from where the camera is, toward the target moved by one more step; a target past
+    `minZoom` or `maxZoom` stops there, with no frame beyond it.
+  - `keyZoom` (1.25): the zoom step of `=` (in) and `-` (out), with no modifier held
+    (Ctrl/Cmd + - is the user zoom, ui/UiZoom), about the pointer.
+  - `pinchCoasts` (false): a pinch follows the fingers 1:1, and let go while zooming it keeps
+    its zoom speed about the same point and slows with `friction`, as a released pan coasts;
+    it stops when slow, or at `minZoom` / `maxZoom`.
 - The wheel without the modifier pans (`wheelPan` points a notch, down and sideways).
 - A drag on the canvas (on nothing clickable inside its box, or on a node of it that is not
   draggable) pans it. Let go while moving, it coasts and slows (`friction`); a tap stops it.
@@ -1481,6 +1492,6 @@ is a node canvas with both, `F` switching between them; case 1526 checks
 each mode's size on screen at zoom 0.25, 1 and 4, the pivot, a fixed node's
 child and a cross-fade.
 
-A camera's zoom still moves in steps: a wheel notch or a pinch sets it
-directly (ui/CanvasComponents).
+A camera's zoom eases and coasts with `CanvasControls.zoomEaseSeconds` and
+`pinchCoasts` (§41); example 152 uses both.
 

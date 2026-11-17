@@ -1,7 +1,10 @@
 # A zooming node canvas, in two feels (docs/ui-scene-format.md "ZoomBehavior").
 #
 # Six nodes joined by wires on a Camera2D canvas: pinch, or the wheel with
-# Ctrl/Cmd held, zooms about the pointer; a drag pans (ui/CanvasComponents).
+# Ctrl/Cmd held, or `=` and `-` zoom about the pointer; a drag pans
+# (ui/CanvasComponents). A wheel notch or a key eases the zoom over 0.2 s, the
+# point under the pointer staying put; a pinch follows the fingers and, let go
+# while zooming, coasts and slows.
 # Every node has a title, a summary (a colored block, for far away) and
 # details (its parameters, for close up), and two ports. `F` switches the feel:
 #
@@ -22,6 +25,10 @@
 #   RAE_ZOOM_CANVAS_ZOOM=0.25 RAE_ZOOM_CANVAS_FEEL=analytical \
 #     RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/zoom.bmp \
 #     compiler/bin/rae run examples/152_zoomCanvas/Main.rae
+#
+# RAE_ZOOM_CANVAS_NOTCHES=<n> scrolls n wheel notches in (out when below 0)
+# about the window's middle on frame 3, so a headless run with RAE_FIXED_DT
+# can stop mid-ease (RAE_HEADLESS_FRAMES).
 import Gpu2d
 import Math
 import Keys
@@ -39,6 +46,7 @@ open ui/RenderSystem
 open ui/SceneFile
 open ui/SceneLoader
 open ui/ThemeParse
+open ui/CanvasComponents
 open ui/UiSystems
 open ui/canvasGestureSystem/CanvasGestureSystem
 open ui/wireSystem/WireSystem
@@ -156,7 +164,7 @@ func hudText(world: view UiWorld, zoomy: view Bool) ret String {
   if zoomy {
     feel = "zoomy"
   }
-  ret "{feel} feel, zoom {Math.round(x: zoom * 100.0).toInt()} %   F switches the feel; pinch or Ctrl/Cmd + wheel zooms"
+  ret "{feel} feel, zoom {Math.round(x: zoom * 100.0).toInt()} %   F switches the feel; pinch, Ctrl/Cmd + wheel, = and - zoom"
 }
 
 func main() ret Int {
@@ -197,21 +205,27 @@ func main() ret Int {
   var schedule: Schedule = createUiPipeline(world: world)
   var input: UiInput = createUiInput()
   var lastFrame: Float64 = Gpu2d.nowSeconds()
+  let scriptedNotches: Float = getEnv(name: "RAE_ZOOM_CANVAS_NOTCHES").toFloat()
+  var frames: Int = 0
   loop not Gpu2d.pollClose() {
+    frames = frames + 1
     let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: gpuUi)
     updateUiInput(input: input, world: world, uiSystems: uiSystems)
     let now: Float64 = Gpu2d.nowSeconds()
     let deltaTime: Float = (now - lastFrame) as Float
     lastFrame = now
-    canvasGestureSystem(
-      world: world
-      uiSystems: uiSystems
-      gestures: canvasGesturesFrom(
-        input: input
-        canvasEntityId: nodeOf(world: world, nodeId: "Canvas")
-        deltaTime: deltaTime
-      )
+    var gestures: CanvasGestures = canvasGesturesFrom(
+      input: input
+      canvasEntityId: nodeOf(world: world, nodeId: "Canvas")
+      deltaTime: deltaTime
     )
+    if frames is 3 and scriptedNotches is not 0.0 {
+      gestures.wheel = scriptedNotches
+      gestures.zoomModifier = true
+      gestures.x = world.layoutW / 2.0
+      gestures.y = world.layoutH / 2.0
+    }
+    canvasGestureSystem(world: world, uiSystems: uiSystems, gestures: gestures)
     if Sdl3.isKeyPressed(key: Keys.keyF) {
       zoomy = zoomy is false
       applyFeel(world: world, zoomy: zoomy)

@@ -17,6 +17,14 @@ type CanvasControls {
   friction: Float = 4.0
   # how close an edge snaps, in screen points (0: no snapping)
   snapDistance: Float = 6.0
+  # a wheel notch or a zoom key eases the camera to its new zoom over this
+  # many seconds, the point under the pointer staying put (0: it jumps there)
+  zoomEaseSeconds: Float = 0.0
+  # the zoom change of one press of a zoom key (`=` in, `-` out)
+  keyZoom: Float = 1.25
+  # a pinch let go while zooming keeps its zoom speed and slows with
+  # `friction`, as a released pan coasts
+  pinchCoasts: Bool = false
 }
 
 # A node the canvas's drag moves (its Rect), rather than panning the canvas
@@ -38,6 +46,8 @@ type CanvasGestures {
   zoomModifier: Bool = false
   # a trackpad pinch's scale change this frame (1: none)
   pinch: Float = 1.0
+  # zoom key presses this frame: +1 a step in (`=`), -1 a step out (`-`)
+  zoomKeys: Int = 0
   # two fingers on a touch screen: their middle and how much their spread grew (1: none)
   twoFingers: Bool = false
   twoFingerX: Float = 0.0
@@ -59,6 +69,21 @@ type CanvasControlState {
   twoFingersDown: Bool = false
   fingersX: Float = 0.0
   fingersY: Float = 0.0
+  # an eased zoom (zoomEaseSeconds): from and to, how far in, and the screen
+  # point it is about
+  easing: Bool = false
+  easeFrom: Float = 1.0
+  easeTo: Float = 1.0
+  easeTime: Float = 0.0
+  easeX: Float = 0.0
+  easeY: Float = 0.0
+  # a pinch's zoom speed (the zoom's natural log a second), the point it is
+  # about, and whether it is pinching now or coasting after it (pinchCoasts)
+  zoomSpeed: Float = 0.0
+  pinching: Bool = false
+  zoomCoasting: Bool = false
+  pinchX: Float = 0.0
+  pinchY: Float = 0.0
   # a node being dragged: it, where the press began, and its Rect then
   dragEntityId: EntityId = noEntity()
   pressX: Float = 0.0

@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.9, 2026-11-17: smooth canvas zoom
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.9` moves a project.
+
+- `CanvasControls.zoomEaseSeconds`: a wheel notch or a zoom key eases the camera to its
+  target zoom, the point under the pointer staying put on every frame; `keyZoom` is the step
+  of the new `=` / `-` zoom keys (`CanvasGestures.zoomKeys`); `pinchCoasts` lets a released
+  pinch keep its zoom speed and slow with `friction`. All off by default
+  (docs/ui-scene-format.md §41). Example 152 uses them.
+
 ## 0.4.8, 2026-11-17: zoom behavior per node
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.8` moves a project.
