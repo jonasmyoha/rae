@@ -5,10 +5,11 @@
 # overlap — all from one instanced draw with analytic antialiasing (no MSAA),
 # crisp at any size. Example 102 animates this same dashboard.
 #
-# The whole thing is authored against a fixed 1280x800 DESIGN canvas and
-# scaled to fill the window, so it looks right at any size or pixel density
-# (see example 104 for the coordinate system itself). The window remembers its
-# size and position across restarts.
+# It lays out in the window's points (docs/ui-coordinate-and-responsive-
+# layout.md): the header and the 3 x 2 grid of panels share the window's
+# width and height, so a bigger window shows bigger panels, not a bigger
+# drawing (see example 104 for the coordinate system itself). The window
+# remembers its size and position across restarts.
 #
 # Compiled-target only; needs wgpu-native + SDL3.
 #   rae run --target compiled --project examples/101_gpu2d_vector main.rae
@@ -16,11 +17,7 @@ import Gpu2d
 import Math
 open ui/WindowGeometry
 open Gpu2dCanvas
-
-# --- Design canvas -----------------------------------------------------------
-const canvasW: Float = 1280.0
-
-const canvasH: Float = 800.0
+open app3d/UiShell
 
 # --- Palette (0xAARRGGBB) ----------------------------------------------------
 const ink: Int = 0xFF0B0E14  # page background, dark
@@ -577,11 +574,17 @@ func main() ret Int {
     name: "window.gpu2dVector.geometry"
   )
   restoreWindowGeometry(windowGeometry: windowGeometry)
-  Gpu2d.setDesignResolution(width: canvasW, height: canvasH, fit: 0)
+  # Drawn in the window's points (app3d/UiShell), kept in step on resize
+  syncDesignResolution()
 
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     let resized: Bool = Gpu2d.windowResized()
+    if resized {
+      syncDesignResolution()
+    }
+    let canvasW: Float = windowExtentW()
+    let canvasH: Float = windowExtentH()
     Gpu2d.beginFrame(
       canvas: canvas
       r: 0.043

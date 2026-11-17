@@ -1,27 +1,211 @@
 # 2D Renderer — Step 4: Coordinate system (#112).
 #
-# Visualizes the three coordinate layers from
-# docs/ui-coordinate-and-responsive-layout.md:
+# Shows the one coordinate model of every Rae program
+# (docs/ui-coordinate-and-responsive-layout.md):
 #
-#   design units  --(scale + offset, "fit")-->  physical px  -->  clip space
+#   points (design units)  --(x dpr)-->  physical pixels  -->  clip space
 #
-# It shows Gpu2d's low-level fixed-canvas transform: a fixed 1080x720 design
-# canvas scaled to fit the OS window (letterboxing on the short axis), with the
-# display's DPI applied. That is NOT how a Rae UI is laid out: the standard
-# (docs/ui-coordinate-and-responsive-layout.md, rules 1-6) is du, 3 per point,
-# with the layout filling the window and a fixed area only as a ScaleToFit
-# subtree. [ui coords 6/7] turns this example into a demonstration of du. Resize the window: the
-# grid + content keep
-# their proportions and the dark letterbox bars grow/shrink. The clear color
-# is the area OUTSIDE the design canvas; the canvas fill shows the 1080x720
-# design region; the grid lines mark every 120 design units.
+# The window is drawn in its own points, origin top-left, y down: the grid
+# behind everything marks every 50 pt (a line every 100 pt is labeled), and the
+# header line says how many points and pixels the window has and how many
+# pixels a point is (the display's dpr). Resize the window: it shows more grid,
+# never a bigger one.
+#
+# Inside it, a fixed 1080x720 area (a game table, a splash, any art drawn at its
+# own size) is drawn as a stage: Gpu2dCanvas canvasPushStage with stageFit,
+# contained in the window below the header. Its own coordinates, its 120-unit
+# grid, its 48-unit safe inset and its centered card scale as one block, the
+# way a ScaleToFit subtree does in a .raescene (rule 3).
 #
 # Compiled-target only; needs wgpu-native + SDL3.
-#   rae run --target compiled examples/104_gpu2d_coords/main.rae
+#   rae run --target compiled examples/104_gpu2d_coords/Main.rae
 import Gpu2d
 import Gpu2dText
+import Math
 import SdfText
 open Gpu2dCanvas
+open app3d/UiShell
+
+const stageW: Float = 1080.0
+
+const stageH: Float = 720.0
+
+# How far below the window's top the stage's box starts (the header's room)
+const headerH: Float = 80.0
+
+# The window's points grid: a line every 50 pt, labeled every 100 pt
+func drawPointsGrid(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  w: view Float
+  h: view Float
+) {
+  var x: Float = 0.0
+  loop x <= w {
+    var color: Int = 0x18557088
+    if (x.toInt() % 100) is 0 {
+      color = 0x40789CC0
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: font
+        text: "{x.toInt()}"
+        x: x + 3.0
+        y: h - 6.0
+        sizePx: 11.0
+        color: 0x80AEB8CC
+      )
+    }
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: x
+      y0: 0.0
+      x1: x
+      y1: h
+      thickness: 1.0
+      color: color
+    )
+    x = x + 50.0
+  }
+  var y: Float = 0.0
+  loop y <= h {
+    var color: Int = 0x18557088
+    if (y.toInt() % 100) is 0 {
+      color = 0x40789CC0
+      Gpu2dText.drawText(
+        canvas: canvas
+        font: font
+        text: "{y.toInt()}"
+        x: 3.0
+        y: y - 3.0
+        sizePx: 11.0
+        color: 0x80AEB8CC
+      )
+    }
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: 0.0
+      y0: y
+      x1: w
+      y1: y
+      thickness: 1.0
+      color: color
+    )
+    y = y + 50.0
+  }
+  # The origin, top-left
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 12.0
+    h: 12.0
+    color: 0xFFEF5350
+  )
+}
+
+# The fixed 1080x720 area, in its own coordinates (drawn inside a stage)
+func drawStageArea(canvas: mod Gpu2dCanvas, font: view SdfFont) {
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: stageW
+    h: stageH
+    color: 0xFF0E131C
+  )
+  var gx: Float = 0.0
+  loop gx <= stageW {
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: gx
+      y0: 0.0
+      x1: gx
+      y1: stageH
+      thickness: 1.5
+      color: 0x22557088
+    )
+    gx = gx + 120.0
+  }
+  var gy: Float = 0.0
+  loop gy <= stageH {
+    Gpu2d.drawLine(
+      canvas: canvas
+      x0: 0.0
+      y0: gy
+      x1: stageW
+      y1: gy
+      thickness: 1.5
+      color: 0x22557088
+    )
+    gy = gy + 120.0
+  }
+  # Its 48-unit safe inset, outlined
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: 48.0
+    y: 48.0
+    w: stageW - 96.0
+    h: stageH - 96.0
+    radius: 16.0
+    fill: 0x00000000
+    borderWidth: 2.0
+    border: 0xFFFFB300
+  )
+  # Its centered card
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: 360.0
+    y: 250.0
+    w: 360.0
+    h: 220.0
+    radius: 20.0
+    fill: 0xFF1B2E4A
+    borderWidth: 2.0
+    border: 0xFF4F8DF7
+  )
+  Gpu2dText.drawText(
+    canvas: canvas
+    font: font
+    text: "stage 1080 x 720 (its own units)"
+    x: 392.0
+    y: 370.0
+    sizePx: 22.0
+    color: 0xFF9FC0FF
+  )
+  # Its corners
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 24.0
+    h: 24.0
+    color: 0xFFEF5350
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: stageW - 24.0
+    y: 0.0
+    w: 24.0
+    h: 24.0
+    color: 0xFF42A5F5
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: 0.0
+    y: stageH - 24.0
+    w: 24.0
+    h: 24.0
+    color: 0xFF42A5F5
+  )
+  Gpu2d.drawRect(
+    canvas: canvas
+    x: stageW - 24.0
+    y: stageH - 24.0
+    w: 24.0
+    h: 24.0
+    color: 0xFF42A5F5
+  )
+}
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1000, height: 640, title: "104: Rae 2D — coordinate system")
@@ -31,12 +215,15 @@ func main() ret Int {
     jsonPath: "{dir}assets/Roboto-Regular.mtsdf.json"
     rawAtlasPath: "{dir}assets/Roboto-Regular.mtsdf.raw"
   )
-
-  # Author against a fixed 1080x720 design canvas, letterboxed to fit.
-  Gpu2d.setDesignResolution(width: 1080.0, height: 720.0, fit: 0)
+  # Drawn in the window's points (app3d/UiShell), kept in step on resize
+  syncDesignResolution()
 
   loop not Gpu2d.pollClose() {
-    # Clear color = the region OUTSIDE the design canvas (the bars).
+    if Gpu2d.windowResized() {
+      syncDesignResolution()
+    }
+    let w: Float = windowExtentW()
+    let h: Float = windowExtentH()
     Gpu2d.beginFrame(
       canvas: canvas
       r: 0.02
@@ -44,198 +231,42 @@ func main() ret Int {
       b: 0.03
       a: 1.0
     )
-
-    # The design canvas itself (0,0)-(1080,720).
-    Gpu2d.drawRect(
-      canvas: canvas
-      x: 0.0
-      y: 0.0
-      w: 1080.0
-      h: 720.0
-      color: 0xFF0E131C
-    )
-
-    # Minor grid every 120 du, major lines every 240 du — Gpu2d.drawLine.
-    var gx: Float = 0.0
-    loop gx <= 1080.0 {
-      Gpu2d.drawLine(
-        canvas: canvas
-        x0: gx
-        y0: 0.0
-        x1: gx
-        y1: 720.0
-        thickness: 1.5
-        color: 0x22557088
-      )
-      gx = gx + 120.0
-    }
-    var gy: Float = 0.0
-    loop gy <= 720.0 {
-      Gpu2d.drawLine(
-        canvas: canvas
-        x0: 0.0
-        y0: gy
-        x1: 1080.0
-        y1: gy
-        thickness: 1.5
-        color: 0x22557088
-      )
-      gy = gy + 120.0
-    }
-    var mx: Float = 0.0
-    loop mx <= 1080.0 {
-      Gpu2d.drawLine(
-        canvas: canvas
-        x0: mx
-        y0: 0.0
-        x1: mx
-        y1: 720.0
-        thickness: 2.0
-        color: 0x66789CC0
-      )
-      mx = mx + 240.0
-    }
-    var my: Float = 0.0
-    loop my <= 720.0 {
-      Gpu2d.drawLine(
-        canvas: canvas
-        x0: 0.0
-        y0: my
-        x1: 1080.0
-        y1: my
-        thickness: 2.0
-        color: 0x66789CC0
-      )
-      my = my + 240.0
-    }
-    # Diagonals across the canvas — show drawLine works at any angle.
-    Gpu2d.drawLine(
-      canvas: canvas
-      x0: 0.0
-      y0: 0.0
-      x1: 1080.0
-      y1: 720.0
-      thickness: 2.0
-      color: 0x33EF5350
-    )
-    Gpu2d.drawLine(
-      canvas: canvas
-      x0: 1080.0
-      y0: 0.0
-      x1: 0.0
-      y1: 720.0
-      thickness: 2.0
-      color: 0x3342A5F5
-    )
-
-    # Safe-area inset (48 du) — outline only (transparent fill + border).
-    Gpu2d.drawBox(
-      canvas: canvas
-      x: 48.0
-      y: 48.0
-      w: 984.0
-      h: 624.0
-      radius: 16.0
-      fill: 0x00000000
-      borderWidth: 2.0
-      border: 0xFFFFB300
-    )
-
-    # Centered content card (in design units; stays centered at any window size).
-    Gpu2d.drawBox(
-      canvas: canvas
-      x: 360.0
-      y: 250.0
-      w: 360.0
-      h: 220.0
-      radius: 20.0
-      fill: 0xFF1B2E4A
-      borderWidth: 2.0
-      border: 0xFF4F8DF7
-    )
-
-    # Corner + origin markers (design-canvas extremes).
-    Gpu2d.drawRect(
-      canvas: canvas
-      x: 0.0
-      y: 0.0
-      w: 24.0
-      h: 24.0
-      color: 0xFFEF5350
-    )
-    # origin (0,0)
-    Gpu2d.drawRect(
-      canvas: canvas
-      x: 1056.0
-      y: 0.0
-      w: 24.0
-      h: 24.0
-      color: 0xFF42A5F5
-    )
-    Gpu2d.drawRect(
-      canvas: canvas
-      x: 0.0
-      y: 696.0
-      w: 24.0
-      h: 24.0
-      color: 0xFF42A5F5
-    )
-    Gpu2d.drawRect(
-      canvas: canvas
-      x: 1056.0
-      y: 696.0
-      w: 24.0
-      h: 24.0
-      color: 0xFF42A5F5
-    )
-
-    # Labels.
-    Gpu2dText.drawText(
+    drawPointsGrid(
       canvas: canvas
       font: font
-      text: "0,0"
-      x: 30.0
-      y: 44.0
-      sizePx: 22.0
-      color: 0xFFEF5350
+      w: w
+      h: h
     )
     Gpu2dText.drawText(
       canvas: canvas
       font: font
-      text: "Design canvas 1080 x 720 du (fit)"
-      x: 70.0
-      y: 96.0
-      sizePx: 30.0
+      text: "Window {w.toInt()} x {h.toInt()} pt   {Gpu2d.windowWidth()} x {Gpu2d.windowHeight()} px   1 pt = {Gpu2d.dpr()} px"
+      x: 24.0
+      y: 34.0
+      sizePx: 20.0
       color: 0xFFFFFFFF
     )
+    let stage: CanvasStage = stageFit(
+      areaW: stageW
+      areaH: stageH
+      boxX: 24.0
+      boxY: headerH
+      boxW: w - 48.0
+      boxH: h - headerH - 24.0
+      fit: StageFit.contain
+    )
     Gpu2dText.drawText(
       canvas: canvas
       font: font
-      text: "Window {Gpu2d.windowWidth()} x {Gpu2d.windowHeight()} px   DPR {Gpu2d.dpr().toInt()}x"
-      x: 70.0
-      y: 136.0
-      sizePx: 24.0
+      text: "the 1080 x 720 stage below is drawn at {Math.round(x: stage.scale * 100.0) / 100.0} pt per unit"
+      x: 24.0
+      y: 60.0
+      sizePx: 14.0
       color: 0xFFAEB8CC
     )
-    Gpu2dText.drawText(
-      canvas: canvas
-      font: font
-      text: "amber = 48 du safe-area inset"
-      x: 70.0
-      y: 168.0
-      sizePx: 20.0
-      color: 0xFFFFB300
-    )
-    Gpu2dText.drawText(
-      canvas: canvas
-      font: font
-      text: "centered card stays centered at any size"
-      x: 388.0
-      y: 370.0
-      sizePx: 20.0
-      color: 0xFF9FC0FF
-    )
-
+    canvasPushStage(canvas: canvas, stage: stage)
+    drawStageArea(canvas: canvas, font: font)
+    canvasPopStage(canvas: canvas)
     Gpu2d.endFrame(canvas: canvas)
   }
 
