@@ -25,8 +25,11 @@ and `.raescene` data as possible. Six rules:
 6. **Phone and desktop share scenes** through the window-filling layout (rule 2), size classes
    and, later, named frames (§2-§3 below).
 
-Status of the code (2026-11-16): example 106 follows these rules with its own `unitScale` and
-responsive extent (`examples/106_mobile_ui/Viewport.rae`). Most other programs still lay out at
+Status of the code (2026-11-17): `unitScale` and the pt / du / px conversions are lib/ui's
+(`ui/DesignUnits`; `ui/SizeClass.sizeClassForDu`; `ui/DevicePresets` gives a preset's screen and
+safe area in du), and example 106 uses them. 106's responsive extent
+(`examples/106_mobile_ui/Viewport.rae`) is still its own, and it is a fit-to-height canvas (a fixed
+2280 du height, the width grown to the window's aspect), not yet rule 2's window x 3. Most other programs still lay out at
 1 unit per logical point through `app3d/UiShell.syncDesignResolution`; the queued tasks
 [ui coords 2/7 ... 7/7] move `unitScale` and the responsive extent into lib/ui, then every shared
 panel, the UI editor and every example to du, and finally remove the 1-unit-per-point mode. Where

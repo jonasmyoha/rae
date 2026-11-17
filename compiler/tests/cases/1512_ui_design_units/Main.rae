@@ -1,0 +1,76 @@
+# lib/ui's design units (ui/DesignUnits, docs/ui-coordinate-and-responsive-
+# layout.md): 3 du per point, pixels only through renderScale = dpr / 3;
+# size classes from a layout's width in du; a device preset's screen and safe
+# area in du.
+open ui/DesignUnits
+open ui/SizeClass
+open ui/DevicePresets
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret Math.abs(value: a - b) < 0.0001
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  check(label: "3 du per point", ok: unitScale is 3.0)
+  check(
+    label: "pt <-> du: 393 pt is 1179 du and back"
+    ok: near(a: duFromPoints(points: 393.0), b: 1179.0) and near(
+      a: pointsFromDu(du: 1179.0)
+      b: 393.0
+    )
+  )
+  check(
+    label: "du -> px: 200 du is 66.7 px at dpr 1, 133.3 at 2, 200 at 3"
+    ok: near(a: pixelsFromDu(du: 200.0, dpr: 1.0), b: 200.0 / 3.0) and near(
+      a: pixelsFromDu(du: 200.0, dpr: 2.0)
+      b: 400.0 / 3.0
+    ) and near(a: pixelsFromDu(du: 200.0, dpr: 3.0), b: 200.0)
+  )
+  check(
+    label: "px -> du: back again at dpr 1, 2 and 3"
+    ok: near(a: duFromPixels(pixels: 200.0 / 3.0, dpr: 1.0), b: 200.0) and near(
+      a: duFromPixels(pixels: 400.0 / 3.0, dpr: 2.0)
+      b: 200.0
+    ) and near(a: duFromPixels(pixels: 200.0, dpr: 3.0), b: 200.0)
+  )
+  check(
+    label: "renderScale is dpr / 3 (a dpr of 0 is taken as 1)"
+    ok: near(a: renderScale(dpr: 2.0), b: 2.0 / 3.0) and near(
+      a: renderScale(dpr: 0.0)
+      b: 1.0 / 3.0
+    )
+  )
+  check(
+    label: "a 44 pt touch target is 132 du"
+    ok: near(a: minTouchTargetDu, b: duFromPoints(points: 44.0))
+  )
+  let iphone: DevicePreset = devicePresetById(id: "iphone-15-pro")
+  let safe: Insets = devicePresetSafeInsetsDu(preset: iphone)
+  check(
+    label: "iPhone 15 Pro: 1179 x 2556 du, safe top 177 du, bottom 102 du"
+    ok: near(a: devicePresetWidthDu(preset: iphone), b: 1179.0) and near(
+      a: devicePresetHeightDu(preset: iphone)
+      b: 2556.0
+    ) and near(a: safe.t, b: 177.0) and near(a: safe.b, b: 102.0) and near(a: safe.l, b: 0.0)
+  )
+  let noInsets: Insets = devicePresetSafeInsetsDu(preset: devicePresetNone())
+  check(
+    label: "no preset: no safe area"
+    ok: noInsets.l is 0.0 and noInsets.t is 0.0 and noInsets.r is 0.0 and noInsets.b is 0.0
+  )
+  log(
+    "size classes at 375 393 430 834 1440 pt: {sizeClassForDu(widthDu: duFromPoints(points: 375.0))} {sizeClassForDu(
+      widthDu: duFromPoints(points: 393.0)
+    )} {sizeClassForDu(widthDu: duFromPoints(points: 430.0))} {sizeClassForDu(
+      widthDu: duFromPoints(points: 834.0)
+    )} {sizeClassForDu(widthDu: duFromPoints(points: 1440.0))}"
+  )
+}

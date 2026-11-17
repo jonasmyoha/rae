@@ -1,0 +1,55 @@
+# Design units (du): the one UI unit of every Rae program
+# (docs/ui-coordinate-and-responsive-layout.md, rules 1-4). A UI size,
+# position, font size, padding or inset is in du; the window reports logical
+# points (pt) and the GPU draws pixels (px):
+#
+#   du = pt x unitScale        the layout fills the window: area = window pt x 3
+#   px = pt x dpr              the display's scale (1, 2 or 3)
+#   px = du x renderScale      renderScale = dpr / unitScale, only where the GPU draws
+#
+# So 200 du is the same physical size on every device: 66.7 pt, 133 px on a
+# @2x display, 200 px on a @3x phone. Size classes are measured in points
+# (ui/SizeClass, sizeClassForDu), safe areas and touch targets in du.
+
+import ui/Components
+
+# Design units per logical point
+const unitScale: Float = 3.0
+
+# The smallest touch target, 44 pt, in du
+const minTouchTargetDu: Float = 132.0
+
+func duFromPoints(points: view Float) ret Float {
+  ret points * unitScale
+}
+
+func pointsFromDu(du: view Float) ret Float {
+  ret du / unitScale
+}
+
+# Pixels per du on a display of `dpr` pixels per point (a dpr of 0 or less is
+# taken as 1)
+func renderScale(dpr: view Float) ret Float {
+  if dpr <= 0.0 {
+    ret 1.0 / unitScale
+  }
+  ret dpr / unitScale
+}
+
+func pixelsFromDu(du: view Float, dpr: view Float) ret Float {
+  ret du * renderScale(dpr: dpr)
+}
+
+func duFromPixels(pixels: view Float, dpr: view Float) ret Float {
+  ret pixels / renderScale(dpr: dpr)
+}
+
+# Insets given in points, in du (a device's safe area as the OS reports it)
+func insetsDuFromPoints(insets: view Insets) ret Insets {
+  ret Insets {
+    l: duFromPoints(points: insets.l)
+    t: duFromPoints(points: insets.t)
+    r: duFromPoints(points: insets.r)
+    b: duFromPoints(points: insets.b)
+  }
+}

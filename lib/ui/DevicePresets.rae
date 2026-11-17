@@ -10,7 +10,8 @@
 # layout extent by *fraction of the device dimension* (`safeTop 59 /
 # height 852` is a ~6.9% top reserve), which lands right in a du extent
 # such as 106's 1080x2280 du frame and in a program still laid out in
-# points; the du helpers come with [ui coords 2/7].
+# points; devicePresetWidthDu, devicePresetHeightDu and
+# devicePresetSafeInsetsDu give the preset in du (ui/DesignUnits).
 #
 # The iPhone insets are Apple's published safe areas in points (checked
 # 2026-11-01): upright, the Dynamic Island phones (15 Pro, 15 Pro Max) 59 top,
@@ -27,6 +28,9 @@
 # Selection is env-driven in Phase 1 (`RAE_UI_DEVICE=pixel-7`) so the
 # snapshot tooling can iterate presets without any in-app UI.
 # See rae/docs/ui-viewport-and-safe-area-plan.md (Phase 1, items 3/5).
+import ui/Components
+open ui/DesignUnits
+
 type DevicePreset {
   id: String
   label: String
@@ -217,6 +221,28 @@ func devicePresetInsets(
     r: (preset.safeRight / preset.width) * layoutW
     b: (preset.safeBottom / preset.height) * layoutH
   }
+}
+
+# The preset's screen in design units (0 for the "none" preset)
+func devicePresetWidthDu(preset: view DevicePreset) ret Float {
+  ret duFromPoints(points: preset.width)
+}
+
+func devicePresetHeightDu(preset: view DevicePreset) ret Float {
+  ret duFromPoints(points: preset.height)
+}
+
+# The preset's safe area in design units: its points x unitScale (the
+# iPhone 15 Pro's 59 pt top is 177 du); zero for the "none" preset
+func devicePresetSafeInsetsDu(preset: view DevicePreset) ret Insets {
+  ret insetsDuFromPoints(
+    insets: Insets {
+      l: preset.safeLeft
+      t: preset.safeTop
+      r: preset.safeRight
+      b: preset.safeBottom
+    }
+  )
 }
 
 # Resolve the active preset from the `RAE_UI_DEVICE` env var. Empty /

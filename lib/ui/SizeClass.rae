@@ -5,6 +5,7 @@
 # breakpoints; Apple's compact / regular is the same idea.
 import Gpu2d
 import Display
+open ui/DesignUnits
 
 enum SizeClass { compact, medium, expanded }
 
@@ -22,6 +23,12 @@ func sizeClassForWidth(widthPoints: view Float) ret SizeClass {
     ret SizeClass.medium
   }
   ret SizeClass.expanded
+}
+
+# The size class of a layout `widthDu` design units wide (its width in points
+# is widthDu / unitScale)
+func sizeClassForDu(widthDu: view Float) ret SizeClass {
+  ret sizeClassForWidth(widthPoints: pointsFromDu(du: widthDu))
 }
 
 # The window's width in points: its pixels over the display scale
