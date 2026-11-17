@@ -4,6 +4,43 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.3, 2026-11-17: one UI coordinate model, in points
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.3` moves a project
+(and `./rae update physicsScenes` to 1.2.1). docs/ui-coordinate-and-responsive-layout.md
+is the standard; its first rule changed on 2026-11-17 from 3 units per point to:
+
+- **A design unit is a logical point**, the unit of iOS, Android (dp), CSS and Figma
+  (`ui/DesignUnits`, `unitScale` 1). A phone is about 393 wide, a margin 16, body text
+  17, a touch target 44. Every UI size, scene and theme is in points.
+- **The layout fills the window** in points: a bigger window shows more, never a bigger
+  UI. `app3d/UiShell` sets it (`syncDesignResolution`, `fitUiToWindow`,
+  `resizeUiToWindow`); a program does not set its own design resolution.
+- **A user zoom**, written `1.25x` (`UiWorld.uiZoom`, `ui/UiZoom`; Ctrl/Cmd + - 0 with
+  `UiShell.handleUiZoomKeys`): the layout is the window / zoom, the pointer, safe area
+  and size class follow.
+- **A fixed art-directed area** (a game table, a playfield) is a stage: a `ScaleToFit`
+  subtree in a scene (modes `Contain`, `Cover`, new `FitHeight`), or on the immediate
+  canvas `Gpu2dCanvas` `stageFit` + `canvasPushStage` / `canvasPopStage` (new).
+  Inside a scene's stage, `StageEdge` (new) pins a node to the visible or safe window
+  edge or bleeds it over the whole window, and a `SafeArea` keeps the notch's size.
+- `Overflow` / `OverflowPolicy` `ScaleToFitY` (with `minScale`) shrinks a column whose
+  content is too tall, as Pixi's.
+- `ui/ResponsiveExtent` (new): the window-filling layout of an app with a phone page
+  column, by size class, with a side panel when expanded and a device preset emulated.
+
+**What 0.4.3 changes for a program that ran on 0.4.2**
+
+- lib/ui's fallback sizes are points: a text style its theme does not size is 17 (was
+  43.37), `SheetPanel.rowHeight` 56 (was 121.44), `UiWorld`'s default layout 393x852.
+- `DebugOverlay` has no `scale` and `setDebugOverlayScale` is gone; the perf HUD's draw
+  functions lost their `scale` parameter. The user zoom enlarges them.
+- `app3d/StaminaWheel.drawStaminaWheel` takes `camera:` (0.4.1).
+- A scene that declares a unit (a top-level `"unitScale"`) is refused by the repository's
+  gate; `tools/scale-ui-lengths.py --divide 3` converts a scene or theme authored at 3
+  units per point (it reports any number it does not know).
+- `lib/ui/Components` and `Gpu2dCanvas` are module folders now; imports are unchanged.
+
 ## 0.4.2, 2026-11-17: kinematic bodies stop at their pose
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.2` moves a project.
