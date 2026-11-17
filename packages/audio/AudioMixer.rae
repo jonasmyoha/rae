@@ -24,6 +24,7 @@ open audio/GraphTeam
 open Atomic
 open audio/Sound
 open audio/MixerOutput
+open audio/AudioTap
 open collections/SpscRing
 
 enum AudioBusKind { music, effects, alerts, voice }
@@ -181,6 +182,8 @@ type AudioMixer {
   useMix: Bool = false
   mixLeft: Buffer(Float)
   mixRight: Buffer(Float)
+  # the output tap (audio/AudioTap; off when its channels are 0)
+  tap: AudioOutputTap
 }
 
 func createAudioMixer(
@@ -191,6 +194,7 @@ func createAudioMixer(
   clockStamps: view SpscRing(ClockStamp)
   busEffects: view Bool
   mix: view GraphRenderer
+  tap: view AudioOutputTap
 ) ret AudioMixer {
   var voices: List(AudioVoice) = List.create(AudioVoice, cap: audioMaxVoices)
   voices.addDefaults(count: audioMaxVoices)
@@ -231,6 +235,7 @@ func createAudioMixer(
     mix: mix
     mixLeft: createSampleBuffer(count: maxFrames)
     mixRight: createSampleBuffer(count: maxFrames)
+    tap: tap
   }
 }
 
@@ -823,6 +828,15 @@ func mixerRender(
     )
     cursor = next
   }
+  # the block, as it goes out, into the output tap
+  tapBlock(
+    tap: mixer.tap
+    output: output
+    firstFrame: firstFrame
+    frames: frames
+    channels: channels
+    sampleTime: blockStart
+  )
   mixer.sampleTime = mixer.sampleTime + frames
   if firstFrame is 0 {
     # one stamp per render (the device's callback renders in parts after it): its start, for

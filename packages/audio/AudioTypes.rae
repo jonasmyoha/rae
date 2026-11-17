@@ -1,5 +1,25 @@
-# audio/AudioTypes — the engine's small value types (audio/Audio): a voice's
-# id, a sound the engine knows, its slot, and a voice the main thread knows.
+# audio/AudioTypes — the engine's small value types (audio/Audio): its
+# settings, a voice's id, a sound the engine knows, its slot, and a voice the
+# main thread knows.
+open audio/AudioSession
+
+type AudioSettings {
+  sampleRate: Int
+  channels: Int
+  # the device period asked for, in frames (the device may choose another)
+  periodFrames: Int
+  # no device: render only through renderOffline
+  offline: Bool
+  # what the program's sound is for (audio/AudioSession)
+  session: AudioSessionKind
+  # input channels to record (audio/AudioInput), 0 for none: a duplex device
+  inputChannels: Int
+  # an EQ, a compressor and a reverb on the music and effects buses (audio/BusEffects)
+  busEffects: Bool = false
+  # copy every rendered block for the main thread (audio/AudioTap, takeOutput)
+  outputTap: Bool = false
+}
+
 type VoiceId {
   value: Int
 }

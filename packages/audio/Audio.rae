@@ -46,6 +46,7 @@ open audio/AudioDevice
 open audio/AudioGlue
 open audio/AudioMixer
 open audio/AudioSession
+open audio/AudioTap
 open audio/AudioTypes
 open audio/Decoder
 open audio/EngineSession
@@ -53,21 +54,6 @@ open audio/GraphRender
 open audio/GraphTeam
 open audio/Sound
 open collections/SpscRing
-
-type AudioSettings {
-  sampleRate: Int
-  channels: Int
-  # the device period asked for, in frames (the device may choose another)
-  periodFrames: Int
-  # no device: render only through renderOffline
-  offline: Bool
-  # what the program's sound is for (audio/AudioSession)
-  session: AudioSessionKind
-  # input channels to record (audio/AudioInput), 0 for none: a duplex device
-  inputChannels: Int
-  # an EQ, a compressor and a reverb on the music and effects buses (audio/BusEffects)
-  busEffects: Bool = false
-}
 
 func defaultAudioSettings() ret AudioSettings {
   ret AudioSettings {
@@ -152,6 +138,8 @@ type AudioEngine {
   # parameters and meters go through, shared with the mixer that renders
   # (mixRenderer, useEcsMix)
   mix: GraphRenderer
+  # the output tap (AudioSettings.outputTap, takeOutput)
+  tap: AudioOutputTap
 }
 
 func audioOfflineWanted() ret Bool {
@@ -202,6 +190,11 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
   # the program's ECS mix: one renderer, its rings shared by every copy (the
   # engine's, the rendering mixer's, the program's AudioGraphState)
   let mix: GraphRenderer = createGraphRenderer()
+  var tapChannels: Int = 0
+  if settings.outputTap {
+    tapChannels = channels
+  }
+  let tap: AudioOutputTap = createAudioOutputTap(channels: tapChannels, sampleRate: sampleRate)
   let mixer: AudioMixer = createAudioMixer(
     sampleRate: sampleRate
     maxFrames: periodFrames
@@ -210,6 +203,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     clockStamps: clockStamps
     busEffects: settings.busEffects
     mix: mix
+    tap: tap
   )
   var renderTask: Task(Int) = spawn audioIdle()
   let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
@@ -251,6 +245,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         clockStamps: clockStamps
         busEffects: settings.busEffects
         mix: mix
+        tap: tap
       )
       commands: commands
       input: input
@@ -291,6 +286,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         clockStamps: clockStamps
         busEffects: settings.busEffects
         mix: mix
+        tap: tap
       )
       renderTask = spawn thread audioRenderThread(
         mixer: threadMixer
@@ -378,6 +374,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     streams: {}
     nextStreamId: 1
     mix: mix
+    tap: tap
   }
 }
 
@@ -395,6 +392,12 @@ func audioStartOffline(
     session: AudioSessionKind.ambient
   }
   ret audioStart(settings: settings)
+}
+
+# Main thread, with AudioSettings.outputTap: the output rendered since the last
+# call, from its oldest frame to the first gap (audio/AudioTap)
+func takeOutput(this: mod AudioEngine) ret TappedOutput {
+  ret this.tap.takeTapped()
 }
 
 func sendCommand(this: view AudioEngine, command: view AudioCommand) ret Bool {
@@ -862,6 +865,7 @@ func stopAudio(this: mod AudioEngine) ret Int {
   freeAudioMixer(mixer: this.mixer)
   # the ECS mix's plans (each mixer handed back the one it held) and rings
   freeGraphRenderer(this: this.mix)
+  freeAudioOutputTap(tap: this.tap)
   freeSpscRing(this: this.commands)
   freeSpscRing(this: this.feedback)
   freeSpscRing(this: this.reclaim)

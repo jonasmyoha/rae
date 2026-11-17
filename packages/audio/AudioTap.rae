@@ -1,0 +1,149 @@
+# audio/AudioTap — the output mix handed to the main thread (docs/audio-design.md
+# §8.3): a meter, a scope, a spectrum or a loudness log reads what plays, off
+# the audio thread. Opt in with `AudioSettings.outputTap`; the mixer
+# (audio/AudioMixer) then copies every block it renders, on the device and
+# offline, into a lock-free ring, as the input's ring does (audio/AudioInput):
+# no allocation, no lock, no wait on the audio thread. A block the full ring
+# has no room for is dropped whole and its frames counted, so whatever the main
+# thread takes is a run of frames with no gap in it.
+#
+#     let tapped: TappedOutput = audio.takeOutput()    # each frame, main thread
+#     # tapped.samples: tapped.frames interleaved frames of tapped.channels,
+#     # the first heard at output sample tapped.firstSample
+import Math
+open Atomic
+open audio/Sound
+open collections/SpscRing
+
+# Two seconds of the output, and that many blocks
+const tapSeconds: Int = 2
+
+const tapBlocks: Int = 4096
+
+# One rendered block in the ring: its first output sample and its frames
+type TapBlock {
+  sampleTime: Int
+  frames: Int
+}
+
+# The tap's rings (plain handles, shared by the engine and its mixers) and the
+# main thread's place in them
+type AudioOutputTap {
+  # 0: the tap is off
+  channels: Int
+  samples: SpscRing(Float)
+  blocks: SpscRing(TapBlock)
+  # frames of whole blocks the full ring had no room for
+  dropped: Atomic(Int)
+  # main thread: a block taken from the ring but not yet given (it starts
+  # after a gap, so it begins the next take), and the drops already reported
+  heldBlock: TapBlock = { sampleTime: -1, frames: 0 }
+  reportedDrops: Int = 0
+}
+
+# What the main thread took: `frames` interleaved frames of `channels`, the
+# first heard at output sample `firstSample` (-1: nothing was taken), with no
+# gap among them; `dropped` frames were lost since the last take (the main
+# thread was late)
+type TappedOutput {
+  samples: List(Float)
+  frames: Int
+  channels: Int
+  firstSample: Int
+  dropped: Int
+}
+
+# A tap for `channels` at `sampleRate`; channels 0 makes an off tap (tiny rings)
+func createAudioOutputTap(channels: view Int, sampleRate: view Int) ret AudioOutputTap {
+  var sampleSlots: Int = 1
+  var blockSlots: Int = 1
+  if channels > 0 {
+    sampleSlots = tapSeconds * sampleRate * channels
+    blockSlots = tapBlocks
+  }
+  ret AudioOutputTap {
+    channels: channels
+    samples: createSpscRing(Float, capacity: sampleSlots)
+    blocks: createSpscRing(TapBlock, capacity: blockSlots)
+    dropped: createAtomic(Int, value: 0)
+  }
+}
+
+func freeAudioOutputTap(tap: view AudioOutputTap) {
+  freeSpscRing(this: tap.samples)
+  freeSpscRing(this: tap.blocks)
+  freeAtomic(this: tap.dropped)
+}
+
+# Audio thread: `frames` frames of the interleaved `output` from frame
+# `firstFrame`, first heard at sample `sampleTime`, into the tap; dropped whole
+# when the rings have no room (counted)
+func tapBlock(
+  tap: view AudioOutputTap
+  output: view Buffer(Float)
+  firstFrame: view Int
+  frames: view Int
+  channels: view Int
+  sampleTime: view Int
+) realtime {
+  if tap.channels is 0 or frames <= 0 {
+    ret
+  }
+  let count: Int = frames * channels
+  if tap.samples.capacity - tap.samples.count() < count or tap.blocks.capacity - tap.blocks.count() < 1 {
+    tap.dropped.fetchAdd(amount: frames)
+    ret
+  }
+  loop var i: Int = 0, i < count, ++i {
+    let pushed: Bool = tap.samples.push(
+      value: sampleAt(samples: output, index: firstFrame * channels + i)
+    )
+  }
+  let given: Bool = tap.blocks.push(value: TapBlock { sampleTime: sampleTime, frames: frames })
+}
+
+# Main thread: the frames the tap holds, from the oldest up to the first gap
+# (a dropped block); what follows a gap waits for the next take
+func takeTapped(tap: mod AudioOutputTap) ret TappedOutput {
+  var taken: TappedOutput = {
+    samples: {}
+    frames: 0
+    channels: tap.channels
+    firstSample: -1
+    dropped: 0
+  }
+  let droppedNow: Int = tap.dropped.load()
+  taken.dropped = droppedNow - tap.reportedDrops
+  tap.reportedDrops = droppedNow
+  if tap.channels is 0 {
+    ret taken
+  }
+  var next: Int = -1
+  loop true {
+    var block: TapBlock = tap.heldBlock
+    if block.sampleTime < 0 {
+      if let popped: TapBlock = tap.blocks.pop() {
+        block = popped
+      } else {
+        ret taken
+      }
+    }
+    tap.heldBlock = TapBlock { sampleTime: -1, frames: 0 }
+    if next >= 0 and block.sampleTime is not next {
+      # a gap: this block begins the next take
+      tap.heldBlock = block
+      ret taken
+    }
+    if taken.firstSample < 0 {
+      taken.firstSample = block.sampleTime
+    }
+    loop var i: Int = 0, i < block.frames * tap.channels, ++i {
+      if let sample: Float = tap.samples.pop() {
+        taken.samples.add(value: sample)
+      }
+    }
+    taken.frames = taken.frames + block.frames
+    next = block.sampleTime + block.frames
+  }
+  ret taken
+}

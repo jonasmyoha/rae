@@ -688,6 +688,25 @@ run there.
 
 ---
 
+### 8.3 The output, handed to the main thread
+
+A meter, a scope, a spectrum or a loudness log reads what plays off the audio
+thread. With `AudioSettings.outputTap` (opt-in: two seconds of ring), the mixer
+copies every block it renders (on the device, stage A and B, and offline)
+into a lock-free ring with a header per block (its first output sample and its
+frames), as the input's ring does: no allocation, no lock, no wait on the audio
+thread. A block the full ring has no room for is dropped whole and its frames
+counted. `audio.takeOutput()` answers a `TappedOutput`: the frames since the
+last take, interleaved, with `firstSample`, the output sample time of the first
+(a reading placed on the timeline), from the oldest up to the first gap; what
+follows a gap comes in the next take, and `dropped` says how many frames the
+late main thread lost (audio/AudioTap, `packages/audio` 0.24.0). Fixture 1529:
+offline, the tap's frames equal renderOffline's answers sample for sample, each
+take at its sample, and a main thread that took nothing for 3 s gets the first
+2 s, 1 s counted dropped, and the frames after the gap at their own sample, with
+RAE_REALTIME_CHECK. `checks/audioTap` on the Mac's device: 2 s of output taken
+every 2 ms over 2.003 s at 48 kHz, no gap, nothing dropped (stage B and A).
+
 ## 9. Platforms and their session rules
 
 Device backends (through miniaudio) and the host rules (our shims, L2):
