@@ -584,8 +584,15 @@ func canvasBackdropBlur(
   }
   canvas.backdrop.usedThisFrame = true
   let fresh: Bool = canvas.backdrop.copied and not (canvas.backdrop.newLayer and canvas.backdrop.drawnSince)
+  # The stage (Gpu2dCanvas Transform.rae): the blur reaches as far on screen
+  # as the stage scales it; the box goes to queueImageEx in the stage's
+  # coordinates (it maps it) and to the copy's coordinates mapped here
+  let screenX: Float = stageX(canvas: canvas, x: x)
+  let screenY: Float = stageY(canvas: canvas, y: y)
+  let screenW: Float = stageLength(canvas: canvas, length: w)
+  let screenH: Float = stageLength(canvas: canvas, length: h)
   if not fresh {
-    if backdropCopy(canvas: canvas, blurRadius: blurRadius) is false {
+    if backdropCopy(canvas: canvas, blurRadius: stageLength(canvas: canvas, length: blurRadius)) is false {
       ret false
     }
   }
@@ -606,10 +613,10 @@ func canvasBackdropBlur(
     radius: radius
     handle: canvas.backdrop.handle
     tint: alpha255 * 16777216 + 16777215
-    u0: (x * scaleX + offsetX) / frameWidth
-    v0: (y * scaleY + offsetY) / frameHeight
-    u1: ((x + w) * scaleX + offsetX) / frameWidth
-    v1: ((y + h) * scaleY + offsetY) / frameHeight
+    u0: (screenX * scaleX + offsetX) / frameWidth
+    v0: (screenY * scaleY + offsetY) / frameHeight
+    u1: ((screenX + screenW) * scaleX + offsetX) / frameWidth
+    v1: ((screenY + screenH) * scaleY + offsetY) / frameHeight
     tiled: false
   )
   ret true

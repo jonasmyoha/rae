@@ -33,17 +33,23 @@ func canvasDrawArc(
     boxY = center.y - radius
     angle = canvas.spinAngle
   }
+  # The stage (Transform.rae), after the rotation: the area's coordinates to
+  # the window's points
+  let stageScale: Float = canvas.stageScale
+  boxX = stageX(canvas: canvas, x: boxX)
+  boxY = stageY(canvas: canvas, y: boxY)
+  let ringRadius: Float = radius * stageScale
   canvas.prims.add(value: boxX)
   canvas.prims.add(value: boxY)
-  canvas.prims.add(value: radius * 2.0)
-  canvas.prims.add(value: radius * 2.0)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
+  canvas.prims.add(value: ringRadius * 2.0)
+  canvas.prims.add(value: ringRadius * 2.0)
+  canvas.prims.add(value: ringRadius)
+  canvas.prims.add(value: ringRadius)
+  canvas.prims.add(value: ringRadius)
+  canvas.prims.add(value: ringRadius)
   pushPremultiplied(canvas: canvas, color: color)
   pushPremultiplied(canvas: canvas, color: 0)
-  canvas.prims.add(value: Math.min(a: thickness, b: radius))
+  canvas.prims.add(value: Math.min(a: thickness, b: radius) * stageScale)
   canvas.prims.add(value: angle)
   # Mode 2: a ring arc
   canvas.prims.add(value: 2.0)

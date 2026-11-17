@@ -277,15 +277,20 @@ func queueImageEx(
     drawX = center.x - w / 2.0
     drawY = center.y - h / 2.0
   }
+  # The stage (Transform.rae), after the rotation: the area's coordinates to
+  # the window's points
+  let stageScale: Float = canvas.stageScale
+  drawX = stageX(canvas: canvas, x: drawX)
+  drawY = stageY(canvas: canvas, y: drawY)
   canvas.imageCommands.add(value: drawX)
   canvas.imageCommands.add(value: drawY)
-  canvas.imageCommands.add(value: w)
-  canvas.imageCommands.add(value: h)
+  canvas.imageCommands.add(value: w * stageScale)
+  canvas.imageCommands.add(value: h * stageScale)
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 65536))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 256))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 1))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 16777216))
-  canvas.imageCommands.add(value: radius)
+  canvas.imageCommands.add(value: radius * stageScale)
   canvas.imageCommands.add(value: canvas.spinAngle)
   var tileFlag: Float = 0.0
   if tiled {

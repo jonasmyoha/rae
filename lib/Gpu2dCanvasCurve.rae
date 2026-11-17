@@ -43,6 +43,19 @@ func canvasDrawCurve(
     x3 = d.x
     y3 = d.y
   }
+  # The stage (Gpu2dCanvas Transform.rae), after the rotation: the area's
+  # coordinates to the window's points
+  if canvasHasStage(canvas: canvas) {
+    x0 = stageX(canvas: canvas, x: x0)
+    y0 = stageY(canvas: canvas, y: y0)
+    x1 = stageX(canvas: canvas, x: x1)
+    y1 = stageY(canvas: canvas, y: y1)
+    x2 = stageX(canvas: canvas, x: x2)
+    y2 = stageY(canvas: canvas, y: y2)
+    x3 = stageX(canvas: canvas, x: x3)
+    y3 = stageY(canvas: canvas, y: y3)
+    width = stageLength(canvas: canvas, length: width)
+  }
   # cut into sub-curves of about 48 units of control polygon each (1 to 24), each an exact cubic
   # of its stretch, so each quad hugs its piece of the curve
   let reach: Float = curveSide(

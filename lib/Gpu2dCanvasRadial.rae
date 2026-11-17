@@ -39,14 +39,19 @@ func canvasDrawRadialGradientRect(
     boxY = center.y - h / 2.0
     angle = canvas.spinAngle
   }
+  # The stage (Gpu2dCanvas Transform.rae), after the rotation; the gradient's
+  # center and reach are shares of the box and stay
+  let stageScale: Float = canvas.stageScale
+  boxX = stageX(canvas: canvas, x: boxX)
+  boxY = stageY(canvas: canvas, y: boxY)
   canvas.prims.add(value: boxX)
   canvas.prims.add(value: boxY)
-  canvas.prims.add(value: w)
-  canvas.prims.add(value: h)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
-  canvas.prims.add(value: radius)
+  canvas.prims.add(value: w * stageScale)
+  canvas.prims.add(value: h * stageScale)
+  canvas.prims.add(value: radius * stageScale)
+  canvas.prims.add(value: radius * stageScale)
+  canvas.prims.add(value: radius * stageScale)
+  canvas.prims.add(value: radius * stageScale)
   pushPremultiplied(canvas: canvas, color: from)
   # The border slot carries the gradient's shape: no border on this box
   canvas.prims.add(value: centerX)

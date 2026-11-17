@@ -213,11 +213,16 @@ func canvasDrawGlyphEx(
     glyphX = center.x - (sx1 - sx0) / 2.0
     glyphY = center.y - (sy1 - sy0) / 2.0
   }
+  # The stage (Gpu2dCanvas Transform.rae), after the rotation: the glyph's
+  # quad and its distance range (screen pixels, in proportion to the quad)
+  let stageScale: Float = canvas.stageScale
+  glyphX = stageX(canvas: canvas, x: glyphX)
+  glyphY = stageY(canvas: canvas, y: glyphY)
   if let entry: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     entry.glyphs.add(value: glyphX)
     entry.glyphs.add(value: glyphY)
-    entry.glyphs.add(value: sx1 - sx0)
-    entry.glyphs.add(value: sy1 - sy0)
+    entry.glyphs.add(value: (sx1 - sx0) * stageScale)
+    entry.glyphs.add(value: (sy1 - sy0) * stageScale)
     entry.glyphs.add(value: u0)
     entry.glyphs.add(value: v0)
     entry.glyphs.add(value: u1 - u0)
@@ -226,7 +231,7 @@ func canvasDrawGlyphEx(
     entry.glyphs.add(value: tintChannel(color: color, shift: 256))
     entry.glyphs.add(value: tintChannel(color: color, shift: 1))
     entry.glyphs.add(value: tintChannel(color: color, shift: 16777216))
-    entry.glyphs.add(value: pxRange)
+    entry.glyphs.add(value: pxRange * stageScale)
     entry.glyphs.add(value: outlineWidth)
     entry.glyphs.add(value: softness)
     entry.glyphs.add(value: canvas.spinAngle)

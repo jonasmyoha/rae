@@ -1,3 +1,7 @@
+# Pong on the 2D canvas. The 800x450 field is a fixed-size playfield drawn as a
+# stage (Gpu2dCanvas canvasPushStage, contained in the window); the HUD
+# (assets/ui.raescene) lays out in the window's points, so a bigger window
+# shows a bigger field with the same-size text around it.
 import Gpu2d
 import Sdl3
 import Keys
@@ -157,10 +161,48 @@ func runPhysicsSelfTest() ret Bool {
   ret velocity.dx > 0.0
 }
 
+# The HUD in the window's points: the title top-left, the score and the
+# winner centered, the help line along the bottom
+func placeHud(world: mod UiWorld) {
+  let w: Float = world.layoutW
+  let h: Float = world.layoutH
+  setNodeRect(
+    world: world
+    nodeId: "UiRoot"
+    x: 0.0
+    y: 0.0
+    w: w
+    h: h
+  )
+  setNodeRect(
+    world: world
+    nodeId: "ScoreText"
+    x: (w - 300.0) / 2.0
+    y: 14.0
+    w: 300.0
+    h: 54.0
+  )
+  setNodeRect(
+    world: world
+    nodeId: "WinnerText"
+    x: (w - 400.0) / 2.0
+    y: (h - 70.0) / 2.0
+    w: 400.0
+    h: 70.0
+  )
+  setNodeRect(
+    world: world
+    nodeId: "HelpText"
+    x: 24.0
+    y: h - 38.0
+    w: w - 48.0
+    h: 24.0
+  )
+}
+
 func main() ret Int {
   Gpu2d.initWindow(width: fieldW.toInt(), height: fieldH.toInt(), title: "91: Rae Pong — GPU2D")
   var canvas: Gpu2dCanvas = createGpu2dCanvas()  # #907: the app-owned 2D canvas (box + image passes)
-  Gpu2d.setDesignResolution(width: fieldW, height: fieldH, fit: 0)
 
   let uiResources: Gpu2dUi = loadUiAssets(
     dir: "examples/104_ui_hello/assets/"
@@ -178,6 +220,8 @@ func main() ret Int {
     path: "examples/91_pong/assets/ui.raescene"
     res: uiResources
   )
+  fitUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
+  placeHud(world: world)
 
   var playerPosition: PaddleTransform = { x: 20.0, y: 175.0 }
   var cpuPosition: PaddleTransform = { x: 760.0, y: 175.0 }
@@ -204,7 +248,9 @@ func main() ret Int {
   }
 
   loop not Gpu2d.pollClose() {
-    let resized: Bool = resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
+    if resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources) {
+      placeHud(world: world)
+    }
     let now: Float64 = Gpu2d.nowSeconds()
     var deltaTime: Float = (now - previousTime) as Float
     previousTime = now
@@ -291,12 +337,26 @@ func main() ret Int {
       b: 0.08
       a: 1.0
     )
+    # The field, contained in the window
+    canvasPushStage(
+      canvas: canvas
+      stage: stageFit(
+        areaW: fieldW
+        areaH: fieldH
+        boxX: 0.0
+        boxY: 0.0
+        boxW: world.layoutW
+        boxH: world.layoutH
+        fit: StageFit.contain
+      )
+    )
     drawGame(
       canvas: canvas
       playerPosition: playerPosition
       cpuPosition: cpuPosition
       ballPosition: ballPosition
     )
+    canvasPopStage(canvas: canvas)
     renderSystemGpu2d(
       world: world
       uiSystems: uiSystems

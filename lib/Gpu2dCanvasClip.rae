@@ -63,6 +63,15 @@ func canvasPushClip(
   radius: copy Float
 ) {
   let parent: Int = canvas.currentClip
+  # The stage (Gpu2dCanvas Transform.rae): a clip is kept in the window's
+  # points, like every queued draw
+  if canvasHasStage(canvas: canvas) {
+    x = stageX(canvas: canvas, x: x)
+    y = stageY(canvas: canvas, y: y)
+    w = stageLength(canvas: canvas, length: w)
+    h = stageLength(canvas: canvas, length: h)
+    radius = stageLength(canvas: canvas, length: radius)
+  }
   var childX: Float = x
   var childY: Float = y
   var childW: Float = w

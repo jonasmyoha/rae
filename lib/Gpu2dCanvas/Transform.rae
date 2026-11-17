@@ -1,0 +1,133 @@
+# Gpu2dCanvas: the transforms every queued draw goes through, the rotation
+# (#1003) and the stage (a fixed-size area drawn scaled into the window).
+import Math
+
+# Rotation state (#1003): boxes, images and glyphs queued while an angle is set
+# turn about (pivotX, pivotY) in design units. Cleared by canvasClearRotation
+# and at every frame start.
+func canvasSetRotation(
+  canvas: mod Gpu2dCanvas
+  angle: copy Float
+  pivotX: copy Float
+  pivotY: copy Float
+) {
+  canvas.spinAngle = angle
+  canvas.spinPivotX = pivotX
+  canvas.spinPivotY = pivotY
+}
+
+func canvasClearRotation(canvas: mod Gpu2dCanvas) {
+  canvas.spinAngle = 0.0
+}
+
+type SpinPoint {
+  x: Float
+  y: Float
+}
+
+# (x, y) turned about the canvas pivot by the canvas angle.
+func spinPoint(canvas: view Gpu2dCanvas, x: copy Float, y: copy Float) ret SpinPoint {
+  let relX: Float = x - canvas.spinPivotX
+  let relY: Float = y - canvas.spinPivotY
+  let cosA: Float = Math.cos(x: canvas.spinAngle)
+  let sinA: Float = Math.sin(x: canvas.spinAngle)
+  ret SpinPoint {
+    x: canvas.spinPivotX + relX * cosA - relY * sinA
+    y: canvas.spinPivotY + relX * sinA + relY * cosA
+  }
+}
+
+# ----- the stage -------------------------------------------------------------
+# A fixed-size area (a game's playfield, a showcase drawn at 800x450) drawn
+# scaled into the window, the immediate-mode counterpart of a ScaleToFit
+# subtree (docs/ui-coordinate-and-responsive-layout.md, rule 3): between
+# canvasPushStage and canvasPopStage every draw, clip and glyph is given in
+# the area's own coordinates and lands at `offset + scale * point` in the
+# window's points. Stages nest; the canvas has none at a frame's start.
+enum StageFit { contain, cover, fitHeight }
+
+type CanvasStage {
+  scale: Float
+  offsetX: Float
+  offsetY: Float
+}
+
+# Where an area `areaW` x `areaH` goes in the box (boxX, boxY, boxW, boxH),
+# centered: contain shows it whole, cover fills the box, fitHeight always
+# shows its full height (the sides cropped or pillarboxed)
+func stageFit(
+  areaW: view Float
+  areaH: view Float
+  boxX: view Float
+  boxY: view Float
+  boxW: view Float
+  boxH: view Float
+  fit: view StageFit
+) ret CanvasStage {
+  if areaW <= 0.0 or areaH <= 0.0 or boxW <= 0.0 or boxH <= 0.0 {
+    ret CanvasStage { scale: 1.0, offsetX: boxX, offsetY: boxY }
+  }
+  let byWidth: Float = boxW / areaW
+  let byHeight: Float = boxH / areaH
+  var scale: Float = Math.min(a: byWidth, b: byHeight)
+  if fit is StageFit.cover {
+    scale = Math.max(a: byWidth, b: byHeight)
+  } else if fit is StageFit.fitHeight {
+    scale = byHeight
+  }
+  ret CanvasStage {
+    scale: scale
+    offsetX: boxX + (boxW - areaW * scale) / 2.0
+    offsetY: boxY + (boxH - areaH * scale) / 2.0
+  }
+}
+
+# Draw in `stage`'s area until canvasPopStage (inside another stage, the two
+# compose)
+func canvasPushStage(canvas: mod Gpu2dCanvas, stage: view CanvasStage) {
+  canvas.stageStack.add(value: canvas.stageScale)
+  canvas.stageStack.add(value: canvas.stageX)
+  canvas.stageStack.add(value: canvas.stageY)
+  canvas.stageX = canvas.stageX + canvas.stageScale * stage.offsetX
+  canvas.stageY = canvas.stageY + canvas.stageScale * stage.offsetY
+  canvas.stageScale = canvas.stageScale * stage.scale
+}
+
+func canvasPopStage(canvas: mod Gpu2dCanvas) {
+  let count: Int = canvas.stageStack.length
+  if count < 3 {
+    ret
+  }
+  canvas.stageScale = canvas.stageStack.copyAtDefault(index: count - 3)
+  canvas.stageX = canvas.stageStack.copyAtDefault(index: count - 2)
+  canvas.stageY = canvas.stageStack.copyAtDefault(index: count - 1)
+  canvas.stageStack.removeLast()
+  canvas.stageStack.removeLast()
+  canvas.stageStack.removeLast()
+}
+
+# No stage (every frame starts so)
+func canvasClearStage(canvas: mod Gpu2dCanvas) {
+  canvas.stageScale = 1.0
+  canvas.stageX = 0.0
+  canvas.stageY = 0.0
+  canvas.stageStack.clear()
+}
+
+# A point of the current stage in the window's points
+func stageX(canvas: view Gpu2dCanvas, x: view Float) ret Float {
+  ret canvas.stageX + canvas.stageScale * x
+}
+
+func stageY(canvas: view Gpu2dCanvas, y: view Float) ret Float {
+  ret canvas.stageY + canvas.stageScale * y
+}
+
+# A length of the current stage (a size, a radius, a stroke) in points
+func stageLength(canvas: view Gpu2dCanvas, length: view Float) ret Float {
+  ret canvas.stageScale * length
+}
+
+func canvasHasStage(canvas: view Gpu2dCanvas) ret Bool {
+  ret canvas.stageScale is not 1.0 or canvas.stageX is not 0.0 or canvas.stageY is not 0.0
+}

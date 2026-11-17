@@ -1,0 +1,136 @@
+# The canvas stage (lib/Gpu2dCanvas Transform.rae): a fixed-size area drawn
+# scaled into the window, the immediate-mode counterpart of a ScaleToFit
+# subtree. stageFit places an 800x450 playfield in a window with contain,
+# cover or fitHeight; between canvasPushStage and canvasPopStage a queued box
+# (no GPU needed to queue) lands at offset + scale * point with its size,
+# radius and border scaled; a clip is mapped the same way; stages nest and
+# pop back.
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+
+func round1(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func fitText(stage: view CanvasStage) ret String {
+  ret "scale {round1(value: stage.scale * 1000.0) / 1000.0}, at {round1(value: stage.offsetX)},{round1(
+    value: stage.offsetY
+  )}"
+}
+
+# The last queued box: x y w h, then the four radii, ... border width at 16
+func lastBox(canvas: view Gpu2dCanvas) ret String {
+  let start: Int = canvas.prims.length - boxPrimFloats
+  let x: Float = canvas.prims.copyAtDefault(index: start)
+  let y: Float = canvas.prims.copyAtDefault(index: start + 1)
+  let w: Float = canvas.prims.copyAtDefault(index: start + 2)
+  let h: Float = canvas.prims.copyAtDefault(index: start + 3)
+  let radius: Float = canvas.prims.copyAtDefault(index: start + 4)
+  ret "{round1(value: x)},{round1(value: y)} {round1(value: w)}x{round1(value: h)} radius {round1(
+    value: radius
+  )}"
+}
+
+func main() {
+  log("phone 393x852, contain: {fitText(stage: stageFit(
+    areaW: 800.0
+    areaH: 450.0
+    boxX: 0.0
+    boxY: 0.0
+    boxW: 393.0
+    boxH: 852.0
+    fit: StageFit.contain
+  ))}")
+  log("phone 393x852, cover: {fitText(stage: stageFit(
+    areaW: 800.0
+    areaH: 450.0
+    boxX: 0.0
+    boxY: 0.0
+    boxW: 393.0
+    boxH: 852.0
+    fit: StageFit.cover
+  ))}")
+  log("desktop 1440x900, fitHeight: {fitText(stage: stageFit(
+    areaW: 800.0
+    areaH: 450.0
+    boxX: 0.0
+    boxY: 0.0
+    boxW: 1440.0
+    boxH: 900.0
+    fit: StageFit.fitHeight
+  ))}")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  canvasDrawRoundedRect(
+    canvas: canvas
+    x: 100.0
+    y: 50.0
+    w: 200.0
+    h: 100.0
+    radius: 10.0
+    color: 0xFF3366FF
+  )
+  log("no stage: {lastBox(canvas: canvas)}")
+  canvasPushStage(
+    canvas: canvas
+    stage: stageFit(
+      areaW: 800.0
+      areaH: 450.0
+      boxX: 0.0
+      boxY: 0.0
+      boxW: 1440.0
+      boxH: 900.0
+      fit: StageFit.contain
+    )
+  )
+  canvasDrawRoundedRect(
+    canvas: canvas
+    x: 100.0
+    y: 50.0
+    w: 200.0
+    h: 100.0
+    radius: 10.0
+    color: 0xFF3366FF
+  )
+  log("on the 1440x900 stage (scale 1.8, at 0,45): {lastBox(canvas: canvas)}")
+  canvasPushClip(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 450.0
+    radius: 0.0
+  )
+  let clip: Int = canvas.currentClip
+  log(
+    "its clip: {round1(value: canvas.clipX.copyAtDefault(index: clip))},{round1(
+      value: canvas.clipY.copyAtDefault(index: clip)
+    )} {round1(value: canvas.clipW.copyAtDefault(index: clip))}x{round1(
+      value: canvas.clipH.copyAtDefault(index: clip)
+    )}"
+  )
+  canvasPopClip(canvas: canvas)
+  canvasPushStage(canvas: canvas, stage: CanvasStage { scale: 0.5, offsetX: 400.0, offsetY: 0.0 })
+  canvasDrawRect(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 100.0
+    color: 0xFF3366FF
+  )
+  log("a half-size stage inside it, 400 across: {lastBox(canvas: canvas)}")
+  canvasPopStage(canvas: canvas)
+  canvasPopStage(canvas: canvas)
+  canvasDrawRect(
+    canvas: canvas
+    x: 10.0
+    y: 10.0
+    w: 20.0
+    h: 20.0
+    color: 0xFF3366FF
+  )
+  log(
+    "popped back to no stage: {lastBox(canvas: canvas)}, stage left {canvasHasStage(canvas: canvas)}"
+  )
+  canvasShutdown(canvas: canvas)
+}

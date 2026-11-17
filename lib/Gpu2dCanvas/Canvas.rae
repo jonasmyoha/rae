@@ -190,6 +190,12 @@ type Gpu2dCanvas {
   spinAngle: Float
   spinPivotX: Float
   spinPivotY: Float
+  # --- stage (Transform.rae): every queued draw is scaled by stageScale and
+  # moved by (stageX, stageY), after the rotation; 1, 0, 0 = none ---
+  stageScale: Float = 1.0
+  stageX: Float = 0.0
+  stageY: Float = 0.0
+  stageStack: List(Float)
   # --- box pass ---
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -264,6 +270,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       clipStack: List.create(Int, cap: 32)
       currentClip: 0
       spinAngle: 0.0
+      stageStack: {}
       spinPivotX: 0.0
       spinPivotY: 0.0
       pipeMade: false
@@ -608,17 +615,22 @@ func pushBox(
     boxY = center.y - h / 2.0
     boxAngle = angle + canvas.spinAngle
   }
+  # The stage (Transform.rae), after the rotation: the area's coordinates to
+  # the window's points
+  let stageScale: Float = canvas.stageScale
+  boxX = stageX(canvas: canvas, x: boxX)
+  boxY = stageY(canvas: canvas, y: boxY)
   canvas.prims.add(value: boxX)
   canvas.prims.add(value: boxY)
-  canvas.prims.add(value: w)
-  canvas.prims.add(value: h)
-  canvas.prims.add(value: radiusTopLeft)
-  canvas.prims.add(value: radiusTopRight)
-  canvas.prims.add(value: radiusBottomRight)
-  canvas.prims.add(value: radiusBottomLeft)
+  canvas.prims.add(value: w * stageScale)
+  canvas.prims.add(value: h * stageScale)
+  canvas.prims.add(value: radiusTopLeft * stageScale)
+  canvas.prims.add(value: radiusTopRight * stageScale)
+  canvas.prims.add(value: radiusBottomRight * stageScale)
+  canvas.prims.add(value: radiusBottomLeft * stageScale)
   pushPremultiplied(canvas: canvas, color: fill)
   pushPremultiplied(canvas: canvas, color: border)
-  canvas.prims.add(value: borderWidth)
+  canvas.prims.add(value: borderWidth * stageScale)
   canvas.prims.add(value: boxAngle)
   var gradientFlag: Float = 0.0
   if gradient {
@@ -628,41 +640,6 @@ func pushBox(
   canvas.prims.add(value: gradientAngle)
   pushPremultiplied(canvas: canvas, color: gradientTo)
   canvas.primClips.add(value: canvas.currentClip)
-}
-
-# Rotation state (#1003): boxes, images and glyphs queued while an angle is set
-# turn about (pivotX, pivotY) in design units. Cleared by canvasClearRotation
-# and at every frame start.
-func canvasSetRotation(
-  canvas: mod Gpu2dCanvas
-  angle: copy Float
-  pivotX: copy Float
-  pivotY: copy Float
-) {
-  canvas.spinAngle = angle
-  canvas.spinPivotX = pivotX
-  canvas.spinPivotY = pivotY
-}
-
-func canvasClearRotation(canvas: mod Gpu2dCanvas) {
-  canvas.spinAngle = 0.0
-}
-
-type SpinPoint {
-  x: Float
-  y: Float
-}
-
-# (x, y) turned about the canvas pivot by the canvas angle.
-func spinPoint(canvas: view Gpu2dCanvas, x: copy Float, y: copy Float) ret SpinPoint {
-  let relX: Float = x - canvas.spinPivotX
-  let relY: Float = y - canvas.spinPivotY
-  let cosA: Float = Math.cos(x: canvas.spinAngle)
-  let sinA: Float = Math.sin(x: canvas.spinAngle)
-  ret SpinPoint {
-    x: canvas.spinPivotX + relX * cosA - relY * sinA
-    y: canvas.spinPivotY + relX * sinA + relY * cosA
-  }
 }
 
 func canvasDrawRect(
