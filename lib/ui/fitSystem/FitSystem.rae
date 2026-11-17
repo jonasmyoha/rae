@@ -8,6 +8,10 @@
 #                       Post-layout, so siblings do NOT reflow around
 #                       the corrected height (fixed-aspect media, not
 #                       a general layout constraint).
+#   Overflow{scaleToFitY, minScale} — a column whose laid-out content is
+#                       taller than it shrinks, content and all, about
+#                       its top center (its TransformFx), not below
+#                       minScale.
 #   ScaleToFit{mode}  — uniform-scale a FIXED-DESIGN subtree so the
 #                       tagged entity's authored Rect (design size in
 #                       du) fits its parent's content box, centered.
@@ -31,6 +35,7 @@
 # size — glyphs don't scale; keep boards to sprites/shapes.
 open ecs/ComponentTable
 open ecs/Query
+open ui/Components
 open ui/UiSystems
 
 # 0.01 du ≈ 1/300 pt: far below one physical pixel at any DPR, so
@@ -208,6 +213,94 @@ func fitApplyOne(
   )
 }
 
+# The scale a scaleToFitY column needs: 1 when its laid-out content fits the
+# height inside its padding, else that height over the content's, not below
+# `minScale` (0: no limit). The content's height is read from the children's
+# ComputedRects, which the column's own TransformFx scale does not change, so
+# the scale is recomputed from the layout every frame and never compounds.
+func overflowColumnScale(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  minScale: view Float
+) ret Float {
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false or componentHas(
+    this: world.childrens
+    entityId: entityId
+  ) is false {
+    ret 1.0
+  }
+  let column: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  var padTop: Float = 0.0
+  var padBottom: Float = 0.0
+  if componentHas(this: world.paddings, entityId: entityId) {
+    let pad: view Padding = componentView(this: world.paddings, entityId: entityId)
+    padTop = pad.insets.t
+    padBottom = pad.insets.b
+  }
+  var bottom: Float = padTop
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
+  loop let childId: view EntityId in children.ids {
+    var shown: Bool = true
+    if componentHas(this: world.actives, entityId: childId) {
+      shown = componentView(this: world.actives, entityId: childId).value
+    }
+    if shown and componentHas(this: uiSystems.layout.computedRects, entityId: childId) {
+      let child: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: childId
+      )
+      if child.position.y + child.size.y > bottom {
+        bottom = child.position.y + child.size.y
+      }
+    }
+  }
+  let available: Float = column.size.y - padTop - padBottom
+  let content: Float = bottom - padTop
+  if content <= available or content <= 0.0 or available <= 0.0 {
+    ret 1.0
+  }
+  var scale: Float = available / content
+  if scale < minScale {
+    scale = minScale
+  }
+  ret scale
+}
+
+# Set every scaleToFitY column's TransformFx to its scale about its top
+# center (change-gated: an unchanged scale writes nothing)
+func overflowColumnsSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  loop var i: Int = 0, i < componentCount(this: world.overflows), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.overflows, i: i)
+    let policy: view OverflowPolicy = queryViewAt(table: world.overflows, denseIndex: i)
+    if policy.mode is not OverflowMode.scaleToFitY {
+      continue
+    }
+    let scale: Float = overflowColumnScale(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      minScale: policy.minScale
+    )
+    if componentHas(this: world.transforms, entityId: entityId) is false {
+      if scale is 1.0 {
+        continue
+      }
+      componentSet(this: world.transforms, entityId: entityId, data: defaultTransformFx())
+    }
+    let fx: view TransformFx = componentView(this: world.transforms, entityId: entityId)
+    if fx.scaleX is not scale or fx.scaleY is not scale or fx.pivot.x is not 0.5 or fx.pivot.y is not 0.0 {
+      let written: mod TransformFx = componentMod(this: world.transforms, entityId: entityId)
+      written.scaleX = scale
+      written.scaleY = scale
+      written.pivot = Vec2 { x: 0.5, y: 0.0 }
+    }
+  }
+}
+
 # Run both art-direction passes. Call between ifDirty and
 # systemIfDirty every frame — cheap when the aspect /
 # scale-to-fit tables are empty or nothing changed.
@@ -239,6 +332,7 @@ func fitSystem(world: mod UiWorld, uiSystems: mod UiSystems) pub {
       }
     }
   }
+  overflowColumnsSystem(world: world, uiSystems: uiSystems)
   var n: Int = componentCount(this: world.scaleToFits)
   var i: Int = 0
   loop i < n {

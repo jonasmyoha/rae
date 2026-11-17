@@ -1,0 +1,64 @@
+# OverflowPolicy scaleToFitY (Pixi's column rule): a column whose laid-out
+# content is taller than it shrinks uniformly about its top center (its
+# TransformFx scale, pivot 0.5,0) down to `minScale`; content that fits is
+# left alone. The scale is recomputed from the layout, so running the pass
+# again does not compound it. The policy is authored `Overflow` or
+# `OverflowPolicy`.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/fitSystem/FitSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+# A 300-tall column with three rows of `rowH` and a policy
+func buildScene(rowH: view Int, policy: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"column\",\"root\":\"Column\",\"nodes\":\{\"Column\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":300\},\"Layout\":\{\"type\":\"Vertical\"\},{policy},\"Children\":[\"A\",\"B\",\"C\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":{rowH}\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":{rowH}\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":{rowH}\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\}\}\}"
+}
+
+func show(label: view String, rowH: view Int, policy: view String) {
+  let scene: Scene = parseScene(source: buildScene(rowH: rowH, policy: policy))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 200.0
+  world.layoutH = 300.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  fitSystem(world: world, uiSystems: uiSystems)
+  fitSystem(world: world, uiSystems: uiSystems)
+  var scale: Float = 1.0
+  var pivot: String = "none"
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: "Column") {
+    let columnId: EntityId = nodeEntityId(world: world, index: raw)
+    if componentHas(this: world.transforms, entityId: columnId) {
+      let fx: view TransformFx = componentView(this: world.transforms, entityId: columnId)
+      scale = fx.scaleY
+      pivot = "{fx.pivot.x},{fx.pivot.y}"
+    }
+  }
+  log("{label}: scale {Math.round(x: scale * 1000.0) / 1000.0}, pivot {pivot}")
+}
+
+func main() {
+  show(
+    label: "content 450 in a 300 column"
+    rowH: 150
+    policy: "\"Overflow\":\{\"mode\":\"ScaleToFitY\"\}"
+  )
+  show(
+    label: "the same with minScale 0.8"
+    rowH: 150
+    policy: "\"OverflowPolicy\":\{\"mode\":\"ScaleToFitY\",\"minScale\":0.8\}"
+  )
+  show(label: "content 240 fits", rowH: 80, policy: "\"Overflow\":\{\"mode\":\"ScaleToFitY\"\}")
+  show(label: "clip does not scale", rowH: 150, policy: "\"Overflow\":\{\"mode\":\"Clip\"\}")
+}

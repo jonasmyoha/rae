@@ -28,6 +28,21 @@ in any numbers, scaled as one block by `ScaleToFit` into its parent's box:
 - The area and its descendants keep their authored Rects; each descendant is scaled with it
   (`fitSystem`, after layout). Case `1517_ui_scale_to_fit_height`.
 
+A laid-out column whose content may be taller than it (a menu of a game screen, Pixi's
+`scaleToFitY`) shrinks instead of overflowing:
+
+```json
+"Menu": { "Layout": { "type": "Vertical" }, "Overflow": { "mode": "ScaleToFitY", "minScale": 0.8 } }
+```
+
+- When the laid-out content is taller than the column's height inside its padding, the column is
+  scaled uniformly about its top center so the content fits, not below `minScale` (0, the
+  default: no limit); content that fits is left at 1. The scale is the column's TransformFx
+  (pivot 0.5,0), which the policy then owns, so the column's own box and background scale with
+  it. It is recomputed from the layout every frame (`fitSystem`), so it never compounds.
+- `Overflow` is also written `OverflowPolicy`; `Clip` cuts the content at the node's box instead.
+  Case `1518_ui_overflow_scale_to_fit_y`.
+
 Today most programs still lay out at 1 unit per logical point (the transitional layout that the
 tasks [ui coords 2/7 ... 7/7] remove; example 106's scenes are already in du). The sizes this
 document quotes in points (a 44-point `circleButton`, a 24-point swipe band, `edgePoints`) are

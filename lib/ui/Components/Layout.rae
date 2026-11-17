@@ -88,8 +88,14 @@ type Constraints {
   hasMaxH: Bool
 }
 
+# What a node does with content that does not fit (authored `Overflow`, or
+# `OverflowPolicy`): `clip` cuts it at the node's box; `scaleToFitY` (Pixi's
+# column rule) shrinks a column whose laid-out content is taller than it,
+# uniformly about its top center, down to `minScale` (0: no limit). The
+# column then owns its TransformFx scale and pivot (fitSystem).
 type OverflowPolicy {
   mode: OverflowMode
+  minScale: Float = 0.0
 }
 
 # Extent-relative horizontal placement for a layout root. See HExtent.
