@@ -1,0 +1,263 @@
+# lib/net's reliable channel under loss, delay, jitter, reordering and
+# duplicates (lib/net/BadNetwork: loss 12, latency 40, jitter 20, reorder 8
+# held 30, duplicate 3), between two Connections of the default config. The
+# sender's window starts at its oldest unacked fragment, the receiver's at the
+# first fragment of the oldest message it has not delivered (it waits for the
+# whole message, and for the app to take it), so the sender can send fragments
+# beyond the receiver's window. Those used to be refused and their packets
+# still acked, so the sender saw them delivered: one message of 6 fragments
+# then 100 small ones stopped at 59 with seeds 2, 5 and 7. Such a packet is
+# now left unacked and comes again. Every message arrives once, in order and
+# whole, the sender ending with nothing in flight, across seeds 1..20, with
+# messages of 2 to 64 fragments among small ones, and with a receiver that
+# takes its messages only every 500 ms.
+open net/Wire
+open net/Connection
+open net/BadNetwork
+open net/ReliableChannel
+open net/Udp
+open Sys
+
+type Link {
+  client: Connection
+  server: Connection
+  toServer: BadNetwork
+  toClient: BadNetwork
+  packet: List(UInt8)
+  arrived: List(UInt8)
+  nowMs: Int
+}
+
+# A fast clean path (20 ms each way), from `seed`
+func cleanPath(seed: view Int) ret BadNetwork {
+  var settings: BadNetworkSettings = goodNetworkSettings()
+  settings.lossPercent = 12
+  settings.latencyMs = 40
+  settings.jitterMs = 20
+  settings.reorderPercent = 8
+  settings.reorderHoldMs = 30
+  settings.duplicatePercent = 3
+  settings.seed = seed
+  ret createBadNetwork(settings: settings, maxPacketBytes: 1200, capacity: 512)
+}
+
+# Hand each packet due on `network` to `connection`
+func deliver(
+  network: mod BadNetwork
+  connection: mod Connection
+  arrived: mod List(UInt8)
+  nowMs: view Int
+) {
+  loop badNetworkNext(network: network, packet: arrived, nowMs: nowMs).ready {
+    let taken: Bool = connectionReadPacket(
+      connection: connection
+      packet: arrived
+      start: 0
+      count: arrived.length
+      nowMs: nowMs
+    )
+  }
+}
+
+func createLink(seed: view Int) ret Link {
+  ret Link {
+    client: createConnection(config: defaultConnectionConfig())
+    server: createConnection(config: defaultConnectionConfig())
+    toServer: cleanPath(seed: seed)
+    toClient: cleanPath(seed: seed + 7)
+    packet: List.create(UInt8, cap: 1200)
+    arrived: List.create(UInt8, cap: 1200)
+    nowMs: 0
+  }
+}
+
+# One 10 ms tick: clocks, every packet each end wants to send, deliveries
+func step(link: mod Link) {
+  link.nowMs = link.nowMs + 10
+  connectionUpdate(connection: link.client, nowMs: link.nowMs)
+  connectionUpdate(connection: link.server, nowMs: link.nowMs)
+  loop connectionWritePacket(connection: link.client, packet: link.packet, nowMs: link.nowMs) {
+    badNetworkSend(
+      network: link.toServer
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
+  }
+  loop connectionWritePacket(connection: link.server, packet: link.packet, nowMs: link.nowMs) {
+    badNetworkSend(
+      network: link.toClient
+      packet: link.packet
+      start: 0
+      count: link.packet.length
+      destination: noNetAddress()
+      nowMs: link.nowMs
+    )
+  }
+  deliver(
+    network: link.toServer
+    connection: link.server
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
+  deliver(
+    network: link.toClient
+    connection: link.client
+    arrived: link.arrived
+    nowMs: link.nowMs
+  )
+}
+
+func connectLink(link: mod Link) {
+  connectionListen(connection: link.server, nowMs: link.nowMs)
+  connectionConnect(connection: link.client, connectionId: 305419896, nowMs: link.nowMs)
+  loop var i: Int = 0, i < 500 and not (connectionIsConnected(connection: link.client) and connectionIsConnected(
+    connection: link.server
+  )), ++i {
+    step(link: link)
+  }
+}
+
+# Message `index` of a run: its size, and its bytes (its index first, then a
+# pattern of its index), so a message is checked whole
+func messageBytes(outgoing: mod List(UInt8), index: view Int, size: view Int) {
+  outgoing.clear()
+  writeU32(bytes: outgoing, value: index)
+  loop var i: Int = 4, i < size, ++i {
+    outgoing.add(value: ((index * 7 + i) % 251) as UInt8)
+  }
+}
+
+func messageMatches(message: view List(UInt8), index: view Int, size: view Int) ret Bool {
+  if message.length is not size or readU32(bytes: message, offset: 0) is not index {
+    ret false
+  }
+  loop var i: Int = 4, i < size, ++i {
+    if (message.copyAtFallback(index: i, fallback: 0) as Int) is not (index * 7 + i) % 251 {
+      ret false
+    }
+  }
+  ret true
+}
+
+type Outcome {
+  received: Int
+  whole: Bool
+  inFlight: Int
+}
+
+# Send `sizes` (bytes each) as reliable messages, the client to the server,
+# each queued as the window lets it; the server takes what arrived every
+# `takeEveryTicks` ticks of 10 ms
+func runMessages(seed: view Int, sizes: view List(Int), takeEveryTicks: view Int) ret Outcome {
+  var link: Link = createLink(seed: seed)
+  connectLink(link: link)
+  var queued: Int = 0
+  var outcome: Outcome = { received: 0, whole: true, inFlight: 0 }
+  var message: List(UInt8) = List.create(UInt8, cap: 70000)
+  var outgoing: List(UInt8) = List.create(UInt8, cap: 70000)
+  loop var tick: Int = 0, tick < 6000 and outcome.received < sizes.length, ++tick {
+    loop queued < sizes.length {
+      messageBytes(
+        outgoing: outgoing
+        index: queued
+        size: sizes.copyAtFallback(index: queued, fallback: 4)
+      )
+      if not connectionSendReliable(
+        connection: link.client
+        bytes: outgoing
+        start: 0
+        count: outgoing.length
+      ) {
+        break
+      }
+      queued = queued + 1
+    }
+    step(link: link)
+    if tick % takeEveryTicks is 0 {
+      loop {
+        let channel: MessageChannel = connectionReceive(connection: link.server, message: message)
+        if channel is MessageChannel.none {
+          break
+        }
+        if not messageMatches(
+          message: message
+          index: outcome.received
+          size: sizes.copyAtFallback(index: outcome.received, fallback: -1)
+        ) {
+          outcome.whole = false
+        }
+        outcome.received = outcome.received + 1
+      }
+    }
+  }
+  # the sender's acks settle
+  loop var tick: Int = 0, tick < 300, ++tick {
+    step(link: link)
+  }
+  outcome.inFlight = reliableInFlight(sender: link.client.sender)
+  ret outcome
+}
+
+# Over seeds 1..20: how many runs delivered everything whole and in order,
+# with the sender agreeing (nothing in flight); the failures named
+func overSeeds(label: view String, sizes: view List(Int), takeEveryTicks: view Int) {
+  var good: Int = 0
+  var bad: String = ""
+  loop var seed: Int = 1, seed <= 20, ++seed {
+    let outcome: Outcome = runMessages(seed: seed, sizes: sizes, takeEveryTicks: takeEveryTicks)
+    if outcome.received is sizes.length and outcome.whole and outcome.inFlight is 0 {
+      good = good + 1
+    } else {
+      bad = "{bad} seed {seed}: {outcome.received} of {sizes.length} whole {outcome.whole} in flight {outcome.inFlight};"
+    }
+  }
+  log(
+    "{label}: {good} of 20 seeds deliver all {sizes.length} once, in order and whole, the sender agreeing{bad}"
+  )
+}
+
+func main() {
+  # the reported run: 6000 bytes (6 fragments), then 100 of 4 bytes
+  var reported: List(Int) = { 6000 }
+  loop var i: Int = 0, i < 100, ++i {
+    reported.add(value: 4)
+  }
+  overSeeds(label: "one message of 6 fragments, then 100 small", sizes: reported, takeEveryTicks: 1)
+
+  # messages of 2..64 fragments (1024 bytes each) among small ones
+  var mixed: List(Int) = {}
+  let fragments: List(Int) = {
+    2
+    64
+    3
+    17
+    5
+    33
+    8
+    63
+    12
+    40
+  }
+  loop let count: Int in fragments {
+    mixed.add(value: count * 1024 - 100)
+    loop var i: Int = 0, i < 9, ++i {
+      mixed.add(value: 4 + i * 37)
+    }
+  }
+  overSeeds(
+    label: "messages of 2 to 64 fragments, 9 small ones after each"
+    sizes: mixed
+    takeEveryTicks: 1
+  )
+
+  # the receiving app takes its messages only every 500 ms: its window lags
+  # by what it has not taken, small messages too
+  var small: List(Int) = {}
+  loop var i: Int = 0, i < 300, ++i {
+    small.add(value: 4 + i % 50)
+  }
+  overSeeds(label: "300 small messages, taken every 500 ms", sizes: small, takeEveryTicks: 50)
+}

@@ -176,6 +176,18 @@ func reliableSlotDue(
   ret lastSentMs < 0 or nowMs - lastSentMs >= resendMs
 }
 
+# Whether fragment `id` is ahead of the receive window: newer than every id the
+# window can hold. The sender's window starts at its oldest unacked fragment,
+# this one at the first fragment of the oldest message not yet delivered (it
+# waits for the whole message, and for the app to take it), so the sender can
+# be up to a message's fragments ahead. Such a fragment must not be acked: the
+# packet that carried it is left unacked (lib/net/Connection) and the fragment
+# comes again once the window has moved.
+func reliableIsAhead(receiver: view ReliableReceiver, id: view Int) ret Bool {
+  let distance: Int = sequenceDistance(newer: id, older: receiver.nextId)
+  ret distance >= receiver.windowSize and sequenceGreater(first: id, second: receiver.nextId)
+}
+
 # Store fragment `id` (`count` bytes of `packet` from `start`): false when it
 # is a duplicate, already delivered, outside the window or malformed
 func reliableReceive(

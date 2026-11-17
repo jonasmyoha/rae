@@ -866,11 +866,6 @@ func readPlainPacket(
   }
   # Data before the accept: the accept was lost, the peer is there
   connection.state = ConnectionState.connected
-  noteReceivedSequence(
-    connection: connection
-    sequence: readU16(bytes: packet, offset: start + 5)
-    nowMs: nowMs
-  )
   if (readU8(bytes: packet, offset: start) bitand flagAckValid) is not 0 {
     takeAcks(
       connection: connection
@@ -880,13 +875,22 @@ func readPlainPacket(
       nowMs: nowMs
     )
   }
-  let carriedReliable: Bool = readMessages(
+  let found: PacketMessages = readMessages(
     connection: connection
     packet: packet
     start: start + headerBytes
     end: start + count
   )
-  if carriedReliable {
+  # Acked only when every reliable fragment in it was kept (or was one this end
+  # already has): a fragment ahead of the receive window comes again
+  if not found.refusedAhead {
+    noteReceivedSequence(
+      connection: connection
+      sequence: readU16(bytes: packet, offset: start + 5)
+      nowMs: nowMs
+    )
+  }
+  if found.carriedReliable {
     connection.ackPending = true
   }
   ret received(connection: connection, nowMs: nowMs)

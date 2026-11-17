@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.10, 2026-11-17: reliable messages no longer lost past the receive window
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.10` moves a project.
+
+- lib/net's reliable channel could lose messages while the sender saw them delivered:
+  the sender's window starts at its oldest unacked fragment, the receiver's at the first
+  fragment of the oldest message it has not delivered, so a fragment beyond the receiver's
+  window (after a message of several fragments, or while the app had not taken its
+  messages) was refused and its packet still acked. Such a packet is now left unacked and
+  the fragment comes again (`ReliableChannel.reliableIsAhead`, `Connection`). A run of one
+  6-fragment message then 100 small ones through loss, reordering and duplicates stopped at
+  59 on half the seeds; it now delivers everything on all of them.
+
 ## 0.4.9, 2026-11-17: smooth canvas zoom
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.9` moves a project.

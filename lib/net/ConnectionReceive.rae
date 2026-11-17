@@ -105,47 +105,60 @@ func ackPacket(connection: mod Connection, sequence: view Int) {
   }
 }
 
+# What reading a data packet's messages found
+type PacketMessages {
+  # a reliable fragment was among them
+  carriedReliable: Bool = false
+  # one was ahead of the receive window and not kept (ReliableChannel
+  # reliableIsAhead): the packet must not be acked, so it comes again
+  refusedAhead: Bool = false
+}
+
 # The messages of a data packet, `start` up to `end`; a malformed tail ends
-# the reading (what was read stays). Whether a reliable message was among them.
+# the reading (what was read stays)
 func readMessages(
   connection: mod Connection
   packet: view List(UInt8)
   start: view Int
   end: view Int
-) ret Bool {
-  var carriedReliable: Bool = false
+) ret PacketMessages {
+  var found: PacketMessages = {}
   var offset: Int = start
   loop offset < end {
     let messageKind: Int = readU8(bytes: packet, offset: offset)
     if messageKind is messageReliable {
       if offset + reliableMessageHeader > end {
-        ret carriedReliable
+        ret found
       }
       let length: Int = readU16(bytes: packet, offset: offset + 7)
       let dataStart: Int = offset + reliableMessageHeader
       if dataStart + length > end {
-        ret carriedReliable
+        ret found
+      }
+      let id: Int = readU16(bytes: packet, offset: offset + 1)
+      if reliableIsAhead(receiver: connection.receiver, id: id) {
+        found.refusedAhead = true
       }
       let stored: Bool = reliableReceive(
         receiver: connection.receiver
-        id: readU16(bytes: packet, offset: offset + 1)
+        id: id
         fragmentIndex: readU16(bytes: packet, offset: offset + 3)
         fragmentCount: readU16(bytes: packet, offset: offset + 5)
         packet: packet
         start: dataStart
         count: length
       )
-      carriedReliable = true
+      found.carriedReliable = true
       offset = dataStart + length
     } else if messageKind is messageUnreliable {
       if offset + unreliableMessageHeader > end {
-        ret carriedReliable
+        ret found
       }
       let sequence: Int = readU16(bytes: packet, offset: offset + 1)
       let length: Int = readU16(bytes: packet, offset: offset + 3)
       let dataStart: Int = offset + unreliableMessageHeader
       if dataStart + length > end {
-        ret carriedReliable
+        ret found
       }
       takeUnreliable(
         connection: connection
@@ -156,10 +169,10 @@ func readMessages(
       )
       offset = dataStart + length
     } else {
-      ret carriedReliable
+      ret found
     }
   }
-  ret carriedReliable
+  ret found
 }
 
 # Keep an unreliable message unless an equal or newer one already came (or
