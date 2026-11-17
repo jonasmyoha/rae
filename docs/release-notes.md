@@ -4,11 +4,44 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
-## 0.4.0 (not released yet): module folders
+## 0.4.0, 2026-11-17: module folders
 
-Named on 2026-11-16. Being built in the 0.3 line from 0.3.173; the task
-[release: modules, Rae 0.4.0, then push] completes this section and tags it.
-docs/module-model-options.md is the design.
+Named on 2026-11-16 and built in the 0.3 line from 0.3.173; the 0.3 line ended
+at 0.3.178 (tag `v0.3.178`). docs/module-model-options.md is the design. A
+project moves with `./rae toolchain pin 0.4.0`, then takes its packages' new
+versions with `./rae update <name>` (physicsScenes 1.2.0, qr 1.1.0).
+
+**What 0.4.0 refuses that 0.3.x took**
+- An import or qualifier whose upper and lower case differ from the file or
+  folder on disk (`import vec3`, `import sys`, `math.sqrt`, `sdl3.isKeyPressed`,
+  `Particles.tick()` for the folder `particles/`): write it as on disk
+  (`import Vec3`, `Math.sqrt`, `particles.tick()`). These worked on macOS only.
+- A file and a folder of one name in one place (`Hud.rae` beside `Hud/`), at
+  any depth: keep one, or move the file into the folder.
+- An import of a file inside a module folder (`import Gpu2d/Window`): import
+  the module (`import Gpu2d`).
+- The same function with the same parameters in two files of one module.
+- `Gpu2dImages.` and `import Gpu2dImages`, which existed in 0.3.172 only: write
+  `Gpu2d.` and drop the import.
+- The old imports of the ui system modules that became folders; each folder is
+  one module now, and a call qualified by one of its files' names takes the
+  module's name (`RenderFills.paintGradient` -> `RenderSystem.paintGradient`):
+
+  | 0.3.x import (every file of the folder) | 0.4.0 import |
+  |---|---|
+  | `ui/renderSystem/RenderSystem`, `RenderFills`, `RenderSprite`, `RenderCull`, `RenderText` and the 13 others | `ui/RenderSystem` |
+  | `ui/animationSystem/...` (8 files) | `ui/AnimationSystem` |
+  | `ui/buttonSystem/...` (4 files) | `ui/ButtonSystem` |
+  | `ui/pageTransitionSystem/...` (3 files) | `ui/PageTransitionSystem` |
+  | `ui/inputSystem/...` | `ui/InputSystem` |
+  | `ui/layoutSystem/...` | `ui/LayoutSystem` |
+  | `ui/listMotionSystem/...` | `ui/ListMotionSystem` |
+  | `ui/listReorderSystem/...` | `ui/ListReorderSystem` |
+  | `ui/listViewSystem/...` | `ui/ListViewSystem` |
+  | `ui/scrollRootSystem/...` | `ui/ScrollRootSystem` |
+
+  The one-file system folders (`ui/dialogSystem/DialogSystem`, the lib/ecs
+  systems and the rest) keep their import paths.
 
 **Modules**
 - A module is a PascalCase file or a PascalCase folder (0.3.174): `import
