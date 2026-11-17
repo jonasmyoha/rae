@@ -40,10 +40,14 @@ type GraphParameterEvent {
   sampleTime: Int
 }
 
-# A meter's peak since the last reading, pushed after each rendered call
+# A meter's peak since the last reading, pushed after each rendered call, with
+# the sums of its channels' squared samples over `frames` frames (for an RMS)
 type MeterReading {
   key: Int
   peak: Float
+  sumLeft: Float64 = 0.0
+  sumRight: Float64 = 0.0
+  frames: Int = 0
 }
 
 type GraphRenderer {
@@ -240,10 +244,58 @@ func takeNewPlan(this: mod GraphRenderer) realtime {
 }
 
 # Render `frames` frames into left/right from `offset`, in pieces of at most
-# the plan's maxFrames; silence when there is no plan yet
+# the plan's maxFrames; silence when there is no plan yet. `sources` is the
+# one-buffer pool (two channels of the plan's maxFrames frames per slot).
 func renderGraph(
   this: mod GraphRenderer
   sources: view Buffer(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  this.renderGraphWith(
+    pool: sources
+    pooled: true
+    sources: pooledSources(pool: sources, maxFrames: 1)
+    sourceOffset: 0
+    left: left
+    right: right
+    offset: offset
+    frames: frames
+  )
+}
+
+# Like renderGraph, the sources read from `sources` from frame `sourceOffset`
+# (an engine's slot buffers, audio/AudioMixer: the slots the voices, streams
+# and notes are mixed into)
+func renderGraphFrom(
+  this: mod GraphRenderer
+  sources: view GraphSources
+  sourceOffset: view Int
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+  frames: view Int
+) realtime {
+  this.renderGraphWith(
+    pool: sources.left
+    pooled: false
+    sources: sources
+    sourceOffset: sourceOffset
+    left: left
+    right: right
+    offset: offset
+    frames: frames
+  )
+}
+
+func renderGraphWith(
+  this: mod GraphRenderer
+  pool: view Buffer(Float)
+  pooled: view Bool
+  sources: view GraphSources
+  sourceOffset: view Int
   left: view Buffer(Float)
   right: view Buffer(Float)
   offset: view Int
@@ -271,10 +323,14 @@ func renderGraph(
           rae_ext_rae_buf_set(buf: rightTarget, index: offset + done + i, value: 0.0)
         }
       } else {
+        var pieceSources: GraphSources = sources
+        if pooled {
+          pieceSources = pooledSources(pool: pool, maxFrames: this.current.maxFrames)
+        }
         renderPlanNodes(
           plan: this.current
-          sources: pooledSources(pool: sources, maxFrames: this.current.maxFrames)
-          sourceOffset: done
+          sources: pieceSources
+          sourceOffset: sourceOffset + done
           frames: piece
           team: this.team
         )
@@ -307,6 +363,14 @@ func renderGraph(
     this.sampleTime = this.sampleTime + piece
   }
   this.pushMeterReadings()
+}
+
+# Audio side, when the renderer's owner is freed (audio/AudioMixer): its plan
+# onto the reclaim ring, for the main thread to free with the rest
+func handBackPlan(this: view GraphRenderer) {
+  if this.hasPlan {
+    let given: Bool = this.reclaim.push(value: this.current)
+  }
 }
 
 # Apply every parameter change whose sample time has come
@@ -413,9 +477,13 @@ func pushMeterReadings(this: view GraphRenderer) realtime {
       if kind is NodeKind.meter {
         var meters: Buffer(MeterState) = plan.meters
         let state: MeterState = rae_ext_rae_buf_get(buf: meters, index: stateAt)
-        let pushed: Bool = this.meters.push(
-          value: MeterReading { key: key, peak: max(a: state.peakLeft, b: state.peakRight) }
-        )
+        let pushed: Bool = this.meters.push(value: MeterReading {
+          key: key
+          peak: max(a: state.peakLeft, b: state.peakRight)
+          sumLeft: state.sumLeft
+          sumRight: state.sumRight
+          frames: state.frames
+        })
         rae_ext_rae_buf_set(
           buf: meters
           index: stateAt

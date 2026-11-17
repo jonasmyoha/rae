@@ -12,6 +12,8 @@
 #   master       sum           -> inserts -> fader -> meter -> output
 #   send         a gain from its track's point before the fader (or after the
 #                meter) into its bus
+open audio/Audio
+open audio/EcsMix
 open audio/AudioComponents
 open audio/AudioGraph
 open audio/GraphCompile
@@ -56,6 +58,9 @@ type AudioGraphState {
   sentFader: List(Float)
   sentPan: List(Float)
   sentSend: List(Float)
+  # false: the renderer is an engine's (createAudioGraphStateFor), which frees
+  # it at stopAudio
+  ownsRenderer: Bool = true
 }
 
 func createAudioGraphState(sampleRate: view Int, maxFrames: view Int) ret AudioGraphState {
@@ -78,8 +83,33 @@ func createAudioGraphState(sampleRate: view Int, maxFrames: view Int) ret AudioG
   }
 }
 
+# The state for an engine's own ECS mix: its plans go to the engine's mixer,
+# which renders them as its output after `audio.useEcsMix(on: true)`, on the
+# device or offline; voices, streams and notes reach a track through its
+# sourceSlot (audio.playIntoSlotFromAt, playStreamIntoSlotFromAt,
+# playNoteIntoSlotAt). Send parameterSystem's events for engine sample times
+# (audio.nextSafeSampleTime()). Free it before stopAudio, which frees the
+# renderer.
+func createAudioGraphStateFor(audio: view AudioEngine) ret AudioGraphState {
+  var state: AudioGraphState = createAudioGraphState(
+    sampleRate: audio.sampleRate
+    maxFrames: audio.periodFrames
+  )
+  state.renderer.freeGraphRenderer()
+  state.renderer = audio.mixRenderer()
+  state.ownsRenderer = false
+  ret state
+}
+
 func freeAudioGraphState(this: view AudioGraphState) {
-  this.renderer.freeGraphRenderer()
+  if this.ownsRenderer {
+    this.renderer.freeGraphRenderer()
+  } else {
+    # the plans the mixer let go of so far; the engine frees the rest
+    loop let old: RenderPlan in this.renderer.takeReclaimedPlans() {
+      freeRenderPlan(plan: old)
+    }
+  }
 }
 
 func audioNodeKey(entityId: view EntityId, role: view Int) ret Int {

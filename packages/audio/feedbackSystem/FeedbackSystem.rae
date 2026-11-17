@@ -4,6 +4,7 @@
 # interruptions and route changes (the events audio/sessionSystem sends as
 # AudioSessionEvent), underruns, voices that ended, and MIDI sources that came
 # or went. Run it once per frame, after the engine's update.
+import Math
 open audio/Audio
 open audio/AudioComponents
 open audio/AudioSession
@@ -27,9 +28,13 @@ func createAudioEventState(watchMidi: view Bool) ret AudioEventState {
 }
 
 # The meters' readings since the last frame: each meter entity's AudioMeter
-# holds the highest of them
+# holds the highest peak of them and the RMS over all the frames they cover
+# (each channel's, the louder of the two)
 func audioFeedbackSystem(entities: mod AudioEntities, state: mod AudioGraphState) {
   var peaks: List(Float) = {}
+  var sumsLeft: List(Float64) = {}
+  var sumsRight: List(Float64) = {}
+  var frames: List(Int) = {}
   loop let reading: MeterReading in state.renderer.takeMeterReadings() {
     if reading.key % 64 is not roleMeter {
       continue
@@ -37,18 +42,43 @@ func audioFeedbackSystem(entities: mod AudioEntities, state: mod AudioGraphState
     let index: Int = reading.key / 64
     loop peaks.length() <= index {
       peaks.add(value: -1.0)
+      sumsLeft.add(value: 0.0)
+      sumsRight.add(value: 0.0)
+      frames.add(value: 0)
     }
     if reading.peak > peaks.copyAtFallback(index: index, fallback: -1.0) {
       peaks.set(index: index, value: reading.peak)
     }
+    sumsLeft.set(
+      index: index
+      value: sumsLeft.copyAtFallback(index: index, fallback: 0.0) + reading.sumLeft
+    )
+    sumsRight.set(
+      index: index
+      value: sumsRight.copyAtFallback(index: index, fallback: 0.0) + reading.sumRight
+    )
+    frames.set(
+      index: index
+      value: frames.copyAtFallback(index: index, fallback: 0) + reading.frames
+    )
   }
   loop var index: Int = 0, index < peaks.length(), ++index {
     let peak: Float = peaks.copyAtFallback(index: index, fallback: -1.0)
     if peak < 0.0 {
       continue
     }
+    var rms: Float = 0.0
+    let counted: Int = frames.copyAtFallback(index: index, fallback: 0)
+    if counted > 0 {
+      var louder: Float64 = sumsLeft.copyAtFallback(index: index, fallback: 0.0)
+      let rightSum: Float64 = sumsRight.copyAtFallback(index: index, fallback: 0.0)
+      if rightSum > louder {
+        louder = rightSum
+      }
+      rms = sqrt(x: (louder / (counted as Float64)) as Float)
+    }
     let entityId: EntityId = state.entityOfIndex.copyAtFallback(index: index, fallback: noEntity())
-    entities.meters.componentSet(entityId: entityId, data: AudioMeter { peak: peak })
+    entities.meters.componentSet(entityId: entityId, data: AudioMeter { peak: peak, rms: rms })
   }
 }
 

@@ -46,8 +46,10 @@ open audio/AudioDevice
 open audio/AudioGlue
 open audio/AudioMixer
 open audio/AudioSession
+open audio/AudioTypes
 open audio/Decoder
 open audio/EngineSession
+open audio/GraphRender
 open audio/GraphTeam
 open audio/Sound
 open collections/SpscRing
@@ -76,38 +78,6 @@ func defaultAudioSettings() ret AudioSettings {
     session: AudioSessionKind.ambient
     inputChannels: 0
   }
-}
-
-type VoiceId {
-  value: Int
-}
-
-# A sound the engine knows (audio.addSound / audio.loadSound)
-type Sound {
-  soundId: Int
-  samples: Buffer(Float)
-  frameCount: Int
-  channels: Int
-  sampleRate: Int
-  # "" when it loaded, else what was wrong (it then plays nothing)
-  error: String
-}
-
-type SoundSlot {
-  soundId: Int
-  samples: Buffer(Float)
-  live: Bool
-  # freeSound asked; the samples go once the audio thread lets them go
-  releasing: Bool
-  # at most this many of its voices at once, 0 for no cap (audio/VoiceControls)
-  voiceLimit: Int = 0
-  stealQuietest: Bool = false
-}
-
-# A voice the main thread knows is playing, and on which bus
-type LiveVoice {
-  voiceId: Int
-  bus: Int
 }
 
 type AudioEngine {
@@ -178,6 +148,10 @@ type AudioEngine {
   renderWorkgroup: Int
   streams: List(StreamRecord)
   nextStreamId: Int
+  # the program's ECS mix (audio/graphSystem): the renderer its plans,
+  # parameters and meters go through, shared with the mixer that renders
+  # (mixRenderer, useEcsMix)
+  mix: GraphRenderer
 }
 
 func audioOfflineWanted() ret Bool {
@@ -225,6 +199,9 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
   # 0.5 % silence). It is up to 21 ms at 256 frames, the cost of stage A; stage
   # B (rendering inside the callback, §4.2) removes it.
   let output: SpscRing(Float) = createSpscRing(Float, capacity: 4 * periodFrames * channels)
+  # the program's ECS mix: one renderer, its rings shared by every copy (the
+  # engine's, the rendering mixer's, the program's AudioGraphState)
+  let mix: GraphRenderer = createGraphRenderer()
   let mixer: AudioMixer = createAudioMixer(
     sampleRate: sampleRate
     maxFrames: periodFrames
@@ -232,6 +209,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     reclaim: reclaim
     clockStamps: clockStamps
     busEffects: settings.busEffects
+    mix: mix
   )
   var renderTask: Task(Int) = spawn audioIdle()
   let butlerCommands: SpscRing(ButlerCommand) = createSpscRing(ButlerCommand, capacity: 256)
@@ -272,6 +250,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         reclaim: reclaim
         clockStamps: clockStamps
         busEffects: settings.busEffects
+        mix: mix
       )
       commands: commands
       input: input
@@ -311,6 +290,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
         reclaim: reclaim
         clockStamps: clockStamps
         busEffects: settings.busEffects
+        mix: mix
       )
       renderTask = spawn thread audioRenderThread(
         mixer: threadMixer
@@ -397,6 +377,7 @@ func audioStart(settings: view AudioSettings) ret AudioEngine {
     renderWorkgroup: renderWorkgroup
     streams: {}
     nextStreamId: 1
+    mix: mix
   }
 }
 
@@ -506,6 +487,30 @@ func playFromAt(
   startFrame: view Int
   atSample: view Int
 ) ret VoiceId {
+  ret this.playVoiceAt(
+    sound: sound
+    slot: busIndex(bus: bus)
+    gainDecibels: gainDecibels
+    pan: pan
+    looping: looping
+    startFrame: startFrame
+    atSample: atSample
+    place: "bus {bus}"
+  )
+}
+
+# A voice of `sound` into slot `slot`; `place` names it in the offline log
+func playVoiceAt(
+  this: mod AudioEngine
+  sound: view Sound
+  slot: view Int
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  startFrame: view Int
+  atSample: view Int
+  place: view String
+) ret VoiceId {
   let voiceId: Int = this.nextVoiceId
   this.nextVoiceId = this.nextVoiceId + 1
   if sound.frameCount is 0 {
@@ -518,7 +523,7 @@ func playFromAt(
   command.frameCount = sound.frameCount
   command.channels = sound.channels
   command.sampleRate = sound.sampleRate
-  command.bus = busIndex(bus: bus)
+  command.bus = slot
   command.value = decibelsToGain(decibels: gainDecibels)
   command.other = pan
   command.looping = looping
@@ -531,7 +536,7 @@ func playFromAt(
     }
   }
   if this.offline {
-    log("[audio] play voice {voiceId} sound {sound.soundId} bus {bus} at {atSample}")
+    log("[audio] play voice {voiceId} sound {sound.soundId} {place} at {atSample}")
   }
   this.liveVoices.add(value: { voiceId: voiceId, bus: command.bus })
   this.lastSoundMs = this.audioNowMs()
@@ -855,6 +860,8 @@ func stopAudio(this: mod AudioEngine) ret Int {
     }
   }
   freeAudioMixer(mixer: this.mixer)
+  # the ECS mix's plans (each mixer handed back the one it held) and rings
+  freeGraphRenderer(this: this.mix)
   freeSpscRing(this: this.commands)
   freeSpscRing(this: this.feedback)
   freeSpscRing(this: this.reclaim)

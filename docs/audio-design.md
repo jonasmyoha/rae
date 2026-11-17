@@ -899,6 +899,39 @@ rather than through the ECS layer, because the ECS chain adds a pan and a meter
 node per track that the simple API does not have. The §10.1 calls and their
 behavior are unchanged (fixtures 1401-1417).
 
+**Landed, the engine plays the program's ECS mix (2026-11-17, `packages/audio`
+0.23.0):** the engine renders a program's compiled ECS plan as its output in
+place of the four-bus plan, on the device (stage A and B) and offline
+(`renderOffline`):
+
+- `createAudioGraphStateFor(audio:)` (graphSystem) makes the AudioGraphState
+  on the engine's own renderer (`audio.mixRenderer()`, audio/EcsMix). Its
+  rings are shared by the engine, every mixer copy and the state, so the
+  plans graphSystem compiles, parameterSystem's events and the meters' readings
+  go through them; `audio.useEcsMix(on: true)` switches the output from the next
+  block. The mixer renders the plan at the engine's sample time, cutting the
+  block at each event (parameterSystem's events land on their samples; send them
+  for `audio.nextSafeSampleTime()` or later), and the plans carry their state
+  across swaps as before. A mixer freed hands its plan back through the reclaim
+  ring, and `stopAudio` frees the renderer: free the state first.
+- The voices, streams and synth notes mix into 64 source slots
+  (`audioSourceSlots`, audio/MixerOutput); slots 0..3 are the four buses, and
+  every slot is a source an `AudioTrack.sourceSlot` reads.
+  `playIntoSlotFromAt`, `playStreamIntoSlotFromAt` and `playNoteIntoSlotAt`
+  play into a slot (the synth is one instrument: its notes sound in the slot
+  its last note named).
+- `AudioMeter.rms` beside `peak`: the meter node sums each channel's squared
+  samples, every reading carries the sums and the frames, and feedbackSystem
+  writes the RMS over all the frames since the last read, the louder channel's
+  (as the peak is the louder channel's).
+
+Fixture 1528: a full-scale sine on a track panned hard left (fader 0 dB, no
+inserts) meters 0 dBFS peak and -3.01 dB RMS offline (centered, the
+equal-power pan puts it 3 dB lower on each side); case 1438's session with its
+sources played as voices into slots 0 and 1, through the engine, null-tests
+against the same formula (below -100 dBFS), B's mute landing on its sample,
+and blocks of 37 equal blocks of 128 bit for bit, with RAE_REALTIME_CHECK.
+
 ### 10.3 Writing DSP
 
 A node kind is a state struct plus its `prepare` / `process` / `reset`

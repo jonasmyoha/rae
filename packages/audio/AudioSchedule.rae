@@ -238,6 +238,24 @@ func playNoteAt(
   let sent: Bool = this.sendCommand(command: command)
 }
 
+# Like playNoteAt, into source slot `slot` of the program's ECS mix (an
+# AudioTrack's sourceSlot, audio/graphSystem). The synth is one instrument:
+# its notes sound in the slot its last note named.
+func playNoteIntoSlotAt(
+  this: view AudioEngine
+  note: view Int
+  velocity: view Float
+  slot: view Int
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOn)
+  command.voiceId = note
+  command.value = velocity
+  command.bus = slot
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
 # The note's release starts at `atSample`
 func releaseNoteAt(this: view AudioEngine, note: view Int, atSample: view Int) {
   var command: AudioCommand = emptyCommand(kind: AudioCommandKind.noteOff)

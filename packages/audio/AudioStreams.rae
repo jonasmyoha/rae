@@ -131,6 +131,45 @@ func playStreamFromAt(
   skipFrames: view Int
   atSample: view Int
 ) ret VoiceId {
+  ret this.playStreamIntoSlotAt(
+    path: path
+    slot: busIndex(bus: bus)
+    gainDecibels: gainDecibels
+    skipFrames: skipFrames
+    atSample: atSample
+    place: "bus {bus}"
+  )
+}
+
+# Like playStreamFromAt, into source slot `slot` of the program's ECS mix (an
+# AudioTrack's sourceSlot, audio/graphSystem)
+func playStreamIntoSlotFromAt(
+  this: mod AudioEngine
+  path: view String
+  slot: view Int
+  gainDecibels: view Float
+  skipFrames: view Int
+  atSample: view Int
+) ret VoiceId {
+  ret this.playStreamIntoSlotAt(
+    path: path
+    slot: slot
+    gainDecibels: gainDecibels
+    skipFrames: skipFrames
+    atSample: atSample
+    place: "slot {slot}"
+  )
+}
+
+func playStreamIntoSlotAt(
+  this: mod AudioEngine
+  path: view String
+  slot: view Int
+  gainDecibels: view Float
+  skipFrames: view Int
+  atSample: view Int
+  place: view String
+) ret VoiceId {
   let voiceId: Int = this.nextVoiceId
   this.nextVoiceId = this.nextVoiceId + 1
   let decoder: AudioDecoder = openAudioDecoder(path: path)
@@ -139,13 +178,13 @@ func playStreamFromAt(
     ret VoiceId { value: voiceId }
   }
   if this.offline {
-    log("[audio] stream voice {voiceId} {path} bus {bus}")
+    log("[audio] stream voice {voiceId} {path} {place}")
   }
   let record: StreamRecord = this.startStream(
     decoder: decoder
     path: path
     voiceId: voiceId
-    bus: busIndex(bus: bus)
+    bus: slot
     gain: decibelsToGain(decibels: gainDecibels)
     startFrame: skipFrames * decoder.sampleRate / max(a: 1, b: this.sampleRate)
     atSample: atSample

@@ -1,0 +1,55 @@
+# audio/MixerOutput — small pieces of the mixer's render (audio/AudioMixer):
+# adding a frame to a slot, the slot a voice may write into, and a frame into
+# the interleaved output. Real-time code: no allocation, lock or wait.
+import Math
+open audio/Sound
+
+# The slots voices, streams and notes are mixed into: the first four are the
+# buses (audio/AudioMixer's AudioBusKind), and all of them are the source slots
+# a program's ECS mix reads (an AudioTrack's sourceSlot, audio/graphSystem)
+const audioSourceSlots: Int = 64
+
+func addToBus(
+  busLeft: view Buffer(Float)
+  busRight: view Buffer(Float)
+  index: view Int
+  left: view Float
+  right: view Float
+) {
+  setSampleAt(
+    samples: busLeft
+    index: index
+    value: sampleAt(samples: busLeft, index: index) + left
+  )
+  setSampleAt(
+    samples: busRight
+    index: index
+    value: sampleAt(samples: busRight, index: index) + right
+  )
+}
+
+# A slot a voice or a note may write into: within the pool (a slot past it is
+# the last one)
+func sourceSlotOf(slot: view Int) ret Int {
+  ret min(a: audioSourceSlots - 1, b: max(a: 0, b: slot))
+}
+
+# One frame into the interleaved output: mono the average, stereo the two,
+# more channels silent past the second
+func writeOutputFrame(
+  output: view Buffer(Float)
+  at: view Int
+  channels: view Int
+  left: view Float
+  right: view Float
+) {
+  if channels is 1 {
+    setSampleAt(samples: output, index: at, value: (left + right) * 0.5)
+  } else {
+    setSampleAt(samples: output, index: at * channels, value: left)
+    setSampleAt(samples: output, index: at * channels + 1, value: right)
+    loop var extra: Int = 2, extra < channels, ++extra {
+      setSampleAt(samples: output, index: at * channels + extra, value: 0.0)
+    }
+  }
+}

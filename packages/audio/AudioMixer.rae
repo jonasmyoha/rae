@@ -23,6 +23,7 @@ open audio/GraphNodes
 open audio/GraphTeam
 open Atomic
 open audio/Sound
+open audio/MixerOutput
 open collections/SpscRing
 
 enum AudioBusKind { music, effects, alerts, voice }
@@ -64,6 +65,9 @@ enum AudioCommandKind {
   # the event recorder's name of the bus plan's node `voiceId`: `startFrame` the name id,
   # `frameCount` the recorder table's generation it belongs to (audio/AudioCapture)
   setPerfNodeName
+  # the output: the program's ECS mix (`value` 1, audio/graphSystem's plan,
+  # through `mix`) or the four buses (0)
+  useMix
 }
 
 # One message to the audio thread. Plain values only (it crosses a ring): the
@@ -170,6 +174,13 @@ type AudioMixer {
   # helpers that render the bus graph's stages with the audio thread
   # (audio/GraphTeam): none unless useMixerTeam was called
   team: GraphTeam
+  # the program's ECS mix: the renderer its plans and parameters come
+  # through (shared with the engine and the program's AudioGraphState), whether
+  # it is the output, and its output's two channels for a part
+  mix: GraphRenderer
+  useMix: Bool = false
+  mixLeft: Buffer(Float)
+  mixRight: Buffer(Float)
 }
 
 func createAudioMixer(
@@ -179,6 +190,7 @@ func createAudioMixer(
   reclaim: view SpscRing(Int)
   clockStamps: view SpscRing(ClockStamp)
   busEffects: view Bool
+  mix: view GraphRenderer
 ) ret AudioMixer {
   var voices: List(AudioVoice) = List.create(AudioVoice, cap: audioMaxVoices)
   voices.addDefaults(count: audioMaxVoices)
@@ -198,8 +210,8 @@ func createAudioMixer(
     voices: voices
     busPlan: busPlan
     busEffects: busEffects
-    busLeft: createSampleBuffer(count: audioBusCount * maxFrames)
-    busRight: createSampleBuffer(count: audioBusCount * maxFrames)
+    busLeft: createSampleBuffer(count: audioSourceSlots * maxFrames)
+    busRight: createSampleBuffer(count: audioSourceSlots * maxFrames)
     duckOn: false
     duckSource: 0
     pausedBuses: 0
@@ -216,6 +228,9 @@ func createAudioMixer(
     clockStamps: clockStamps
     synth: createSynthState(sampleRate: sampleRate, bus: 0)
     team: noGraphTeam()
+    mix: mix
+    mixLeft: createSampleBuffer(count: maxFrames)
+    mixRight: createSampleBuffer(count: maxFrames)
   }
 }
 
@@ -261,7 +276,12 @@ func freeAudioMixer(mixer: view AudioMixer) {
     rae_ext_rae_buf_free(buf: mixer.busLeft)
     rae_ext_rae_buf_free(buf: mixer.busRight)
     rae_ext_rae_buf_free(buf: mixer.duckActivity)
+    rae_ext_rae_buf_free(buf: mixer.mixLeft)
+    rae_ext_rae_buf_free(buf: mixer.mixRight)
   }
+  # the ECS mix's plan this mixer was rendering goes back to the engine, which
+  # frees it with the renderer (stopAudio)
+  mixer.mix.handBackPlan()
   freeRenderPlan(plan: mixer.busPlan)
   if mixer.team.helperCount is 0 {
     freeGraphTeam(team: mixer.team)
@@ -412,7 +432,7 @@ func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
     voice.step = step
     voice.rate = steadyRamp(value: command.rate)
     voice.startedAt = sampleTime
-    voice.bus = command.bus
+    voice.bus = sourceSlotOf(slot: command.bus)
     voice.gain = steadyRamp(value: command.value)
     voice.pan = steadyRamp(value: command.other)
     voice.looping = command.looping
@@ -435,8 +455,12 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
     startVoice(mixer: mixer, command: command)
     ret
   }
+  if command.kind is AudioCommandKind.useMix {
+    mixer.useMix = command.value > 0.5
+    ret
+  }
   if command.kind is AudioCommandKind.noteOn {
-    mixer.synth.bus = command.bus
+    mixer.synth.bus = sourceSlotOf(slot: command.bus)
     synthNoteOn(synth: mixer.synth, note: command.voiceId, velocity: command.value)
     ret
   }
@@ -607,25 +631,6 @@ func voiceSampleAt(voice: view AudioVoice, position: view Float64, channel: view
   }
   let b: Float = sampleAt(samples: voice.samples, index: next * voice.channels + channel)
   ret a + (b - a) * fraction
-}
-
-func addToBus(
-  busLeft: view Buffer(Float)
-  busRight: view Buffer(Float)
-  index: view Int
-  left: view Float
-  right: view Float
-) {
-  setSampleAt(
-    samples: busLeft
-    index: index
-    value: sampleAt(samples: busLeft, index: index) + left
-  )
-  setSampleAt(
-    samples: busRight
-    index: index
-    value: sampleAt(samples: busRight, index: index) + right
-  )
 }
 
 # One frame of a streamed voice: its channels from the ring (already at the
@@ -840,7 +845,7 @@ func renderPart(
 ) {
   let maxFrames: Int = mixer.maxFrames
   unsafe {
-    loop var bus: Int = 0, bus < audioBusCount, ++bus {
+    loop var bus: Int = 0, bus < audioSourceSlots, ++bus {
       rae_ext_rae_buf_zero(
         buf: mixer.busLeft
         start: bus * maxFrames + from
@@ -898,6 +903,37 @@ func renderPart(
     from: from
     frames: frames
   )
+  # the program's ECS mix, when it is the output: its plan reads the slots,
+  # at the engine's sample time (its parameter events land on their samples)
+  if mixer.useMix {
+    let slots: GraphSources = {
+      left: busLeft
+      right: busRight
+      slotStride: maxFrames
+      rightOffset: 0
+      activity: activity
+      hasActivity: false
+    }
+    mixer.mix.sampleTime = mixer.partStart
+    mixer.mix.renderGraphFrom(
+      sources: slots
+      sourceOffset: from
+      left: mixer.mixLeft
+      right: mixer.mixRight
+      offset: 0
+      frames: frames
+    )
+    loop var i: Int = 0, i < frames, ++i {
+      writeOutputFrame(
+        output: output
+        at: firstFrame + from + i
+        channels: channels
+        left: sampleAt(samples: mixer.mixLeft, index: i)
+        right: sampleAt(samples: mixer.mixRight, index: i)
+      )
+    }
+    ret
+  }
   # the buses' mix: the plan (bus faders with the duck, the sum)
   let sources: GraphSources = {
     left: busLeft
@@ -928,15 +964,12 @@ func renderPart(
       channel: 1
       frame: i
     )
-    let at: Int = firstFrame + from + i
-    if channels is 1 {
-      setSampleAt(samples: output, index: at, value: (left + right) * 0.5)
-    } else {
-      setSampleAt(samples: output, index: at * channels, value: left)
-      setSampleAt(samples: output, index: at * channels + 1, value: right)
-      loop var extra: Int = 2, extra < channels, ++extra {
-        setSampleAt(samples: output, index: at * channels + extra, value: 0.0)
-      }
-    }
+    writeOutputFrame(
+      output: output
+      at: firstFrame + from + i
+      channels: channels
+      left: left
+      right: right
+    )
   }
 }

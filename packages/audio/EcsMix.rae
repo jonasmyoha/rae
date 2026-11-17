@@ -1,0 +1,57 @@
+# audio/EcsMix — the engine playing a program's ECS mix (docs/audio-design.md
+# §10.2): the tracks, buses, sends and master of audio/AudioComponents, compiled
+# by audio/graphSystem into the engine's own renderer (createAudioGraphStateFor),
+# are the engine's output after `useEcsMix(on: true)`, on the device and
+# offline. Voices, streams and notes reach a track through its source slot.
+#
+#     var state: AudioGraphState = createAudioGraphStateFor(audio: audio)
+#     audioGraphSystem(entities: world.audio, state: state)      # each frame
+#     audio.useEcsMix(on: true)
+#     audio.playIntoSlotFromAt(sound: kick, slot: 0, gainDecibels: 0.0, pan: 0.0,
+#       looping: false, startFrame: 0, atSample: audio.nextSafeSampleTime())
+open audio/Audio
+open audio/AudioMixer
+open audio/GraphRender
+open audio/Sound
+
+# The renderer of the program's ECS mix (audio/graphSystem's
+# createAudioGraphStateFor takes it): plans, parameter events and meter
+# readings go through it to the mixer that renders
+func mixRenderer(this: view AudioEngine) ret GraphRenderer {
+  ret this.mix
+}
+
+# The output from the next block: the program's ECS mix (true; its plan reads
+# the source slots the voices, streams and notes play into) or the four buses
+func useEcsMix(this: view AudioEngine, on: view Bool) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.useMix)
+  if on {
+    command.value = 1.0
+  }
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# Like playFromAt, into source slot `slot` (0 .. audioSourceSlots - 1) of the
+# program's ECS mix (an AudioTrack's sourceSlot, audio/graphSystem; the slots
+# 0..3 are also the four buses)
+func playIntoSlotFromAt(
+  this: mod AudioEngine
+  sound: view Sound
+  slot: view Int
+  gainDecibels: view Float
+  pan: view Float
+  looping: view Bool
+  startFrame: view Int
+  atSample: view Int
+) ret VoiceId {
+  ret this.playVoiceAt(
+    sound: sound
+    slot: slot
+    gainDecibels: gainDecibels
+    pan: pan
+    looping: looping
+    startFrame: startFrame
+    atSample: atSample
+    place: "slot {slot}"
+  )
+}

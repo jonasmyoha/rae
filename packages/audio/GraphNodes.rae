@@ -291,6 +291,8 @@ func processMeter(
       )
       state.peakLeft = max(a: state.peakLeft, b: abs(value: left))
       state.peakRight = max(a: state.peakRight, b: abs(value: right))
+      state.sumLeft = state.sumLeft + (left * left) as Float64
+      state.sumRight = state.sumRight + (right * right) as Float64
       setScratchAt(
         plan: plan
         buffer: out
@@ -306,6 +308,7 @@ func processMeter(
         value: right
       )
     }
+    state.frames = state.frames + frames
     var meters: Buffer(MeterState) = plan.meters
     rae_ext_rae_buf_set(buf: meters, index: stateAt, value: state)
   }

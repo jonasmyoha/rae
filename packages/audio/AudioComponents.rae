@@ -82,9 +82,11 @@ type AudioInserts {
   inserts: List(AudioInsert)
 }
 
-# Written back from the audio thread: the peak since the last frame
+# Written back from the audio thread (audio/feedbackSystem): the peak and the
+# RMS (linear, the louder channel's) over what was rendered since the last read
 type AudioMeter {
   peak: Float
+  rms: Float = 0.0
 }
 
 type AudioEntities {

@@ -137,6 +137,11 @@ type DelayState {
 type MeterState {
   peakLeft: Float
   peakRight: Float
+  # the sum of each channel's squared samples, and how many frames, since the last reading
+  # (an RMS over what was rendered)
+  sumLeft: Float64 = 0.0
+  sumRight: Float64 = 0.0
+  frames: Int = 0
 }
 
 type LimiterState {
