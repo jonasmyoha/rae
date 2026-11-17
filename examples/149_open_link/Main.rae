@@ -8,6 +8,7 @@
 #     xcrun devicectl device process launch --device <device> \
 #       --payload-url raejoin://join/abc com.rae.149openlink
 import Gpu2d
+import Math
 import Gpu2dText
 import SdfText
 open AppLinks
@@ -20,7 +21,11 @@ const quietColor: Int = 0x9FB3C8FF
 func main() ret Int {
   Gpu2d.initWindow(width: 900, height: 500, title: "149: open from a link")
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
-  Gpu2d.setDesignResolution(width: 900.0, height: 500.0, fit: 0)
+  # Drawn in the window's points, the unit of every Rae UI
+  # (docs/ui-coordinate-and-responsive-layout.md): the design resolution is
+  # the window, kept in step when it is resized
+  var layoutW: Float = 0.0
+  var layoutH: Float = 0.0
   let font: SdfFont = SdfText.loadSdfFont(
     jsonPath: "examples/149_open_link/assets/Roboto-Regular.mtsdf.json"
     rawAtlasPath: "examples/149_open_link/assets/Roboto-Regular.mtsdf.raw"
@@ -32,6 +37,14 @@ func main() ret Int {
     if let url: String = nextAppLink(appLinks: appLinks) {
       log("opened with: {url}")
       lastUrl = url
+    }
+    let windowDpr: Float = Math.max(a: Gpu2d.dpr(), b: 0.1)
+    let windowW: Float = Gpu2d.windowWidth().toFloat() / windowDpr
+    let windowH: Float = Gpu2d.windowHeight().toFloat() / windowDpr
+    if windowW > 0.0 and windowH > 0.0 and (windowW is not layoutW or windowH is not layoutH) {
+      Gpu2d.setDesignResolution(width: windowW, height: windowH, fit: 0)
+      layoutW = windowW
+      layoutH = windowH
     }
     Gpu2d.beginFrame(
       canvas: canvas
@@ -68,7 +81,7 @@ func main() ret Int {
         y: 210.0
         sizePx: 36.0
         color: textColor
-        maxWidth: 820.0
+        maxWidth: layoutW - 80.0
         lineHeight: 44.0
         outlineWidth: 0.0
         outlineColor: 0

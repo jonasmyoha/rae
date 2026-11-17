@@ -67,7 +67,6 @@ func plainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
 
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "147: QR codes in 3D and UI")
-  Gpu2d.setDesignResolution(width: 1280.0, height: 800.0, fit: 0)
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
   let box: MeshHandle = meshOf(renderer: renderer, meshData: makeBox(size: 2.0))
   let ground: MeshHandle = meshOf(renderer: renderer, meshData: makePlane(size: 30.0, segments: 1))
@@ -107,6 +106,8 @@ func main() ret Int {
   var uiSystems: UiSystems = createUiSystems()
   var qrCodeSystem: QrCodeSystem = createQrCodeSystem()
   seedWorldTheme(world: world, res: uiResources)
+  # The UI lays out in the window's points (app3d/UiShell), like every Rae UI
+  fitUiToWindow(world: world, uiSystems: uiSystems, res: uiResources)
   let uiRoot: EntityId = mountUiScene(
     world: world
     uiSystems: uiSystems
