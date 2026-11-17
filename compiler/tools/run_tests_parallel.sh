@@ -85,6 +85,15 @@ if [ -f tools/example-copy-gate.sh ]; then
   stage_time "tools/example-copy-gate.sh" "$stage_start"
   echo
 fi
+# One UI coordinate model (tools/ui-model-gate.sh): no program's own design
+# resolution outside its allowlist, no scene unit, no unitScale in programs.
+UI_MODEL_CHECK=1
+if [ -f tools/ui-model-gate.sh ]; then
+  stage_start=$(date +%s)
+  if bash tools/ui-model-gate.sh; then UI_MODEL_CHECK=0; fi
+  stage_time "tools/ui-model-gate.sh" "$stage_start"
+  echo
+fi
 # The tools that work per file also work per module folder
 # (tools/module-folder-tools-check.sh, docs/module-model-options.md).
 MODULE_TOOLS_CHECK=1
@@ -220,6 +229,7 @@ if [ "$TREE_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1))
 if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$COPY_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$MODULE_TOOLS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$UI_MODEL_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

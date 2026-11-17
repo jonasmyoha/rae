@@ -5,7 +5,7 @@ it draws with. The node/component grammar itself is documented with the
 components (`lib/ui/Components.rae`, docs/ui-editor-design.md §5); the theme
 token sections in docs/ui-theme-system.md.
 
-## Units: design units, 3 per point
+## Units: design units, which are points
 
 Every size, position, font size, padding, radius and offset in a scene is in **design units
 (du)**, and a design unit is a logical point: the one coordinate model of every Rae program
@@ -62,10 +62,11 @@ A laid-out column whose content may be taller than it (a menu of a game screen, 
 - `Overflow` is also written `OverflowPolicy`; `Clip` cuts the content at the node's box instead.
   Case `1518_ui_overflow_scale_to_fit_y`.
 
-Today most programs still lay out at 1 unit per logical point (the transitional layout that the
-tasks [ui coords 2/7 ... 7/7] remove; example 106's scenes are already in du). The sizes this
-document quotes in points (a 44-point `circleButton`, a 24-point swipe band, `edgePoints`) are
-that layout; in du they are the same number x 3.
+The sizes this document quotes in points (a 44-point `circleButton`, a 24-point swipe band,
+`edgePoints`) are the same numbers in du. A new scene starts at the reference phone, 393x852
+(the UI editor's default for a scene that gives no size). `compiler/tools/ui-model-gate.sh`, one
+pre-suite case of every full run, fails on a scene that declares its own unit or design size and
+on a program that sets its own design resolution outside its allowlist.
 
 ## 1. A scene reference is a path, without extension
 

@@ -112,7 +112,7 @@ func main() ret Int {
   # instead of shrinking with window width.
   var extentW: Float = windowExtentW()
   var extentH: Float = windowExtentH()
-  Gpu2d.setDesignResolution(width: extentW, height: extentH, fit: 0)
+  syncDesignResolution()
 
   let sphereData: MeshData = makeSphere(rings: 32, segments: 48)
   let torusData: MeshData = makeTorus(
@@ -367,6 +367,7 @@ func main() ret Int {
     let resized: Bool = Gpu2d.windowResized()
     updateWindowGeometry(windowGeometry: windowGeometry, now: now, resized: resized)
     if resized {
+      syncDesignResolution()
       extentW = windowExtentW()
       extentH = windowExtentH()
     }

@@ -80,6 +80,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/example-copy-gate.sh" ]; then
   if ! bash tools/example-copy-gate.sh; then COPY_CHECK_FAILED=1; fi
   echo
 fi
+# One UI coordinate model (tools/ui-model-gate.sh): no program's own design
+# resolution outside its allowlist, no scene unit, no unitScale in programs.
+UI_MODEL_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/ui-model-gate.sh" ]; then
+  if ! bash tools/ui-model-gate.sh; then UI_MODEL_FAILED=1; fi
+  echo
+fi
 # The tools that work per file also work per module folder
 # (tools/module-folder-tools-check.sh).
 MODULE_TOOLS_FAILED=0
@@ -697,6 +704,7 @@ if [ "$TREE_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TERMS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$COPY_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$MODULE_TOOLS_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$UI_MODEL_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi

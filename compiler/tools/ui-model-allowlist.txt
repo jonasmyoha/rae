@@ -1,0 +1,8 @@
+# Files outside lib/ui, lib/app3d and checks/ that may call Gpu2d.setDesignResolution
+# themselves (compiler/tools/ui-model-gate.sh). Each line: a repository path, then the
+# reason. The standard (docs/ui-coordinate-and-responsive-layout.md) is the window in
+# points, set by app3d/UiShell (syncDesignResolution, fitUiToWindow, resizeUiToWindow);
+# the files below set what IS that standard by another route. The list may only shrink:
+# a file that no longer calls it fails as STALE until its line is removed.
+examples/106_mobile_ui/GpuWindow.rae  sets lib/ui/ResponsiveExtent's layout (the window in points / the user zoom, or an emulated phone)
+examples/121_ui_editor/viewportSystem/ViewportSystem.rae  the editor's document viewport: a document shown at its own design size inside the edit area

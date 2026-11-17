@@ -126,7 +126,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: ui-model-gate module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -255,6 +255,9 @@ float8-lowerings: build
 # The tools that work per file also work per module folder (docs/module-model-options.md)
 module-folder-tools: build
 	bash tools/module-folder-tools-check.sh
+
+ui-model-gate:
+	bash tools/ui-model-gate.sh
 
 c-warnings-gate: build
 	@bash tools/c-warnings-gate.sh

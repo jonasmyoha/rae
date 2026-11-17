@@ -608,8 +608,11 @@ is what it demonstrates):
 - Origin top-left, y down; pixels only at the GPU (`renderScale = dpr`). 3D worlds keep their own
   units (metres); only their UI/HUD is in points.
 
-Convert through `ui/DesignUnits` (not a literal factor), so the coming user zoom (`1.25x`) changes
-one place. An app with a phone page column takes its layout from `ui/ResponsiveExtent` (106 does).
+Convert through `ui/DesignUnits` (not a literal factor), so the user zoom (`1.25x`, `ui/UiZoom`)
+changes one place. `compiler/tools/ui-model-gate.sh` (a pre-suite case) fails on a program that
+sets its own design resolution outside `compiler/tools/ui-model-allowlist.txt`, a scene that
+declares its own unit or design size, and `unitScale` in a program; a fixed area is a stage
+(`Gpu2dCanvas canvasPushStage`) or a `ScaleToFit` subtree. An app with a phone page column takes its layout from `ui/ResponsiveExtent` (106 does).
 A scene or theme authored at another scale is converted with `tools/scale-ui-lengths.py`. Do not
 describe another model in a doc or comment.
 

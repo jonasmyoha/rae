@@ -13,6 +13,7 @@ import Gpu2dText
 import SdfText
 open AppLinks
 open Gpu2dCanvas
+open app3d/UiShell
 
 const textColor: Int = 0xFFFFFFFF
 
@@ -42,7 +43,7 @@ func main() ret Int {
     let windowW: Float = Gpu2d.windowWidth().toFloat() / windowDpr
     let windowH: Float = Gpu2d.windowHeight().toFloat() / windowDpr
     if windowW > 0.0 and windowH > 0.0 and (windowW is not layoutW or windowH is not layoutH) {
-      Gpu2d.setDesignResolution(width: windowW, height: windowH, fit: 0)
+      syncDesignResolution()
       layoutW = windowW
       layoutH = windowH
     }
