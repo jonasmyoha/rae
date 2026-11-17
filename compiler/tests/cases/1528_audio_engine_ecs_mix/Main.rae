@@ -1,0 +1,372 @@
+# A program's ECS mix played by the engine (docs/audio-design.md §10.2): the
+# tracks, bus, sends and master of audio/AudioComponents compiled by
+# audio/graphSystem into the engine's own renderer (createAudioGraphStateFor),
+# which the engine renders as its output (useEcsMix) offline, with sound voices
+# played into the tracks' source slots (playIntoSlotFromAt) instead of a
+# program-filled buffer. A full-scale sine on a track panned hard left (fader
+# 0 dB, no inserts) meters 0 dBFS peak and -3.01 dB RMS; case 1438's session,
+# its sources played as voices, null-tests against the same formula, B's mute
+# landing on its sample through audio/parameterSystem, and blocks of 37 equal
+# blocks of 128 bit for bit.
+import Math
+open Realtime
+open audio/Audio
+open audio/AudioComponents
+open audio/AudioGraph
+open audio/AudioMixer
+open audio/EcsMix
+open audio/GraphRender
+open audio/Sound
+open audio/feedbackSystem/FeedbackSystem
+open audio/graphSystem/GraphSystem
+open audio/parameterSystem/ParameterSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/World
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 128
+
+const total: Int = 4800
+
+const muteAt: Int = 2450
+
+# slot 0 and slot 1: sines; slot 2: silence (no voice plays there)
+func sourceValue(slot: view Int, channel: view Int, frame: view Int) ret Float {
+  if slot is 2 {
+    ret 0.0
+  }
+  let frequency: Float = 300.0 + 170.0 * (slot as Float) + 40.0 * (channel as Float)
+  ret Math.sin(x: 6.283185307179586 * frequency * (frame as Float) / (sampleRate as Float)) * 0.6
+}
+
+# A stereo sound of `frames` frames, each channel from `value`
+func sineSound(audio: mod AudioEngine, slot: view Int, frames: view Int) ret Sound {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames * 2)
+  loop var i: Int = 0, i < frames, ++i {
+    setSampleAt(
+      samples: samples
+      index: i * 2
+      value: sourceValue(slot: slot, channel: 0, frame: i)
+    )
+    setSampleAt(
+      samples: samples
+      index: i * 2 + 1
+      value: sourceValue(slot: slot, channel: 1, frame: i)
+    )
+  }
+  ret audio.addSound(data: SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 2
+    sampleRate: sampleRate
+    error: ""
+  })
+}
+
+type Session {
+  allocator: EntityAllocator
+  audio: AudioEntities
+  trackA: EntityId
+  trackB: EntityId
+  bus: EntityId
+  master: EntityId
+}
+
+func createSession() ret Session {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var audio: AudioEntities = createAudioEntities()
+  let master: EntityId = allocator.allocEntity()
+  let bus: EntityId = allocator.allocEntity()
+  let trackA: EntityId = allocator.allocEntity()
+  let trackB: EntityId = allocator.allocEntity()
+  let send: EntityId = allocator.allocEntity()
+  audio.tracks.componentSet(
+    entityId: master
+    data: AudioTrack { kind: AudioTrackKind.master, sourceSlot: 0 }
+  )
+  audio.tracks.componentSet(
+    entityId: bus
+    data: AudioTrack { kind: AudioTrackKind.bus, sourceSlot: 0 }
+  )
+  audio.gains.componentSet(entityId: bus, data: AudioGain { decibels: -3.0 })
+  audio.tracks.componentSet(
+    entityId: trackA
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 0 }
+  )
+  audio.gains.componentSet(entityId: trackA, data: AudioGain { decibels: -6.0 })
+  audio.pans.componentSet(entityId: trackA, data: AudioPan { pan: -0.5 })
+  audio.tracks.componentSet(
+    entityId: trackB
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 1 }
+  )
+  audio.pans.componentSet(entityId: trackB, data: AudioPan { pan: 0.3 })
+  audio.outputs.componentSet(entityId: trackB, data: AudioOutput { busEntityId: bus })
+  audio.sends.componentSet(
+    entityId: send
+    data: AudioSend { sourceEntityId: trackA, targetEntityId: bus, decibels: -10.0, preFader: true }
+  )
+  ret Session {
+    allocator: allocator
+    audio: audio
+    trackA: trackA
+    trackB: trackB
+    bus: bus
+    master: master
+  }
+}
+
+func panLeft(pan: view Float) ret Float64 {
+  ret Math.cos(x: (pan + 1.0) * 0.7853981633974483) as Float64
+}
+
+func panRight(pan: view Float) ret Float64 {
+  ret Math.sin(x: (pan + 1.0) * 0.7853981633974483) as Float64
+}
+
+func decibels(value: view Float) ret Float64 {
+  ret Math.pow(base: 10.0, exp: value / 20.0) as Float64
+}
+
+# The mix by formula: master = A (fader, pan) + bus(-3 dB, centre) of
+# (B (fader, pan; muted at muteAt with the 5 ms ramp) + A before its fader at -10 dB)
+func expected(channel: view Int, frame: view Int) ret Float64 {
+  let a: Float64 = sourceValue(slot: 0, channel: channel, frame: frame) as Float64
+  let b: Float64 = sourceValue(slot: 1, channel: channel, frame: frame) as Float64
+  var aPan: Float64 = panLeft(pan: -0.5)
+  var bPan: Float64 = panLeft(pan: 0.3)
+  var busPan: Float64 = panLeft(pan: 0.0)
+  if channel is 1 {
+    aPan = panRight(pan: -0.5)
+    bPan = panRight(pan: 0.3)
+    busPan = panRight(pan: 0.0)
+  }
+  var bGain: Float64 = 1.0
+  if frame >= muteAt {
+    let ramp: Float64 = ((frame - muteAt + 1) as Float64) / 240.0
+    bGain = (1.0 as Float64) - ramp
+    if bGain < 0.0 {
+      bGain = 0.0
+    }
+  }
+  let bus: Float64 = (b * bGain * bPan + a * decibels(value: -10.0)) * decibels(value: -3.0) * busPan
+  ret a * decibels(value: -6.0) * aPan + bus
+}
+
+# Interleaved frames into the two channels from `offset`
+func takeFrames(
+  rendered: view List(Float)
+  left: view Buffer(Float)
+  right: view Buffer(Float)
+  offset: view Int
+) {
+  loop var i: Int = 0, i * 2 + 1 < rendered.length(), ++i {
+    setSampleAt(
+      samples: left
+      index: offset + i
+      value: rendered.copyAtFallback(index: i * 2, fallback: 0.0)
+    )
+    setSampleAt(
+      samples: right
+      index: offset + i
+      value: rendered.copyAtFallback(index: i * 2 + 1, fallback: 0.0)
+    )
+  }
+}
+
+# Case 1438's session through the engine, in blocks of `block`: the systems
+# each block (a program's frame), B muted before the block that holds muteAt
+# (the event lands at muteAt exactly), a silent track C added at frame 3000
+func run(block: view Int, left: view Buffer(Float), right: view Buffer(Float)) ret String {
+  var audio: AudioEngine = audioStartOffline(
+    sampleRate: sampleRate
+    channels: 2
+    blockFrames: maxFrames
+  )
+  var session: Session = createSession()
+  var state: AudioGraphState = createAudioGraphStateFor(audio: audio)
+  let soundA: Sound = sineSound(audio: audio, slot: 0, frames: total)
+  let soundB: Sound = sineSound(audio: audio, slot: 1, frames: total)
+  audioGraphSystem(entities: session.audio, state: state)
+  audio.useEcsMix(on: true)
+  let voiceA: VoiceId = audio.playIntoSlotFromAt(
+    sound: soundA
+    slot: 0
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: 0
+    atSample: 0
+  )
+  let voiceB: VoiceId = audio.playIntoSlotFromAt(
+    sound: soundB
+    slot: 1
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: 0
+    atSample: 0
+  )
+  var done: Int = 0
+  var muted: Bool = false
+  var added: Bool = false
+  var aMeter: Float = 0.0
+  var compiles: Int = 1
+  loop done < total {
+    let frames: Int = min(a: block, b: total - done)
+    if not muted and done + frames > muteAt {
+      session.audio.mutes.componentSet(entityId: session.trackB, data: AudioMute { muted: true })
+      muted = true
+    }
+    if not added and done >= 3000 {
+      let trackC: EntityId = session.allocator.allocEntity()
+      session.audio.tracks.componentSet(
+        entityId: trackC
+        data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 2 }
+      )
+      session.audio.outputs.componentSet(
+        entityId: trackC
+        data: AudioOutput { busEntityId: session.bus }
+      )
+      added = true
+    }
+    let hadPlan: Int = state.plan.serial
+    audioGraphSystem(entities: session.audio, state: state)
+    if state.plan.serial is not hadPlan {
+      compiles = compiles + 1
+    }
+    audioParameterSystem(entities: session.audio, state: state, sampleTime: muteAt)
+    let rendered: List(Float) = audio.renderOffline(frames: frames)
+    takeFrames(
+      rendered: rendered
+      left: left
+      right: right
+      offset: done
+    )
+    audioFeedbackSystem(entities: session.audio, state: state)
+    if let meter: AudioMeter = session.audio.meters.componentCopy(entityId: session.trackA) {
+      aMeter = max(a: aMeter, b: meter.peak)
+    }
+    done = done + frames
+  }
+  var bMeter: Float = -1.0
+  if let meter: AudioMeter = session.audio.meters.componentCopy(entityId: session.trackB) {
+    bMeter = meter.peak
+  }
+  state.freeAudioGraphState()
+  let unusedBlocks: Int = stopAudio(this: audio)
+  ret "plans compiled {compiles} (the session, then track C), error '{state.error}'; track A's meter peaked at {aMeter}, track B's meter silent after its mute {bMeter <= 0.0 and bMeter > -1.0}"
+}
+
+func decibelsOf(value: view Float) ret Float {
+  ret Math.round(x: 20.0 * Math.naturalLog(x: value) / 2.302585092994046 * 100.0) / 100.0
+}
+
+# A full-scale 1 kHz sine (both channels) on a track panned hard left, fader
+# 0 dB, no inserts, into the master: the track's meter over 4800 frames
+func meterReading() ret String {
+  var audio: AudioEngine = audioStartOffline(
+    sampleRate: sampleRate
+    channels: 2
+    blockFrames: maxFrames
+  )
+  var allocator: EntityAllocator = createEntityAllocator()
+  var entities: AudioEntities = createAudioEntities()
+  let master: EntityId = allocator.allocEntity()
+  let track: EntityId = allocator.allocEntity()
+  entities.tracks.componentSet(
+    entityId: master
+    data: AudioTrack { kind: AudioTrackKind.master, sourceSlot: 0 }
+  )
+  entities.tracks.componentSet(
+    entityId: track
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 5 }
+  )
+  entities.gains.componentSet(entityId: track, data: AudioGain { decibels: 0.0 })
+  entities.pans.componentSet(entityId: track, data: AudioPan { pan: -1.0 })
+  var state: AudioGraphState = createAudioGraphStateFor(audio: audio)
+  audioGraphSystem(entities: entities, state: state)
+  audio.useEcsMix(on: true)
+  let samples: Buffer(Float) = createSampleBuffer(count: total * 2)
+  loop var i: Int = 0, i < total, ++i {
+    let value: Float = Math.sin(
+      x: 6.283185307179586 * 1000.0 * (i as Float) / (sampleRate as Float)
+    )
+    setSampleAt(samples: samples, index: i * 2, value: value)
+    setSampleAt(samples: samples, index: i * 2 + 1, value: value)
+  }
+  let sine: Sound = audio.addSound(data: SoundData {
+    samples: samples
+    frameCount: total
+    channels: 2
+    sampleRate: sampleRate
+    error: ""
+  })
+  let voice: VoiceId = audio.playIntoSlotFromAt(
+    sound: sine
+    slot: 5
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: 0
+    atSample: 0
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: total)
+  audioFeedbackSystem(entities: entities, state: state)
+  var line: String = "no meter"
+  if let meter: AudioMeter = entities.meters.componentCopy(entityId: track) {
+    line = "peak {decibelsOf(value: meter.peak)} dBFS, RMS {decibelsOf(value: meter.rms)} dB"
+  }
+  state.freeAudioGraphState()
+  let unusedBlocks: Int = stopAudio(this: audio)
+  ret line
+}
+
+func main() {
+  log(
+    "a full-scale sine on a track (slot 5, fader 0 dB, panned hard left, no inserts): {meterReading()}"
+  )
+  let left: Buffer(Float) = createSampleBuffer(count: total)
+  let right: Buffer(Float) = createSampleBuffer(count: total)
+  let report: String = run(block: maxFrames, left: left, right: right)
+  var worst: Float64 = 0.0
+  loop var i: Int = 0, i < total, ++i {
+    loop var channel: Int = 0, channel < 2, ++channel {
+      var heard: Float = sampleAt(samples: left, index: i)
+      if channel is 1 {
+        heard = sampleAt(samples: right, index: i)
+      }
+      var error: Float64 = (heard as Float64) - expected(channel: channel, frame: i)
+      if error < 0.0 {
+        error = -error
+      }
+      if error > worst {
+        worst = error
+      }
+    }
+  }
+  log(
+    "case 1438's session played by the engine, its sources as voices in slots 0 and 1: against the mix by formula below -100 dBFS {worst < 0.00001}"
+  )
+  log(report)
+  let leftSmall: Buffer(Float) = createSampleBuffer(count: total)
+  let rightSmall: Buffer(Float) = createSampleBuffer(count: total)
+  let unusedReport: String = run(block: 37, left: leftSmall, right: rightSmall)
+  var same: Bool = true
+  loop var i: Int = 0, i < total, ++i {
+    if sampleAt(samples: left, index: i) is not sampleAt(samples: leftSmall, index: i) or sampleAt(
+      samples: right
+      index: i
+    ) is not sampleAt(samples: rightSmall, index: i) {
+      same = false
+    }
+  }
+  log("the same session in blocks of 37 instead of 128: equal bit for bit {same}")
+  unsafe {
+    rae_ext_rae_buf_free(buf: left)
+    rae_ext_rae_buf_free(buf: right)
+    rae_ext_rae_buf_free(buf: leftSmall)
+    rae_ext_rae_buf_free(buf: rightSmall)
+  }
+}
