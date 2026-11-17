@@ -1,5 +1,4 @@
 open ui/Ecs
-open ui/DesignUnits
 # Canvas overlay — the S5/S6 demo page (#212, §10 S5/S6).
 #
 # A resident full-screen overlay on the "dialog" layer, hidden by the
@@ -45,7 +44,7 @@ func applyCanvasState(
   }
   let deviceFrame: DeviceFrame = activeDeviceFrame()
   let forcedName: String = frameIdName(id: deviceFrame.forcedFrameId)
-  let framePtW: Float = pointsFromDu(du: world.layoutW)
+  let framePtW: Float = world.layoutW / sceneUnitsPerPoint
   var activeStates: List(String) = List.create(String, cap: 2)
   if state.canvasOpen {
     let openState: String = "canvasOpen"

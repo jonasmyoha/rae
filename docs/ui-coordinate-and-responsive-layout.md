@@ -1,40 +1,48 @@
 # Rae UI — Frames, Coordinates & Responsive Layout (final architecture)
 
-## The standard (decided 2026-11-16): one coordinate model for every Rae program
+## The standard (decided 2026-11-16, unit changed to the point 2026-11-17): one coordinate model for every Rae program
 
-Model A below (example 106's model) is **the one coordinate model of every Rae program, app and
-example**. It was chosen so that the phone and desktop versions of every app share as much code
-and `.raescene` data as possible. Six rules:
+This is **the one coordinate model of every Rae program, app and example** (an example uses another
+only when another model is what it demonstrates). It was chosen so that the phone and desktop
+versions of every app share as much code and `.raescene` data as possible. Six rules:
 
-1. **One design unit.** Every UI size, position, font size, padding, radius and offset is in
-   design units (du). `unitScale` = **3 du per logical point**. A phone is about 1080-1290 du
-   wide; the authored phone frame is 1080x2280 du; 1 du is about 1 pixel on a @3x phone; `200`
-   is the same physical size on every device and in every frame.
-2. **The layout fills the window.** The layout area is the window in points x 3
-   (`area_du = windowPt x unitScale`). A bigger window shows more, never a bigger UI. Size
-   classes are measured in points (window du / `unitScale`); safe areas and touch targets are
-   in du (the 44 pt minimum touch target is 132 du).
+1. **One unit, the logical point.** Every UI size, position, font size, padding, radius and offset
+   is in design units (du), and a design unit is a logical point (`unitScale` = 1, `ui/DesignUnits`):
+   the unit of iOS (points), Android (dp), CSS (px) and Figma. A phone is about 360-430 du wide,
+   a screen margin 16, body text 17, the minimum touch target 44; the reference phone frame is the
+   iPhone 15 Pro's 393x852. `200` is the same physical size on every device and in every frame.
+2. **The layout fills the window.** The layout area is the window in points. A bigger window
+   shows more, never a bigger UI. Size classes, safe areas and touch targets are in points. (A
+   user zoom, written like `1.25x`, will divide the area: [ui coords: user zoom].)
 3. **Fixed art-directed areas are subtrees, not the canvas.** A game table, a board or a
-   splash is a subtree authored at a fixed du size and scaled as one block with `ScaleToFit`.
-   There is never a global scaled canvas (no `setDesignResolution` to a fixed virtual size for
-   the UI).
+   splash is a subtree authored at its own fixed size (any numbers, a 1080x2280 game table
+   included) and scaled as one block with `ScaleToFit`. There is never a global scaled canvas
+   (no `setDesignResolution` to a fixed virtual size for the UI).
 4. **Origin top-left, y down; pixels only at the GPU.** Pixels appear only where the GPU draws:
-   `renderScale = dpr / unitScale` maps du to framebuffer pixels. Pointer input arrives in du.
+   `renderScale = dpr` maps points to framebuffer pixels (1, 2 or 3; 2.625 on some Android
+   phones), and hairlines snap to whole pixels there. Pointer input arrives in points.
 5. **3D worlds keep their own units.** A 3D world stays in its own world units (metres); only
-   its UI and HUD are in du.
+   its UI and HUD are in points.
 6. **Phone and desktop share scenes** through the window-filling layout (rule 2), size classes
    and, later, named frames (§2-§3 below).
 
-Status of the code (2026-11-17): `unitScale` and the pt / du / px conversions are lib/ui's
-(`ui/DesignUnits`; `ui/SizeClass.sizeClassForDu`; `ui/DevicePresets` gives a preset's screen and
-safe area in du), and example 106 uses them. 106's responsive extent
-(`examples/106_mobile_ui/Viewport.rae`) is still its own, and it is a fit-to-height canvas (a fixed
-2280 du height, the width grown to the window's aspect), not yet rule 2's window x 3. Most other programs still lay out at
-1 unit per logical point through `app3d/UiShell.syncDesignResolution`; the queued tasks
-[ui coords 2/7 ... 7/7] move `unitScale` and the responsive extent into lib/ui, then every shared
-panel, the UI editor and every example to du, and finally remove the 1-unit-per-point mode. Where
-a doc or comment in the tree quotes a UI size in points, it describes that transitional layout:
-the same size in du is the number x 3.
+**Why the point, not 3 units per point (changed 2026-11-17).** The first version of this standard
+(2026-11-16) used 3 du per point, so that 1 du was one pixel of a @3x phone and game proto4's
+1080-wide Pixi numbers carried over. In use the numbers read wrong: a 16 pt margin became 48, a
+44 pt touch target 132, and every number from Apple's and Material's guidelines, CSS and a
+designer's Figma file had to be multiplied on the way in. The 1080-wide habit comes from game
+engines' reference resolutions; rule 3 already gives such art its own fixed size inside a
+`ScaleToFit` subtree, so it never needed to be the global unit. Positions are floats, so a third
+of a point is simply 0.333. And almost every Rae program already laid out at 1 unit per point.
+
+Status of the code (2026-11-17): `ui/DesignUnits` holds `unitScale` (1) and the pt / du / px
+conversions; `ui/SizeClass.sizeClassForDu`; `ui/DevicePresets` gives a preset's screen and safe
+area in du. `app3d/UiShell.syncDesignResolution` already lays out in window points. Example 106
+is the exception: its scenes are authored at 3 units per point (`sceneUnitsPerPoint` in its
+Config.rae) and its responsive extent (`Viewport.rae`) is a fit-to-height canvas; [ui coords 2d/7]
+converts it. The sections below are the 2026-11-16 design this standard comes from: where they
+quote du sizes (a 1080x2280 phone frame, a 5760x3240 desktop frame), divide by 3 for today's
+unit.
 
 This document supersedes `docs/ui-viewport-and-safe-area-plan.md` and
 `examples/98_mobile_ui/docs/adaptive-layout.md`. Sections below the standard are the design it

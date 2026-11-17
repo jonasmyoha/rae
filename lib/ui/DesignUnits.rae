@@ -1,23 +1,25 @@
 # Design units (du): the one UI unit of every Rae program
-# (docs/ui-coordinate-and-responsive-layout.md, rules 1-4). A UI size,
-# position, font size, padding or inset is in du; the window reports logical
-# points (pt) and the GPU draws pixels (px):
+# (docs/ui-coordinate-and-responsive-layout.md, rules 1-4). A design unit is
+# a logical point, the unit of iOS, Android (dp), CSS and Figma: a phone is
+# about 360-430 wide, a margin 16, a touch target 44. A UI size, position,
+# font size, padding or inset is in du; the GPU draws pixels (px):
 #
-#   du = pt x unitScale        the layout fills the window: area = window pt x 3
+#   du = pt x unitScale        unitScale is 1: the layout fills the window in points
 #   px = pt x dpr              the display's scale (1, 2 or 3)
 #   px = du x renderScale      renderScale = dpr / unitScale, only where the GPU draws
 #
-# So 200 du is the same physical size on every device: 66.7 pt, 133 px on a
-# @2x display, 200 px on a @3x phone. Size classes are measured in points
-# (ui/SizeClass, sizeClassForDu), safe areas and touch targets in du.
+# So 200 du is the same physical size on every device: 200 px on a 1x
+# monitor, 400 on a @2x display, 600 on a @3x phone. Size classes, safe areas
+# and touch targets are in du. These functions are the one place a program
+# converts, so a later user zoom changes them and nothing else.
 
 import ui/Components
 
 # Design units per logical point
-const unitScale: Float = 3.0
+const unitScale: Float = 1.0
 
 # The smallest touch target, 44 pt, in du
-const minTouchTargetDu: Float = 132.0
+const minTouchTargetDu: Float = 44.0
 
 func duFromPoints(points: view Float) ret Float {
   ret points * unitScale

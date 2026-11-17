@@ -1,7 +1,6 @@
 open ui/Ecs
 open ui/DevicePresets
 open ui/SizeClass
-open ui/DesignUnits
 
 # 106's coordinate spine. The SDL3 window is sized in logical points,
 # while scene/layout coordinates are native design units (du). gpu2d's
@@ -96,9 +95,14 @@ func activeDeviceFrame() pub ret DeviceFrame {
   ret DeviceFrame {
     enabled: true
     forcedFrameId: frameId
-    widthDu: devicePresetWidthDu(preset: preset)
-    heightDu: devicePresetHeightDu(preset: preset)
-    safeInsetsDu: devicePresetSafeInsetsDu(preset: preset)
+    widthDu: preset.width * sceneUnitsPerPoint
+    heightDu: preset.height * sceneUnitsPerPoint
+    safeInsetsDu: Insets {
+      l: preset.safeLeft * sceneUnitsPerPoint
+      t: preset.safeTop * sceneUnitsPerPoint
+      r: preset.safeRight * sceneUnitsPerPoint
+      b: preset.safeBottom * sceneUnitsPerPoint
+    }
   }
 }
 
@@ -112,7 +116,7 @@ func createViewport(
   let frame: DeviceFrame = activeDeviceFrame()
   var sizeClass: SizeClass = windowSizeClass
   if frame.enabled {
-    sizeClass = sizeClassForDu(widthDu: frame.widthDu)
+    sizeClass = sizeClassForWidth(widthPoints: frame.widthDu / sceneUnitsPerPoint)
   }
   var dprVal: Float = 1.0
   if windowPtW > 0.0 {
@@ -195,7 +199,7 @@ func createViewport(
     framebufferPxW: framebufferPxW
     framebufferPxH: framebufferPxH
     dpr: dprVal
-    unitScale: unitScale
+    unitScale: sceneUnitsPerPoint
     areaDuW: areaColumnDuW
     areaDuH: layoutHVal
     renderScale: renderScaleVal
