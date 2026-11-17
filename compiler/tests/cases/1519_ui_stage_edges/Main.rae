@@ -1,0 +1,136 @@
+# Nodes of a ScaleToFit stage (a 1080x2280 game table under FitHeight) placed
+# against the visible window: a StageEdge `bleed` background covers the whole
+# window (the pillarbox bars too); a HUD pinned to the safe top and a play
+# button pinned to the safe bottom keep their distance from the stage's edge
+# but measured from the window's safe edge; a SafeArea node inside the stage
+# is inset only where the notch and home bar bands overlap it, those bands
+# keeping their on-screen size. Rects are printed in window points.
+import String
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/fitSystem/FitSystem
+open ui/safeAreaSystem/SafeAreaSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func buildScene(boxW: view Int, boxH: view Int) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"table\",\"root\":\"Window\",\"nodes\":\{\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":{boxW},\"h\":{boxH}\},\"Children\":[\"Table\"]\},\"Table\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1080,\"h\":2280\},\"ScaleToFit\":\{\"mode\":\"FitHeight\"\},\"Children\":[\"Felt\",\"Hud\",\"Play\",\"Safe\"]\},\"Felt\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1080,\"h\":2280\},\"StageEdge\":\{\"bleed\":true\}\},\"Hud\":\{\"Rect\":\{\"x\":40,\"y\":40,\"w\":1000,\"h\":120\},\"StageEdge\":\{\"top\":\"Safe\"\}\},\"Play\":\{\"Rect\":\{\"x\":340,\"y\":2060,\"w\":400,\"h\":160\},\"StageEdge\":\{\"bottom\":\"Safe\"\}\},\"Safe\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1080,\"h\":2280\},\"SafeArea\":\{\},\"Children\":[\"Corner\"]\},\"Corner\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\}\}\}"
+}
+
+func round1(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func computed(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeId: view String
+) ret ComputedRect {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    if let rect: ComputedRect = componentCopy(
+      this: uiSystems.layout.computedRects
+      entityId: nodeEntityId(world: world, index: raw)
+    ) {
+      ret rect
+    }
+  }
+  ret ComputedRect { position: Vec2 { x: 0.0, y: 0.0 }, size: Vec2 { x: 0.0, y: 0.0 } }
+}
+
+# A node's rect in window points: its parent's place plus its own
+func onScreen(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  nodeId: view String
+  parents: view List(String)
+) ret String {
+  var x: Float = 0.0
+  var y: Float = 0.0
+  loop let parentId: String in parents {
+    let parent: ComputedRect = computed(world: world, uiSystems: uiSystems, nodeId: parentId)
+    x = x + parent.position.x
+    y = y + parent.position.y
+  }
+  let nodeRect: ComputedRect = computed(world: world, uiSystems: uiSystems, nodeId: nodeId)
+  ret "{nodeId} {round1(value: x + nodeRect.position.x)},{round1(value: y + nodeRect.position.y)} {round1(
+    value: nodeRect.size.x
+  )}x{round1(value: nodeRect.size.y)}"
+}
+
+func show(
+  label: view String
+  boxW: view Int
+  boxH: view Int
+  safe: view Insets
+) {
+  let scene: Scene = parseScene(source: buildScene(boxW: boxW, boxH: boxH))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = boxW.toFloat()
+  world.layoutH = boxH.toFloat()
+  setSimulatedSafeInsets(world: world, insets: safe)
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  fitSystem(world: world, uiSystems: uiSystems)
+  let table: List(String) = List(String) { "Table" }
+  log("{label}: {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Table"
+    parents: List(String) {}
+  )}")
+  log("  {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Felt"
+    parents: table
+  )}")
+  log("  {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Hud"
+    parents: table
+  )}")
+  log("  {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Play"
+    parents: table
+  )}")
+  log("  {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Safe"
+    parents: table
+  )}")
+  log("  {onScreen(
+    world: world
+    uiSystems: uiSystems
+    nodeId: "Corner"
+    parents: List(String) { "Table", "Safe" }
+  )}")
+}
+
+func main() {
+  show(
+    label: "phone 393x852, notch 59, home bar 34"
+    boxW: 393
+    boxH: 852
+    safe: Insets { l: 0.0, t: 59.0, r: 0.0, b: 34.0 }
+  )
+  show(
+    label: "desktop 1440x900, no insets"
+    boxW: 1440
+    boxH: 900
+    safe: Insets { l: 0.0, t: 0.0, r: 0.0, b: 0.0 }
+  )
+}

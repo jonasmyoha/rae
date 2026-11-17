@@ -71,6 +71,16 @@ func osSafeInsets() ret Insets {
   }
 }
 
+# The screen's safe insets now: the simulated ones while the world has them,
+# else the OS's (design units)
+func screenSafeInsets(world: view UiWorld) ret Insets {
+  if world.safeInsetsSimulated {
+    let simulated: Insets = world.simulatedSafeInsets
+    ret simulated
+  }
+  ret osSafeInsets()
+}
+
 # The step a layout pass starts with (runUiSystems, runScheduledUiSystems):
 # every node that asks for the safe area gets the screen's insets, the
 # simulated ones while the world has them, else the OS's

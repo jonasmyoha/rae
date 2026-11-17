@@ -66,6 +66,23 @@ type ScaleToFit {
   mode: FitMode
 }
 
+# A node inside a ScaleToFit stage placed against the visible window instead of
+# the stage (fitSystem). Each edge may be pinned: `visible` keeps the node's
+# distance from that stage edge but measures it from the visible edge (the
+# stage's parent box); `safe` measures it from the visible edge less the
+# window's safe inset (the notch, the home bar). Pinning both opposite edges
+# stretches the node between them. `bleed` makes the node cover the whole
+# visible box (a background that fills pillarbox bars or the cropped band).
+enum StageEdgePin { none, visible, safe }
+
+type StageEdge {
+  bleed: Bool = false
+  top: StageEdgePin = StageEdgePin.none
+  bottom: StageEdgePin = StageEdgePin.none
+  left: StageEdgePin = StageEdgePin.none
+  right: StageEdgePin = StageEdgePin.none
+}
+
 type Align {
   x: AlignKind
   y: AlignKind

@@ -27,6 +27,25 @@ in any numbers, scaled as one block by `ScaleToFit` into its parent's box:
   area's shape and pillarboxed in a wider one (a game table on any phone and on a desktop).
 - The area and its descendants keep their authored Rects; each descendant is scaled with it
   (`fitSystem`, after layout). Case `1517_ui_scale_to_fit_height`.
+- **Against the visible window, from inside the area.** A descendant with `StageEdge` is placed
+  against the window (the area's parent box) instead of the area:
+
+  ```json
+  "Felt": { "Rect": { ... }, "StageEdge": { "bleed": true } },
+  "Hud":  { "Rect": { "x": 40, "y": 40, "w": 1000, "h": 120 }, "StageEdge": { "top": "Safe" } },
+  "Play": { "Rect": { "x": 340, "y": 2060, "w": 400, "h": 160 }, "StageEdge": { "bottom": "Safe" } }
+  ```
+
+  Each of `top`, `bottom`, `left`, `right` is `None` (the default), `Visible` or `Safe`. A pinned
+  edge keeps the node's distance from that edge of the area, measured instead from the window's
+  edge (`Visible`) or from the window's edge less the safe inset (`Safe`: the notch, the home
+  bar); both edges of an axis pinned stretch the node between them. `bleed` makes the node cover
+  the whole window (a background that fills the pillarbox bars or the cropped band).
+- **A `SafeArea` node inside the area** is inset only where the window's unsafe bands (its safe
+  insets on the sides `apply` asks for, plus `extra` in the area's units) overlap it, so the
+  notch and the home bar keep their size on screen whatever the area's scale; its children keep
+  their authored places from its new top-left. Case `1519_ui_stage_edges` (a 393x852 phone with
+  59/34 insets and a 1440x900 window, the area under `FitHeight`).
 
 A laid-out column whose content may be taller than it (a menu of a game screen, Pixi's
 `scaleToFitY`) shrinks instead of overflowing:

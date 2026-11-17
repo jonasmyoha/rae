@@ -37,6 +37,8 @@ open ecs/ComponentTable
 open ecs/Query
 open ui/Components
 open ui/UiSystems
+open ui/safeAreaSystem/SafeAreaSystem
+import Math
 
 # 0.01 du ≈ 1/300 pt: far below one physical pixel at any DPR, so
 # gating on it can't suppress a visible change.
@@ -89,44 +91,178 @@ func fitWriteRect(
   cr.size.y = h
 }
 
-# Rewrite every descendant's ComputedRect as `authored Rect * s`.
-# ComputedRect coordinates are parent-local, so uniform scaling per
-# level composes to a uniform subtree scale.
+# The stage being fitted, in its parent's local coordinates: where the scaled
+# stage is, its scale, the visible box (the parent's own box, from 0,0) and
+# the screen's safe insets. StageEdge and SafeArea nodes inside the stage are
+# placed against it.
+type StageFrame {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+  scale: Float
+  visibleW: Float
+  visibleH: Float
+  safe: Insets
+}
+
+# A box in the stage parent's coordinates
+type StageBox {
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+}
+
+# The visible edge a pin measures from (the safe inset taken off when `safe`)
+func pinnedEdge(
+  pin: view StageEdgePin
+  visible: view Float
+  inset: view Float
+  inward: view Float
+) ret Float {
+  if pin is StageEdgePin.safe {
+    ret visible + inset * inward
+  }
+  ret visible
+}
+
+# `box` placed by its StageEdge: each pinned edge keeps its distance from the
+# stage's edge, measured from the visible (or safe) edge; both edges of an
+# axis pinned stretch it; bleed covers the visible box
+func stageEdgeBox(edge: view StageEdge, frame: view StageFrame, box: view StageBox) ret StageBox {
+  if edge.bleed {
+    ret StageBox { left: 0.0, top: 0.0, right: frame.visibleW, bottom: frame.visibleH }
+  }
+  var placed: StageBox = box
+  let topEdge: Float = pinnedEdge(
+    pin: edge.top
+    visible: 0.0
+    inset: frame.safe.t
+    inward: 1.0
+  )
+  let bottomEdge: Float = pinnedEdge(
+    pin: edge.bottom
+    visible: frame.visibleH
+    inset: frame.safe.b
+    inward: -1.0
+  )
+  let leftEdge: Float = pinnedEdge(
+    pin: edge.left
+    visible: 0.0
+    inset: frame.safe.l
+    inward: 1.0
+  )
+  let rightEdge: Float = pinnedEdge(
+    pin: edge.right
+    visible: frame.visibleW
+    inset: frame.safe.r
+    inward: -1.0
+  )
+  let height: Float = box.bottom - box.top
+  let width: Float = box.right - box.left
+  if edge.top is not StageEdgePin.none {
+    placed.top = box.top + topEdge - frame.y
+    placed.bottom = placed.top + height
+  }
+  if edge.bottom is not StageEdgePin.none {
+    placed.bottom = box.bottom + bottomEdge - (frame.y + frame.h)
+    if edge.top is StageEdgePin.none {
+      placed.top = placed.bottom - height
+    }
+  }
+  if edge.left is not StageEdgePin.none {
+    placed.left = box.left + leftEdge - frame.x
+    placed.right = placed.left + width
+  }
+  if edge.right is not StageEdgePin.none {
+    placed.right = box.right + rightEdge - (frame.x + frame.w)
+    if edge.left is StageEdgePin.none {
+      placed.left = placed.right - width
+    }
+  }
+  ret placed
+}
+
+# `box` of a SafeArea node inside a stage, inset wherever the window's unsafe
+# bands (its safe insets, on the sides SafeArea.apply asks for, plus `extra`
+# in stage units) overlap it: on screen they keep their size whatever the
+# stage's scale
+func stageSafeBox(area: view SafeArea, frame: view StageFrame, box: view StageBox) ret StageBox {
+  let topLimit: Float = frame.safe.t * area.apply.t + area.extra.t * frame.scale
+  let bottomLimit: Float = frame.visibleH - frame.safe.b * area.apply.b - area.extra.b * frame.scale
+  let leftLimit: Float = frame.safe.l * area.apply.l + area.extra.l * frame.scale
+  let rightLimit: Float = frame.visibleW - frame.safe.r * area.apply.r - area.extra.r * frame.scale
+  ret StageBox {
+    left: Math.max(a: box.left, b: leftLimit)
+    top: Math.max(a: box.top, b: topLimit)
+    right: Math.min(a: box.right, b: rightLimit)
+    bottom: Math.min(a: box.bottom, b: bottomLimit)
+  }
+}
+
+# Rewrite every descendant's ComputedRect as `authored Rect * s`, placing a
+# StageEdge or SafeArea node against the visible window (`frame`). `originX`
+# / `originY` is `entityId`'s position in the stage parent's coordinates.
+# ComputedRect coordinates are parent-local, so uniform scaling per level
+# composes to a uniform subtree scale.
 func fitScaleSubtree(
   world: mod UiWorld
   uiSystems: mod UiSystems
   entityId: view EntityId
-  s: view Float
+  frame: view StageFrame
+  originX: view Float
+  originY: view Float
 ) {
-  unsafe {
-    if componentHas(this: world.childrens, entityId: entityId) is false {
-      ret
-    }
-    let ch: view Children = componentView(this: world.childrens, entityId: entityId)
-    let n: Int = ch.ids.length
-    var i: Int = 0
-    loop i < n {
-      let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
-      if componentHas(this: world.rects, entityId: cid) {
-        let r: view Rect = componentView(this: world.rects, entityId: cid)
-        fitWriteRect(
-          world: world
-          uiSystems: uiSystems
-          entityId: cid
-          x: r.position.x * s
-          y: r.position.y * s
-          w: r.size.x * s
-          h: r.size.y * s
+  if componentHas(this: world.childrens, entityId: entityId) is false {
+    ret
+  }
+  let s: Float = frame.scale
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
+  loop let cid: EntityId in children.ids {
+    var childX: Float = originX
+    var childY: Float = originY
+    if componentHas(this: world.rects, entityId: cid) {
+      let r: view Rect = componentView(this: world.rects, entityId: cid)
+      var box: StageBox = {
+        left: originX + r.position.x * s
+        top: originY + r.position.y * s
+        right: originX + (r.position.x + r.size.x) * s
+        bottom: originY + (r.position.y + r.size.y) * s
+      }
+      if componentHas(this: world.stageEdges, entityId: cid) {
+        box = stageEdgeBox(
+          edge: componentView(this: world.stageEdges, entityId: cid)
+          frame: frame
+          box: box
+        )
+      } else if componentHas(this: world.safeAreas, entityId: cid) {
+        box = stageSafeBox(
+          area: componentView(this: world.safeAreas, entityId: cid)
+          frame: frame
+          box: box
         )
       }
-      fitScaleSubtree(
+      fitWriteRect(
         world: world
         uiSystems: uiSystems
         entityId: cid
-        s: s
+        x: box.left - originX
+        y: box.top - originY
+        w: box.right - box.left
+        h: box.bottom - box.top
       )
-      i = i + 1
+      childX = box.left
+      childY = box.top
     }
+    fitScaleSubtree(
+      world: world
+      uiSystems: uiSystems
+      entityId: cid
+      frame: frame
+      originX: childX
+      originY: childY
+    )
   }
 }
 
@@ -205,11 +341,23 @@ func fitApplyOne(
     w: w
     h: h
   )
+  let frame: StageFrame = {
+    x: x
+    y: y
+    w: w
+    h: h
+    scale: s
+    visibleW: pcr.size.x
+    visibleH: pcr.size.y
+    safe: screenSafeInsets(world: world)
+  }
   fitScaleSubtree(
     world: world
     uiSystems: uiSystems
     entityId: entityId
-    s: s
+    frame: frame
+    originX: x
+    originY: y
   )
 }
 
