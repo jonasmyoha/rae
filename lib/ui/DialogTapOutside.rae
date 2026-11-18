@@ -1,0 +1,43 @@
+# ui/DialogTapOutside — a dialog closed by a tap outside it, through the layer walk's event
+# (docs/ui-layers-design.md §7): for a program that keeps captures (ui/LayerCapture), a
+# LayerTappedOutside of the dialog layer sends the top presented dialog's dismissActionId as a UI
+# action, as a tap on its scrim does. A dialog whose scrim takes the press never hears a tap
+# outside (the scrim is inside it), so the two never both fire; a dialog with no scrim (a scene's
+# own, a context menu) is closed this way.
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/Dialog
+open ui/Ecs
+open ui/LayerCapture
+open ui/UiLayers
+open ui/dialogSystem/DialogSystem
+
+# This frame's taps outside the dialog layer, answered: true when one sent the top dialog's
+# dismiss action
+func dialogTappedOutsideSystem(
+  world: mod UiWorld
+  captures: view UiCaptures
+  stack: view LayerStack
+) ret Bool {
+  let dialogLayer: Int = layerIdOf(stack: stack, name: "dialog")
+  loop let tapped: view LayerTappedOutside in captures.tappedOutside {
+    if tapped.layer is not dialogLayer {
+      continue
+    }
+    let host: EntityId = topPresentedPage(world: world)
+    if isNone(this: host) or not componentHas(this: world.presentedPages, entityId: host) {
+      continue
+    }
+    let pageRoot: EntityId = componentView(this: world.presentedPages, entityId: host).pageRoot
+    let options: DialogOptions = dialogOptionsOf(world: world, pageRoot: pageRoot)
+    if options.dismissActionId.length() > 0 {
+      eventSend(
+        this: world.uiActions
+        value: UiAction { entityId: host, actionId: options.dismissActionId }
+      )
+      ret true
+    }
+  }
+  ret false
+}

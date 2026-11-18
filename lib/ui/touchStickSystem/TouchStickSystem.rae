@@ -137,7 +137,31 @@ func stepTouchStick(state: mod TouchStickState, input: view StickInput) {
 # child) offset to match. True when a knob moved: the app runs the
 # transform pass (runUiSystems) so it draws where it is.
 func touchStickSystem(world: view UiWorld, uiSystems: mod UiSystems) ret Bool {
-  let input: StickInput = readStickInput()
+  let noFingers: List(Int) = {}
+  ret touchStickSystemBlocking(world: world, uiSystems: uiSystems, blockedIds: noFingers)
+}
+
+# The same, leaving alone the fingers in `blockedIds` (-1: the mouse): the ones the UI holds
+# (ui/LayerCapture), so a finger pressed on a button or under a dialog never takes the stick
+func touchStickSystemBlocking(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  blockedIds: view List(Int)
+) ret Bool {
+  var input: StickInput = readStickInput()
+  if blockedIds.length > 0 {
+    var kept: List(StickPointer) = {}
+    loop let touch: view StickPointer in input.touches {
+      if not blockedIds.contains(value: touch.id) {
+        kept.add(value: touch)
+      }
+    }
+    input.touches = own kept
+    if blockedIds.contains(value: -1) {
+      input.mousePressed = false
+      input.mouseDown = false
+    }
+  }
   var moved: Bool = false
   loop var i: Int = 0, i < componentCount(this: world.touchSticks), ++i {
     let entityId: EntityId = componentEntityAt(this: world.touchSticks, i: i)

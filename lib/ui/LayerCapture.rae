@@ -19,6 +19,8 @@
 open ecs/Entity
 open ui/LayerHit
 open ui/UiLayers
+open ui/Ecs
+open ecs/ComponentTable
 
 # A held press: its pointer (-1 the mouse, else a touch id), what the walk found, and whether the
 # UI took it (a node, a surface, or blocked under a modal), so nothing else may act on it
@@ -182,4 +184,29 @@ func uiClaimsKeys(captures: view UiCaptures) ret Bool {
 
 func setUiTextFocus(captures: mod UiCaptures, focused: view Bool) {
   captures.textFocus = focused
+}
+
+# The keys are the UI's while a text field has focus: read from the world's fields each frame
+func feedUiTextFocus(captures: mod UiCaptures, world: view UiWorld) {
+  var focused: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.textFields), ++i {
+    if componentView(
+      this: world.textFields
+      entityId: componentEntityAt(this: world.textFields, i: i)
+    ).focused {
+      focused = true
+    }
+  }
+  captures.textFocus = focused
+}
+
+# The fingers (and -1 the mouse) the UI holds this frame
+func claimedPointerIds(captures: view UiCaptures) ret List(Int) {
+  var ids: List(Int) = {}
+  loop let capture: view PointerCapture in captures.captures {
+    if capture.claimed {
+      ids.add(value: capture.pointerId)
+    }
+  }
+  ret ids
 }

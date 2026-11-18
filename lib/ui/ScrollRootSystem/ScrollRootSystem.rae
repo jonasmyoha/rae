@@ -551,9 +551,13 @@ func updateScrollRoot(
   # A row lifted out of a list in this root (ui/ListReorderSystem) has the
   # press: the content does not follow the finger, and the press stays
   # claimed (`active`), so its release clicks nothing
-  # Under a presented page (a dialog's scrim, a page over this one): the
-  # finger is not this root's
-  if presentedPageBlocks(world: world, uiSystems: uiSystems, entityId: entityId) {
+  # Under a presented page (a dialog's scrim, a page over this one) or any other shown root of
+  # the dialog layer (the "..." menu, a scene's own dialog): the finger is not this root's
+  if presentedPageBlocks(world: world, uiSystems: uiSystems, entityId: entityId) or dialogLayerCovers(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  ) {
     drag.dragging = false
     drag.active = false
     componentSet(this: world.scrollDrags, entityId: entityId, data: drag)

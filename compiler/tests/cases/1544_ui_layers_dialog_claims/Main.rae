@@ -1,0 +1,204 @@
+# Dialogs, the scroll root and the stick on the claims (ui/DialogTapOutside, ui/LayerCapture,
+# ui/InputSystem dialogLayerCovers; docs/ui-layers-design.md §7), headless. A screen with a list
+# and a dialog presented over it (a card, its scrim made not to take taps, as a dialog with no
+# scrim click of its own):
+#   1. a finger off the card is blocked and the UI's (the touch stick skips it), the dialog layer
+#      hears the tap outside, and dialogTappedOutsideSystem sends the dialog's dismiss action;
+#   2. the list under the dialog is covered: a scroll there takes nothing;
+#   3. the dialog closed: the list is free; a text field given focus makes the keys the UI's, and
+#      taking its focus away frees them.
+import ui/Components
+open ui/Ecs
+open ui/Dialog
+open ui/DialogTapOutside
+open ui/InputSystem
+open ui/LayerCapture
+open ui/LayerHit
+open ui/LayerLegacy
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ui/dialogSystem/DialogSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+func screenScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":852\},\"Children\":[\"List\",\"Field\"]\},\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":600\}\},\"Field\":\{\"Rect\":\{\"x\":0,\"y\":700,\"w\":393,\"h\":44\},\"OnClick\":\{\"actionId\":\"field\",\"label\":\"Field\"\}\}\}\}"
+}
+
+func cardScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Card\",\"nodes\":\{\"Card\":\{\"PageRoot\":\{\"id\":\"ask\",\"presentation\":\"dialog\"\},\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":120\},\"Children\":[\"Ok\"]\},\"Ok\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":48\},\"OnClick\":\{\"actionId\":\"ok\",\"label\":\"Ok\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  stack: mod LayerStack
+  contributions: mod List(LayerContribution)
+  plan: mod LayerPaintPlan
+  captures: mod UiCaptures
+) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  adoptWorldLayers(stack: stack, world: world)
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  capturesFrameBegin(
+    captures: captures
+    plan: plan
+    stack: stack
+    contributions: contributions
+  )
+  feedUiTextFocus(captures: captures, world: world)
+}
+
+const listId: String = "List"
+
+const okId: String = "Ok"
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 393.0
+  world.layoutH = 852.0
+  createStandardLayers(world: world)
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: screenScene())
+  )
+  let card: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardScene())
+    pageId: "ask"
+  )
+  let noOverrides: List(SceneOverride) = {}
+  let host: EntityId = presentMountedPage(
+    world: world
+    uiSystems: uiSystems
+    pageRoot: card
+    pageId: "ask"
+    overrides: noOverrides
+  )
+  # a dialog whose scrim takes no tap of its own
+  componentRemove(
+    this: world.onClicks
+    entityId: componentView(this: world.presentedPages, entityId: host).scrim
+  )
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  var captures: UiCaptures = createUiCaptures()
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+
+  let hit: UiHit = capturePress(
+    captures: captures
+    pointerId: 4
+    walk: uiHitWalkAt(
+      plan: plan
+      stack: stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      x: 20.0
+      y: 800.0
+      targetSize: 0.0
+      skip: noEntity()
+    )
+  )
+  let sent: Bool = dialogTappedOutsideSystem(world: world, captures: captures, stack: stack)
+  var action: String = "none"
+  if eventCount(this: world.uiActions) > 0 {
+    action = eventAt(this: world.uiActions, i: 0).actionId
+  }
+  log(
+    "1. finger 4 off the card: blocked {hit.blockedByModal}, the UI's {uiClaimsTouch(
+      captures: captures
+      touchId: 4
+    )}, kept from the stick {claimedPointerIds(captures: captures).contains(value: 4)}; the dismiss action sent {sent}: {action}"
+  )
+  log(
+    "2. the list under the dialog covered: {dialogLayerCovers(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: listId)
+    )}; the card's button is not: {dialogLayerCovers(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: okId)
+    )}"
+  )
+
+  captureRelease(captures: captures, pointerId: 4)
+  closePresentedPage(world: world, uiSystems: uiSystems, host: host)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  let field: EntityId = nodeOf(world: world, nodeId: "Field")
+  componentSet(this: world.textFields, entityId: field, data: TextField { focused: true })
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  let focusedKeys: Bool = uiClaimsKeys(captures: captures)
+  componentMod(this: world.textFields, entityId: field).focused = false
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  log(
+    "3. closed: the list covered {dialogLayerCovers(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: listId)
+    )}; a field with focus: keys the UI's {focusedKeys}; without: {uiClaimsKeys(captures: captures)}"
+  )
+}

@@ -667,6 +667,22 @@ program set `setUiTextFocus`. Hover and the wheel are the same walk at the point
 - Not yet (queued as 3c-2): dialogs closed by `LayerTappedOutside`, the scroll root and the touch
   stick asking the claims themselves, a text field's focus as `setUiTextFocus`.
 
+**Built (step 3c-2, 2026-11-18):** case 1544.
+
+- `ui/DialogTapOutside` `dialogTappedOutsideSystem(world, captures, stack)`: a
+  `LayerTappedOutside` of the dialog layer sends the top presented dialog's `dismissActionId` as a
+  UI action, as its scrim's click does. A presented dialog's scrim takes the press whenever it has
+  a dismiss action (the press is then inside the dialog, never outside), so the two never both
+  fire; the event closes a dialog with no clickable scrim.
+- `touchStickSystemBlocking(world, uiSystems, blockedIds)` leaves the fingers the UI holds alone
+  (`claimedPointerIds(captures)`; -1 the mouse). `touchStickSystem` is it with none blocked. The
+  walkers pass theirs through `updateTouchControls(..., blockedIds)`.
+- The scroll root leaves a finger alone under any shown root of the dialog layer
+  (`dialogLayerCovers`, from ui/InputSystem/DialogLayerHold), the "..." menu and a scene's own
+  dialogs included, as well as under a presented page (`presentedPageBlocks`).
+- `feedUiTextFocus(captures, world)` sets the text focus from the world's `TextField.focused`;
+  the walkers call it each frame in `hudCapturesStep`.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

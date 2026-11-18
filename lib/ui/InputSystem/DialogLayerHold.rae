@@ -79,3 +79,15 @@ func dialogLayerHolds(
   }
   ret noEntity()
 }
+
+# Is `entityId` covered by a dialog-layer root that takes input (it is not in one and not on a
+# layer above): a scroll root or a gesture under it leaves the finger alone
+func dialogLayerCovers(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  ret isNone(this: entityId) is false and isNone(
+    this: dialogLayerHolds(world: world, uiSystems: uiSystems, hit: entityId)
+  )
+}
