@@ -600,6 +600,15 @@ wait for step 6 (queued as 7b).
   the layer motion functions moved to `lib/ui/LayerMotion.rae` to keep the files under the cap.
 - Not yet (queued as 2b-2): the qr package on `CustomPaint`, its release, 147 moved.
 
+**Built (step 2b-2, 2026-11-18):** qr 1.2.0 on Rae 0.4.13, case 1540. `qrCodeTakePending` gives a
+QrCode node a `CustomPaint` of kind `qrCustomPaintKind`; `qrCodePaintStep` paints it for that plan
+step inside `beginCustomPaintG` / `endCustomPaintG`; `qrCodePaint` still works. Example 147 walks
+its plan with `paintPlanStepRaeG` (ui/RenderSystem: one step as Rae paints it, false for a
+program's) and `qrCodePaintStep`; 148 moves to 1.2.0 and keeps `qrCodePaint` until its overlays
+are on the plan (2c). The flat paint lists were not built: 106 has no `CustomPaint` node, so
+none of its roots is split and it walks each root once, as before; a split root costs one walk per
+part, which 147 (one code) does not notice.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

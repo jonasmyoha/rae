@@ -1,0 +1,103 @@
+# A QR code under an open dialog (qr 1.2.0 on CustomPaint; docs/ui-layers-design.md §5.1),
+# headless: a page holding a QrCode node, and a dialog over it. qrCodeTakePending marks the node
+# CustomPaint, so the page's paint is split around it; its step comes before the dialog's in the
+# plan, so the dialog covers it. qrCodePaintStep paints the code for that step (its modules queued
+# on the canvas) and leaves every other step alone.
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open qr/qrCodeSystem/QrCodeSystem
+open Gpu2dCanvas
+
+func pageScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Code\"]\},\"Code\":\{\"Rect\":\{\"x\":20,\"y\":20,\"w\":200,\"h\":200\},\"QrCode\":\{\"text\":\"https://example.com/rae\",\"errorCorrection\":\"M\"\}\}\}\}"
+}
+
+func dialogScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Dialog\",\"nodes\":\{\"Dialog\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"LayerTag\":\{\"id\":\"dialog\"\}\}\}\}"
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  var qrCodeSystem: QrCodeSystem = createQrCodeSystem()
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: pageScene())
+  )
+  let dialog: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: dialogScene())
+  )
+  qrCodeTakePending(world: world, qrCodeSystem: qrCodeSystem)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var qrStep: Int = -1
+  var dialogStep: Int = -1
+  var painted: Int = 0
+  var otherSteps: Int = 0
+  loop var i: Int = 0, i < plan.steps.length, ++i {
+    let step: PaintStep = plan.steps.copyAtFallback(
+      index: i
+      fallback: paintStepOf(kind: PaintStepKind.layerEnd, layer: -1)
+    )
+    let before: Int = canvas.prims.length
+    if qrCodePaintStep(
+      qrCodeSystem: qrCodeSystem
+      world: world
+      uiSystems: uiSystems
+      canvas: canvas
+      step: step
+    ) {
+      qrStep = i
+      painted = (canvas.prims.length - before) / 24
+    } else if step.kind is PaintStepKind.sceneRoot and step.entityId is dialog {
+      dialogStep = i
+    } else {
+      otherSteps = otherSteps + 1
+    }
+  }
+  log(
+    "the code's node is a CustomPaint of the qr kind: {componentHas(
+      this: world.customPaints
+      entityId: dialog
+    ) is false and componentCount(this: world.customPaints) is 1}"
+  )
+  log(
+    "its step {qrStep} comes before the dialog's {dialogStep}: {qrStep >= 0 and qrStep < dialogStep}; it queued {painted > 10} boxes (white zone and module runs); other steps left alone: {otherSteps}"
+  )
+  log("the canvas after it: clips {canvas.clipStack.length}, layer alpha {canvas.layerAlpha}")
+  canvasShutdown(canvas: canvas)
+}
