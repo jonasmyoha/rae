@@ -196,6 +196,11 @@ type Gpu2dCanvas {
   stageX: Float = 0.0
   stageY: Float = 0.0
   stageStack: List(Float)
+  # --- the UI layer being drawn (Transform.rae canvasPushLayer): every queued color's alpha is
+  # multiplied by layerAlpha; layerStack keeps the pushed layers' alphas and whether each pushed a
+  # stage ---
+  layerAlpha: Float = 1.0
+  layerStack: List(Float)
   # --- box pass ---
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -271,6 +276,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       currentClip: 0
       spinAngle: 0.0
       stageStack: {}
+      layerStack: {}
       spinPivotX: 0.0
       spinPivotY: 0.0
       pipeMade: false
@@ -568,10 +574,12 @@ func colorAlpha(color: view Int) ret Int {
 }
 
 func pushPremultiplied(canvas: mod Gpu2dCanvas, color: copy Int) {
-  canvas.prims.add(value: premultipliedChannel(color: color, shift: 65536))
-  canvas.prims.add(value: premultipliedChannel(color: color, shift: 256))
-  canvas.prims.add(value: premultipliedChannel(color: color, shift: 1))
-  canvas.prims.add(value: ((color / 16777216) % 256).toFloat() / 255.0)
+  # premultiplied: the layer's alpha scales all four channels
+  let layerAlpha: Float = canvas.layerAlpha
+  canvas.prims.add(value: premultipliedChannel(color: color, shift: 65536) * layerAlpha)
+  canvas.prims.add(value: premultipliedChannel(color: color, shift: 256) * layerAlpha)
+  canvas.prims.add(value: premultipliedChannel(color: color, shift: 1) * layerAlpha)
+  canvas.prims.add(value: ((color / 16777216) % 256).toFloat() / 255.0 * layerAlpha)
 }
 
 # Queue one primitive: rect, four corner radii (top-left, top-right,

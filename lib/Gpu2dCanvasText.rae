@@ -218,6 +218,7 @@ func canvasDrawGlyphEx(
   let stageScale: Float = canvas.stageScale
   glyphX = stageX(canvas: canvas, x: glyphX)
   glyphY = stageY(canvas: canvas, y: glyphY)
+  let layerAlpha: Float = canvas.layerAlpha
   if let entry: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     entry.glyphs.add(value: glyphX)
     entry.glyphs.add(value: glyphY)
@@ -230,7 +231,7 @@ func canvasDrawGlyphEx(
     entry.glyphs.add(value: tintChannel(color: color, shift: 65536))
     entry.glyphs.add(value: tintChannel(color: color, shift: 256))
     entry.glyphs.add(value: tintChannel(color: color, shift: 1))
-    entry.glyphs.add(value: tintChannel(color: color, shift: 16777216))
+    entry.glyphs.add(value: tintChannel(color: color, shift: 16777216) * layerAlpha)
     entry.glyphs.add(value: pxRange * stageScale)
     entry.glyphs.add(value: outlineWidth)
     entry.glyphs.add(value: softness)
@@ -238,7 +239,7 @@ func canvasDrawGlyphEx(
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 65536))
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 256))
     entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 1))
-    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 16777216))
+    entry.glyphs.add(value: tintChannel(color: outlineColor, shift: 16777216) * layerAlpha)
     entry.glyphClips.add(value: clip)
   }
 }

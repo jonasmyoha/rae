@@ -179,29 +179,25 @@ func collectPaintableRoots(world: view UiWorld, uiSystems: view UiSystems) pub r
         roots.add(value: raised)
       }
     }
+    # by layer order, keeping the order found among equal ones (an insertion sort: the plan of
+    # ui/UiLayers paints in the same order)
     let m: Int = roots.length
-    var outer: Int = 0
-    loop outer < m {
-      var minIdx: Int = outer
-      let outerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-      var minOrd: Int = entityLayerOrder(world: world, entityId: outerE)
-      var inner: Int = outer + 1
-      loop inner < m {
-        let innerE: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: inner)
-        let ord: Int = entityLayerOrder(world: world, entityId: innerE)
-        if ord < minOrd {
-          minIdx = inner
-          minOrd = ord
-        }
-        inner = inner + 1
+    loop var outer: Int = 1, outer < m, ++outer {
+      let moving: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
+      let movingOrder: Int = entityLayerOrder(world: world, entityId: moving)
+      var at: Int = outer
+      loop at > 0 and entityLayerOrder(
+        world: world
+        entityId: rae_ext_rae_buf_get(buf: roots.data, index: at - 1)
+      ) > movingOrder {
+        rae_ext_rae_buf_set(
+          buf: roots.data
+          index: at
+          value: rae_ext_rae_buf_get(buf: roots.data, index: at - 1)
+        )
+        at = at - 1
       }
-      if minIdx is not outer {
-        let a: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: outer)
-        let b: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: minIdx)
-        rae_ext_rae_buf_set(buf: roots.data, index: outer, value: b)
-        rae_ext_rae_buf_set(buf: roots.data, index: minIdx, value: a)
-      }
-      outer = outer + 1
+      rae_ext_rae_buf_set(buf: roots.data, index: at, value: moving)
     }
     ret roots
   }

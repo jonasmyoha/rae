@@ -1,0 +1,204 @@
+# Painting by the layer plan (ui/RenderSystem renderSystemGpu2d; docs/ui-layers-design.md §4.4),
+# headless:
+#   1. a world with layers of its own, as example 121 makes them (document 0, guides 50, chrome
+#      100) and a node raised to the dialog layer: adopted into the standard stack in the same
+#      order, and the plan paints its roots in the order the hit test walks them (bottom first);
+#   2. the canvas's layer push: a box queued in a layer at opacity 0.5 and offset (10, 20) has
+#      half its alpha and is moved; popped, the next box is as drawn.
+import Gpu2d
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open Gpu2dCanvas
+
+func sceneOf(name: view String, child: view String) ret String {
+  if child.length() is 0 {
+    ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\}\}\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"Children\":[\"{child}\"]\},\"{child}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) {
+    "Chrome"
+    "Document"
+    "Guides"
+    "Page"
+    "Menu"
+  } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "?"
+}
+
+func mount(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  name: view String
+  child: view String
+) ret EntityId {
+  ret loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: sceneOf(name: name, child: child))
+  )
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
+  let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
+  let guidesLayer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
+  # mounted in an order unlike the layers', so only the layers decide
+  let chrome: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    name: "Chrome"
+    child: ""
+  )
+  let page: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    name: "Page"
+    child: "Menu"
+  )
+  let document: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    name: "Document"
+    child: ""
+  )
+  let guides: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    name: "Guides"
+    child: ""
+  )
+  setLayerById(world: world, entityId: chrome, id: "chrome")
+  setLayerById(world: world, entityId: document, id: "document")
+  setLayerById(world: world, entityId: guides, id: "guides")
+  raiseNodeToLayer(
+    world: world
+    entityId: nodeOf(world: world, nodeId: "Menu")
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  adoptWorldLayers(stack: stack, world: world)
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var layers: String = ""
+  loop let layer: view UiLayer in stack.layers {
+    if layer.order <= 700 {
+      layers = "{layers} {layer.name} {layer.order},"
+    }
+  }
+  log("1. the stack up to dialog:{layers}")
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  var painted: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.sceneRoot {
+      painted = "{painted} {nameIn(world: world, entityId: step.entityId)}"
+    }
+  }
+  var hitOrder: String = ""
+  loop let root: view EntityId in collectPaintableRoots(world: world, uiSystems: uiSystems) {
+    if componentHas(this: world.layerRoots, entityId: root) is false {
+      hitOrder = "{hitOrder} {nameIn(world: world, entityId: root)}"
+    }
+  }
+  log("   the plan paints:{painted}")
+  log("   the hit test's roots, bottom first:{hitOrder}; the same: {painted is hitOrder}")
+
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  canvasPushLayer(
+    canvas: canvas
+    opacity: 0.5
+    offsetX: 10.0
+    offsetY: 20.0
+  )
+  pushBox(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 10.0
+    h: 10.0
+    radiusTopLeft: 0.0
+    radiusTopRight: 0.0
+    radiusBottomRight: 0.0
+    radiusBottomLeft: 0.0
+    fill: 4294967295
+    border: 0
+    borderWidth: 0.0
+    angle: 0.0
+    gradient: false
+    gradientAngle: 0.0
+    gradientTo: 0
+  )
+  canvasPopLayer(canvas: canvas)
+  pushBox(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 10.0
+    h: 10.0
+    radiusTopLeft: 0.0
+    radiusTopRight: 0.0
+    radiusBottomRight: 0.0
+    radiusBottomLeft: 0.0
+    fill: 4294967295
+    border: 0
+    borderWidth: 0.0
+    angle: 0.0
+    gradient: false
+    gradientAngle: 0.0
+    gradientTo: 0
+  )
+  let stride: Int = canvas.prims.length / 2
+  log(
+    "2. in the layer: at {canvas.prims.copyAtDefault(index: 0)},{canvas.prims.copyAtDefault(
+      index: 1
+    )}, alpha {canvas.prims.copyAtDefault(index: 11)}; popped: at {canvas.prims.copyAtDefault(
+      index: stride
+    )},{canvas.prims.copyAtDefault(index: stride + 1)}, alpha {canvas.prims.copyAtDefault(
+      index: stride + 11
+    )}, layer alpha {canvas.layerAlpha}"
+  )
+  canvasShutdown(canvas: canvas)
+}

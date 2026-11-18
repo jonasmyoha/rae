@@ -106,12 +106,48 @@ func canvasPopStage(canvas: mod Gpu2dCanvas) {
   canvas.stageStack.removeLast()
 }
 
-# No stage (every frame starts so)
+# No stage and no UI layer (every frame starts so)
 func canvasClearStage(canvas: mod Gpu2dCanvas) {
   canvas.stageScale = 1.0
   canvas.stageX = 0.0
   canvas.stageY = 0.0
   canvas.stageStack.clear()
+  canvas.layerAlpha = 1.0
+  canvas.layerStack.clear()
+}
+
+# Draw a UI layer (ui/UiLayers) until canvasPopLayer: every color's alpha times `opacity` (inside
+# another layer, the two multiply), everything moved by (offsetX, offsetY) points through a stage
+func canvasPushLayer(
+  canvas: mod Gpu2dCanvas
+  opacity: view Float
+  offsetX: view Float
+  offsetY: view Float
+) {
+  canvas.layerStack.add(value: canvas.layerAlpha)
+  canvas.layerAlpha = canvas.layerAlpha * opacity
+  if offsetX is not 0.0 or offsetY is not 0.0 {
+    canvasPushStage(
+      canvas: canvas
+      stage: CanvasStage { scale: 1.0, offsetX: offsetX, offsetY: offsetY }
+    )
+    canvas.layerStack.add(value: 1.0)
+  } else {
+    canvas.layerStack.add(value: 0.0)
+  }
+}
+
+func canvasPopLayer(canvas: mod Gpu2dCanvas) {
+  let count: Int = canvas.layerStack.length
+  if count < 2 {
+    ret
+  }
+  if canvas.layerStack.copyAtDefault(index: count - 1) > 0.5 {
+    canvasPopStage(canvas: canvas)
+  }
+  canvas.layerAlpha = canvas.layerStack.copyAtDefault(index: count - 2)
+  canvas.layerStack.removeLast()
+  canvas.layerStack.removeLast()
 }
 
 # A point of the current stage in the window's points

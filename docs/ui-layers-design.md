@@ -479,6 +479,28 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
 - The old `createStandardLayers`, `raiseNodeToLayer`, `setLayerById` and `collectPaintableRoots` are
   unchanged and still paint and hit; the plan is not painted by yet (step 2).
 
+**Built (step 2, the first part, 2026-11-18):** `renderSystemGpu2d` paints by the plan; case 1534.
+
+- `Gpu2dCanvas` has a UI layer push: `canvasPushLayer(canvas, opacity, offsetX, offsetY)` and
+  `canvasPopLayer`. The opacity multiplies the alpha of every queued box (all four premultiplied
+  channels, in `pushPremultiplied`, so arcs, curves and gradients too), image tint and glyph and
+  outline color; layers nest and multiply. The offset is a stage (`canvasPushStage`), so clips and
+  the backdrop blur move with it. A frame starts with neither.
+- `ui/RenderSystem`: `paintSceneRootG` paints one root as a `sceneRoot` step (a layer entity has
+  nothing, a raised node of a hidden scene is hidden); `paintLayerEdgeG` pushes and pops a layer at
+  `layerBegin` / `layerEnd`; `renderLayerPlanGpu2d` walks a plan for one world. A program with
+  several worlds walks the plan itself with those two.
+- `renderSystemGpu2d` keeps its signature (its world, systems and resources are `view`, so it
+  cannot keep a stack between frames). It builds the standard stack, the world's own old layers
+  (`adoptWorldLayers`, at `stackOrderOfLegacy` of their order, so 121's document, guides and
+  chrome keep their order among the standard ones) and the plan on each call, which allocates
+  about as much as `collectPaintableRoots` did. A program that holds its stack does not.
+- `collectPaintableRoots` sorts with a stable insertion sort, so the hit test walks the roots in
+  the plan's order; the old selection sort could swap two roots of one layer.
+- Not yet (queued as 2b, 2c, 2d): flat paint lists and `CustomPaint`; `LayerDraw` areas, the layer
+  clip and safe rectangle, the depth-sorted world layer, `app3d/HudOverlays` on the plan with
+  `ui/HudOverlay` removed; the GPU check. Page transitions still paint through `gpu2dLayerRange`.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

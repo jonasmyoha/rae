@@ -29,6 +29,7 @@ import ui/AnimationSystem
 import ui/Components
 import ui/IconCodepoints
 import ui/Layer
+open ui/UiLayers
 import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
@@ -716,22 +717,117 @@ func gpu2dLayerRange(
   }
 }
 
-# Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame.
+# The root (or raised node) `root` of `world`, as a plan's sceneRoot step paints it: a layer
+# entity has nothing to paint, and a raised node whose scene is hidden is hidden with it
+func paintSceneRootG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  root: view EntityId
+) {
+  if componentHas(this: world.layerRoots, entityId: root) {
+    ret
+  }
+  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
+    uiSystems: uiSystems
+    entityId: root
+  ) is false {
+    ret
+  }
+  canvasBackdropLayer(canvas: canvas)
+  paintSubtreeG(
+    world: world
+    uiSystems: uiSystems
+    entityId: root
+    res: res
+    canvas: canvas
+  )
+}
+
+# A plan's layerBegin or layerEnd step on the canvas: the layer's opacity and offset pushed, or
+# popped (ui/UiLayers; Gpu2dCanvas canvasPushLayer). Other steps do nothing here.
+func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod Gpu2dCanvas) {
+  if step.kind is PaintStepKind.layerBegin {
+    let layer: UiLayer = layerOf(stack: stack, id: step.layer)
+    canvasPushLayer(
+      canvas: canvas
+      opacity: layer.opacity
+      offsetX: layer.offsetX
+      offsetY: layer.offsetY
+    )
+  } else if step.kind is PaintStepKind.layerEnd {
+    canvasPopLayer(canvas: canvas)
+  }
+}
+
+# Every step of `plan` that Rae paints for the world `worldKey`: the layers' edges and that
+# world's roots. A program with several worlds walks the plan itself (paintLayerEdgeG once per
+# step, paintSceneRootG with the step's world, its own draws for draw steps).
+func renderLayerPlanGpu2d(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.sceneRoot {
+      if step.world is worldKey {
+        paintSceneRootG(
+          world: world
+          uiSystems: uiSystems
+          res: res
+          canvas: canvas
+          root: step.entityId
+        )
+      }
+    } else {
+      paintLayerEdgeG(step: step, stack: stack, canvas: canvas)
+    }
+  }
+}
+
+# Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame. The one-call
+# form for a program with one world and only scene nodes: it builds the standard stack (with the
+# world's own layers, adoptWorldLayers) and its paint plan for this call, and paints by it
+# (docs/ui-layers-design.md §4.4). A program that keeps its own LayerStack builds the plan once
+# per frame and walks it with renderLayerPlanGpu2d, with no allocation.
 func renderSystemGpu2d(
   world: view UiWorld
   uiSystems: view UiSystems
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
 ) pub {
-  let allRangeLow: Int = -1000000
-  let allRangeHi: Int = 1000000
-  gpu2dLayerRange(
+  var stack: LayerStack = createStandardLayerStack()
+  adoptWorldLayers(stack: stack, world: world)
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  renderLayerPlanGpu2d(
+    plan: plan
+    stack: stack
+    worldKey: 0
     world: world
     uiSystems: uiSystems
     res: res
     canvas: canvas
-    minOrder: allRangeLow
-    maxOrder: allRangeHi
   )
   renderSharedNodesGpu2d(
     world: world
