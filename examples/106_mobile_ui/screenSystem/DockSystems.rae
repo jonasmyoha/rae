@@ -4,8 +4,6 @@ open ui/Ecs
 #   anchorBottomSystem  every `AnchorBottom`: Offset.y = layoutH - Rect.h -
 #                       bottomInset, written only when it changes (replaces
 #                       both the authored dock Offset and liftDockForSafeArea).
-#   layerTagSystem      every `LayerTag`: resolve the named layer to a
-#                       LayerRef once (a scene cannot spell an EntityId).
 #   navTabsSystem       every `NavTab`: the tab is active when its `screen`
 #                       names the app's current tab — write the active /
 #                       inactive icon tint onto the tab's Sprite children and
@@ -44,19 +42,6 @@ func anchorBottomSystem(world: mod UiWorld, bottomInset: view Float) pub {
         let off: Offset = { delta: Vec2 { x: 0.0, y: wantedY } }
         componentSet(this: world.offsets, entityId: entityId, data: off)
       }
-    }
-    i = i + 1
-  }
-}
-
-func layerTagSystem(world: mod UiWorld) pub {
-  let n: Int = componentCount(this: world.layerTags)
-  var i: Int = 0
-  loop i < n {
-    let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
-    if componentHas(this: world.layerRefs, entityId: entityId) is false {
-      let tag: view LayerTag = queryViewAt(table: world.layerTags, denseIndex: i)
-      setLayerById(world: world, entityId: entityId, id: tag.id)
     }
     i = i + 1
   }

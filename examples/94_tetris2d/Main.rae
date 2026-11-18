@@ -891,6 +891,7 @@ func main() ret Int {
   var displayedLines: Int = -1
   var displayedLevel: Int = -1
 
+  var layers: TetrisLayers = createTetrisLayers()
   loop not Gpu2d.pollClose() {
     let now: Float64 = Gpu2d.nowSeconds()
     if updateDebugOverlay(
@@ -956,12 +957,13 @@ func main() ret Int {
         fit: StageFit.contain
       )
     )
-    drawGame(canvas: canvas, game: game)
-    renderSystemGpu2d(
+    paintTetrisLayers(
+      layers: layers
       world: world
       uiSystems: uiSystems
       res: uiResources
       canvas: canvas
+      game: game
     )
     canvasPopStage(canvas: canvas)
     drawDebugOverlay(

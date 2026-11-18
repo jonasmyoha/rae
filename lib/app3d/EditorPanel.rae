@@ -49,6 +49,7 @@ open app3d/ControlPanel
 open app3d/EdgeTab
 open app3d/ModeMenu
 open app3d/UiModes
+open app3d/HudOverlays
 
 # The two places an app adds its own controls (buildEditorPanelControls): the
 # top bar after the camera bar, and the side panel under the settings, which
@@ -100,6 +101,8 @@ const editorSkyGroundAlbedo: Float = 0.25
 
 type EditorPanel {
   gpuUi: Gpu2dUi
+  # Its chrome and the debug readout in layer order (app3d/HudOverlays drawPanelLayers)
+  layerPaint: HudLayerPaint
   world: UiWorld
   uiSystems: UiSystems
   input: UiInput
@@ -178,6 +181,7 @@ func createEditorPanel(assetBase: view String, settings: view SettingsState) ret
   let panelScroll: EntityId = findScrollRoot(world: world, uiSystems: uiSystems)
   ret EditorPanel {
     gpuUi: own gpuUi
+    layerPaint: createHudLayerPaint()
     world: own world
     uiSystems: own uiSystems
     input: createUiInput()
@@ -652,20 +656,16 @@ func applyEditorPanelSettings(
   )
 }
 
-# Draw the chrome and the debug overlay over the frame (RenderTag.uiOverlay)
+# Draw the chrome and the debug overlay over the frame (RenderTag.uiOverlay), in layer order: the
+# debug readout is the debug layer's, over everything
 func drawEditorPanel(editorPanel: mod EditorPanel, canvas: mod Gpu2dCanvas) {
   Gpu2d.beginFrameLoad(canvas: canvas)
-  renderSystemGpu2d(
+  drawPanelLayers(
+    paint: editorPanel.layerPaint
     world: editorPanel.world
     uiSystems: editorPanel.uiSystems
-    res: editorPanel.gpuUi
+    gpuUi: editorPanel.gpuUi
     canvas: canvas
-  )
-  # Last, so nothing paints over the frame rate
-  drawDebugOverlay(
-    debugOverlay: editorPanel.debugOverlay
-    canvas: canvas
-    font: editorPanel.gpuUi.textFont
-    didRealWork: true
+    dbg: editorPanel.debugOverlay
   )
 }

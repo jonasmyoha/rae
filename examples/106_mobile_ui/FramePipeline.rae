@@ -197,9 +197,8 @@ func runFrameLayoutTransform(
     systemDone(schedule: schedule, index: uiSystemSafeArea)
   }
   # #978: bottom-anchored overlays follow the layout extent and the safe
-  # inset; layer tags resolve for anything mounted since last frame.
+  # inset (layer tags are raised by the transform pass, ui/Layer raiseTaggedNodes)
   anchorBottomSystem(world: world, bottomInset: viewport.safeInsetsDu.b)
-  layerTagSystem(world: world)
   if uiShouldRun(
     schedule: schedule
     world: world

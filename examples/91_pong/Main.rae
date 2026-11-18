@@ -10,6 +10,7 @@ open app3d/UiShell
 open ui/Ecs
 open ui/Registry
 open ui/RenderSystem
+open ui/UiLayers
 open Gpu2dCanvas
 open ui/UiSystems
 
@@ -247,6 +248,21 @@ func main() ret Int {
     log("[pong] self-test passed")
   }
 
+  # The window's layer stack (ui/UiLayers): the board is a program draw in the hud layer, under
+  # the scene UI's roots (z -1), so a dialog or the score over it is painted in order
+  var layerStack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: layerStack, worldKey: 0)
+  let unusedBoard: Int = addLayerDraw(
+    stack: layerStack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: layerStack, name: "hud")
+      kind: LayerDrawKind.app
+      appKind: 1
+      z: -1
+    }
+  )
+  var layerContributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  var paintPlan: LayerPaintPlan = createLayerPaintPlan()
   loop not Gpu2d.pollClose() {
     if resizeUiToWindow(world: world, uiSystems: uiSystems, res: uiResources) {
       placeHud(world: world)
@@ -337,32 +353,52 @@ func main() ret Int {
       b: 0.08
       a: 1.0
     )
-    # The field, contained in the window
-    canvasPushStage(
-      canvas: canvas
-      stage: stageFit(
-        areaW: fieldW
-        areaH: fieldH
-        boxX: 0.0
-        boxY: 0.0
-        boxW: world.layoutW
-        boxH: world.layoutH
-        fit: StageFit.contain
+    if let contribution: mod LayerContribution = layerContributions.modAt(index: 0) {
+      refreshLayerContribution(
+        contribution: contribution
+        stack: layerStack
+        world: world
+        uiSystems: uiSystems
       )
+    }
+    buildLayerPaintPlan(
+      plan: paintPlan
+      stack: layerStack
+      contributions: layerContributions
+      editor: false
     )
-    drawGame(
-      canvas: canvas
-      playerPosition: playerPosition
-      cpuPosition: cpuPosition
-      ballPosition: ballPosition
-    )
-    canvasPopStage(canvas: canvas)
-    renderSystemGpu2d(
-      world: world
-      uiSystems: uiSystems
-      res: uiResources
-      canvas: canvas
-    )
+    loop let step: view PaintStep in paintPlan.steps {
+      if not paintPlanStepRaeG(
+        step: step
+        stack: layerStack
+        worldKey: 0
+        world: world
+        uiSystems: uiSystems
+        res: uiResources
+        canvas: canvas
+      ) and step.kind is PaintStepKind.draw {
+        # The field, contained in the window
+        canvasPushStage(
+          canvas: canvas
+          stage: stageFit(
+            areaW: fieldW
+            areaH: fieldH
+            boxX: 0.0
+            boxY: 0.0
+            boxW: world.layoutW
+            boxH: world.layoutH
+            fit: StageFit.contain
+          )
+        )
+        drawGame(
+          canvas: canvas
+          playerPosition: playerPosition
+          cpuPosition: cpuPosition
+          ballPosition: ballPosition
+        )
+        canvasPopStage(canvas: canvas)
+      }
+    }
     Gpu2d.endFrame(canvas: canvas)
     # Frame end: report the authored components no lib table matched (this app
     # has no tables of its own) and recycle the indices of destroyed entities.

@@ -79,7 +79,6 @@ func mountBackButtonOverlay(
     subScenes: scenes.subScenes
   )
   setPageActive(world: world, pageId: backButtonPageId, active: isSubPage(state: state))
-  layerTagSystem(world: world)
   ret mount
 }
 
@@ -124,9 +123,9 @@ func mountBottomDockOverlay(
   # placeholder texts; the TrackText binding below rewrites them.
   applyMiniPlayerFrames(world: world, uiSystems: uiSystems, scenes: scenes)
 
-  # First run of the dock's layer + nav-tab systems so the very first frame
-  # is right; the playbackSystem bindings land in the frame's observation pass.
-  layerTagSystem(world: world)
+  # First run of the dock's nav-tab system so the very first frame is right (its layer tag is
+  # raised by the transform pass); the playbackSystem bindings land in the frame's observation
+  # pass.
   navTabsSystem(dockSystem: dockSystem, world: world, activeTab: activeTab)
 
   # Canvas overlay (#212 S5/S6 demo) — mounted here because every screen

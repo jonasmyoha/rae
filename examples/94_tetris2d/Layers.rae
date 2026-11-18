@@ -1,0 +1,71 @@
+# The game's layer stack (ui/UiLayers, docs/ui-layers-design.md): the board is a program draw in
+# the hud layer under the scene UI's roots (z -1), so the score, the pause text and the game-over
+# panel are painted over it in layer order, all inside the game's stage.
+open ui/Ecs
+open ui/RenderSystem
+open ui/UiLayers
+open ui/UiSystems
+open Gpu2dCanvas
+
+type TetrisLayers {
+  stack: LayerStack
+  contributions: List(LayerContribution)
+  plan: LayerPaintPlan
+}
+
+func createTetrisLayers() ret TetrisLayers {
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  let unusedBoard: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "hud")
+      kind: LayerDrawKind.app
+      appKind: 1
+      z: -1
+    }
+  )
+  ret TetrisLayers {
+    stack: own stack
+    contributions: { createLayerContribution(worldKey: 0) }
+    plan: createLayerPaintPlan()
+  }
+}
+
+# The board and the scene UI, in layer order
+func paintTetrisLayers(
+  layers: mod TetrisLayers
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  game: view Game
+) {
+  if let contribution: mod LayerContribution = layers.contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: layers.stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: layers.plan
+    stack: layers.stack
+    contributions: layers.contributions
+    editor: false
+  )
+  loop let step: view PaintStep in layers.plan.steps {
+    if not paintPlanStepRaeG(
+      step: step
+      stack: layers.stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      res: res
+      canvas: canvas
+    ) and step.kind is PaintStepKind.draw {
+      drawGame(canvas: canvas, game: game)
+    }
+  }
+}

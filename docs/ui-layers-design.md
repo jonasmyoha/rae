@@ -739,6 +739,24 @@ when there is one, the `LayerTag`'s `z`, so `ZChildOrder` and the layer contribu
 a key. `zKeySystem` runs at the start of `animationSystem`, and pending keys keep
 `animationInFlight` true.
 
+**Built (step 6, 2026-11-18):**
+
+- `app3d/ModeMenu` tags its menus for the dialog layer with a `LayerTag` (`tagForDialogLayer`); the
+  transform pass raises them.
+- `app3d/EditorPanel` (134, 135, 138) keeps a `HudLayerPaint` and draws by its plan
+  (`drawPanelLayers`): its chrome's roots and layers, then the debug readout as the debug layer's
+  draw.
+- 106 drops its own `layerTagSystem`; the transform pass's `raiseTaggedNodes` does the same. Its
+  scenes keep the old names ("content", "back-button"): the stack already reads them as `hud` and
+  `dock`, and the names go with `LayerRoot` in 6b.
+- 121's edited document has a `LayerScope` on its page root, so the document's own tagged nodes
+  stay inside its view.
+- 91 and 94 keep a layer stack each; their boards are a program draw in hud at `z` -1, under the
+  scene UI's roots (94's in `Layers.rae`, to keep `Main.rae` under the cap).
+- `SettingsDialog` needed nothing: it is a scene instance in the panel world, painted with it.
+  `Minimap` has no program in this repository; game proto2 moves it in its own queue.
+- Checked by eye on headless frames: 91, 94, 106, 121, 134 (and 136, 147 earlier).
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

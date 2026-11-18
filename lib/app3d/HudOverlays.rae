@@ -397,3 +397,60 @@ func blockClaimedCameraFingers(rig: mod CameraRig, captures: view UiCaptures) {
     }
   }
 }
+
+# A panel world over a 3D frame (app3d/EditorPanel: its chrome and the debug readout), in layer
+# order by `paint`'s plan: the scene UI's roots and layers, the debug readout in the debug layer
+func drawPanelLayers(
+  paint: mod HudLayerPaint
+  world: view UiWorld
+  uiSystems: view UiSystems
+  gpuUi: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  dbg: mod DebugOverlay
+) {
+  setLayerStackFrame(
+    stack: paint.stack
+    width: windowExtentW()
+    height: windowExtentH()
+    safe: screenSafeInsets(world: world)
+    reserved: reservedInsets(world: world)
+  )
+  clearWorldAnchors(stack: paint.stack)
+  buildHudLayerPlan(
+    paint: paint
+    world: world
+    uiSystems: uiSystems
+    editor: false
+  )
+  loop let step: view PaintStep in paint.plan.steps {
+    if not paintPlanStepRaeG(
+      step: step
+      stack: paint.stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    ) and step.kind is PaintStepKind.draw {
+      let draw: LayerDraw = paint.stack.draws.copyAtFallback(
+        index: step.draw
+        fallback: LayerDraw { layer: -1, kind: LayerDrawKind.app }
+      )
+      if draw.kind is LayerDrawKind.debugReadout {
+        drawDebugOverlay(
+          debugOverlay: dbg
+          canvas: canvas
+          font: gpuUi.textFont
+          didRealWork: true
+        )
+      }
+    }
+  }
+  renderSharedNodesGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: gpuUi
+    canvas: canvas
+  )
+  paintCanvasGuidesG(world: world, canvas: canvas)
+}
