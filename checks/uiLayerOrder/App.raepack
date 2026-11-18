@@ -1,0 +1,25 @@
+pack App {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  dependencies: {
+    dep qr: {
+      git: "../.."
+      subdir: "packages/qr"
+      version: "1.2.0"
+      hash: "git-tree:ddff617eb6b72014f467d511d0f8624a64377ec4"
+    }
+  }
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+}
