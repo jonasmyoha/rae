@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.24, 2026-11-19: entities owned by peers, handed over at run time
+
+- `net/Ownership`: an owner per shared entity that changes while the game runs. The host asks the
+  owner, the owner sends its state to the new owner in one message and keeps simulating until
+  the new owner takes it, and the host switches at once: every tick of an entity is one peer's,
+  and its state goes on without a jump. A leaving peer's or host's entities go to the host
+  (`ownershipPeerLeft`, `ownershipBecomeHost`); `ownerByNearest` is the usual rule; messages go
+  as bytes over a walker session's game messages (docs/walker-net.md).
+
 ## 0.4.23, 2026-11-19: simulation levels round relevance centers
 
 - `simulation/SimLevelSystem`: a subject (an entity id with a `SimRelevance` component) is near

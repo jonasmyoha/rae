@@ -1,0 +1,328 @@
+# net/Ownership with three peers in one process, messages moved by hand one frame each way (a
+# player's to the host, the host's to the peers it names). Entity 1 moves one step a tick (its
+# state is its place, x = tick), entity 2 too:
+#   1. entity 1 handed from the host A to B, then from B to C: every tick's state is taken from
+#      exactly one peer, and the place goes on step by step (no jump, no tick twice, none missing)
+#   2. the host A leaves: B hosts, A's entity 2 is B's and goes on from B's copy; C keeps entity 1
+#   3. the new host takes entity 1 from C itself; the rule ownerByNearest with its margin
+#   4. a message survives its bytes
+open net/Ownership
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+type Peer {
+  ownership: Ownership
+  alive: Bool = true
+  inbox: List(OwnerMessage) = {}
+}
+
+type Record {
+  netId: Int
+  from: Int
+  tick: Int
+  x: Int
+}
+
+# One frame: messages in, every simulated entity stepped to `tick`, messages out to next frame
+func frame(peers: mod List(Peer), tick: view Int, records: mod List(Record)) {
+  loop var p: Int = 0, p < peers.length, ++p {
+    if let peer: mod Peer = peers.modAt(index: p) {
+      if not peer.alive {
+        continue
+      }
+      ownershipFrameBegin(ownership: peer.ownership)
+      loop let message: view OwnerMessage in peer.inbox {
+        ownershipReceive(ownership: peer.ownership, message: message)
+      }
+      peer.inbox.clear()
+      loop let netId: view Int in List(Int) { 1, 2 } {
+        if ownershipSimulates(ownership: peer.ownership, netId: netId) {
+          # from the state's own tick to now, one step a tick
+          let state: List(Int) = ownedState(ownership: peer.ownership, netId: netId)
+          var x: Int = state.copyAtFallback(index: 0, fallback: 0)
+          var at: Int = 0
+          loop var i: Int = 0, i < peer.ownership.entities.length, ++i {
+            if let entity: view OwnedEntity = peer.ownership.entities.viewAt(index: i) {
+              if entity.netId is netId {
+                at = entity.stateTick
+              }
+            }
+          }
+          loop at < tick {
+            x = x + 1
+            at = at + 1
+          }
+          ownershipSetState(
+            ownership: peer.ownership
+            netId: netId
+            state: List(Int) { x }
+            tick: tick
+          )
+        }
+      }
+      if ownershipIsHost(ownership: peer.ownership) {
+        loop let taken: view OwnerStateTaken in peer.ownership.taken {
+          records.add(
+            value: Record {
+              netId: taken.netId
+              from: taken.from
+              tick: taken.tick
+              x: taken.state.copyAtFallback(index: 0, fallback: -1)
+            }
+          )
+        }
+      }
+    }
+  }
+  # out: a player's to the host, the host's to the peers it names (or all)
+  loop var p: Int = 0, p < peers.length, ++p {
+    var messages: List(OwnerMessage) = {}
+    var host: Bool = false
+    var hostId: Int = 0
+    var self: Int = 0
+    if let peer: mod Peer = peers.modAt(index: p) {
+      if not peer.alive {
+        continue
+      }
+      messages = ownershipTakeOutbox(ownership: peer.ownership)
+      host = ownershipIsHost(ownership: peer.ownership)
+      hostId = peer.ownership.host
+      self = peer.ownership.self
+    }
+    loop let message: view OwnerMessage in messages {
+      loop var q: Int = 0, q < peers.length, ++q {
+        if let to: mod Peer = peers.modAt(index: q) {
+          if not to.alive or to.ownership.self is self {
+            continue
+          }
+          if host {
+            if message.to < 0 or message.to is to.ownership.self {
+              to.inbox.add(value: message)
+            }
+          } else if to.ownership.self is hostId {
+            to.inbox.add(value: message)
+          }
+        }
+      }
+    }
+  }
+}
+
+# Over ticks `from` to `until`: the entity's states the host took, one a tick, x = tick
+func steady(
+  records: view List(Record)
+  netId: view Int
+  from: view Int
+  until: view Int
+) ret String {
+  var counts: List(Int) = {}
+  loop var t: Int = from, t <= until, ++t {
+    counts.add(value: 0)
+  }
+  var wrong: Int = 0
+  var owners: String = ""
+  var last: Int = -1
+  loop let record: view Record in records {
+    if record.netId is netId and record.tick >= from and record.tick <= until {
+      counts.set(
+        index: record.tick - from
+        value: counts.copyAtFallback(index: record.tick - from, fallback: 0) + 1
+      )
+      if record.x is not record.tick {
+        wrong = wrong + 1
+      }
+      if record.from is not last {
+        owners = "{owners} {record.from}@{record.tick}"
+        last = record.from
+      }
+    }
+  }
+  var missing: Int = 0
+  var twice: Int = 0
+  loop var k: Int = 0, k < counts.length, ++k {
+    let count: Int = counts.copyAtFallback(index: k, fallback: 0)
+    if count is 0 {
+      missing = missing + 1
+    }
+    if count > 1 {
+      twice = twice + 1
+    }
+  }
+  ret "owners:{owners}; ticks missing {missing}, twice {twice}, off their place {wrong}"
+}
+
+func main() {
+  var peers: List(Peer) = {
+    Peer { ownership: createOwnership(self: 0, host: 0) }
+    Peer { ownership: createOwnership(self: 1, host: 0) }
+    Peer { ownership: createOwnership(self: 2, host: 0) }
+  }
+  if let host: mod Peer = peers.modAt(index: 0) {
+    ownershipAdd(
+      ownership: host.ownership
+      netId: 1
+      owner: 0
+      state: List(Int) { 0 }
+      tick: 0
+    )
+    ownershipAdd(
+      ownership: host.ownership
+      netId: 2
+      owner: 0
+      state: List(Int) { 0 }
+      tick: 0
+    )
+  }
+  var records: List(Record) = {}
+  loop var tick: Int = 1, tick <= 60, ++tick {
+    if let host: mod Peer = peers.modAt(index: 0) {
+      if tick is 5 {
+        ownershipWant(ownership: host.ownership, netId: 1, owner: 1)
+      }
+      if tick is 15 {
+        ownershipWant(ownership: host.ownership, netId: 1, owner: 2)
+      }
+      if tick is 30 {
+        # the host goes: B hosts (the relay promotes it at once here), C is told
+        host.alive = false
+      }
+    }
+    if tick is 30 {
+      if let b: mod Peer = peers.modAt(index: 1) {
+        ownershipBecomeHost(ownership: b.ownership, formerHost: 0)
+      }
+      if let c: mod Peer = peers.modAt(index: 2) {
+        ownershipHostChanged(ownership: c.ownership, host: 1)
+      }
+    }
+    if tick is 40 {
+      if let b: mod Peer = peers.modAt(index: 1) {
+        ownershipWant(ownership: b.ownership, netId: 1, owner: 1)
+      }
+    }
+    frame(peers: peers, tick: tick, records: records)
+    if tick is 29 {
+      log("1. entity 1 at the first host, ticks 1-28 (a player's tick arrives a frame later): {steady(
+        records: records
+        netId: 1
+        from: 1
+        until: 28
+      )}")
+      check(
+        label: "handed A to B to C, every tick once, in place"
+        ok: steady(
+          records: records
+          netId: 1
+          from: 1
+          until: 28
+        ) is "owners: 0@1 1@7 2@20; ticks missing 0, twice 0, off their place 0"
+      )
+      records.clear()
+    }
+  }
+  var bView: Ownership = createOwnership(self: -1, host: -1)
+  var cView: Ownership = createOwnership(self: -1, host: -1)
+  if let b: view Peer = peers.viewAt(index: 1) {
+    bView = b.ownership
+  }
+  if let c: view Peer = peers.viewAt(index: 2) {
+    cView = c.ownership
+  }
+  log("2. after the host left: entity 2 {steady(
+    records: records
+    netId: 2
+    from: 31
+    until: 60
+  )}")
+  check(
+    label: "the old host's entity is the new host's, in place every tick"
+    ok: ownerOf(ownership: bView, netId: 2) is 1 and ownerOf(ownership: cView, netId: 2) is 1 and steady(
+      records: records
+      netId: 2
+      from: 31
+      until: 60
+    ) is "owners: 1@31; ticks missing 0, twice 0, off their place 0"
+  )
+  log("3. entity 1 at the new host: {steady(
+    records: records
+    netId: 1
+    from: 31
+    until: 60
+  )}")
+  check(
+    label: "C kept entity 1, then the new host took it, every tick once"
+    ok: steady(
+      records: records
+      netId: 1
+      from: 31
+      until: 60
+    ) is "owners: 2@31 1@42; ticks missing 0, twice 0, off their place 0"
+  )
+  check(
+    label: "C does not simulate it any more"
+    ok: not ownershipSimulates(ownership: cView, netId: 1)
+  )
+  # the rule: the nearest player, the owner keeping it within the margin
+  let players: List(OwnerCandidate) = {
+    OwnerCandidate { peerId: 0, x: 0.0, y: 0.0 }
+    OwnerCandidate { peerId: 1, x: 10.0, y: 0.0 }
+  }
+  check(
+    label: "nearest owns it"
+    ok: ownerByNearest(
+      current: -1
+      x: 4.0
+      y: 0.0
+      candidates: players
+      margin: 2.0
+    ) is 0
+  )
+  check(
+    label: "the owner keeps it within the margin"
+    ok: ownerByNearest(
+      current: 1
+      x: 4.5
+      y: 0.0
+      candidates: players
+      margin: 2.0
+    ) is 1
+  )
+  check(
+    label: "and gives it up past it"
+    ok: ownerByNearest(
+      current: 1
+      x: 3.0
+      y: 0.0
+      candidates: players
+      margin: 2.0
+    ) is 0
+  )
+  # on the wire
+  let sent: OwnerMessage = {
+    kind: OwnerMessageKind.offer
+    netId: 300
+    from: 2
+    to: 1
+    owner: 1
+    epoch: 4
+    tick: 12345
+    state: List(Int) { -7, 0, 99999 }
+  }
+  if let read: OwnerMessage = ownerMessageFromBytes(bytes: ownerMessageBytes(message: sent)) {
+    check(
+      label: "a message survives its bytes"
+      ok: read.kind is OwnerMessageKind.offer and read.netId is 300 and read.from is 2 and read.to is 1 and read.epoch is 4 and read.tick is 12345 and read.state.length is 3 and read.state.copyAtFallback(
+        index: 0
+        fallback: 0
+      ) is -7
+    )
+  } else {
+    check(label: "a message survives its bytes", ok: false)
+  }
+}

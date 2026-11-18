@@ -1,0 +1,714 @@
+# net/Ownership — which peer simulates each shared entity, and handing it from one peer to
+# another while the game runs (docs/walker-net.md, "Entities owned by peers"). A peer-to-peer
+# game (one peer hosts, with host migration) lets each machine simulate what is near its own
+# player; a bot or a vehicle moves to another machine as players move.
+#
+# Every peer keeps an Ownership. The host's table is the truth: it says who owns each entity,
+# and the host accepts an entity's state only from that owner. A hand-over:
+#
+#   1. the host decides (ownershipWant, the game's rule: ownerByNearest) and asks the owner
+#   2. the owner sends its state to the new owner in one message (an offer, through the host),
+#      and keeps simulating
+#   3. the new owner starts simulating from that state and answers that it takes it
+#   4. the host switches the owner at once and tells every peer; the old owner stops when told
+#
+# The host takes the old owner's states up to the switch and the new owner's from it, and each
+# tick's state once, so every tick of the entity is one peer's, and the new owner's run continues
+# the offered state. A peer that leaves, or a host that goes, leaves its entities to the host
+# (ownershipPeerLeft, ownershipBecomeHost).
+#
+# No transport here: each peer takes messages (ownershipReceive) and leaves its own in
+# `outbox` for the app to send (ownerMessageBytes / ownerMessageFromBytes; over a walker
+# session, walkerNetSendToHost and walkerNetSendToPlayers). A player's messages all go to the
+# host; the host's name their peer (`to`, -1 for every peer).
+#
+# Each frame the app runs the entities ownershipSimulates says this peer simulates, from their
+# `state`, and hands the result back (ownershipSetState); the others it draws from `state`. A
+# state carries the tick it is of (`stateTick`, on the session's shared clock): a peer that takes
+# an entity steps it from that tick to its own now, so the entity does not fall behind by the
+# time the offer took to arrive.
+# A state is the app's own numbers (List(Int); net/replication's ReplicaValues can make them).
+import Math
+open net/Wire
+
+enum OwnerMessageKind {
+  request
+  offer
+  accept
+  owner
+  state
+}
+
+type OwnerMessage {
+  kind: OwnerMessageKind
+  netId: Int
+  # the sender's peer id, and whom it is for (-1: every peer; a player's go to the host)
+  from: Int
+  to: Int = -1
+  # request and offer: the peer it goes to; owner: the owner now
+  owner: Int = -1
+  epoch: Int = 0
+  tick: Int = 0
+  state: List(Int) = {}
+}
+
+# One entity as this peer knows it
+type OwnedEntity {
+  netId: Int
+  owner: Int
+  # Counts the owner changes (the host's word wins over an older one)
+  epoch: Int = 1
+  # This peer took it on an offer and simulates it, until the host says who owns it
+  taking: Bool = false
+  # Host: the peer it is being handed to (-1: none), and the owner before the last switch (its
+  # states on their way at the switch still count when they are newer)
+  pending: Int = -1
+  previousOwner: Int = -1
+  # The newest state this peer has (its own while it simulates; the owner's otherwise)
+  state: List(Int) = {}
+  stateTick: Int = 0
+}
+
+# A state the host took this frame, and from whom
+type OwnerStateTaken {
+  netId: Int
+  from: Int
+  tick: Int
+  state: List(Int) = {}
+}
+
+# An owner change this peer heard of (or made, at the host)
+type OwnerChange {
+  netId: Int
+  from: Int
+  to: Int
+}
+
+type Ownership {
+  self: Int
+  host: Int
+  entities: List(OwnedEntity)
+  outbox: List(OwnerMessage)
+  # this frame: the states the host took (host only), and the owner changes
+  taken: List(OwnerStateTaken)
+  changes: List(OwnerChange)
+  # Hand-overs finished (host)
+  handOvers: Int = 0
+}
+
+func createOwnership(self: view Int, host: view Int) ret Ownership {
+  ret Ownership {
+    self: self
+    host: host
+    entities: {}
+    outbox: {}
+    taken: {}
+    changes: {}
+  }
+}
+
+func ownershipIsHost(ownership: view Ownership) ret Bool {
+  ret ownership.self is ownership.host
+}
+
+func ownedIndex(ownership: view Ownership, netId: view Int) ret Int {
+  loop var i: Int = 0, i < ownership.entities.length, ++i {
+    if let entity: view OwnedEntity = ownership.entities.viewAt(index: i) {
+      if entity.netId is netId {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The owner as this peer knows it (-1: not known)
+func ownerOf(ownership: view Ownership, netId: view Int) ret Int {
+  if let entity: view OwnedEntity = ownership.entities.viewAt(
+    index: ownedIndex(ownership: ownership, netId: netId)
+  ) {
+    ret entity.owner
+  }
+  ret -1
+}
+
+# Does this peer run the entity's simulation this frame: it owns it, or it is taking it over
+func ownershipSimulates(ownership: view Ownership, netId: view Int) ret Bool {
+  if let entity: view OwnedEntity = ownership.entities.viewAt(
+    index: ownedIndex(ownership: ownership, netId: netId)
+  ) {
+    ret entity.owner is ownership.self or entity.taking
+  }
+  ret false
+}
+
+# The entity's newest state on this peer
+func ownedState(ownership: view Ownership, netId: view Int) ret List(Int) {
+  if let entity: view OwnedEntity = ownership.entities.viewAt(
+    index: ownedIndex(ownership: ownership, netId: netId)
+  ) {
+    ret entity.state
+  }
+  ret List(Int) {}
+}
+
+func sendOwnerMessage(ownership: mod Ownership, message: own OwnerMessage) {
+  ownership.outbox.add(value: own message)
+}
+
+# The host's word on an entity's owner, to every peer
+func announceOwner(ownership: mod Ownership, entity: view OwnedEntity) {
+  sendOwnerMessage(
+    ownership: ownership
+    message: OwnerMessage {
+      kind: OwnerMessageKind.owner
+      netId: entity.netId
+      from: ownership.self
+      owner: entity.owner
+      epoch: entity.epoch
+      tick: entity.stateTick
+      state: entity.state
+    }
+  )
+}
+
+# Host: a new shared entity, owned by `owner`, from `state`
+func ownershipAdd(
+  ownership: mod Ownership
+  netId: view Int
+  owner: view Int
+  state: view List(Int)
+  tick: view Int
+) {
+  if ownedIndex(ownership: ownership, netId: netId) >= 0 {
+    ret
+  }
+  ownership.entities.add(
+    value: OwnedEntity { netId: netId, owner: owner, state: state, stateTick: tick }
+  )
+  if ownershipIsHost(ownership: ownership) {
+    if let entity: OwnedEntity = ownership.entities.copyAt(index: ownership.entities.length - 1) {
+      announceOwner(ownership: ownership, entity: entity)
+    }
+  }
+}
+
+# The owner changes on this peer's table (and the host tells every peer)
+func setOwner(
+  ownership: mod Ownership
+  index: view Int
+  owner: view Int
+  epoch: view Int
+) {
+  if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+    if entity.owner is not owner {
+      ownership.changes.add(
+        value: OwnerChange { netId: entity.netId, from: entity.owner, to: owner }
+      )
+      entity.previousOwner = entity.owner
+    }
+    entity.owner = owner
+    entity.epoch = epoch
+    entity.pending = -1
+    entity.taking = false
+  }
+  if ownershipIsHost(ownership: ownership) {
+    if let entity: OwnedEntity = ownership.entities.copyAt(index: index) {
+      announceOwner(ownership: ownership, entity: entity)
+    }
+  }
+}
+
+# An offer of the entity at `index` (this peer owns it) to `to`, with its state now
+func offerEntity(ownership: mod Ownership, index: view Int, to: view Int) {
+  if let entity: OwnedEntity = ownership.entities.copyAt(index: index) {
+    let offer: OwnerMessage = {
+      kind: OwnerMessageKind.offer
+      netId: entity.netId
+      from: ownership.self
+      to: to
+      owner: to
+      epoch: entity.epoch
+      tick: entity.stateTick
+      state: entity.state
+    }
+    if ownershipIsHost(ownership: ownership) and to is ownership.self {
+      ret
+    }
+    sendOwnerMessage(ownership: ownership, message: own offer)
+  }
+}
+
+# Host: the game's rule says `owner` should own the entity now. Starts a hand-over when it is
+# someone else and none is under way; the old owner keeps it until the new one takes it.
+func ownershipWant(ownership: mod Ownership, netId: view Int, owner: view Int) {
+  if not ownershipIsHost(ownership: ownership) {
+    ret
+  }
+  let index: Int = ownedIndex(ownership: ownership, netId: netId)
+  var current: Int = -1
+  var pending: Int = -1
+  if let entity: view OwnedEntity = ownership.entities.viewAt(index: index) {
+    current = entity.owner
+    pending = entity.pending
+  } else {
+    ret
+  }
+  if current is owner or pending >= 0 {
+    ret
+  }
+  if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+    entity.pending = owner
+  }
+  if current is ownership.self {
+    # the host owns it: it offers it itself
+    offerEntity(ownership: ownership, index: index, to: owner)
+  } else {
+    # ask the owner for its state (to the host itself too: it takes it from the offer)
+    sendOwnerMessage(
+      ownership: ownership
+      message: OwnerMessage {
+        kind: OwnerMessageKind.request
+        netId: netId
+        from: ownership.self
+        to: current
+        owner: owner
+      }
+    )
+  }
+}
+
+# This peer simulated the entity this frame: its new state. The owner's (and a taking peer's)
+# goes to the host, which keeps the owner's only; the host's own counts at once.
+func ownershipSetState(
+  ownership: mod Ownership
+  netId: view Int
+  state: view List(Int)
+  tick: view Int
+) {
+  let index: Int = ownedIndex(ownership: ownership, netId: netId)
+  var owner: Int = -1
+  if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+    entity.state = state
+    entity.stateTick = tick
+    owner = entity.owner
+  } else {
+    ret
+  }
+  if ownershipIsHost(ownership: ownership) {
+    if owner is ownership.self {
+      ownership.taken.add(
+        value: OwnerStateTaken { netId: netId, from: ownership.self, tick: tick, state: state }
+      )
+      sendOwnerMessage(
+        ownership: ownership
+        message: OwnerMessage {
+          kind: OwnerMessageKind.state
+          netId: netId
+          from: ownership.self
+          owner: owner
+          tick: tick
+          state: state
+        }
+      )
+    }
+    ret
+  }
+  sendOwnerMessage(
+    ownership: ownership
+    message: OwnerMessage {
+      kind: OwnerMessageKind.state
+      netId: netId
+      from: ownership.self
+      to: ownership.host
+      tick: tick
+      state: state
+    }
+  )
+}
+
+# A message that came: from the host to a player, or from a player to the host
+func ownershipReceive(ownership: mod Ownership, message: view OwnerMessage) {
+  if message.to >= 0 and message.to is not ownership.self and not ownershipIsHost(
+    ownership: ownership
+  ) {
+    ret
+  }
+  var index: Int = ownedIndex(ownership: ownership, netId: message.netId)
+  if index < 0 {
+    if message.kind is not OwnerMessageKind.owner {
+      ret
+    }
+    ownership.entities.add(
+      value: OwnedEntity { netId: message.netId, owner: message.owner, epoch: 0 }
+    )
+    index = ownership.entities.length - 1
+  }
+  if ownershipIsHost(ownership: ownership) {
+    hostReceive(ownership: ownership, message: message, index: index)
+  } else {
+    playerReceive(ownership: ownership, message: message, index: index)
+  }
+}
+
+func hostReceive(ownership: mod Ownership, message: view OwnerMessage, index: view Int) {
+  var owner: Int = -1
+  var pending: Int = -1
+  var epoch: Int = 0
+  if let entity: view OwnedEntity = ownership.entities.viewAt(index: index) {
+    owner = entity.owner
+    pending = entity.pending
+    epoch = entity.epoch
+  }
+  if message.kind is OwnerMessageKind.state {
+    # the owner's only, and each tick once: at a switch the old owner's last ticks and the new
+    # owner's first can cross, and the newer tick wins
+    var newer: Bool = false
+    var previous: Int = -1
+    if let entity: view OwnedEntity = ownership.entities.viewAt(index: index) {
+      newer = message.tick > entity.stateTick
+      previous = entity.previousOwner
+    }
+    if (message.from is owner or message.from is previous) and newer {
+      if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+        entity.state = message.state
+        entity.stateTick = message.tick
+        # the new owner's first state ends the old one's say
+        if message.from is owner {
+          entity.previousOwner = -1
+        }
+      }
+      ownership.taken.add(
+        value: OwnerStateTaken {
+          netId: message.netId
+          from: message.from
+          tick: message.tick
+          state: message.state
+        }
+      )
+      # to the other peers, to draw it
+      sendOwnerMessage(
+        ownership: ownership
+        message: OwnerMessage {
+          kind: OwnerMessageKind.state
+          netId: message.netId
+          from: message.from
+          owner: owner
+          tick: message.tick
+          state: message.state
+        }
+      )
+    }
+  } else if message.kind is OwnerMessageKind.offer {
+    # the owner's state for the peer the host asked for
+    if message.from is not owner or pending < 0 or message.to is not pending {
+      ret
+    }
+    if pending is ownership.self {
+      # the host takes it at once, from the newest state it has (the owner's last state can be
+      # newer than its offer)
+      if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+        if message.tick > entity.stateTick {
+          entity.state = message.state
+          entity.stateTick = message.tick
+        }
+      }
+      setOwner(
+        ownership: ownership
+        index: index
+        owner: ownership.self
+        epoch: epoch + 1
+      )
+      ownership.handOvers = ownership.handOvers + 1
+    } else {
+      var forward: OwnerMessage = message
+      forward.to = pending
+      sendOwnerMessage(ownership: ownership, message: own forward)
+    }
+  } else if message.kind is OwnerMessageKind.accept {
+    if pending >= 0 and message.from is pending {
+      setOwner(
+        ownership: ownership
+        index: index
+        owner: message.from
+        epoch: epoch + 1
+      )
+      ownership.handOvers = ownership.handOvers + 1
+    }
+  }
+}
+
+func playerReceive(ownership: mod Ownership, message: view OwnerMessage, index: view Int) {
+  if message.kind is OwnerMessageKind.owner {
+    var epoch: Int = 0
+    if let entity: view OwnedEntity = ownership.entities.viewAt(index: index) {
+      epoch = entity.epoch
+    }
+    if message.epoch < epoch {
+      ret
+    }
+    let mine: Bool = message.owner is ownership.self
+    if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+      if not mine and not entity.taking and entity.owner is not ownership.self {
+        entity.state = message.state
+        entity.stateTick = message.tick
+      }
+    }
+    setOwner(
+      ownership: ownership
+      index: index
+      owner: message.owner
+      epoch: message.epoch
+    )
+  } else if message.kind is OwnerMessageKind.request {
+    # the host asks this peer, the owner, to hand the entity to `owner`
+    if ownerOf(ownership: ownership, netId: message.netId) is ownership.self {
+      offerEntity(ownership: ownership, index: index, to: message.owner)
+    }
+  } else if message.kind is OwnerMessageKind.offer {
+    # this peer takes the entity from the offered state: it simulates it from now, and says so
+    if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+      entity.state = message.state
+      entity.stateTick = message.tick
+      entity.taking = true
+    }
+    sendOwnerMessage(
+      ownership: ownership
+      message: OwnerMessage {
+        kind: OwnerMessageKind.accept
+        netId: message.netId
+        from: ownership.self
+        to: ownership.host
+        epoch: message.epoch
+        tick: message.tick
+      }
+    )
+  } else if message.kind is OwnerMessageKind.state {
+    # the owner's state, to draw: not while this peer runs the entity itself
+    if not ownershipSimulates(ownership: ownership, netId: message.netId) {
+      if let entity: mod OwnedEntity = ownership.entities.modAt(index: index) {
+        entity.state = message.state
+        entity.stateTick = message.tick
+      }
+    }
+  }
+}
+
+# A new frame: last frame's taken states and changes gone (call before receiving)
+func ownershipFrameBegin(ownership: mod Ownership) {
+  ownership.taken.clear()
+  ownership.changes.clear()
+}
+
+# The messages to send now (the outbox emptied)
+func ownershipTakeOutbox(ownership: mod Ownership) ret List(OwnerMessage) {
+  let messages: List(OwnerMessage) = own ownership.outbox
+  ownership.outbox = {}
+  ret messages
+}
+
+# Host: the peer `peerId` left: its entities are the host's now (from the newest state the host
+# has), and a hand-over to it is called off
+func ownershipPeerLeft(ownership: mod Ownership, peerId: view Int) {
+  if not ownershipIsHost(ownership: ownership) {
+    ret
+  }
+  loop var i: Int = 0, i < ownership.entities.length, ++i {
+    var owner: Int = -1
+    var pending: Int = -1
+    var epoch: Int = 0
+    if let entity: view OwnedEntity = ownership.entities.viewAt(index: i) {
+      owner = entity.owner
+      pending = entity.pending
+      epoch = entity.epoch
+    }
+    if owner is peerId {
+      setOwner(
+        ownership: ownership
+        index: i
+        owner: ownership.self
+        epoch: epoch + 1
+      )
+    } else if pending is peerId {
+      if let entity: mod OwnedEntity = ownership.entities.modAt(index: i) {
+        entity.pending = -1
+      }
+    }
+  }
+}
+
+# This peer hosts now (the host went): the old host's entities, and any it was taking, are its
+# own from the newest state it has; every peer is told every owner afresh
+func ownershipBecomeHost(ownership: mod Ownership, formerHost: view Int) {
+  ownership.host = ownership.self
+  loop var i: Int = 0, i < ownership.entities.length, ++i {
+    var owner: Int = -1
+    var epoch: Int = 0
+    var taking: Bool = false
+    if let entity: mod OwnedEntity = ownership.entities.modAt(index: i) {
+      owner = entity.owner
+      epoch = entity.epoch
+      taking = entity.taking
+      entity.pending = -1
+    }
+    if owner is formerHost or owner < 0 or taking {
+      setOwner(
+        ownership: ownership
+        index: i
+        owner: ownership.self
+        epoch: epoch + 1
+      )
+    } else {
+      setOwner(
+        ownership: ownership
+        index: i
+        owner: owner
+        epoch: epoch + 1
+      )
+    }
+  }
+}
+
+# Another peer hosts now: this peer's messages go to it
+func ownershipHostChanged(ownership: mod Ownership, host: view Int) {
+  ownership.host = host
+}
+
+# A peer's id changed (over a relay a promoted player hosts as peer 0): every owner `from` is
+# `to` now, this peer's own id too
+func ownershipRenamePeer(ownership: mod Ownership, from: view Int, to: view Int) {
+  if ownership.self is from {
+    ownership.self = to
+  }
+  if ownership.host is from {
+    ownership.host = to
+  }
+  loop var i: Int = 0, i < ownership.entities.length, ++i {
+    if let entity: mod OwnedEntity = ownership.entities.modAt(index: i) {
+      if entity.owner is from {
+        entity.owner = to
+      }
+      if entity.pending is from {
+        entity.pending = to
+      }
+    }
+  }
+}
+
+# ----- the game's rule ------------------------------------------------------------------------
+# A player's place, for ownerByNearest
+type OwnerCandidate {
+  peerId: Int
+  x: Float
+  y: Float
+}
+
+# The rule most games want: the peer whose player is nearest the entity at (x, y) owns it, but
+# the current owner keeps it until another is nearer by `margin` (m), so it does not go back and
+# forth between two players at the same distance
+func ownerByNearest(
+  current: view Int
+  x: view Float
+  y: view Float
+  candidates: view List(OwnerCandidate)
+  margin: view Float
+) ret Int {
+  var best: Int = -1
+  var bestDistance: Float = 0.0
+  var currentDistance: Float = -1.0
+  loop let candidate: view OwnerCandidate in candidates {
+    let dx: Float = candidate.x - x
+    let dy: Float = candidate.y - y
+    let distance: Float = dx * dx + dy * dy
+    if best < 0 or distance < bestDistance {
+      best = candidate.peerId
+      bestDistance = distance
+    }
+    if candidate.peerId is current {
+      currentDistance = distance
+    }
+  }
+  if currentDistance < 0.0 or best < 0 {
+    ret best
+  }
+  let near: Float = Math.sqrt(x: bestDistance)
+  let held: Float = Math.sqrt(x: currentDistance)
+  if near + margin < held {
+    ret best
+  }
+  ret current
+}
+
+# ----- on the wire ----------------------------------------------------------------------------
+func ownerKindNumber(kind: view OwnerMessageKind) ret Int {
+  if kind is OwnerMessageKind.request {
+    ret 0
+  }
+  if kind is OwnerMessageKind.offer {
+    ret 1
+  }
+  if kind is OwnerMessageKind.accept {
+    ret 2
+  }
+  if kind is OwnerMessageKind.owner {
+    ret 3
+  }
+  ret 4
+}
+
+func ownerKindOf(number: view Int) ret OwnerMessageKind {
+  if number is 0 {
+    ret OwnerMessageKind.request
+  }
+  if number is 1 {
+    ret OwnerMessageKind.offer
+  }
+  if number is 2 {
+    ret OwnerMessageKind.accept
+  }
+  if number is 3 {
+    ret OwnerMessageKind.owner
+  }
+  ret OwnerMessageKind.state
+}
+
+# The first byte of an ownership message, so a game can tell it from its own
+const ownerMessageTag: Int = 77
+
+func ownerMessageBytes(message: view OwnerMessage) ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  bytes.add(value: ownerMessageTag as UInt8)
+  bytes.add(value: ownerKindNumber(kind: message.kind) as UInt8)
+  writeVarint(bytes: bytes, value: message.netId)
+  writeSignedVarint(bytes: bytes, value: message.from)
+  writeSignedVarint(bytes: bytes, value: message.to)
+  writeSignedVarint(bytes: bytes, value: message.owner)
+  writeVarint(bytes: bytes, value: message.epoch)
+  writeSignedVarint(bytes: bytes, value: message.tick)
+  writeVarint(bytes: bytes, value: message.state.length)
+  loop let value: view Int in message.state {
+    writeSignedVarint(bytes: bytes, value: value)
+  }
+  ret bytes
+}
+
+# An ownership message from its bytes (none when they are not one)
+func ownerMessageFromBytes(bytes: view List(UInt8)) ret opt OwnerMessage {
+  if bytes.length < 2 or bytes.copyAtFallback(index: 0, fallback: 0) as Int is not ownerMessageTag {
+    ret none
+  }
+  var reader: ByteReader = byteReader(start: 1, end: bytes.length)
+  let kind: OwnerMessageKind = ownerKindOf(number: readerU8(reader: reader, bytes: bytes))
+  var message: OwnerMessage = { kind: kind, netId: 0, from: 0 }
+  message.netId = readerVarint(reader: reader, bytes: bytes)
+  message.from = readerSignedVarint(reader: reader, bytes: bytes)
+  message.to = readerSignedVarint(reader: reader, bytes: bytes)
+  message.owner = readerSignedVarint(reader: reader, bytes: bytes)
+  message.epoch = readerVarint(reader: reader, bytes: bytes)
+  message.tick = readerSignedVarint(reader: reader, bytes: bytes)
+  let count: Int = readerVarint(reader: reader, bytes: bytes)
+  loop var i: Int = 0, i < count, ++i {
+    message.state.add(value: readerSignedVarint(reader: reader, bytes: bytes))
+  }
+  ret message
+}

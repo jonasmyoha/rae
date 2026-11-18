@@ -64,6 +64,42 @@ gives what came, each with the sender's relay peer id at the host (-1 at a playe
 migration they reach the new host; what the old host held is the game's to rebuild.
 Checked in `compiler/tests/cases/1342_walker_game_messages`.
 
+## Entities owned by peers
+
+A game where each machine simulates what is near its own player (a bot, a car) hands those
+entities from machine to machine as the players move: `lib/net/Ownership` (case
+`compiler/tests/cases/1552_net_ownership`). Every peer keeps an `Ownership`; the host's table
+says who owns each entity and is the truth.
+
+- **The owner simulates, the others draw.** Each frame a peer runs the entities
+  `ownershipSimulates` says it runs, from their `state` (the app's numbers, with the tick they
+  are of), and gives the result to `ownershipSetState`. The host takes an entity's state only
+  from its owner and each tick once (`taken` lists this frame's, for the app to replicate), so
+  every tick of an entity is exactly one peer's.
+- **A hand-over** (`ownershipWant(netId, owner)` at the host, from the game's rule, such as
+  `ownerByNearest` with a margin so two players at one distance do not take turns): the host asks
+  the owner, the owner sends its state to the new owner in one message and keeps simulating, the
+  new owner steps that state to its own tick, simulates from it and says it takes it, and the
+  host switches the owner at once and tells every peer. The old owner stops when told. Up to
+  the switch the host takes the old owner's states, from it the new owner's, so the entity
+  goes on without a jump and never has no owner. To the host itself it is the same, with the
+  host taking it from the offer.
+- **Peers that go.** A player that leaves: `ownershipPeerLeft` at the host, which takes its
+  entities from the newest state it has. A host that goes: the new host calls
+  `ownershipBecomeHost(formerHost)`, which gives it the old host's entities (and any it was
+  taking) and tells every peer every owner again; the others call `ownershipHostChanged`.
+
+Over a walker session the messages are game messages: a player sends `ownerMessageBytes` of
+each outbox message with `walkerNetSendToHost`, the host with `walkerNetSendToPlayers` (to every
+player; a message names its peer and the others leave it), and each side reads
+`walkerNetTakeGameMessages` with `ownerMessageFromBytes` (it starts with byte 77, so a game's own
+messages can share the channel). Peer ids are relay peer ids: the host is 0, a player its
+`relayPlayer.client.peerId`. At the host, set a message's `from` to the peer id the session
+gives the message, so a player cannot speak for another. A promoted player hosts as peer 0
+(`becameHost`): call `ownershipBecomeHost(formerHost: 0)`, then `ownershipRenamePeer(from:
+<its old id>, to: 0)`; on `hostChanged` the others call `ownershipHostChanged(host: 0)`, and
+the new host's owner messages set their tables right.
+
 ## Desync check
 
 With every snapshot the host replicates a `WalkerNetCheck`: the sum of all
