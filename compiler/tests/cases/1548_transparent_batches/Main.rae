@@ -1,0 +1,141 @@
+# The transparent pass takes several meshes a frame: instances queued with two
+# meshes become runs in the order queued (one draw each), a shimmering instance
+# carries its settings in the record, and an open cylinder has no caps.
+import Math3d
+open Mesh3d
+open Scene3d
+open TransparentForward
+
+func check(ok: view Bool, label: view String) {
+  if ok {
+    log("ok {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func runText(run: view TransparentRun) ret String {
+  ret "mesh {run.meshId} from {run.first} count {run.count}"
+}
+
+func main() {
+  var transparent: TransparentPassCache = createTransparentPassCache(capacity: 8)
+  let sphere: MeshHandle = { id: 3 }
+  let wall: MeshHandle = { id: 5 }
+  let model: Mat4 = Math3d.mat4Identity()
+  # two spheres, the wall, then a sphere again (sorted far to near)
+  addTransparentMaterialInstance(
+    cache: transparent
+    mesh: sphere
+    model: model
+    r: 1.0
+    g: 0.5
+    b: 0.2
+    alpha: 0.5
+    style: 2.0
+  )
+  addTransparentMaterialInstance(
+    cache: transparent
+    mesh: sphere
+    model: model
+    r: 1.0
+    g: 0.5
+    b: 0.2
+    alpha: 0.5
+    style: 3.0
+  )
+  let shimmer: TransparentShimmer = {
+    time: 12.5
+    bandsPerMeter: 0.25
+    speed: 0.5
+    edgeGlow: 0.8
+    additive: true
+  }
+  addTransparentShimmerInstance(
+    cache: transparent
+    mesh: wall
+    model: model
+    r: 0.3
+    g: 0.6
+    b: 1.0
+    alpha: 0.3
+    shimmer: shimmer
+  )
+  addTransparentMaterialInstance(
+    cache: transparent
+    mesh: sphere
+    model: model
+    r: 1.0
+    g: 1.0
+    b: 1.0
+    alpha: 0.2
+    style: 0.0
+  )
+  transparentRuns(cache: transparent)
+  check(ok: transparent.runs.length is 3, label: "three runs")
+  loop let run: view TransparentRun in transparent.runs {
+    log(runText(run: run))
+  }
+  let base: Int = 2 * 44
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: base + 36) is 4.0
+    label: "shimmer style"
+  )
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: base + 37) is 12.5
+    label: "shimmer time"
+  )
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: base + 38) is 0.25
+    label: "shimmer bands"
+  )
+  check(
+    ok: transparent.batch.records.copyAtDefault(index: base + 39) is 0.5
+    label: "shimmer speed"
+  )
+  check(ok: transparent.batch.records.copyAtDefault(index: base + 40) is 1.0, label: "additive")
+  check(ok: transparent.batch.records.copyAtDefault(index: base + 41) is 0.8, label: "edge glow")
+  # the next frame starts empty and the slots are reused
+  transparent.batch.count = 0
+  addTransparentMaterialInstance(
+    cache: transparent
+    mesh: wall
+    model: model
+    r: 1.0
+    g: 1.0
+    b: 1.0
+    alpha: 0.2
+    style: 0.0
+  )
+  transparentRuns(cache: transparent)
+  check(ok: transparent.runs.length is 1, label: "next frame one run")
+  check(ok: transparent.meshIds.length is 4, label: "mesh slots reused")
+  # past capacity nothing is queued
+  var small: TransparentPassCache = createTransparentPassCache(capacity: 1)
+  addTransparentShimmerInstance(
+    cache: small
+    mesh: wall
+    model: model
+    r: 0.3
+    g: 0.6
+    b: 1.0
+    alpha: 0.3
+    shimmer: shimmer
+  )
+  addTransparentShimmerInstance(
+    cache: small
+    mesh: sphere
+    model: model
+    r: 0.3
+    g: 0.6
+    b: 1.0
+    alpha: 0.3
+    shimmer: shimmer
+  )
+  transparentRuns(cache: small)
+  check(ok: small.batch.count is 1 and small.runs.length is 1, label: "capacity respected")
+  let tube: MeshData = makeOpenCylinder(segments: 8)
+  let closed: MeshData = makeCylinder(segments: 8)
+  log("open cylinder: {tube.vertCount} vertices, {tube.indices.length / 3} triangles")
+  check(ok: closed.indices.length > tube.indices.length, label: "no caps")
+}

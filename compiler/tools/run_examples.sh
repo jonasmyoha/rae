@@ -204,6 +204,7 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
              RAE_GPU2D_SCREENSHOT="$SCREENSHOT" \
              perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") > "$TMP_OUT/render.log" 2>&1 \
              && grep -qE '\[transparent\] deterministic deferred frame rendered: 10 alpha instances over 4 opaque, [1-9][0-9]* transparent frames' "$TMP_OUT/render.log" \
+             && grep -q '\[transparent\] a shimmering wall and 3 spheres beside the cubes: 3 meshes a frame' "$TMP_OUT/render.log" \
              && python3 tools/assert_nonblank_bmp.py "$SCREENSHOT" --min-colors=50 \
                 > "$TMP_OUT/screenshot.log" 2>&1; then
             echo "PASS: $EXAMPLE_NAME (transparentForward: alpha row over a lit deferred scene)"

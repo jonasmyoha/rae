@@ -12,12 +12,18 @@
 #   * one cube half-sunk into the ground: its lower half is cut off by the
 #     opaque ground (depth test), its upper half blends;
 #   * the opaque cubes in front of the row occlude it (depth), the row never
-#     occludes them (depth is not written).
+#     occludes them (depth is not written);
+#   * a tall shimmering wall round the scene (an open cylinder, style 4): bands
+#     running up it, brighter where it is seen side-on, its far side visible
+#     through its near side; and three soft glowing spheres. Three meshes in one
+#     frame, each run one draw. RAE_TRANSPARENT_VIEW=inside puts the camera inside
+#     the wall, =outside far outside it.
 import Gpu2d
 import Sys
 import Vec3
 open app3d/UiShell
 open Gbuffer
+open GbufferRecord
 open Math3d
 open Mesh3d
 open RendererDeferred
@@ -29,6 +35,10 @@ open ecs/Entity
 const alphaCubeCount: Int = 9
 
 const opaqueCubeCount: Int = 4
+
+const wallRadius: Float = 10.0
+
+const wallHeight: Float = 9.0
 
 func uploadMeshData(renderer: mod DeferredRenderer, meshData: view MeshData) ret MeshHandle {
   ret uploadMesh(
@@ -126,6 +136,48 @@ func queueTransparents(transparent: mod TransparentPassCache, box: view MeshHand
   )
 }
 
+# The wall: the open cylinder (unit, along y) stood up on z and scaled to the
+# circle, shimmering in time. Then three glowing spheres, a third mesh.
+func queueWall(
+  transparent: mod TransparentPassCache
+  wall: view MeshHandle
+  sphere: view MeshHandle
+  time: view Float
+) {
+  let standUp: Transform3d = {
+    position: Vec3.create(x: 0.0, y: 0.0, z: wallHeight * 0.5)
+    rotation: Vec3.create(x: 1.5707963, y: 0.0, z: 0.0)
+    scale: Vec3.create(x: wallRadius, y: wallHeight * 0.5, z: wallRadius)
+  }
+  addTransparentShimmerInstance(
+    cache: transparent
+    mesh: wall
+    model: modelMatrixOf(t: standUp)
+    r: 0.35
+    g: 0.75
+    b: 1.0
+    alpha: 0.22
+    shimmer: { time: time, bandsPerMeter: 0.35, speed: 0.3, edgeGlow: 0.9 }
+  )
+  loop var i: Int = 0, i < 3, ++i {
+    let ball: Transform3d = {
+      position: Vec3.create(x: i.toFloat() * 3.0 - 3.0, y: 5.0, z: 4.5)
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      scale: Vec3.create(x: 1.2, y: 1.2, z: 1.2)
+    }
+    addTransparentMaterialInstance(
+      cache: transparent
+      mesh: sphere
+      model: modelMatrixOf(t: ball)
+      r: 1.0
+      g: 0.6
+      b: 0.25
+      alpha: 0.7
+      style: 3.0
+    )
+  }
+}
+
 func main() ret Int {
   Gpu2d.initWindow(width: 960, height: 600, title: "139: Rae Transparent Pass — Deferred")
   # 2D (the debug overlay) is drawn in the window's points (app3d/UiShell)
@@ -136,11 +188,26 @@ func main() ret Int {
   var renderer: DeferredRenderer = createDeferredRenderer()
 
   let box: MeshHandle = uploadMeshData(renderer: renderer, meshData: boxData)
+  let wall: MeshHandle = uploadMeshData(
+    renderer: renderer
+    meshData: makeOpenCylinder(segments: 96)
+  )
+  let sphere: MeshHandle = uploadMeshData(
+    renderer: renderer
+    meshData: makeSphere(rings: 16, segments: 24)
+  )
   let ground: MeshHandle = uploadMeshData(renderer: renderer, meshData: planeData)
   var sceneWorld: World3d = buildScene(box: box, ground: ground)
   var camera: Camera3d = defaultCamera3d()
   camera.position = Vec3.create(x: 1.0, y: 0.0 - 13.0, z: 7.0)
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.5)
+  let cameraPlace: String = Sys.getEnv(name: "RAE_TRANSPARENT_VIEW")
+  if cameraPlace is "outside" {
+    camera.position = Vec3.create(x: 4.0, y: 0.0 - 26.0, z: 12.0)
+  } else if cameraPlace is "inside" {
+    camera.position = Vec3.create(x: 0.0, y: 0.0 - 7.0, z: 2.5)
+    camera.target = Vec3.create(x: 0.0, y: 6.0, z: 3.0)
+  }
   let light: Light3d = defaultLight3d()
 
   let graphStatus: Int = compileDeferred(renderer: renderer)
@@ -162,6 +229,12 @@ func main() ret Int {
         let tag: Int = deferredTagAt(renderer: renderer, i: passIndex)
         if tag is RenderTag.transparentForward {
           queueTransparents(transparent: renderer.passes.transparent, box: box)
+          queueWall(
+            transparent: renderer.passes.transparent
+            wall: wall
+            sphere: sphere
+            time: transparentFrames.toFloat() / 60.0
+          )
           transparentFrames = transparentFrames + 1
         }
         renderDeferredPassWorld(
@@ -182,6 +255,9 @@ func main() ret Int {
     log(
       "[transparent] deterministic deferred frame rendered: {alphaCubeCount + 1} alpha instances over {opaqueCubeCount} opaque, {transparentFrames} transparent frames"
     )
+  }
+  if fixedTestFrame {
+    log("[transparent] a shimmering wall and 3 spheres beside the cubes: 3 meshes a frame")
   }
   shutdownDeferredRenderer(renderer: renderer)  # #904: the renderer-owned GPU manager, before the C shutdown
   Gbuffer.shutdownAll()

@@ -133,6 +133,17 @@ off by opaque geometry in front, and are clipped where they sink into the
 terrain. Note for clients: readiness is `gbMeshIcount > 0`, NOT `gbMeshReady`
 — the latter is 0 outside the geometry pass.
 
+Since 0.4.15 the pass takes several meshes a frame: each queued instance keeps
+its mesh, and each run of one mesh in the order queued is one instanced draw in
+the same render pass (`transparentRuns`), so the caller's far-to-near sort still
+decides the blend. The blend is premultiplied (one / one-minus-src-alpha): every
+style returns its color times its alpha, and an additive one returns alpha 0.
+Style 4 is a shimmering surface (`addTransparentShimmerInstance` with a
+`TransparentShimmer`: time, bands per meter, speed, edge glow, additive): bands
+up the surface that run in time and a fresnel term from the camera position,
+which the shader solves from the view-projection. `Mesh3d.makeOpenCylinder` is
+a wall round a circle (example 139 draws one beside its cubes and spheres).
+
 The copy is full resolution, single-sampled, and uses the selected HDR format
 (RG11B10Ufloat or RGBA16Float). Its C-owned texture/view follow the deferred
 target generation, resize and shutdown lifecycle. The three new `rae_gb_*`

@@ -222,6 +222,24 @@ func makeCylinder(segments: view Int) ret MeshData {
   ret MeshData { verts: own verts, indices: own indices, vertCount: verts.length / 8 }
 }
 
+# The same cylinder with no caps: only its side, a tube open at both ends (a
+# wall round a circle, a pipe). Its normals point out; draw it two-sided (the
+# transparent pass does) to see it from inside too. uv.x runs once round it,
+# uv.y from the bottom (0) to the top (1).
+func makeOpenCylinder(segments: view Int) ret MeshData {
+  let full: MeshData = makeCylinder(segments: segments)
+  let sideVerts: Int = 2 * (segments + 1)
+  var verts: List(Float) = List.create(Float, cap: sideVerts * 8)
+  loop var i: Int = 0, i < sideVerts * 8, ++i {
+    verts.add(value: full.verts.copyAtFallback(index: i, fallback: 0.0))
+  }
+  var indices: List(Int) = List.create(Int, cap: segments * 6)
+  loop var i: Int = 0, i < segments * 6, ++i {
+    indices.add(value: full.indices.copyAtFallback(index: i, fallback: 0))
+  }
+  ret MeshData { verts: own verts, indices: own indices, vertCount: sideVerts }
+}
+
 # Flat ground plane in XY (normal +Z), centered, `size` on a side.
 func makePlane(size: view Float, segments: view Int) pub ret MeshData {
   var verts: List(Float) = List.create(Float, cap: (segments + 1) * (segments + 1) * 8)

@@ -21,9 +21,12 @@
 # frame's uniform + draws buffers by ID (GbufferCache) and the pass attaches
 # the cache's depth target read-only — no adopted externals.
 #
-# Client API (one batch, one mesh per frame — a list of batches is the obvious
-# extension when a second mesh needs it):
+# Client API:
 #   addTransparentInstance(cache, mesh, transform, r, g, b, alpha)   # per instance
+#   addTransparentShimmerInstance(cache, mesh, model, r, g, b, alpha, shimmer)
+# Instances of several meshes may be queued in one frame. They are drawn in the
+# order they were queued (sort them farthest first for the blend): each run of
+# instances with one mesh is one instanced draw, all in one render pass.
 # The pass draws whatever was added this frame and resets the batch, so callers
 # never reset it themselves. Adding after the pass ran shows up next frame.
 open MeshStore
@@ -56,6 +59,34 @@ type TransparentPassCache {
   bindGroup: BindGroupId
   snapshotDone: Bool  # this frame's opaque snapshot was taken early (transparentSnapshot)
   batch: InstanceBatch
+  # the mesh of each queued instance, by slot (batch.meshId is only the last one)
+  meshIds: List(Int)
+  # this frame's draws, one per run of instances with one mesh (transparentRuns)
+  runs: List(TransparentRun)
+}
+
+# A run of queued instances with one mesh: slots first .. first + count - 1
+type TransparentRun {
+  meshId: Int
+  first: Int
+  count: Int
+}
+
+# How a shimmering surface moves (style 4, addTransparentShimmerInstance): bands
+# along its height that run in time, with a finer ripple across them, and more
+# light and alpha where the surface is seen side-on (its edges). Both faces show,
+# so a wall reads from inside and outside.
+type TransparentShimmer {
+  # seconds; the bands move with it (the program's clock, any start)
+  time: Float = 0.0
+  # bands per meter up the surface (world z)
+  bandsPerMeter: Float = 0.5
+  # bands per second that pass a point
+  speed: Float = 0.4
+  # extra brightness and alpha seen side-on (0 none, 1 strong)
+  edgeGlow: Float = 0.6
+  # add light instead of blending over (a glow, not a tinted sheet)
+  additive: Bool = false
 }
 
 func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache {
@@ -73,6 +104,8 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
     bindGroup: noBindGroupId()
     snapshotDone: false
     batch: { meshId: -1, capacity: capacity, count: 0, records: records }
+    meshIds: List.create(Int, cap: capacity)
+    runs: List.create(TransparentRun, cap: 4)
   }
 }
 
@@ -101,8 +134,9 @@ func addTransparentInstance(
   )
 }
 
-# style 0 preserves unlit geometry; style 1 is the rounded water-drop impostor.
-# Both use the same single-mesh batch. Do not mix meshes within a frame.
+# style 0 is plain unlit geometry; 1 the rounded water-drop impostor; 2 a soft
+# puff; 3 a soft glow; 4 a shimmering surface (addTransparentShimmerInstance).
+# Meshes may be mixed within a frame.
 func addTransparentMaterialInstance(
   cache: mod TransparentPassCache
   mesh: view MeshHandle
@@ -131,7 +165,76 @@ func addTransparentMaterialInstance(
     toon: 0
     paletteBase: 0
   )
+  if cache.batch.count < cache.meshIds.length {
+    cache.meshIds.set(index: cache.batch.count, value: mesh.id)
+  } else {
+    cache.meshIds.add(value: mesh.id)
+  }
   cache.batch.count = cache.batch.count + 1
+}
+
+# Queue one shimmering instance (style 4, see TransparentShimmer). The time and
+# the band settings go in the record's free slots: params.yzw (time, bands per
+# meter, speed) and fade.xy (additive, edge glow), which the plain styles do not
+# read.
+func addTransparentShimmerInstance(
+  cache: mod TransparentPassCache
+  mesh: view MeshHandle
+  model: view Mat4
+  r: copy Float
+  g: copy Float
+  b: copy Float
+  alpha: copy Float
+  shimmer: view TransparentShimmer
+) {
+  let before: Int = cache.batch.count
+  addTransparentMaterialInstance(
+    cache: cache
+    mesh: mesh
+    model: model
+    r: r
+    g: g
+    b: b
+    alpha: alpha
+    style: 4.0
+  )
+  if cache.batch.count is before {
+    ret
+  }
+  let base: Int = before * instanceRecordFloats
+  cache.batch.records.set(index: base + 37, value: shimmer.time)
+  cache.batch.records.set(index: base + 38, value: shimmer.bandsPerMeter)
+  cache.batch.records.set(index: base + 39, value: shimmer.speed)
+  var additive: Float = 0.0
+  if shimmer.additive {
+    additive = 1.0
+  }
+  cache.batch.records.set(index: base + 40, value: additive)
+  cache.batch.records.set(index: base + 41, value: shimmer.edgeGlow)
+}
+
+# This frame's draws into cache.runs: the queued instances in order, a new run
+# where the mesh changes. Refilled in place (no allocation once it has grown).
+func transparentRuns(cache: mod TransparentPassCache) {
+  cache.runs.clear()
+  var count: Int = cache.batch.count
+  if count > cache.meshIds.length {
+    count = cache.meshIds.length
+  }
+  loop var slot: Int = 0, slot < count, ++slot {
+    let meshId: Int = cache.meshIds.copyAtFallback(index: slot, fallback: -1)
+    let last: Int = cache.runs.length - 1
+    var extended: Bool = false
+    if let run: mod TransparentRun = cache.runs.modAt(index: last) {
+      if run.meshId is meshId {
+        run.count = run.count + 1
+        extended = true
+      }
+    }
+    if not extended {
+      cache.runs.add(value: TransparentRun { meshId: meshId, first: slot, count: 1 })
+    }
+  }
 }
 
 func copyOpaqueRadiance(resources: mod GpuResources, targets: mod DeferredTargets) {
@@ -167,7 +270,9 @@ func copyOpaqueRadiance(resources: mod GpuResources, targets: mod DeferredTarget
 }
 
 # The blend pipeline: the geometry pass's vertex layout and group-0 bindings,
-# ONE color target in the lit HDR format with straight alpha blending, and a
+# ONE color target in the lit HDR format with premultiplied alpha blending (the
+# shader multiplies its color by alpha; an additive style returns alpha 0, so
+# one pipeline both blends and adds), and a
 # depth state that TESTS reverse-Z (Greater, like the G-buffer) but never writes.
 # Built lazily after the targets exist, so the format is the one the lit
 # target was actually created with (rg11b10 or the rgba16f fallback).
@@ -185,7 +290,7 @@ func transparentPipelineSpec(litFormat: copy Int32) ret RenderPipelineSpec {
     attributes: own attributes
     colorFormats: own colorFormats
     alphaBlend: true
-    premultiplied: false
+    premultiplied: true
     depthFormat: WGPUTextureFormat_Depth32Float
     depthWrite: false
     depthCompare: WGPUCompareFunction_Greater
@@ -243,12 +348,13 @@ func ensureTransparentBind(
   }
 }
 
-# Encode + submit the transparent draw: one render pass that LOADS the lit
+# Encode + submit the transparent draws: one render pass that LOADS the lit
 # target (the opaque radiance stays), attaches the scene depth READ-ONLY, and
-# issues one instanced DrawIndexed from the manager IDs over the mesh's
-# buffers, after uploading the records into the draws buffer at the running
-# cursor. The cursor is per frame and only resets at the next Gbuffer.begin,
-# so these records land after the geometry pass's and never overlap them.
+# issues one instanced DrawIndexed per run of one mesh (transparentRuns), in the
+# order queued, after uploading every record into the draws buffer at the
+# running cursor. The cursor is per frame and only resets at the next
+# Gbuffer.begin, so these records land after the geometry pass's and never
+# overlap them. A run whose mesh is not uploaded is skipped.
 func drawTransparentBatch(
   cache: mod TransparentPassCache
   resources: mod GpuResources
@@ -256,13 +362,6 @@ func drawTransparentBatch(
   targets: mod DeferredTargets
 ) {
   unsafe {
-    let mesh: Int = cache.batch.meshId
-    # NOT gbMeshReady: that answers "may I draw into the CURRENT geometry pass"
-    # (it is 0 once Gbuffer.end cleared the pass), and this pass runs after it.
-    # An uploaded mesh has a non-zero index count; an invalid/unset id has 0.
-    if meshStoreIndexCount(store: gbuffer.meshes, mesh: mesh) <= 0 {
-      ret
-    }
     if not gbufferTargetsReady(cache: gbuffer, resources: resources) {
       ret
     }
@@ -275,6 +374,7 @@ func drawTransparentBatch(
     if count <= 0 {
       ret
     }
+    transparentRuns(cache: cache)
     let strideBytes: Int = instanceRecordFloats * 4
     if not writeBufferFromPtr(
       resources: resources
@@ -323,19 +423,38 @@ func drawTransparentBatch(
       depthStencilAttachment: depthAtts.data
     }
     let pass: Ptr = wgpuCommandEncoderBeginRenderPass(commandEncoder: enc, descriptor: rpDesc)
-    if recordDrawIndexedInPass(
-      resources: resources
-      pass: pass
-      pipeline: cache.pipeline
-      bindGroup: cache.bindGroup
-      vertexBuffer: meshStoreVbufHandle(store: gbuffer.meshes, resources: resources, mesh: mesh)
-      indexBuffer: meshStoreIbufHandle(store: gbuffer.meshes, resources: resources, mesh: mesh)
-      indexCount: meshStoreIndexCount(store: gbuffer.meshes, mesh: mesh)
-      instanceCount: count
-      firstInstance: base
-    ) {
-      gbAdvanceDraws(cache: gbuffer, count: count)
+    loop let run: view TransparentRun in cache.runs {
+      var runCount: Int = run.count
+      if run.first + runCount > count {
+        runCount = count - run.first
+      }
+      # NOT gbMeshReady: that answers "may I draw into the CURRENT geometry pass"
+      # (it is 0 once Gbuffer.end cleared the pass), and this pass runs after it.
+      # An uploaded mesh has a non-zero index count; an invalid/unset id has 0.
+      let indexCount: Int = meshStoreIndexCount(store: gbuffer.meshes, mesh: run.meshId)
+      if runCount > 0 and indexCount > 0 {
+        let drawn: Bool = recordDrawIndexedInPass(
+          resources: resources
+          pass: pass
+          pipeline: cache.pipeline
+          bindGroup: cache.bindGroup
+          vertexBuffer: meshStoreVbufHandle(
+            store: gbuffer.meshes
+            resources: resources
+            mesh: run.meshId
+          )
+          indexBuffer: meshStoreIbufHandle(
+            store: gbuffer.meshes
+            resources: resources
+            mesh: run.meshId
+          )
+          indexCount: indexCount
+          instanceCount: runCount
+          firstInstance: base + run.first
+        )
+      }
     }
+    gbAdvanceDraws(cache: gbuffer, count: count)
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
   }
