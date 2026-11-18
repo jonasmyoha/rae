@@ -7,6 +7,7 @@
 # flush / endFrame are the app-facing wrappers over these.
 import String
 import Math
+import Sys
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/GpuResources
@@ -98,6 +99,7 @@ func canvasOpenFrame(
 # deferred until the GPU is done — no reliance on wgpu's own tracking), submit,
 # then retire the frame's groups, poll earlier frames and compact the arena.
 func canvasCloseFrame(canvas: mod Gpu2dCanvas) {
+  canvasCountDraws(canvas: canvas)
   if let resources: mod GpuResources = canvas.gpuResources {
     unsafe {
       endRenderPass(pass: canvas.framePass)
@@ -215,4 +217,28 @@ func presentCanvasToSurface(canvas: mod Gpu2dCanvas) {
       )
     }
   }
+}
+
+# The frame's draw calls into the sum; with RAE_GPU2D_DRAWS=1 a line every 120 frames: the last
+# frame's draw calls and the mean over those frames (every render pass of the canvas: boxes,
+# images, text, backdrops)
+func canvasCountDraws(canvas: mod Gpu2dCanvas) {
+  if canvas.drawCallLog < 0 {
+    canvas.drawCallLog = 0
+    if Sys.getEnv(name: "RAE_GPU2D_DRAWS") is "1" {
+      canvas.drawCallLog = 1
+    }
+  }
+  canvas.drawCallSum = canvas.drawCallSum + canvas.drawCalls
+  canvas.drawCallFrames = canvas.drawCallFrames + 1
+  if canvas.drawCallLog is 1 and canvas.drawCallFrames >= 120 {
+    log(
+      "[gpu2d] draws: {canvas.drawCalls} last frame, {canvas.drawCallSum.toFloat() / canvas.drawCallFrames.toFloat()} a frame over {canvas.drawCallFrames} frames"
+    )
+  }
+  if canvas.drawCallFrames >= 120 {
+    canvas.drawCallSum = 0
+    canvas.drawCallFrames = 0
+  }
+  canvas.drawCalls = 0
 }

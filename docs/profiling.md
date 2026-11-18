@@ -217,6 +217,10 @@ measured on a Mac only, and on the clouds' passes only.
 (`[frame] slow: N ms = cpu + drawable acquire + present + gpu wait`), for a run where the pattern from frame to frame
 is the question. The clock reads whole milliseconds on an iPhone.
 
+**The 2D canvas's draw calls: `RAE_GPU2D_DRAWS=1`** logs `[gpu2d] draws: N last frame, M a frame over 120 frames` every
+120 frames: the draw calls of every render pass the canvas recorded (boxes, images, text, backdrops). On an iPhone 15
+Pro 106's Home is 15 a frame and a walker's HUD 6 or 7 (docs/ui-layers-design.md §11).
+
 **The 2D canvas: `RAE_GPU2D_TIMING=1`** (lib/Gpu2dCanvasTiming) times the one render pass a 2D frame draws in by
 its own begin and end timestamps, read back without waiting, about every other or third frame: a `[gpu2d] frame N us`
 line per sample and a `[gpu2d] last second` summary. It is one pass, so the overlap above does not split it. On a Mac

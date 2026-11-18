@@ -383,6 +383,32 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
 - **Measured on a phone** (step 8, §14): frame time and draw calls of 106 and of a walker with its
   HUD on the iPhone, before and after. The bar is "no worse than today".
 
+**Measured (step 8, 2026-11-19, iPhone 15 Pro):** "before" is 88af42a89 (the commit before step
+2), "after" is Rae 0.4.18 (every step through 7b). Both builds carry the same 2D draw-call
+counter (`RAE_GPU2D_DRAWS=1`, every render pass of the canvas), added for this measure. 106 runs
+its hover stress mode (`RAE_UI_STRESS_HOVER=1`: the Home screen painted by `renderSystemGpu2d`
+every frame, a different button hovered each time, 4,000 frames), with `RAE_FRAME_TIMING=all`
+and `RAE_GPU2D_TIMING=1`; 136 runs 45 to 60 s standing still with its HUD (`RAE_FRAME_TIMING=1`,
+`tools/ios/profile-ios.sh`, waiting for a cool phone before each run).
+
+| | before | after |
+|---|---|---|
+| 106: frame (60 fps pacing), median | 16.7 ms | 16.7 ms |
+| 106: CPU a frame, median | 2.9 ms | 2.9 ms |
+| 106: Metal GPU time a second, median; longest command buffer | 86.9 ms; 1.53 ms | 87.2 ms; 1.53 ms |
+| 106: 2D draw calls a frame | 15 | 15 |
+| 136: frame, median | 17.0 ms (3 runs) | 17.0 ms (3 runs) |
+| 136: CPU a frame | 5.9, 5.9, 5.8 ms | 5.8, 5.8, 5.8 ms |
+| 136: 2D draw calls a frame (the HUD) | 6 to 7 | 6 to 7 |
+| 136: frames over 20.8 ms, while cool at scale 0.80 | 3.2%, 3.9%, 4.7% | 4.5%, 4.7%, 4.6% |
+
+The bar holds: the medians, the CPU time and the draw calls are the same. The walker's missed
+frames are waits for the drawable (the 3D frame's GPU work) and follow the phone's heat and the
+dynamic resolution: one build's runs spread from 3.2% to 4.7%, and the last pair, run back to back,
+missed 109 frames each. A build of "after" with the transparent pass's shader of "before" read
+5.0%, so the 0.4.15 shader change is not a cost either. The 95th percentile of a whole run (18 to
+34 ms) depends on when the phone warmed and is not a comparison.
+
 ## 12. Developer experience
 
 - **A `.raescene` says a node's layer and z** with the key it has today, which gains `z`:

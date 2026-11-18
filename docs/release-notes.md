@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.19, 2026-11-19: the UI layers measured on a phone
+
+- `RAE_GPU2D_DRAWS=1`: the 2D canvas logs its draw calls a frame (docs/profiling.md).
+- The UI layers measured on an iPhone 15 Pro against the commit before them: the same frame times,
+  CPU time and draw calls for 106 and a walker (docs/ui-layers-design.md §11).
+
 ## 0.4.18, 2026-11-18: the layers in the debug overlay and the UI editor
 
 - The debug overlay's dialog has a Layers row: the window's layers in paint order with what is

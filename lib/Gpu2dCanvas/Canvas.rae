@@ -166,6 +166,12 @@ type Gpu2dCanvas {
   backdrop: Gpu2dBackdrop  # BackdropBlur's copy of the frame (Gpu2dCanvasBackdrop)
   caches: Gpu2dCaches  # drawings kept to draw again (Gpu2dCanvasCache)
   gpuTiming: Canvas2dTiming  # the frame pass's GPU time under RAE_GPU2D_TIMING (Gpu2dCanvasTiming)
+  # draw calls this frame, and their sum over the frames since the last [gpu2d] draws line
+  # (RAE_GPU2D_DRAWS=1, Gpu2dCanvasFrame canvasCountDraws)
+  drawCalls: Int = 0
+  drawCallSum: Int = 0
+  drawCallFrames: Int = 0
+  drawCallLog: Int = -1
   # --- the offscreen presentable target (#920: was C's g_g2d_off_tex) ---
   offscreenTexture: TextureId  # RenderAttachment | CopySrc, the surface format, rebuilt on resize
   offscreenView: TextureViewId
@@ -896,6 +902,9 @@ func boxFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
           firstVertex: 0
           firstInstance: runStart
         )
+        if drawn {
+          canvas.drawCalls = canvas.drawCalls + 1
+        }
       }
     }
     runStart = runEnd
