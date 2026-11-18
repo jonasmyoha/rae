@@ -1,4 +1,4 @@
-# Order inside a layer (ui/ZOrder, ui/Layer raiseTaggedNodes; docs/ui-layers-design.md §6),
+# Order inside a layer (ui/ZOrder, ui/Layer isRaisedNode; docs/ui-layers-design.md §6),
 # headless. Three cards A, B, C lie on one spot under one parent, in that tree order; a fourth
 # node, Card, is tagged for the dialog layer in the scene.
 #   1. with no ZIndex the last in the tree (C) is on top and takes the press;
@@ -17,7 +17,6 @@ open ui/SceneLoader
 open ui/LayoutSystem
 open ui/Transform
 open ui/UiLayers
-open ui/LayerLegacy
 open ui/UiSystems
 open ui/ZOrder
 open ecs/Entity
@@ -98,7 +97,6 @@ func walkAt(
   y: view Float
 ) ret String {
   var stack: LayerStack = createStandardLayerStack()
-  adoptWorldLayers(stack: stack, world: world)
   layerStackAddWorld(stack: stack, worldKey: 0)
   var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
   if let contribution: mod LayerContribution = contributions.modAt(index: 0) {

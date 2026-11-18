@@ -769,6 +769,19 @@ a key. `zKeySystem` runs at the start of `animationSystem`, and pending keys kee
   until 6b replaces it with a one-world plan (3c).
 - **The remaining order of work** is 2c-2, 2d, 3b, 3c, 4b, 5b, 6, 6b, 7b, 8, then the release.
 
+**Built (6b, Rae 0.4.17):** `LayerTag` is the one link from a node to its layer. `LayerRoot`,
+`LayerRef`, `createStandardLayers`, `createLayerEntity`, `findLayerEntity`, `entityLayerOrder`,
+`collectPaintableRoots`, `raiseTaggedNodes` and `ui/LayerLegacy` are gone. `setLayerById` and
+`raiseNodeToLayer` set the tag (keeping its z); `isRaisedNode` is a node with a parent whose tag
+names a layer, not below a `LayerScope`. Names are looked up in the window's stack only ("content"
+and "back-button" are no longer read as hud and dock; 106's back button says "dock"). 121's
+document, guides and chrome are on the standard hud, hudOver and dock, since it paints by
+`renderSystemGpu2d`'s standard stack. `uiHitTest`, the wheel route and the hit index walk
+`rootsInPaintOrder` (the standard stack's plan with the one world). A contribution checks its
+entries against the LayerTags when the tag table changed, so a tag that moves its node to another
+layer is seen without `markLayerContributionStale`. `sceneRootShown` and `sceneRootTakesInput`
+moved to `ui/Layer`.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

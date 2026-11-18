@@ -287,7 +287,7 @@ func updateModeMenuItems(
   rig: mod CameraRig
 ) ret Bool {
   # The menu opens over every other root, an app's HUD scenes mounted after its own included: it
-  # is tagged for the dialog layer (the transform pass raises it, ui/Layer raiseTaggedNodes), and
+  # is tagged for the dialog layer (its LayerTag raises it, ui/Layer isRaisedNode), and
   # so is the window presets'; there it is modal while open
   tagForDialogLayer(world: world, entityId: nodeEntityFor(world: world, nodeId: modeMenuNodeId))
   tagForDialogLayer(
@@ -479,16 +479,7 @@ func updateWindowPresetMenu(
   ret changed
 }
 
-# Put `entityId` on the dialog layer by its LayerTag (once; a tag already naming it stays)
+# Put `entityId` on the dialog layer by its LayerTag (a tag already naming it stays)
 func tagForDialogLayer(world: mod UiWorld, entityId: view EntityId) {
-  if isNone(this: entityId) {
-    ret
-  }
-  if componentHas(this: world.layerTags, entityId: entityId) and componentView(
-    this: world.layerTags
-    entityId: entityId
-  ).id is layerDialogId {
-    ret
-  }
-  componentSet(this: world.layerTags, entityId: entityId, data: LayerTag { id: layerDialogId })
+  setLayerById(world: world, entityId: entityId, id: layerDialogId)
 }

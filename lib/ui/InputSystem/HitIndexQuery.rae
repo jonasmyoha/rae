@@ -21,6 +21,7 @@ open ui/Components
 open ui/Ecs
 open ui/HitIndex
 open ui/Layer
+open ui/UiLayers
 open ui/Transform
 open ui/UiSystems
 open ui/ZOrder
@@ -32,8 +33,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     componentTableGeneration(this: world.actives)
     componentTableGeneration(this: world.leavings)
     componentTableGeneration(this: world.onClicks)
-    componentTableGeneration(this: world.layerRoots)
-    componentTableGeneration(this: world.layerRefs)
+    componentTableGeneration(this: world.layerTags)
     componentTableGeneration(this: world.cameras)
     componentTableGeneration(this: uiSystems.hierarchy.parents)
     componentTableGeneration(this: uiSystems.transform2d.worldTransforms)
@@ -50,28 +50,26 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 15 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 14 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
   ) is componentTableGeneration(this: world.leavings) and key.copyAtDefault(index: 3) is componentTableGeneration(
     this: world.onClicks
-  ) and key.copyAtDefault(index: 4) is componentTableGeneration(this: world.layerRoots) and key.copyAtDefault(
+  ) and key.copyAtDefault(index: 4) is componentTableGeneration(this: world.layerTags) and key.copyAtDefault(
     index: 5
-  ) is componentTableGeneration(this: world.layerRefs) and key.copyAtDefault(index: 6) is componentTableGeneration(
-    this: world.cameras
-  ) and key.copyAtDefault(index: 7) is componentTableGeneration(this: uiSystems.hierarchy.parents) and key.copyAtDefault(
-    index: 8
-  ) is componentTableGeneration(this: uiSystems.transform2d.worldTransforms) and key.copyAtDefault(
-    index: 9
-  ) is componentTableGeneration(this: uiSystems.transform2d.worldVisuals) and key.copyAtDefault(
-    index: 10
-  ) is componentTableGeneration(this: uiSystems.layout.computedRects) and key.copyAtDefault(
-    index: 11
-  ) is aliveCount(world: world) and key.copyAtDefault(index: 12) is componentTableGeneration(
+  ) is componentTableGeneration(this: world.cameras) and key.copyAtDefault(index: 6) is componentTableGeneration(
+    this: uiSystems.hierarchy.parents
+  ) and key.copyAtDefault(index: 7) is componentTableGeneration(
+    this: uiSystems.transform2d.worldTransforms
+  ) and key.copyAtDefault(index: 8) is componentTableGeneration(
+    this: uiSystems.transform2d.worldVisuals
+  ) and key.copyAtDefault(index: 9) is componentTableGeneration(
+    this: uiSystems.layout.computedRects
+  ) and key.copyAtDefault(index: 10) is aliveCount(world: world) and key.copyAtDefault(index: 11) is componentTableGeneration(
     this: world.zChildOrders
-  ) and key.copyAtDefault(index: 13) is componentTableGeneration(this: world.customPaints) and key.copyAtDefault(
-    index: 14
+  ) and key.copyAtDefault(index: 12) is componentTableGeneration(this: world.customPaints) and key.copyAtDefault(
+    index: 13
   ) is componentTableGeneration(this: world.layerScopes)
 }
 
@@ -152,14 +150,14 @@ func hitCollect(
 # uiHitTestTarget's roots, walked
 func hitCollectAll(world: view UiWorld, uiSystems: view UiSystems) ret List(HitFound) {
   var found: List(HitFound) = {}
-  let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+  let roots: List(EntityId) = rootsInPaintOrder(world: world, uiSystems: uiSystems)
   loop var i: Int = roots.length - 1, i >= 0, --i {
     let root: EntityId = roots.copyAtDefault(index: i)
     let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
       uiSystems: uiSystems
       entityId: root
     )
-    if componentHas(this: world.layerRoots, entityId: root) is false and shown {
+    if shown {
       hitCollect(
         world: world
         uiSystems: uiSystems

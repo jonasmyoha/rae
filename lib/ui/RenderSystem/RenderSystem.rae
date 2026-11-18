@@ -30,7 +30,6 @@ import ui/Components
 import ui/IconCodepoints
 import ui/Layer
 open ui/UiLayers
-open ui/LayerLegacy
 import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
@@ -732,49 +731,9 @@ func paintChildrenG(
   }
 }
 
-func gpu2dLayerRange(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  res: view Gpu2dUi
-  canvas: mod Gpu2dCanvas
-  minOrder: view Int
-  maxOrder: view Int
-) pub {
-  unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
-    let m: Int = roots.length
-    var p: Int = 0
-    loop p < m {
-      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: p)
-      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
-        uiSystems: uiSystems
-        entityId: root
-      )
-      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
-        let ord: Int = entityLayerOrder(world: world, entityId: root)
-        if ord >= minOrder {
-          if ord < maxOrder {
-            canvasBackdropLayer(canvas: canvas)
-            var full: PaintRange = fullPaintRange()
-            paintSubtreeG(
-              world: world
-              uiSystems: uiSystems
-              entityId: root
-              res: res
-              canvas: canvas
-              range: full
-            )
-          }
-        }
-      }
-      p = p + 1
-    }
-  }
-}
-
 # Render `world` on the gpu2d backend. Call between Gpu2d.beginFrame/endFrame. The one-call
-# form for a program with one world and only scene nodes: it builds the standard stack (with the
-# world's own layers, adoptWorldLayers) and its paint plan for this call, and paints by it
+# form for a program with one world and only scene nodes: it builds the standard stack and its
+# paint plan for this call, and paints by it (a LayerTag names one of the standard layers)
 # (docs/ui-layers-design.md §4.4). A program that keeps its own LayerStack builds the plan once
 # per frame and walks it with renderLayerPlanGpu2d, with no allocation.
 func renderSystemGpu2d(
@@ -784,7 +743,6 @@ func renderSystemGpu2d(
   canvas: mod Gpu2dCanvas
 ) pub {
   var stack: LayerStack = createStandardLayerStack()
-  adoptWorldLayers(stack: stack, world: world)
   layerStackAddWorld(stack: stack, worldKey: 0)
   var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
   if let contribution: mod LayerContribution = contributions.modAt(index: 0) {

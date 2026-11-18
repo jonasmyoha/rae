@@ -6,6 +6,7 @@ import ui/Components
 open ui/Ecs
 open ui/AnimationSystem
 open ui/Layer
+open ui/UiLayers
 open ecs/ComponentTable
 open ui/UiSystems
 open ui/ButtonSystem
@@ -44,7 +45,7 @@ func addCover(
 }
 
 func collectOnce(world: view UiWorld, uiSystems: view UiSystems) ret Int {
-  let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+  let roots: List(EntityId) = rootsInPaintOrder(world: world, uiSystems: uiSystems)
   ret roots.length
 }
 

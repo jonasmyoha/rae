@@ -72,10 +72,6 @@ func presentMountedPage(
   pageId: view String
   overrides: view List(SceneOverride)
 ) ret EntityId {
-  var layer: EntityId = findLayerEntity(world: world, id: layerDialogId)
-  if isNone(this: layer) {
-    layer = createLayerEntity(world: world, id: "{layerDialogId}", order: layerDialogOrder)
-  }
   var presentation: PagePresentation = PagePresentation.page
   if componentHas(this: world.pageRoots, entityId: pageRoot) {
     presentation = componentView(this: world.pageRoots, entityId: pageRoot).presentation
@@ -124,7 +120,7 @@ func presentMountedPage(
       columnGap: 0.0
     }
   )
-  componentSet(this: world.layerRefs, entityId: host, data: LayerRef { layer: layer })
+  setLayerById(world: world, entityId: host, id: layerDialogId)
 
   # The dialog's slot (none for a page)
   var slot: EntityId = noEntity()

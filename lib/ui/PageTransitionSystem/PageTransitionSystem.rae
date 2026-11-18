@@ -31,7 +31,6 @@ open ui/UiSystems
 open ui/AnimationSystem
 open ui/LayoutSystem
 open ui/RenderSystem
-open ui/LayerLegacy
 open ui/UiLayers
 open Gpu2dCanvas
 
@@ -436,12 +435,10 @@ func pageTransitionDraw(
     firstLeavingKey = 1
   }
   var stack: LayerStack = createStandardLayerStack()
-  adoptWorldLayers(stack: stack, world: world)
   layerStackAddWorld(stack: stack, worldKey: currentKey)
   var contributions: List(LayerContribution) = {}
   loop var k: Int = 0, k < system.leaving.length, ++k {
     if let page: view LeavingWorld = system.leaving.viewAt(index: k) {
-      adoptWorldLayers(stack: stack, world: page.world)
       layerStackAddWorld(stack: stack, worldKey: firstLeavingKey + k)
     }
   }

@@ -506,9 +506,8 @@ func transformSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
     childrens: world.childrens
   )
   accumulateVisibility(world: world, uiSystems: uiSystems)
-  # nodes a scene put on a layer (LayerTag) raised to it, and siblings' paint order by ZIndex
-  # (ui/ZOrder), after the hierarchy is settled
-  raiseTaggedNodes(world: world, uiSystems: uiSystems)
+  # siblings' paint order by ZIndex (ui/ZOrder), after the hierarchy is settled (a node's LayerTag
+  # raises it with no pass: ui/Layer isRaisedNode)
   zOrderSystem(world: world, uiSystems: uiSystems)
 }
 

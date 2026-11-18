@@ -226,16 +226,6 @@ type VisualBounds {
   measuredKey: String = ""  # an icon's Sprite key: same key and size reuse the glyph
 }
 
-# A layer is a real entity. `LayerRoot` is what makes one — it carries
-# the layer's stable id (used for lookup from app code) and its paint
-# order (ascending = painted on top of lower orders, hit-tested
-# top-down). Layer-root entities don't have Rect / Layout / Sprite —
-# they're labels for grouping other roots.
-type LayerRoot {
-  id: String
-  order: Int
-}
-
 # Paint order among a node's siblings (docs/ui-layers-design.md §6): siblings are painted by z,
 # lowest first, and in tree order where z is equal; the hit test walks the same order backwards.
 # Layout keeps tree order. A node without one has z 0. `z` never takes a node out of its parent's
@@ -289,16 +279,6 @@ type ZFlight {
 type ZChildOrder {
   ids: List(EntityId)
   zs: List(Int)
-}
-
-# Soft link from a root entity to the layer it lives on. The renderer
-# groups parentless roots by their `LayerRef.layer`, looks up each
-# group's `LayerRoot.order`, and paints in ascending order. Roots
-# without a `LayerRef` fall back to the content layer (lookup by
-# id `"content"`), so the default for ordinary screen pages stays
-# zero-config.
-type LayerRef {
-  layer: EntityId
 }
 
 # `DebugAnchor` marks an entity as the placement slot for the shared

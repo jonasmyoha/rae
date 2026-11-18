@@ -1,8 +1,9 @@
 # Painting by the layer plan (ui/RenderSystem renderSystemGpu2d; docs/ui-layers-design.md §4.4),
 # headless:
-#   1. a world with layers of its own, as example 121 makes them (document 0, guides 50, chrome
-#      100) and a node raised to the dialog layer: adopted into the standard stack in the same
-#      order, and the plan paints its roots in the order the hit test walks them (bottom first);
+#   1. a world whose roots name their layers by LayerTag, as example 121's do (the document in
+#      hud, its guides in hudOver, the chrome in dock), a layer the program adds to its stack, and
+#      a node raised to the dialog layer: the plan paints its roots in the order the hit test walks
+#      them (bottom first);
 #   2. the canvas's layer push: a box queued in a layer at opacity 0.5 and offset (10, 20) has
 #      half its alpha and is moved; popped, the next box is as drawn.
 import Gpu2d
@@ -13,7 +14,6 @@ open ui/SceneLoader
 open ui/LayoutSystem
 open ui/Transform
 open ui/UiLayers
-open ui/LayerLegacy
 open ui/UiSystems
 open ecs/Entity
 open ecs/ComponentTable
@@ -66,9 +66,6 @@ func main() {
   var uiSystems: UiSystems = createUiSystems()
   world.layoutW = 400.0
   world.layoutH = 400.0
-  let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
-  let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
-  let guidesLayer: EntityId = createLayerEntity(world: world, id: "guides", order: 50)
   # mounted in an order unlike the layers', so only the layers decide
   let chrome: EntityId = mount(
     world: world
@@ -94,20 +91,20 @@ func main() {
     name: "Guides"
     child: ""
   )
-  setLayerById(world: world, entityId: chrome, id: "chrome")
-  setLayerById(world: world, entityId: document, id: "document")
-  setLayerById(world: world, entityId: guides, id: "guides")
+  setLayerById(world: world, entityId: chrome, id: "dock")
+  setLayerById(world: world, entityId: document, id: "hud")
+  setLayerById(world: world, entityId: guides, id: "hudOver")
   raiseNodeToLayer(
     world: world
     entityId: nodeOf(world: world, nodeId: "Menu")
     layerId: layerDialogId
-    order: layerDialogOrder
   )
   layoutSystem(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
 
   var stack: LayerStack = createStandardLayerStack()
-  adoptWorldLayers(stack: stack, world: world)
+  # a program's own layer in the gap above dock: nothing is on it, it shows in the stack
+  let rulerLayer: Int = addLayer(stack: stack, name: "rulers", order: 450)
   layerStackAddWorld(stack: stack, worldKey: 0)
   var layers: String = ""
   loop let layer: view UiLayer in stack.layers {
@@ -139,10 +136,8 @@ func main() {
     }
   }
   var hitOrder: String = ""
-  loop let root: view EntityId in collectPaintableRoots(world: world, uiSystems: uiSystems) {
-    if componentHas(this: world.layerRoots, entityId: root) is false {
-      hitOrder = "{hitOrder} {nameIn(world: world, entityId: root)}"
-    }
+  loop let root: view EntityId in rootsInPaintOrder(world: world, uiSystems: uiSystems) {
+    hitOrder = "{hitOrder} {nameIn(world: world, entityId: root)}"
   }
   log("   the plan paints:{painted}")
   log("   the hit test's roots, bottom first:{hitOrder}; the same: {painted is hitOrder}")

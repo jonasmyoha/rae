@@ -4,6 +4,38 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.17, 2026-11-18: LayerTag is the one link from a node to its layer
+
+A patch release in the 0.4 line, breaking. `./rae toolchain pin 0.4.17` moves a project.
+
+- A node names its layer only by `LayerTag { id, z }` (a .raescene's `"LayerTag": { "id":
+  "dialog" }`, or `setLayerById` / `raiseNodeToLayer` in code, which set the tag and keep its z).
+  The name is looked up in the window's `LayerStack`; a root without a tag is in hud, and a name
+  the stack has not is painted in hud. A node inside a scene whose tag names a layer is raised
+  (`isRaisedNode`), unless it is below a `LayerScope`.
+- Removed (breaking): the layer entities `LayerRoot` and `LayerRef` (`UiWorld.layerRoots`,
+  `layerRefs`), `createStandardLayers`, `createLayerEntity`, `findLayerEntity`,
+  `entityLayerOrder`, `collectPaintableRoots`, `raiseTaggedNodes`, `layerDialogOrder`,
+  `gpu2dLayerRange`, and `ui/LayerLegacy` (`adoptWorldLayers`, `stackOrderOfLegacy`).
+  `raiseNodeToLayer` takes no `order`. A program that made its own layers either tags its roots
+  with the standard names (121: the document in hud, its guides in hudOver, the chrome in dock) or
+  adds its layers to the stack it keeps (`addLayer`). The old names "content" and "back-button"
+  are no longer read as hud and dock: write "hud" and "dock".
+- `uiHitTest` walks the roots in the order of the standard stack's plan (`rootsInPaintOrder`).
+  A layer contribution notices a LayerTag that changed its layer or z on its next refresh.
+
+## 0.4.16, 2026-11-18: a screen tint
+
+- `setScreenTint(cache: renderer.passes.transparent, r, g, b, strength)`: a color over the whole
+  lit frame after the transparents (one full-screen triangle; nothing drawn at strength 0).
+
+## 0.4.15, 2026-11-18: the transparent pass takes several meshes a frame
+
+- `lib/TransparentForward` draws each run of one mesh in the order queued (`transparentRuns`);
+  style 4 is a shimmering surface (`addTransparentShimmerInstance`, `TransparentShimmer`); the blend
+  is premultiplied, so a style can be additive. `Mesh3d.makeOpenCylinder`. Styles 2 and 3 (the
+  explosions' puff and glow) now run as designed.
+
 ## 0.4.14, 2026-11-18: the 3D shell's overlays by the layer plan; HudOverlay removed
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.14` moves a project.

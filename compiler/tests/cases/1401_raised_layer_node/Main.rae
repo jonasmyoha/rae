@@ -9,6 +9,7 @@
 import ui/Components
 open ui/Ecs
 open ui/Layer
+open ui/UiLayers
 open ui/Scene
 open ui/SceneLoader
 open ui/InputSystem
@@ -49,10 +50,8 @@ func nameOf(world: view UiWorld, entityId: view EntityId) ret String {
 
 func order(world: view UiWorld, uiSystems: view UiSystems) ret String {
   var text: String = ""
-  loop let root: view EntityId in collectPaintableRoots(world: world, uiSystems: uiSystems) {
-    if componentHas(this: world.layerRoots, entityId: root) is false {
-      text = "{text} {nameOf(world: world, entityId: root)}"
-    }
+  loop let root: view EntityId in rootsInPaintOrder(world: world, uiSystems: uiSystems) {
+    text = "{text} {nameOf(world: world, entityId: root)}"
   }
   ret text
 }
@@ -85,18 +84,8 @@ func main() {
   )}")
   # B
   let menu: EntityId = nodeOf(world: world, nodeId: "Menu")
-  raiseNodeToLayer(
-    world: world
-    entityId: menu
-    layerId: layerDialogId
-    order: layerDialogOrder
-  )
-  raiseNodeToLayer(
-    world: world
-    entityId: menu
-    layerId: layerDialogId
-    order: layerDialogOrder
-  )
+  raiseNodeToLayer(world: world, entityId: menu, layerId: layerDialogId)
+  raiseNodeToLayer(world: world, entityId: menu, layerId: layerDialogId)
   layOut(world: world, uiSystems: uiSystems)
   log("B. raised: {isRaisedNode(world: world, uiSystems: uiSystems, entityId: menu)}, painted:{order(
     world: world

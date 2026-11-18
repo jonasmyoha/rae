@@ -50,7 +50,7 @@ func dialogLayerHolds(
   uiSystems: view UiSystems
   hit: view EntityId
 ) ret EntityId {
-  if componentCount(this: world.layerRefs) is 0 {
+  if componentCount(this: world.layerTags) is 0 {
     ret hit
   }
   var hitRoot: EntityId = noEntity()
@@ -58,13 +58,13 @@ func dialogLayerHolds(
     hitRoot = hitRootOf(world: world, uiSystems: uiSystems, entityId: hit)
   }
   var shown: Bool = false
-  loop var i: Int = 0, i < componentCount(this: world.layerRefs), ++i {
-    let root: EntityId = componentEntityAt(this: world.layerRefs, i: i)
-    let layer: EntityId = componentView(this: world.layerRefs, entityId: root).layer
-    if componentHas(this: world.layerRoots, entityId: layer) and componentView(
-      this: world.layerRoots
-      entityId: layer
-    ).id is layerDialogId and sceneRootTakesInput(world: world, uiSystems: uiSystems, root: root) {
+  loop var i: Int = 0, i < componentCount(this: world.layerTags), ++i {
+    let root: EntityId = componentEntityAt(this: world.layerTags, i: i)
+    if componentView(this: world.layerTags, entityId: root).id is layerDialogId and hitRootOf(
+      world: world
+      uiSystems: uiSystems
+      entityId: root
+    ) is root and sceneRootTakesInput(world: world, uiSystems: uiSystems, root: root) {
       if root is hitRoot {
         ret hit
       }
@@ -74,7 +74,9 @@ func dialogLayerHolds(
   if not shown or isNone(this: hit) {
     ret hit
   }
-  if entityLayerOrder(world: world, entityId: hitRoot) > layerDialogOrder {
+  if tagNamesLayer(world: world, entityId: hitRoot) and tagLayerOrderOf(
+    name: componentView(this: world.layerTags, entityId: hitRoot).id
+  ) > layerOrderDialog {
     ret hit
   }
   ret noEntity()

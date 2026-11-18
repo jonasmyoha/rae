@@ -102,7 +102,6 @@ func main() {
   var aSystems: UiSystems = createUiSystems()
   a.layoutW = 400.0
   a.layoutH = 400.0
-  createStandardLayers(world: a)
   let hud: EntityId = loadScene(
     world: a
     uiSystems: aSystems
@@ -113,12 +112,7 @@ func main() {
     uiSystems: aSystems
     scene: parseScene(source: laterScene())
   )
-  raiseNodeToLayer(
-    world: a
-    entityId: nodeOf(world: a, nodeId: "Menu")
-    layerId: layerDialogId
-    order: layerDialogOrder
-  )
+  raiseNodeToLayer(world: a, entityId: nodeOf(world: a, nodeId: "Menu"), layerId: layerDialogId)
   place(world: a, uiSystems: aSystems)
 
   var b: UiWorld = createUiWorld()

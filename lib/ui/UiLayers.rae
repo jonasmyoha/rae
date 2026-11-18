@@ -23,9 +23,8 @@
 # roots or the stack changed, a z change moves one entry in place (setRootZ), and the
 # plan refills its own list.
 #
-# The old ui/Layer API (LayerRoot, LayerRef, createStandardLayers, raiseNodeToLayer,
-# setLayerById, collectPaintableRoots) still works as before; a world's layer names are
-# read from it here ("content" is hud, "back-button" is dock).
+# A node's layer is its LayerTag's name (ui/Layer), looked up in this stack; a root
+# without one is in hud.
 import ui/Components
 open ecs/Entity
 open ecs/ComponentTable
@@ -374,6 +373,8 @@ type LayerContribution {
   # This refresh's roots, reused
   scratch: List(EntityId)
   stackGeneration: Int = -1
+  # The world's layerTags generation at the last refresh (a tag changed: its entries checked)
+  tagsGeneration: Int = -1
   # How many times the entries were made again (a z change does not count)
   rebuilds: Int = 0
   # Roots whose layer name the stack does not have (they go in hud)
@@ -412,17 +413,6 @@ func entryBefore(a: view LayerEntry, b: view LayerEntry) ret Bool {
   ret a.seq < b.seq
 }
 
-# The stack's name for a world's legacy layer name
-func stackLayerName(legacy: view String) ret String {
-  if legacy is "content" {
-    ret "hud"
-  }
-  if legacy is "back-button" {
-    ret "dock"
-  }
-  ret "{legacy}"
-}
-
 # The z a node asks for (its LayerTag's), 0 without one
 func nodeLayerZ(world: view UiWorld, entityId: view EntityId) ret Int {
   if componentHas(this: world.layerTags, entityId: entityId) {
@@ -431,25 +421,41 @@ func nodeLayerZ(world: view UiWorld, entityId: view EntityId) ret Int {
   ret 0
 }
 
-# The layer a root or a raised node is in: its LayerRef's layer by name, else its
-# LayerTag's name, else hud; -1 when the stack has no such layer
+# The layer a root or a raised node is in: its LayerTag's name, else hud; -1 when the stack has
+# no such layer
 func nodeLayerId(stack: view LayerStack, world: view UiWorld, entityId: view EntityId) ret Int {
-  var name: String = "hud"
-  if componentHas(this: world.layerRefs, entityId: entityId) {
-    let layer: EntityId = componentView(this: world.layerRefs, entityId: entityId).layer
-    if componentHas(this: world.layerRoots, entityId: layer) {
-      name = stackLayerName(legacy: componentView(this: world.layerRoots, entityId: layer).id)
+  if tagNamesLayer(world: world, entityId: entityId) {
+    if let id: Int = layerIdNamed(
+      stack: stack
+      name: componentView(this: world.layerTags, entityId: entityId).id
+    ) {
+      ret id
     }
-  } else if componentHas(this: world.layerTags, entityId: entityId) {
-    let tag: view LayerTag = componentView(this: world.layerTags, entityId: entityId)
-    if tag.id.length() > 0 {
-      name = stackLayerName(legacy: tag.id)
-    }
+    ret -1
   }
-  if let id: Int = layerIdNamed(stack: stack, name: name) {
+  if let id: Int = layerIdNamed(stack: stack, name: "hud") {
     ret id
   }
   ret -1
+}
+
+# Does every entry still name the layer and z its node's LayerTag does? (Asked only after a tag
+# changed: a tag moved to another layer makes the contribution again.)
+func entriesMatchTags(
+  contribution: view LayerContribution
+  stack: view LayerStack
+  world: view UiWorld
+) ret Bool {
+  loop let entry: view LayerEntry in contribution.entries {
+    let layer: Int = nodeLayerId(stack: stack, world: world, entityId: entry.entityId)
+    if layer >= 0 and layer is not entry.layer {
+      ret false
+    }
+    if nodeLayerZ(world: world, entityId: entry.entityId) is not entry.z {
+      ret false
+    }
+  }
+  ret true
 }
 
 # Is `entityId` among the contribution's entries?
@@ -462,8 +468,8 @@ func contributionHolds(contribution: view LayerContribution, entityId: view Enti
   ret false
 }
 
-# The world's roots and raised nodes now, in the order the world lists them (as
-# collectPaintableRoots finds them), into the contribution's scratch list
+# The world's roots and raised nodes now (the roots in the order the world lists them, then the
+# raised nodes), into the contribution's scratch list
 func gatherLayerRoots(
   contribution: mod LayerContribution
   world: view UiWorld
@@ -478,8 +484,8 @@ func gatherLayerRoots(
       contribution.scratch.add(value: entityId)
     }
   }
-  loop var r: Int = 0, r < componentCount(this: world.layerRefs), ++r {
-    let raised: EntityId = componentEntityAt(this: world.layerRefs, i: r)
+  loop var r: Int = 0, r < componentCount(this: world.layerTags), ++r {
+    let raised: EntityId = componentEntityAt(this: world.layerTags, i: r)
     if isRaisedNode(world: world, uiSystems: uiSystems, entityId: raised) and componentHas(
       this: uiSystems.transform2d.worldTransforms
       entityId: raised
@@ -507,6 +513,11 @@ func refreshLayerContribution(
       }
     }
   }
+  let tagsGeneration: Int = componentTableGeneration(this: world.layerTags)
+  if same and contribution.tagsGeneration is not tagsGeneration {
+    same = entriesMatchTags(contribution: contribution, stack: stack, world: world)
+  }
+  contribution.tagsGeneration = tagsGeneration
   if same {
     updateEntriesShown(contribution: contribution, world: world, uiSystems: uiSystems)
     ret
@@ -653,47 +664,9 @@ func updateEntriesShown(
   updateLayerCustoms(contribution: contribution, world: world, uiSystems: uiSystems)
 }
 
-# Does the root take input: shown, and not leaving (a dialog animating out after its close takes
-# no press and holds none)
-func sceneRootTakesInput(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  root: view EntityId
-) ret Bool {
-  ret sceneRootShown(world: world, uiSystems: uiSystems, root: root) and not componentHas(
-    this: world.leavings
-    entityId: root
-  )
-}
-
-# Does the root (or raised node) show anything a press could land on or a cover could hide
-# under? A layer entity does not, a raised node of a hidden scene does not, and neither does a
-# root that is inactive or hidden: a mounted but hidden page keeps its layer from blocking input
-func sceneRootShown(world: view UiWorld, uiSystems: view UiSystems, root: view EntityId) ret Bool {
-  if componentHas(this: world.layerRoots, entityId: root) {
-    ret false
-  }
-  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
-    uiSystems: uiSystems
-    entityId: root
-  ) is false {
-    ret false
-  }
-  if componentHas(this: world.actives, entityId: root) and componentView(
-    this: world.actives
-    entityId: root
-  ).value is false {
-    ret false
-  }
-  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: root) {
-    ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: root).visible
-  }
-  ret true
-}
-
 # Make the contribution again on its next refresh. Call it after a root already in the
-# world moved to another layer (its LayerTag's id or its LayerRef changed): the refresh
-# only notices roots coming and going.
+# world moved to another layer in a way its LayerTag does not show (the refresh notices roots
+# coming and going and a changed LayerTag).
 func markLayerContributionStale(contribution: mod LayerContribution) {
   contribution.stackGeneration = -1
 }
@@ -997,4 +970,23 @@ func dropStepsBefore(plan: mod LayerPaintPlan, cut: view Int) {
   loop plan.steps.length > kept {
     plan.steps.removeLast()
   }
+}
+
+# The roots and raised nodes of a program with one world in paint order, bottom first: the order
+# of the standard stack's plan with that world alone (uiHitTest walks it backwards). A program
+# that keeps its own stack walks its own plan (ui/LayerHit).
+func rootsInPaintOrder(world: view UiWorld, uiSystems: view UiSystems) ret List(EntityId) {
+  let stack: LayerStack = createStandardLayerStack()
+  var contribution: LayerContribution = createLayerContribution(worldKey: 0)
+  refreshLayerContribution(
+    contribution: contribution
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+  )
+  var roots: List(EntityId) = List.create(EntityId, cap: contribution.entries.length)
+  loop let entry: view LayerEntry in contribution.entries {
+    roots.add(value: entry.entityId)
+  }
+  ret roots
 }

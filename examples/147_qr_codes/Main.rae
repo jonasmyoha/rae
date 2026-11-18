@@ -24,7 +24,6 @@ open ui/Ecs
 open ui/Registry
 open ui/RenderSystem
 open ui/UiLayers
-open ui/LayerLegacy
 open qr/qrCodeSystem/QrCodeSystem
 open Gpu2dCanvas
 open ui/UiSystems
@@ -123,7 +122,6 @@ func main() ret Int {
   # (docs/ui-layers-design.md): the QR code is painted in its node's place in the
   # paint order, so a dialog over it covers it
   var layerStack: LayerStack = createStandardLayerStack()
-  adoptWorldLayers(stack: layerStack, world: world)
   layerStackAddWorld(stack: layerStack, worldKey: 0)
   var layerContributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
   var paintPlan: LayerPaintPlan = createLayerPaintPlan()

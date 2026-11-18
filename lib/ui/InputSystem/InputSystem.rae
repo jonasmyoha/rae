@@ -24,6 +24,7 @@ open ui/Ecs
 open ui/AnimationComponents
 open ui/Components
 open ui/Layer
+open ui/UiLayers
 import Gpu2d
 import Gpu2dGestures
 import Math
@@ -351,7 +352,7 @@ func uiHitTestWalk(
   targetSize: view Float
 ) ret EntityId {
   unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+    let roots: List(EntityId) = rootsInPaintOrder(world: world, uiSystems: uiSystems)
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
@@ -359,7 +360,7 @@ func uiHitTestWalk(
         uiSystems: uiSystems
         entityId: root
       )
-      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
+      if shown {
         let hit: EntityId = uiHitTestEntity(
           world: world
           uiSystems: uiSystems
@@ -528,7 +529,7 @@ func uiWheelRoute(
   y: view Float
 ) ret UiWheelRoute {
   unsafe {
-    let roots: List(EntityId) = collectPaintableRoots(world: world, uiSystems: uiSystems)
+    let roots: List(EntityId) = rootsInPaintOrder(world: world, uiSystems: uiSystems)
     var i: Int = roots.length - 1
     loop i >= 0 {
       let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
@@ -536,7 +537,7 @@ func uiWheelRoute(
         uiSystems: uiSystems
         entityId: root
       )
-      if componentHas(this: world.layerRoots, entityId: root) is false and shown {
+      if shown {
         let route: UiWheelRoute = uiWheelRouteEntity(
           world: world
           uiSystems: uiSystems

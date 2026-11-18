@@ -24,7 +24,6 @@ open Gpu2dCanvas
 open SdfText
 open ui/UiSystems
 open ui/UiLayers
-open ui/LayerLegacy
 open ui/LayerFrame
 open ui/LayerCapture
 open ui/LayerHit
@@ -123,15 +122,13 @@ func createHudLayerPaint() ret HudLayerPaint {
   }
 }
 
-# This frame's plan for the UI world `world` (its own layers adopted, its roots
-# refreshed), in game or editor mode
+# This frame's plan for the UI world `world` (its roots refreshed), in game or editor mode
 func buildHudLayerPlan(
   paint: mod HudLayerPaint
   world: view UiWorld
   uiSystems: view UiSystems
   editor: view Bool
 ) {
-  adoptWorldLayers(stack: paint.stack, world: world)
   if let contribution: mod LayerContribution = paint.contributions.modAt(index: 0) {
     refreshLayerContribution(
       contribution: contribution

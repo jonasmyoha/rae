@@ -14,7 +14,6 @@ open ui/DialogTapOutside
 open ui/InputSystem
 open ui/LayerCapture
 open ui/LayerHit
-open ui/LayerLegacy
 open ui/Layer
 open ui/Scene
 open ui/SceneLoader
@@ -53,7 +52,6 @@ func frame(
 ) {
   layoutSystem(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
-  adoptWorldLayers(stack: stack, world: world)
   if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
     refreshLayerContribution(
       contribution: contribution
@@ -86,7 +84,6 @@ func main() {
   var uiSystems: UiSystems = createUiSystems()
   world.layoutW = 393.0
   world.layoutH = 852.0
-  createStandardLayers(world: world)
   let screen: EntityId = loadScene(
     world: world
     uiSystems: uiSystems

@@ -235,8 +235,6 @@ func createApp() ret App {
   seedWorldTheme(world: world, res: gpuUi)
   # A viewer opens OTHER people's scenes: report what it cannot apply, never exit.
   world.scenePolicy.unknownComponents = UnknownComponentPolicy.report
-  let documentLayer: EntityId = createLayerEntity(world: world, id: "document", order: 0)
-  let chromeLayer: EntityId = createLayerEntity(world: world, id: "chrome", order: 100)
   var inspectorSystem: InspectorSystem = createInspectorSystem(world: world)
 
   let mounted: Bool = documentPrepareSystem(document: document, world: world)
@@ -338,7 +336,8 @@ func createApp() ret App {
     w: viewportSystem.designW
     h: viewportSystem.designH
   )
-  setLayerById(world: world, entityId: chromeRoot, id: "chrome")
+  # the editor's chrome over the document and its guides (ui/UiLayers: the standard stack)
+  setLayerById(world: world, entityId: chromeRoot, id: "dock")
   # The chrome's own sub-scenes (the inspector panel) resolve from the same
   # registry the document uses.
   resolveSceneInstances(

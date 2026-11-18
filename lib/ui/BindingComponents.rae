@@ -100,9 +100,9 @@ type AnchorBottom {
   enabled: Bool = true
 }
 
-# Names the paint/hit-test layer an entity belongs to, by the layer id the
-# app created ("dock", "back-button", ...). `LayerRef` holds an EntityId a
-# scene cannot spell; the layer-tag system resolves the id once per entity.
+# The one link from a node to its layer (docs/ui-layers-design.md §4.2): the layer's name in the
+# window's stack ("hud", "dock", "dialog", or one the program added), "" for only a z. A root
+# without one is in hud; a node inside a scene with one is raised (ui/Layer isRaisedNode).
 type LayerTag {
   id: String
   # Order inside the layer: higher paints over (ui/UiLayers; docs/ui-layers-design.md §6)
