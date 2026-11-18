@@ -1,54 +1,117 @@
-# ui/HudOverlay: what is drawn over the scene in the 2D overlay pass is one
-# entity per overlay, with a HudOverlay component (what it draws, its order,
-# which mode shows it). overlaysInOrder gives the entities to draw this
-# frame, lowest order first, for the mode the app is in; Rae draws its own
-# kinds (app3d/HudOverlays drawRaeOverlay), the app its own.
+# What Rae's 3D shell draws in 2D over the frame, in layer order (app3d/HudOverlays
+# HudLayerPaint; docs/ui-layers-design.md): the world's labels in the world layer (game mode
+# only), the scene UI's roots in their layers, the log strip in the log layer (editor mode only),
+# the debug readout in the debug layer. An app's own drawing is a LayerDraw it adds: here a
+# compass in hudOver, over the scene's hud page and under its dialog, then hidden again.
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open app3d/HudOverlays
 open ecs/Entity
 open ecs/ComponentTable
-open ui/Ecs
-open ui/HudOverlay
 
-func addOverlay(world: mod UiWorld, overlay: own HudOverlay) ret EntityId {
-  let entityId: EntityId = createEntity(world: world)
-  componentSet(this: world.hudOverlays, entityId: entityId, data: overlay)
-  ret entityId
+func taggedScene(name: view String, layer: view String) ret String {
+  if layer.length() is 0 {
+    ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}\}\}\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"LayerTag\":\{\"id\":\"{layer}\"\}\}\}\}"
 }
 
-func listed(world: view UiWorld, editor: view Bool) ret String {
-  var out: String = ""
-  let entities: List(EntityId) = overlaysInOrder(overlays: world.hudOverlays, editor: editor)
-  loop let entityId: view EntityId in entities {
-    let overlay: view HudOverlay = componentView(this: world.hudOverlays, entityId: entityId)
-    out = "{out} {(overlay.draw as OverlayDraw).toString()}:{overlay.order}"
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Page", "Dialog" } {
+    if let index: Int = world.nodeIds.get(k: id) {
+      if nodeEntityId(world: world, index: index) is entityId {
+        ret id
+      }
+    }
   }
-  ret out
+  ret "?"
+}
+
+func planText(paint: view HudLayerPaint, world: view UiWorld) ret String {
+  var text: String = ""
+  loop let step: view PaintStep in paint.plan.steps {
+    if step.kind is PaintStepKind.layerBegin {
+      text = "{text} {layerNameOf(stack: paint.stack, id: step.layer)}["
+    } else if step.kind is PaintStepKind.layerEnd {
+      text = "{text} ]"
+    } else if step.kind is PaintStepKind.draw {
+      let draw: LayerDraw = paint.stack.draws.copyAtFallback(
+        index: step.draw
+        fallback: LayerDraw { layer: -1, kind: LayerDrawKind.app }
+      )
+      if draw.kind is LayerDrawKind.app {
+        text = "{text} app {draw.appKind}"
+      } else {
+        text = "{text} {(draw.kind as LayerDrawKind).toString()}"
+      }
+    } else {
+      text = "{text} {nameIn(world: world, entityId: step.entityId)}"
+    }
+  }
+  ret text
 }
 
 func main() {
   var world: UiWorld = createUiWorld()
-  # Added out of order, as an app may
-  let debug: EntityId = addOverlay(
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = loadScene(
     world: world
-    overlay: HudOverlay { draw: OverlayDraw.debugReadout, order: 90, shows: OverlayShows.always }
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Page", layer: ""))
   )
-  let labels: EntityId = addOverlay(
+  let dialog: EntityId = loadScene(
     world: world
-    overlay: HudOverlay { draw: OverlayDraw.worldLabels, order: 10, shows: OverlayShows.gameMode }
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Dialog", layer: "dialog"))
   )
-  let log: EntityId = addOverlay(
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+
+  var paint: HudLayerPaint = createHudLayerPaint()
+  buildHudLayerPlan(
+    paint: paint
     world: world
-    overlay: HudOverlay { draw: OverlayDraw.logStrip, order: 80, shows: OverlayShows.editorMode }
+    uiSystems: uiSystems
+    editor: false
   )
-  let scene: EntityId = addOverlay(
+  log("GAME:{planText(paint: paint, world: world)}")
+  buildHudLayerPlan(
+    paint: paint
     world: world
-    overlay: HudOverlay { draw: OverlayDraw.sceneUi, order: 20, shows: OverlayShows.always }
+    uiSystems: uiSystems
+    editor: true
   )
-  let appOverlay: EntityId = addOverlay(
+  log("EDITOR:{planText(paint: paint, world: world)}")
+
+  let compass: Int = addLayerDraw(
+    stack: paint.stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: paint.stack, name: "hudOver")
+      kind: LayerDrawKind.app
+      appKind: 7
+    }
+  )
+  buildHudLayerPlan(
+    paint: paint
     world: world
-    overlay: HudOverlay { draw: OverlayDraw.app, order: 50, shows: OverlayShows.always }
+    uiSystems: uiSystems
+    editor: false
   )
-  log("GAME:{listed(world: world, editor: false)}")
-  log("EDITOR:{listed(world: world, editor: true)}")
-  componentRemove(this: world.hudOverlays, entityId: appOverlay)
-  log("the app's taken away:{listed(world: world, editor: false)}")
+  log("an app's compass:{planText(paint: paint, world: world)}")
+  setLayerDrawActive(stack: paint.stack, index: compass, active: false)
+  buildHudLayerPlan(
+    paint: paint
+    world: world
+    uiSystems: uiSystems
+    editor: false
+  )
+  log("hidden again:{planText(paint: paint, world: world)}")
 }

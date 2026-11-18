@@ -560,10 +560,12 @@ func renderWalkerApp(
             camera: cameraSystem.camera
           )
         }
-        # Every overlay entity, in order (ui/HudOverlay): the crowd's names
-        # (app3d/WalkerNames) under the scene UI in GAME mode, the scene UI,
-        # the log strip in EDITOR mode, the debug readout over everything
-        drawOverlays(
+        # Everything 2D in layer order (app3d/HudOverlays drawHudLayers): the
+        # crowd's names (app3d/WalkerNames) in the world layer in GAME mode,
+        # the scene UI's layers, the log strip in EDITOR mode, the debug readout
+        # over everything
+        drawHudLayers(
+          paint: renderSystem.layerPaint
           world: inputSystem.world
           uiSystems: uiSystems
           gpuUi: inputSystem.gpuUi

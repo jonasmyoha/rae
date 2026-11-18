@@ -609,6 +609,16 @@ are on the plan (2c). The flat paint lists were not built: 106 has no `CustomPai
 none of its roots is split and it walks each root once, as before; a split root costs one walk per
 part, which 147 (one code) does not notice.
 
+**Built (step 2c, 2026-11-18):** Rae 0.4.14, case 1202. `app3d/HudOverlays` draws by the plan:
+`HudLayerPaint` holds the stack (the standard one, the world layer set to game mode with
+`setLayerShows`), the UI world's contribution and the plan, with three draws: the world's labels
+(world), the log strip (log, editor mode) and the debug readout (debug). `drawHudLayers` adopts the
+world's own layers, refreshes, builds and walks the plan (`paintPlanStepRaeG` for Rae's steps, the
+three draws by kind), then the shared nodes and the canvas guides, as `renderSystemGpu2d` does. The
+walkers keep it on `WalkerRender.layerPaint`. `ui/HudOverlay` and `UiWorld.hudOverlays`,
+`addStandardHudOverlays`, `drawRaeOverlay` and `drawOverlays` are gone. Not yet (queued as 2c-2):
+draw areas as clips, the safe rectangle, the depth-sorted world layer.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

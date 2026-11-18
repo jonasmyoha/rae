@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.14, 2026-11-18: the 3D shell's overlays by the layer plan; HudOverlay removed
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.14` moves a project.
+
+- `app3d/HudOverlays`: the shell draws everything 2D by the window's layer stack:
+  `HudLayerPaint` (`createHudLayerPaint`, `drawHudLayers`, `buildHudLayerPlan`) puts the world's
+  labels in the world layer (game mode), the scene UI's roots in their layers, the log strip in
+  the log layer (editor mode) and the debug readout in the debug layer. An app's own drawing is a
+  `LayerDraw` it adds. The walkers keep it on their `WalkerRender`.
+- Removed (breaking): `ui/HudOverlay` (`HudOverlay`, `OverlayDraw`, `OverlayShows`,
+  `overlaysInOrder`, `UiWorld.hudOverlays`) and `addStandardHudOverlays`, `drawRaeOverlay`,
+  `drawOverlays`. A program on them moves to a `LayerDraw` in its layer.
+- `setLayerShows` paints a layer in one mode only.
+
 ## 0.4.13, 2026-11-18: UI layers, the first steps
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.13` moves a project. The first steps of

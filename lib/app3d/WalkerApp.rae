@@ -643,9 +643,6 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       logWarnLine(ov: logOverlay, text: "editor chrome failed to mount")
     }
     hideCameraSmoothingToggles(world: uiWorld)
-    # Rae's overlay entities: names, the scene UI, the log strip, the debug
-    # readout (app3d/HudOverlays)
-    addStandardHudOverlays(world: uiWorld)
     settingsApplyToWorld(settingsState: settingsState, world: uiWorld, uiSystems: uiSystems)
     applyEditorPanelOpen(world: uiWorld, open: settingsState.open)
     # The scene look: the walker's own, or one RAE_SCENE_LOOK names
@@ -773,6 +770,7 @@ func createWalkerApp(settings: view WalkerAppSettings) ret WalkerApp {
       terrainSystem: own terrainSystem
       renderSystem: {
         renderer: own renderer
+        layerPaint: createHudLayerPaint()
         drs: own drs
         shadowLogged: false
         cubeBatch: own cubeBatch

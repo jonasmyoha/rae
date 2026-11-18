@@ -205,6 +205,18 @@ func createStandardLayerStack() ret LayerStack {
   ret stack
 }
 
+# Paint the layer named `name` only in that mode (a program's choice: the walkers show world
+# labels in game mode only)
+func setLayerShows(stack: mod LayerStack, name: view String, shows: view LayerShows) {
+  loop var i: Int = 0, i < stack.layers.length, ++i {
+    if let layer: mod UiLayer = stack.layers.modAt(index: i) {
+      if layer.name is name {
+        layer.shows = shows
+      }
+    }
+  }
+}
+
 # The id of the layer named `name`, if there is one
 func layerIdNamed(stack: view LayerStack, name: view String) ret opt Int {
   loop let layer: view UiLayer in stack.layers {
