@@ -58,6 +58,7 @@ open ui/RenderSystem
 open ui/UiSystems
 open app3d/WalkerCharacter
 open app3d/HudOverlays
+open ui/LayerCapture
 open app3d/WalkerInput
 open app3d/WalkerTerrain
 open app3d/WalkerWorld
@@ -190,18 +191,35 @@ func cameraUpdate(
     )
   }
   # The scene's touch stick (node MoveStick, shown by its touch frame)
-  inputSystem.touchStick = updateTouchControls(
-    rig: cameraSystem.rig
-    world: inputSystem.world
-    uiSystems: inputSystem.uiSystems
-    res: inputSystem.gpuUi
-    stickNodeId: "MoveStick"
-  )
+  # under an open modal (a dialog, the "..." menu) the stick lets go and takes no finger
+  if inputSystem.captures.modalPosition >= 0 {
+    inputSystem.touchStick = createTouchStickState()
+    setCameraTouch(
+      rig: cameraSystem.rig
+      excludeId: -1
+      joystickActive: false
+      zoneX: 0.0
+      zoneY: 0.0
+      zoneR: -1.0
+    )
+  } else {
+    inputSystem.touchStick = updateTouchControls(
+      rig: cameraSystem.rig
+      world: inputSystem.world
+      uiSystems: inputSystem.uiSystems
+      res: inputSystem.gpuUi
+      stickNodeId: "MoveStick"
+    )
+  }
+  # the fingers the UI holds (on its buttons, under a modal) do not turn the camera
+  blockClaimedCameraFingers(rig: cameraSystem.rig, captures: inputSystem.captures)
   let joyActive: Bool = inputSystem.touchStick.active
   var cameraMoved: Bool = updateCameraRig(
     rig: cameraSystem.rig
     camera: cameraSystem.camera
-    allowInput: uiPointerCaptured(input: inputSystem.ui) is false
+    allowInput: uiPointerCaptured(input: inputSystem.ui) is false and not uiClaimsPointer(
+      captures: inputSystem.captures
+    )
     wheel: uiWheelUnclaimed(input: inputSystem.ui)
     deltaTime: deltaTime
   )

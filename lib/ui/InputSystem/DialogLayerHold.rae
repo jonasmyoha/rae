@@ -1,0 +1,81 @@
+# The dialog layer's hold on presses for a program that does not keep a layer plan (one world,
+# renderSystemGpu2d; docs/ui-layers-design.md §7): while a root on the "dialog" layer shows anything
+# (a presented dialog, the "..." menu raised there, a resident full-screen page shown), a press
+# lands only on it or on a layer above it (debug); anything under it gets nothing. A program that
+# keeps a plan has the same rule from ui/LayerHit's walk.
+open ui/Ecs
+open ui/AnimationComponents
+open ui/Components
+open ui/Layer
+import Gpu2d
+import Gpu2dGestures
+import Math
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/UiSystems
+open ui/ZOrder
+open ui/ButtonSystem
+open ui/InputKind
+open ui/DesignUnits
+open ui/ScrollDrag
+open ui/Transform
+import Device
+open ui/UiLayers
+
+# The root `entityId` is painted with: its first raised ancestor (itself included), else its top
+func hitRootOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret EntityId {
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if isRaisedNode(world: world, uiSystems: uiSystems, entityId: at) or not componentHas(
+      this: uiSystems.hierarchy.parents
+      entityId: at
+    ) {
+      ret at
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret at
+}
+
+# `hit` (a press's answer) as the dialog layer lets it be: itself when no dialog-layer root shows,
+# when it is in one, or when it is on a layer above; noEntity when a shown dialog-layer root covers
+# the layer it is on
+func dialogLayerHolds(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  hit: view EntityId
+) ret EntityId {
+  if componentCount(this: world.layerRefs) is 0 {
+    ret hit
+  }
+  var hitRoot: EntityId = noEntity()
+  if isNone(this: hit) is false {
+    hitRoot = hitRootOf(world: world, uiSystems: uiSystems, entityId: hit)
+  }
+  var shown: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.layerRefs), ++i {
+    let root: EntityId = componentEntityAt(this: world.layerRefs, i: i)
+    let layer: EntityId = componentView(this: world.layerRefs, entityId: root).layer
+    if componentHas(this: world.layerRoots, entityId: layer) and componentView(
+      this: world.layerRoots
+      entityId: layer
+    ).id is layerDialogId and sceneRootTakesInput(world: world, uiSystems: uiSystems, root: root) {
+      if root is hitRoot {
+        ret hit
+      }
+      shown = true
+    }
+  }
+  if not shown or isNone(this: hit) {
+    ret hit
+  }
+  if entityLayerOrder(world: world, entityId: hitRoot) > layerDialogOrder {
+    ret hit
+  }
+  ret noEntity()
+}

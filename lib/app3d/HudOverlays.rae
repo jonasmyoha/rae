@@ -26,6 +26,8 @@ open ui/UiSystems
 open ui/UiLayers
 open ui/LayerLegacy
 open ui/LayerFrame
+open ui/LayerCapture
+open ui/LayerHit
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -291,6 +293,105 @@ func drawWorldLabelAnchor(
         label: componentView(this: labels, entityId: componentEntityAt(this: labels, i: anchor.id))
         at: Vec3.create(x: anchor.x, y: anchor.y, z: anchor.z)
       )
+    }
+  }
+}
+
+# This frame's presses through the last drawn plan (the one on screen): the mouse (pointer -1) and
+# each finger (its touch id) captured by what the hit walk finds, released when let go, and every
+# capture under a modal that shows now canceled (ui/LayerCapture). The camera, the touch stick and
+# the keys ask the claims after this.
+func hudCapturesStep(
+  paint: view HudLayerPaint
+  captures: mod UiCaptures
+  world: view UiWorld
+  uiSystems: view UiSystems
+) {
+  capturesFrameBegin(
+    captures: captures
+    plan: paint.plan
+    stack: paint.stack
+    contributions: paint.contributions
+  )
+  if Gpu2d.pointerReleased() {
+    captureRelease(captures: captures, pointerId: -1)
+  }
+  if Gpu2d.pointerPressed() {
+    hudCapturePress(
+      paint: paint
+      captures: captures
+      world: world
+      uiSystems: uiSystems
+      pointerId: -1
+      x: Gpu2d.pointerX()
+      y: Gpu2d.pointerY()
+    )
+  }
+  # fingers that are gone let go of their captures
+  loop var c: Int = captures.captures.length - 1, c >= 0, --c {
+    let pointerId: Int = captures.captures.copyAtFallback(
+      index: c
+      fallback: PointerCapture { pointerId: -1, hit: UiHit {}, claimed: false }
+    ).pointerId
+    if pointerId >= 0 {
+      var down: Bool = false
+      loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+        if Gpu2d.touchId(index: i) is pointerId {
+          down = true
+        }
+      }
+      if not down {
+        captureRelease(captures: captures, pointerId: pointerId)
+      }
+    }
+  }
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    if Gpu2d.touchPressed(index: i) {
+      hudCapturePress(
+        paint: paint
+        captures: captures
+        world: world
+        uiSystems: uiSystems
+        pointerId: Gpu2d.touchId(index: i)
+        x: Gpu2d.touchX(index: i)
+        y: Gpu2d.touchY(index: i)
+      )
+    }
+  }
+}
+
+# One press of `pointerId` at (x, y) through the plan on screen, captured by what it hits
+func hudCapturePress(
+  paint: view HudLayerPaint
+  captures: mod UiCaptures
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pointerId: view Int
+  x: view Float
+  y: view Float
+) {
+  let unusedHit: UiHit = capturePress(
+    captures: captures
+    pointerId: pointerId
+    walk: uiHitWalkAt(
+      plan: paint.plan
+      stack: paint.stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+      targetSize: 0.0
+      skip: noEntity()
+    )
+  )
+}
+
+# The fingers the UI holds this frame do not start a camera drag (after setCameraTouch)
+func blockClaimedCameraFingers(rig: mod CameraRig, captures: view UiCaptures) {
+  loop let capture: view PointerCapture in captures.captures {
+    if capture.pointerId >= 0 and capture.claimed {
+      blockCameraFinger(rig: rig, id: capture.pointerId)
     }
   }
 }

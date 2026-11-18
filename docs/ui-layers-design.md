@@ -649,6 +649,24 @@ held and took a node, a surface or was blocked by a modal; `uiClaimsKeys` while 
 program set `setUiTextFocus`. Hover and the wheel are the same walk at the pointer's place
 (`uiHitWalkAt`), so they need nothing of their own. Rae's systems and dialogs move onto these in 3c.
 
+**Built (step 3c, the first part, 2026-11-18):** case 1543.
+
+- The walkers keep a `UiCaptures` on `WalkerInput`. Each frame, before the camera,
+  `hudCapturesStep` (app3d/HudOverlays) runs `capturesFrameBegin` on the last drawn plan (the one on
+  screen), captures the mouse and every new finger with `hudCapturePress` through the hit walk, and
+  releases the ones let go. The camera does not drag with a press the UI claims, its touch turn
+  does not take a claimed finger (`blockClaimedCameraFingers`), the touch stick lets go while a
+  modal shows, and WASD, R and V wait while the UI has the pointer or the keys (`walkerKeysFree`).
+  The "..." menu, raised to the dialog layer, is such a modal.
+- A program without a plan keeps `uiHitTest`'s root walk, and `uiHitTestTarget` now ends with
+  `dialogLayerHolds` (ui/InputSystem/DialogLayerHold): while a root on the dialog layer shows
+  anything, a press lands only in it or on a layer above it; anything else gets nothing. The "..."
+  menu still closes on a press elsewhere, because a press that lands on nothing is elsewhere.
+- A root that is leaving (a dialog animating out after its close) takes no input and holds none:
+  `sceneRootTakesInput` (shown and not `Leaving`) is what the hold and the hit walk ask.
+- Not yet (queued as 3c-2): dialogs closed by `LayerTappedOutside`, the scroll root and the touch
+  stick asking the claims themselves, a text field's focus as `setUiTextFocus`.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

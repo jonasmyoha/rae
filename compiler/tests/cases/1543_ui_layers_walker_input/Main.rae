@@ -1,0 +1,203 @@
+# Rae's input on the layer walk (app3d/HudOverlays hudCapturePress, ui/LayerCapture,
+# ui/InputSystem's dialog-layer hold; docs/ui-layers-design.md §7), headless. A page with a button
+# and a dialog card (a scene tagged for the dialog layer), first hidden:
+#   1. through the walker's plan (HudLayerPaint), a finger on the page's empty part is not the UI's:
+#      the camera may turn with it;
+#   2. the dialog open: a finger anywhere off the card is blocked and the UI's, so the camera does
+#      not start a drag with it; the keys (WASD) are the UI's; the dialog hears a tap outside;
+#   3. a program without a plan (uiHitTest): with the dialog shown a press on the button under it
+#      lands nowhere and one on the card on the card; hidden, the button is pressed again.
+import ui/Components
+import Vec3
+open ui/Ecs
+open ui/InputSystem
+open ui/LayerCapture
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open app3d/CameraRig
+open app3d/HudOverlays
+open ecs/Entity
+open ecs/ComponentTable
+open Scene3d
+
+func boxScene(
+  name: view String
+  layer: view String
+  x: view Int
+  y: view Int
+  w: view Int
+  h: view Int
+) ret String {
+  var tag: String = ""
+  if layer.length() > 0 {
+    tag = ",\"LayerTag\":\{\"id\":\"{layer}\"\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}Root\",\"nodes\":\{\"{name}Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}{tag},\"Children\":[\"{name}\"]\},\"{name}\":\{\"Rect\":\{\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h}\},\"OnClick\":\{\"actionId\":\"{name}\",\"label\":\"{name}\"\}\}\}\}"
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Button", "Card" } {
+    if let index: Int = world.nodeIds.get(k: id) {
+      if nodeEntityId(world: world, index: index) is entityId {
+        ret id
+      }
+    }
+  }
+  ret "nothing"
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  paint: mod HudLayerPaint
+  captures: mod UiCaptures
+) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  buildHudLayerPlan(
+    paint: paint
+    world: world
+    uiSystems: uiSystems
+    editor: false
+  )
+  capturesFrameBegin(
+    captures: captures
+    plan: paint.plan
+    stack: paint.stack
+    contributions: paint.contributions
+  )
+}
+
+func cameraBlocks(rig: view CameraRig, id: view Int) ret Bool {
+  ret rig.camBlockedIds.contains(value: id)
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: boxScene(
+      name: "Button"
+      layer: ""
+      x: 0
+      y: 0
+      w: 200
+      h: 200
+    ))
+  )
+  let dialog: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: boxScene(
+      name: "Card"
+      layer: "dialog"
+      x: 250
+      y: 250
+      w: 100
+      h: 100
+    ))
+  )
+  componentSet(this: world.actives, entityId: dialog, data: Active { value: false })
+  var paint: HudLayerPaint = createHudLayerPaint()
+  var captures: UiCaptures = createUiCaptures()
+  var rig: CameraRig = createCameraRig(camera: Camera3d {
+    position: Vec3.create(x: 0.0, y: -5.0, z: 2.0)
+    target: Vec3.create(x: 0.0, y: 0.0, z: 1.0)
+    fovYDeg: 60.0
+    nearZ: 0.1
+    farZ: 100.0
+  })
+  frame(
+    world: world
+    uiSystems: uiSystems
+    paint: paint
+    captures: captures
+  )
+
+  hudCapturePress(
+    paint: paint
+    captures: captures
+    world: world
+    uiSystems: uiSystems
+    pointerId: 1
+    x: 300.0
+    y: 100.0
+  )
+  blockClaimedCameraFingers(rig: rig, captures: captures)
+  log(
+    "1. no dialog: finger 1 on empty page the UI's {uiClaimsTouch(captures: captures, touchId: 1)}, the camera blocks it {cameraBlocks(
+      rig: rig
+      id: 1
+    )}; keys the UI's {uiClaimsKeys(captures: captures)}"
+  )
+  captureRelease(captures: captures, pointerId: 1)
+
+  componentSet(this: world.actives, entityId: dialog, data: Active { value: true })
+  frame(
+    world: world
+    uiSystems: uiSystems
+    paint: paint
+    captures: captures
+  )
+  hudCapturePress(
+    paint: paint
+    captures: captures
+    world: world
+    uiSystems: uiSystems
+    pointerId: 2
+    x: 100.0
+    y: 100.0
+  )
+  rig.camBlockedIds = {}
+  blockClaimedCameraFingers(rig: rig, captures: captures)
+  var outside: String = ""
+  loop let tapped: view LayerTappedOutside in captures.tappedOutside {
+    outside = "{outside} {layerNameOf(stack: paint.stack, id: tapped.layer)}"
+  }
+  log(
+    "2. the dialog open: finger 2 on the button under it the UI's {uiClaimsTouch(
+      captures: captures
+      touchId: 2
+    )}, the camera blocks it {cameraBlocks(rig: rig, id: 2)}; keys the UI's {uiClaimsKeys(
+      captures: captures
+    )}; tapped outside:{outside}"
+  )
+
+  log("3. without a plan, the dialog shown: a press on the button lands on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 100.0
+      y: 100.0
+    )
+  )}, on the card on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 300.0
+      y: 300.0
+    )
+  )}")
+  componentSet(this: world.actives, entityId: dialog, data: Active { value: false })
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("   hidden: a press on the button lands on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 100.0
+      y: 100.0
+    )
+  )}")
+}

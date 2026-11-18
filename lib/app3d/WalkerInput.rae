@@ -10,6 +10,7 @@
 import Sdl3
 import Keys
 open ecs/Entity
+open ui/LayerCapture
 open ui/Ecs
 open ui/InputSystem
 open ui/RenderSystem
@@ -43,6 +44,9 @@ type WalkerInput {
   uiModes: UiModes
   # What the "..." menu's moon item says now (app3d/WalkerUi)
   moonItemText: String
+  # Presses held in layer order and what the UI claims (ui/LayerCapture), fed each frame from the
+  # last drawn plan (app3d/HudOverlays hudCapturesStep)
+  captures: UiCaptures
 }
 
 # Window-geometry + hot-reload persistence. (#555)
@@ -121,4 +125,12 @@ func walkerResetKeyPressed() ret Bool {
 # back to the WASD camera (app3d/WalkerSpawnHere)
 func walkerSpawnHereKeyPressed() ret Bool {
   ret Sdl3.isKeyPressed(key: Keys.keyV)
+}
+
+# The walker's keys (WASD, R, V) act: the UI has neither the pointer (hovered or pressed) nor the
+# keys (an open modal: a dialog or the "..." menu, ui/LayerCapture)
+func walkerKeysFree(inputSystem: view WalkerInput) ret Bool {
+  ret uiPointerCaptured(input: inputSystem.ui) is false and not uiClaimsKeys(
+    captures: inputSystem.captures
+  )
 }

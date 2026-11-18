@@ -294,8 +294,17 @@ func uiHitTestTarget(
   y: view Float
   targetSize: view Float
 ) ret EntityId {
+  var hit: EntityId = noEntity()
   if hitIndexCurrent(world: world, uiSystems: uiSystems) {
-    ret hitIndexTest(
+    hit = hitIndexTest(
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+      targetSize: targetSize
+    )
+  } else {
+    hit = uiHitTestWalk(
       world: world
       uiSystems: uiSystems
       x: x
@@ -303,13 +312,8 @@ func uiHitTestTarget(
       targetSize: targetSize
     )
   }
-  ret uiHitTestWalk(
-    world: world
-    uiSystems: uiSystems
-    x: x
-    y: y
-    targetSize: targetSize
-  )
+  # a shown dialog-layer root holds every press under it (DialogLayerHold)
+  ret dialogLayerHolds(world: world, uiSystems: uiSystems, hit: hit)
 }
 
 # The hit test by walking every root's tree in reverse paint order

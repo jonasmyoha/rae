@@ -211,3 +211,22 @@ func walkerCharacterModel(
     controller: controllerOf(controllers: world.controllers, entityId: entityId)
   )
 }
+
+# The clip `entityId` plays (idle without an AnimationState)
+func walkerClipOf(world: view WalkerWorld, entityId: view EntityId) ret Int {
+  if componentHas(this: world.animStates, entityId: entityId) {
+    ret componentView(this: world.animStates, entityId: entityId).clipIndex
+  }
+  ret ClipKind.idle as Int
+}
+
+# Is any character still blending out of a clip change (an animation source:
+# the frame loop keeps drawing)?
+func anyCharacterTransitionActive(world: view WalkerWorld) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: world.animTransitions), ++i {
+    if transitionActive(transition: componentCopyAtDefault(this: world.animTransitions, i: i)) {
+      ret true
+    }
+  }
+  ret false
+}

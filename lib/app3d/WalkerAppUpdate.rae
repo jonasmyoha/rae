@@ -21,6 +21,7 @@ open Weather
 open WeatherWind
 open Wind
 open GeoPlace
+open ui/LayerCapture
 open app3d/SettingsClouds
 open app3d/SeasonImpostors
 open app3d/GroundPalette
@@ -475,6 +476,14 @@ func updateWalkerApp(app: mod WalkerApp) {
   let settingsChanged: Bool = uiTick.settingsChanged
   let scrolled: Bool = uiTick.scrolled
 
+  # presses in layer order through the plan on screen: what the UI holds, the camera and the
+  # keys leave alone (app3d/HudOverlays, ui/LayerCapture)
+  hudCapturesStep(
+    paint: app.renderSystem.layerPaint
+    captures: app.inputSystem.captures
+    world: app.inputSystem.world
+    uiSystems: app.inputSystem.uiSystems
+  )
   Profile.zoneBegin(profiler: app.profiler, name: "camera")
   let camTick: CameraTick = cameraUpdate(
     uiSystems: app.inputSystem.uiSystems
@@ -546,7 +555,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     intent = inputUpdate(
       stick: app.inputSystem.touchStick
-      allowKeys: uiPointerCaptured(input: app.inputSystem.ui) is false and app.characterSystem.playing
+      allowKeys: walkerKeysFree(inputSystem: app.inputSystem) and app.characterSystem.playing
       jumpButton: uiActionFired(world: app.inputSystem.world, actionId: jumpActionId)
     )
   }
@@ -559,7 +568,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   )
   app.frame.savedFrame = autoWalkSaveFrame(frame: app.frame.savedFrame, seconds: app.frame.time)
   # R, or the "..." menu's Reset: everything back as it started
-  let resetKey: Bool = walkerResetKeyPressed() and uiPointerCaptured(input: app.inputSystem.ui) is false
+  let resetKey: Bool = walkerResetKeyPressed() and walkerKeysFree(inputSystem: app.inputSystem)
   if takeModeMenuReset(menu: app.inputSystem.uiModes.modeMenu) or resetKey {
     resetWalkerToStart(
       walkerReset: app.walkerReset
@@ -574,7 +583,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   }
   # V: the character in front of the WASD camera, in Character control; or
   # back to the WASD camera (app3d/WalkerSpawnHere)
-  if walkerSpawnHereKeyPressed() and uiPointerCaptured(input: app.inputSystem.ui) is false {
+  if walkerSpawnHereKeyPressed() and walkerKeysFree(inputSystem: app.inputSystem) {
     toggleWalkerSpawnHere(
       rig: app.cameraSystem.rig
       camera: app.cameraSystem.camera
@@ -975,23 +984,4 @@ func updateWalkerCharacters(
       }
     }
   }
-}
-
-# The clip `entityId` plays (idle without an AnimationState)
-func walkerClipOf(world: view WalkerWorld, entityId: view EntityId) ret Int {
-  if componentHas(this: world.animStates, entityId: entityId) {
-    ret componentView(this: world.animStates, entityId: entityId).clipIndex
-  }
-  ret ClipKind.idle as Int
-}
-
-# Is any character still blending out of a clip change (an animation source:
-# the frame loop keeps drawing)?
-func anyCharacterTransitionActive(world: view WalkerWorld) ret Bool {
-  loop var i: Int = 0, i < componentCount(this: world.animTransitions), ++i {
-    if transitionActive(transition: componentCopyAtDefault(this: world.animTransitions, i: i)) {
-      ret true
-    }
-  }
-  ret false
 }

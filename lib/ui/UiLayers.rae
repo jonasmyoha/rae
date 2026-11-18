@@ -653,6 +653,19 @@ func updateEntriesShown(
   updateLayerCustoms(contribution: contribution, world: world, uiSystems: uiSystems)
 }
 
+# Does the root take input: shown, and not leaving (a dialog animating out after its close takes
+# no press and holds none)
+func sceneRootTakesInput(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  root: view EntityId
+) ret Bool {
+  ret sceneRootShown(world: world, uiSystems: uiSystems, root: root) and not componentHas(
+    this: world.leavings
+    entityId: root
+  )
+}
+
 # Does the root (or raised node) show anything a press could land on or a cover could hide
 # under? A layer entity does not, a raised node of a hidden scene does not, and neither does a
 # root that is inactive or hidden: a mounted but hidden page keeps its layer from blocking input
