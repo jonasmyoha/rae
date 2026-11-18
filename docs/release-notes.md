@@ -4,6 +4,39 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.20, 2026-11-19: UI layers, released
+
+A patch release in the 0.4 line that closes the UI layers work (docs/ui-layers-design.md):
+everything 2D in a window is painted and hit in one order, the window's layer stack. It sums up
+0.4.15 to 0.4.19 and the layer steps since 0.4.14. `./rae toolchain pin 0.4.20` moves a project;
+a program on the removed names below moves first.
+
+- **Input through the plan and the claims.** `ui/LayerCapture`: a press is captured in layer order
+  until it is let go; a modal layer or draw that opens over it cancels it (`PointerCanceled`); a
+  press outside a `dismissOnOutsideTap` layer is reported (`LayerTappedOutside`); the camera, the
+  touch stick, the scroll root and a game's gestures ask `uiClaimsPointer` / `uiClaimsTouch` /
+  `uiClaimsKeys` first. `uiHitTest` and the walkers' input follow the same order; a shown dialog
+  holds the presses under it.
+- **Order inside a layer.** `LayerTag { id, z }`, `ZIndex` among siblings (`ui/ZOrder`), raised
+  nodes that keep their parent's place but take no ancestor opacity, `reparentKeepingPlace`,
+  `LayerScope` keeping a subtree's layers to itself, a scene's own layers, and a node's z set at a
+  motion's keys (`ui/ZKeys`).
+- **Effects and page transitions.** Safe rectangles, draw areas as clips, world anchors sorted far
+  to near, the backdrop blur per layer, isolated layers composited once at their opacity, and page
+  transitions painting both worlds by one plan.
+- **The moved programs.** The "..." menu on the dialog layer, the editor panel and the walkers'
+  overlays by a plan, 106 and 121 on the stack, the pong and tetris boards as program draws under
+  the scene UI.
+- **LayerTag is the one link from a node to its layer** (0.4.17, breaking). Removed: `LayerRoot`,
+  `LayerRef`, `collectPaintableRoots`, `createStandardLayers`, `createLayerEntity`,
+  `findLayerEntity`, `entityLayerOrder`, `raiseTaggedNodes`, `layerDialogOrder`,
+  `gpu2dLayerRange` and `ui/LayerLegacy`; "content" and "back-button" are now "hud" and "dock".
+- **Seeing the layers.** The debug overlay's Layers page (`ui/DebugLayers`), `layerReportRows`, and
+  121's Layers panel with inspector edits of LayerTag, ZIndex and CustomPaint (0.4.18).
+- **Measured** on an iPhone 15 Pro against the commit before the layers: the same frame times, CPU
+  time and draw calls (0.4.19, `RAE_GPU2D_DRAWS=1`).
+- Packages: qr 1.2.0 (a QrCode node painted in its place in the order, needs Rae 0.4.13).
+
 ## 0.4.19, 2026-11-19: the UI layers measured on a phone
 
 - `RAE_GPU2D_DRAWS=1`: the 2D canvas logs its draw calls a frame (docs/profiling.md).
