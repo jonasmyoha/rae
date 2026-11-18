@@ -698,6 +698,21 @@ program set `setUiTextFocus`. Hover and the wheel are the same walk at the point
   LayerTag and ZIndex stay.
 - Not yet (queued as 4c): `LayerScope` and a scene's own `layers`.
 
+**Built (step 4c, 2026-11-18):** `lib/ui/SceneLayers.rae`, case 1546.
+
+- `LayerScope { clip }` is a scene key and a world table. It is not a second paint plan inside the
+  node: a `LayerTag` below a `LayerScope` is simply not raised to the window's stack
+  (`raiseTaggedNodes` skips it, and lowers it again if it was raised), and the scope node paints its
+  tagged descendants after the rest of its subtree, sorted by their layer's standard order and `z`,
+  clipped to its box (`paintScopedTaggedG`). The hit test and the hit index test them first, in the
+  reverse order, and every child walk skips them (`isScopedTagged`). A nested scope keeps its own.
+  For 121's edited document this is what matters: the document's dialog stays inside the view, over
+  the document's page and under the editor's own layers. A document's modal rule (input under its
+  dialog) is left to the document view.
+- `sceneLayerDefs(scene)` reads a scene's top-level `"layers": { "minimap": { "order": 250 } }` from
+  its document (no parser change), and `addSceneLayers(stack, scene)` adds the ones the stack does
+  not have, in the stack's own orders.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

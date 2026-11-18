@@ -639,6 +639,17 @@ func paintSubtreeG(
         canvas: canvas
         range: range
       )
+      # a LayerScope paints its subtree's tagged nodes last, in their layers' order
+      if componentHas(this: world.layerScopes, entityId: entityId) {
+        paintScopedTaggedG(
+          world: world
+          uiSystems: uiSystems
+          scope: entityId
+          res: res
+          canvas: canvas
+          range: range
+        )
+      }
     }
     if children is PaintChildren.capture {
       paintCaptureFinish(canvas: canvas)
@@ -700,7 +711,11 @@ func paintChildrenG(
         if ranks.copyAtFallback(index: i, fallback: 0) is pass and componentHas(
           this: uiSystems.animation.sharedNodes
           entityId: cid
-        ) is false and isRaisedNode(world: world, uiSystems: uiSystems, entityId: cid) is false {
+        ) is false and isRaisedNode(world: world, uiSystems: uiSystems, entityId: cid) is false and not isScopedTagged(
+          world: world
+          uiSystems: uiSystems
+          entityId: cid
+        ) {
           paintSubtreeG(
             world: world
             uiSystems: uiSystems

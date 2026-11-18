@@ -193,9 +193,14 @@ func legacyLayerOrderOf(name: view String) ret Int {
 # has none): a root moves to that layer, a node inside a scene is raised, and a tag changed later
 # moves it again. "hud" is the old "content" layer. An empty id is only a z (ui/UiLayers
 # setRootZ). Run by the transform pass.
-func raiseTaggedNodes(world: mod UiWorld) {
-  loop var i: Int = 0, i < componentCount(this: world.layerTags), ++i {
+func raiseTaggedNodes(world: mod UiWorld, uiSystems: view UiSystems) {
+  loop var i: Int = componentCount(this: world.layerTags) - 1, i >= 0, --i {
     let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
+    # a tag inside a LayerScope stays in its scope: not raised (and lowered again if it was)
+    if insideLayerScope(world: world, uiSystems: uiSystems, entityId: entityId) {
+      componentRemove(this: world.layerRefs, entityId: entityId)
+      continue
+    }
     var name: String = componentView(this: world.layerTags, entityId: entityId).id
     if name.length() is 0 {
       continue
@@ -220,6 +225,114 @@ func raiseTaggedNodes(world: mod UiWorld) {
       order: legacyLayerOrderOf(name: name)
     )
   }
+}
+
+# Is `entityId` below a LayerScope node (its own LayerScope does not count)?
+func insideLayerScope(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  if componentCount(this: world.layerScopes) is 0 {
+    ret false
+  }
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+      ret false
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    if componentHas(this: world.layerScopes, entityId: at) {
+      ret true
+    }
+  }
+  ret false
+}
+
+# A node a LayerScope paints after the rest of its subtree: one with a LayerTag naming a layer,
+# below a LayerScope
+func isScopedTagged(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  if componentCount(this: world.layerScopes) is 0 or not componentHas(
+    this: world.layerTags
+    entityId: entityId
+  ) {
+    ret false
+  }
+  ret componentView(this: world.layerTags, entityId: entityId).id.length() > 0 and insideLayerScope(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  )
+}
+
+# The scope's place for a tagged node: its layer's order (the old scale, legacyLayerOrderOf), then z
+func scopedOrderBefore(world: view UiWorld, a: view EntityId, b: view EntityId) ret Bool {
+  let tagA: view LayerTag = componentView(this: world.layerTags, entityId: a)
+  let tagB: view LayerTag = componentView(this: world.layerTags, entityId: b)
+  let orderA: Int = legacyLayerOrderOf(name: tagA.id)
+  let orderB: Int = legacyLayerOrderOf(name: tagB.id)
+  if orderA is not orderB {
+    ret orderA < orderB
+  }
+  ret tagA.z < tagB.z
+}
+
+func collectScopedTagged(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  out: mod List(EntityId)
+) {
+  if not componentHas(this: world.childrens, entityId: entityId) {
+    ret
+  }
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
+  loop let child: view EntityId in children.ids {
+    if componentHas(this: world.layerTags, entityId: child) and componentView(
+      this: world.layerTags
+      entityId: child
+    ).id.length() > 0 {
+      # in paint order: by layer, then z, keeping tree order for ties
+      var at: Int = out.length
+      loop at > 0 and scopedOrderBefore(
+        world: world
+        a: child
+        b: out.copyAtFallback(index: at - 1, fallback: child)
+      ) {
+        at = at - 1
+      }
+      out.insert(index: at, value: child)
+    }
+    # a nested scope keeps its own
+    if not componentHas(this: world.layerScopes, entityId: child) {
+      collectScopedTagged(
+        world: world
+        uiSystems: uiSystems
+        entityId: child
+        out: out
+      )
+    }
+  }
+}
+
+# The LayerScope node `scope`'s tagged nodes in paint order (bottom first)
+func scopedTaggedNodes(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  scope: view EntityId
+) ret List(EntityId) {
+  var out: List(EntityId) = {}
+  collectScopedTagged(
+    world: world
+    uiSystems: uiSystems
+    entityId: scope
+    out: out
+  )
+  ret out
 }
 
 # Collect every parentless root with a WorldTransform2D, and every raised node

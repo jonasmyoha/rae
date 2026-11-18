@@ -1,0 +1,56 @@
+# ui/SceneLayers — a scene's own layers (docs/ui-layers-design.md §12): a .raescene may declare
+# layers at its top, in the window stack's orders,
+#
+#   "layers": { "minimap": { "order": 250 } }
+#
+# and the program adds them to its stack when it mounts the scene (addSceneLayers); a layer the
+# stack already has keeps its own order.
+import Json
+open ui/Scene
+open ui/UiLayers
+
+# One layer a scene declares
+type SceneLayerDef {
+  name: String
+  order: Int
+}
+
+# The scene's top-level "layers" (empty when it has none)
+func sceneLayerDefs(scene: view Scene) ret List(SceneLayerDef) {
+  var out: List(SceneLayerDef) = {}
+  let doc: view JsonDoc = scene.doc
+  if doc.ok is false {
+    ret out
+  }
+  let idx: Int = Json.field(doc: doc, this: Json.root(doc: doc), key: "layers")
+  if idx < 0 {
+    ret out
+  }
+  let layers: JsonValue = Json.jsonValueAt(doc: doc, idx: idx)
+  if layers.kind is not JsonKind.object {
+    ret out
+  }
+  loop var i: Int = 0, i < Json.objectLen(this: layers), ++i {
+    let name: String = Json.objectKeyAt(doc: doc, this: layers, idx: i)
+    let body: JsonValue = Json.objectValueAt(doc: doc, this: layers, idx: i)
+    var order: Int = layerOrderHud
+    let orderAt: Int = Json.field(doc: doc, this: body, key: "order")
+    if orderAt >= 0 {
+      order = Json.jsonInt(this: Json.jsonValueAt(doc: doc, idx: orderAt), fallback: layerOrderHud)
+    }
+    out.add(value: SceneLayerDef { name: name, order: order })
+  }
+  ret out
+}
+
+# Add the scene's own layers to the stack (those it has not); how many were added
+func addSceneLayers(stack: mod LayerStack, scene: view Scene) ret Int {
+  var added: Int = 0
+  loop let def: view SceneLayerDef in sceneLayerDefs(scene: scene) {
+    if layerIdOf(stack: stack, name: def.name) < 0 {
+      let unusedId: Int = addLayer(stack: stack, name: def.name, order: def.order)
+      added = added + 1
+    }
+  }
+  ret added
+}

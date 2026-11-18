@@ -1,0 +1,146 @@
+# A LayerScope and a scene's own layers (ui/Layer scopedTaggedNodes, ui/SceneLayers;
+# docs/ui-layers-design.md §6, §12), headless. An editor's view (a LayerScope) holds an edited
+# document: its dialog (tagged for the dialog layer, before its page in the tree) and its page; the
+# editor's own panel is in hudOver over part of the view.
+#   1. the document's dialog is not raised to the window's stack (the plan has no dialog layer);
+#      the scope paints it after the page;
+#   2. a press on the document's dialog lands on it (over its page), one where the editor's panel
+#      overlaps the view lands on the panel, one on the page elsewhere on the page;
+#   3. a scene that declares "layers": { "minimap": { "order": 250 } } adds that layer to the
+#      stack, between hud and hudOver, once.
+import ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/Scene
+open ui/SceneLayers
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+func editorScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Editor\",\"nodes\":\{\"Editor\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"View\"]\},\"View\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":300\},\"LayerScope\":\{\},\"Children\":[\"DocDialog\",\"DocPage\"]\},\"DocDialog\":\{\"Rect\":\{\"x\":50,\"y\":50,\"w\":100,\"h\":100\},\"LayerTag\":\{\"id\":\"dialog\"\},\"OnClick\":\{\"actionId\":\"docDialog\",\"label\":\"Doc dialog\"\}\},\"DocPage\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":300\},\"OnClick\":\{\"actionId\":\"docPage\",\"label\":\"Doc page\"\}\}\}\}"
+}
+
+func panelScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"PanelRoot\",\"layers\":\{\"minimap\":\{\"order\":250\}\},\"nodes\":\{\"PanelRoot\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"LayerTag\":\{\"id\":\"hudOver\"\},\"Children\":[\"Panel\"]\},\"Panel\":\{\"Rect\":\{\"x\":200,\"y\":200,\"w\":200,\"h\":200\},\"OnClick\":\{\"actionId\":\"panel\",\"label\":\"Panel\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "DocDialog", "DocPage", "Panel", "View" } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "nothing"
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+const viewId: String = "View"
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let editor: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: editorScene())
+  )
+  let panelScene: Scene = parseScene(source: panelScene())
+  let panel: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: panelScene)
+  place(world: world, uiSystems: uiSystems)
+  place(world: world, uiSystems: uiSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  var layers: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.layerBegin {
+      layers = "{layers} {layerNameOf(stack: stack, id: step.layer)}"
+    }
+  }
+  let docDialog: EntityId = nodeOf(world: world, nodeId: "DocDialog")
+  var scoped: String = ""
+  loop let node: view EntityId in scopedTaggedNodes(
+    world: world
+    uiSystems: uiSystems
+    scope: nodeOf(world: world, nodeId: viewId)
+  ) {
+    scoped = "{scoped} {nameIn(world: world, entityId: node)}"
+  }
+  log(
+    "1. the document's dialog raised to the window: {isRaisedNode(
+      world: world
+      uiSystems: uiSystems
+      entityId: docDialog
+    )}; the plan's layers:{layers}; the scope paints last:{scoped}"
+  )
+  log("2. a press on the document's dialog lands on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 60.0
+      y: 60.0
+    )
+  )}; where the panel overlaps the view on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 250.0
+      y: 250.0
+    )
+  )}; on the page elsewhere on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 250.0
+      y: 20.0
+    )
+  )}")
+
+  let added: Int = addSceneLayers(stack: stack, scene: panelScene)
+  let again: Int = addSceneLayers(stack: stack, scene: panelScene)
+  var around: String = ""
+  loop let layer: view UiLayer in stack.layers {
+    if layer.order >= 200 and layer.order <= 300 {
+      around = "{around} {layer.name} {layer.order}"
+    }
+  }
+  log("3. the scene's own layers added {added} (again {again}):{around}")
+}

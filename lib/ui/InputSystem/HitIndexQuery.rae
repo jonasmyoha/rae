@@ -42,6 +42,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     aliveCount(world: world)
     componentTableGeneration(this: world.zChildOrders)
     componentTableGeneration(this: world.customPaints)
+    componentTableGeneration(this: world.layerScopes)
   }
 }
 
@@ -49,7 +50,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 14 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 15 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
@@ -69,7 +70,9 @@ func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
     index: 11
   ) is aliveCount(world: world) and key.copyAtDefault(index: 12) is componentTableGeneration(
     this: world.zChildOrders
-  ) and key.copyAtDefault(index: 13) is componentTableGeneration(this: world.customPaints)
+  ) and key.copyAtDefault(index: 13) is componentTableGeneration(this: world.customPaints) and key.copyAtDefault(
+    index: 14
+  ) is componentTableGeneration(this: world.layerScopes)
 }
 
 # A clickable node in hit order, and the root of its space
@@ -94,6 +97,23 @@ func hitCollect(
     if componentHas(this: world.cameras, entityId: entityId) {
       space = entityId
     }
+    # a LayerScope's tagged nodes are on top of the rest of its subtree (top first)
+    if componentHas(this: world.layerScopes, entityId: entityId) {
+      let tagged: List(EntityId) = scopedTaggedNodes(
+        world: world
+        uiSystems: uiSystems
+        scope: entityId
+      )
+      loop var t: Int = tagged.length - 1, t >= 0, --t {
+        hitCollect(
+          world: world
+          uiSystems: uiSystems
+          entityId: tagged.copyAtFallback(index: t, fallback: noEntity())
+          spaceRootEntityId: space
+          found: found
+        )
+      }
+    }
     if componentHas(this: world.childrens, entityId: entityId) {
       let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
@@ -104,7 +124,11 @@ func hitCollect(
           children: children
           i: i
         )
-        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false and not isScopedTagged(
+          world: world
+          uiSystems: uiSystems
+          entityId: child
+        ) {
           hitCollect(
             world: world
             uiSystems: uiSystems

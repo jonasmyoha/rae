@@ -254,6 +254,14 @@ type CustomPaint {
   hit: Bool = false
 }
 
+# A node that keeps its subtree's layers to itself (docs/ui-layers-design.md §6): a LayerTag under
+# it is not raised to the window's stack; the tagged nodes are painted after the rest of the
+# subtree, in their layers' order and by z, clipped to the node's box, and hit first. An edited
+# document's own dialog stays inside its view and under the editor's panels.
+type LayerScope {
+  clip: Bool = true
+}
+
 # Runtime, on a parent with a ZIndex child (never authored): its children in paint order and the z
 # each had when sorted, kept by the transform pass (zOrderSystem)
 type ZChildOrder {

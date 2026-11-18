@@ -350,3 +350,50 @@ func renderLayerPlanGpu2d(
     }
   }
 }
+
+# A LayerScope node's tagged nodes, after the rest of its subtree: in their layers' order and by z,
+# clipped to the scope's box when it clips (docs/ui-layers-design.md §6)
+func paintScopedTaggedG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  scope: view EntityId
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  range: mod PaintRange
+) {
+  let tagged: List(EntityId) = scopedTaggedNodes(world: world, uiSystems: uiSystems, scope: scope)
+  if tagged.length is 0 {
+    ret
+  }
+  var clipped: Bool = false
+  if componentView(this: world.layerScopes, entityId: scope).clip and componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: scope
+  ) and componentHas(this: uiSystems.transform2d.worldTransforms, entityId: scope) {
+    let box: WorldRect = worldRectOf(
+      wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: scope)
+      cr: componentView(this: uiSystems.layout.computedRects, entityId: scope)
+    )
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: box.x
+      y: box.y
+      w: box.w
+      h: box.h
+    )
+    clipped = true
+  }
+  loop let node: view EntityId in tagged {
+    paintSubtreeG(
+      world: world
+      uiSystems: uiSystems
+      entityId: node
+      res: res
+      canvas: canvas
+      range: range
+    )
+  }
+  if clipped {
+    Gpu2d.popClipRect(canvas: canvas)
+  }
+}

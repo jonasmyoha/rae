@@ -222,6 +222,27 @@ func uiHitTestEntity(
     if uiEntityActive(world: world, entityId: entityId) is false {
       ret noEntity()
     }
+    # a LayerScope's tagged nodes are on top of the rest of its subtree: tested first
+    if componentHas(this: world.layerScopes, entityId: entityId) {
+      let tagged: List(EntityId) = scopedTaggedNodes(
+        world: world
+        uiSystems: uiSystems
+        scope: entityId
+      )
+      loop var t: Int = tagged.length - 1, t >= 0, --t {
+        let hit: EntityId = uiHitTestEntity(
+          world: world
+          uiSystems: uiSystems
+          entityId: tagged.copyAtFallback(index: t, fallback: noEntity())
+          x: x
+          y: y
+          targetSize: targetSize
+        )
+        if isNone(this: hit) is false {
+          ret hit
+        }
+      }
+    }
     if componentHas(this: world.childrens, entityId: entityId) {
       let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
@@ -232,8 +253,13 @@ func uiHitTestEntity(
           children: children
           i: i
         )
-        # a raised node (ui/Layer isRaisedNode) is tested with its layer's roots instead
-        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+        # a raised node (ui/Layer isRaisedNode) is tested with its layer's roots instead, a
+        # LayerScope's tagged node with its scope above
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false and not isScopedTagged(
+          world: world
+          uiSystems: uiSystems
+          entityId: child
+        ) {
           let hit: EntityId = uiHitTestEntity(
             world: world
             uiSystems: uiSystems
