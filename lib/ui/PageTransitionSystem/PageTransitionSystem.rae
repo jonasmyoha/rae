@@ -31,6 +31,8 @@ open ui/UiSystems
 open ui/AnimationSystem
 open ui/LayoutSystem
 open ui/RenderSystem
+open ui/LayerLegacy
+open ui/UiLayers
 open Gpu2dCanvas
 
 # The page that is leaving, with the world it lives in
@@ -405,8 +407,11 @@ func pageTransitionStep(system: mod PageTransitionSystem) ret Bool {
   ret true
 }
 
-# Paint the screen: the new world, and the old one while it is leaving. Going forward the new page
-# comes over the old one, and going back the old one goes away over the new one.
+# Paint the screen: the new world, and the old one while it is leaving, by one layer plan
+# (ui/UiLayers): both worlds join one stack, and in every layer they share the one in front paints
+# last. Going forward the new page comes over the old one (the new world's key is the higher),
+# going back the old one goes away over the new one (the leaving world's is). Each world's dialogs
+# stay over every page (the dialog layer is over the hud layer).
 func pageTransitionDraw(
   system: view PageTransitionSystem
   world: view UiWorld
@@ -414,17 +419,7 @@ func pageTransitionDraw(
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
 ) {
-  if system.back is false {
-    loop let page: view LeavingWorld in system.leaving {
-      renderSystemGpu2d(
-        world: page.world
-        uiSystems: page.uiSystems
-        res: res
-        canvas: canvas
-      )
-    }
-  }
-  if system.back is false or system.leaving.length is 0 {
+  if system.leaving.length is 0 {
     renderSystemGpu2d(
       world: world
       uiSystems: uiSystems
@@ -433,17 +428,81 @@ func pageTransitionDraw(
     )
     ret
   }
-  # Going back, what stays is over the page that goes away, though its own page is under that one
-  gpu2dLayerRange(
+  # the keys: forward the leaving worlds 0.. and the current one last, back the current one 0
+  var currentKey: Int = system.leaving.length
+  var firstLeavingKey: Int = 0
+  if system.back {
+    currentKey = 0
+    firstLeavingKey = 1
+  }
+  var stack: LayerStack = createStandardLayerStack()
+  adoptWorldLayers(stack: stack, world: world)
+  layerStackAddWorld(stack: stack, worldKey: currentKey)
+  var contributions: List(LayerContribution) = {}
+  loop var k: Int = 0, k < system.leaving.length, ++k {
+    if let page: view LeavingWorld = system.leaving.viewAt(index: k) {
+      adoptWorldLayers(stack: stack, world: page.world)
+      layerStackAddWorld(stack: stack, worldKey: firstLeavingKey + k)
+    }
+  }
+  var current: LayerContribution = createLayerContribution(worldKey: currentKey)
+  refreshLayerContribution(
+    contribution: current
+    stack: stack
     world: world
     uiSystems: uiSystems
-    res: res
-    canvas: canvas
-    minOrder: -1000000
-    maxOrder: 1000000
   )
+  contributions.add(value: own current)
+  loop var k: Int = 0, k < system.leaving.length, ++k {
+    if let page: view LeavingWorld = system.leaving.viewAt(index: k) {
+      var leaving: LayerContribution = createLayerContribution(worldKey: firstLeavingKey + k)
+      refreshLayerContribution(
+        contribution: leaving
+        stack: stack
+        world: page.world
+        uiSystems: page.uiSystems
+      )
+      contributions.add(value: own leaving)
+    }
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.sceneRoot or step.kind is PaintStepKind.sceneRootPart {
+      if step.world is currentKey {
+        paintSceneRootPartG(
+          world: world
+          uiSystems: uiSystems
+          res: res
+          canvas: canvas
+          root: step.entityId
+          from: step.fromNode
+          until: step.untilNode
+        )
+      } else if let page: view LeavingWorld = system.leaving.viewAt(
+        index: step.world - firstLeavingKey
+      ) {
+        paintSceneRootPartG(
+          world: page.world
+          uiSystems: page.uiSystems
+          res: res
+          canvas: canvas
+          root: step.entityId
+          from: step.fromNode
+          until: step.untilNode
+        )
+      }
+    } else if step.kind is PaintStepKind.layerBegin or step.kind is PaintStepKind.layerEnd {
+      paintLayerEdgeG(step: step, stack: stack, canvas: canvas)
+    }
+  }
   loop let page: view LeavingWorld in system.leaving {
-    renderSystemGpu2d(
+    renderSharedNodesGpu2d(
       world: page.world
       uiSystems: page.uiSystems
       res: res

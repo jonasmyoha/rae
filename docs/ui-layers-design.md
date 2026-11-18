@@ -713,6 +713,23 @@ program set `setUiTextFocus`. Hover and the wheel are the same walk at the point
   its document (no parser change), and `addSceneLayers(stack, scene)` adds the ones the stack does
   not have, in the stack's own orders.
 
+**Built (step 5b, 2026-11-18):** `checks/uiLayerEffects`.
+
+- The backdrop blur's copy is per UiLayer: `paintLayerEdgeG` starts a new backdrop layer at each
+  `layerBegin` (`canvasBackdropLayer`), no longer at each root, so every BackdropBlur in a layer
+  shares one copy of what the layers under it drew, every world included; the copy is still reused
+  while nothing under it changed.
+- An isolated layer is drawn at full strength into a frame-sized paint-cache picture
+  (`canvasCacheBegin` with key `isolatedLayerKey`) and composited once at its `layerEnd` at the
+  layer's opacity. When the picture cannot be had (the canvas holds one capture at a time, so a
+  PaintCache node is capturing), the layer falls back to fading draw by draw.
+- `pageTransitionDraw` paints the current world and the leaving ones by one plan: every world joins
+  one stack, going forward the current world's key is the highest (its pages over the leaving one
+  in every layer they share), going back the leaving one's is; layer edges are painted once. The
+  frames are byte for byte the old ones (checks/uiPageTransitions forward and back at half way,
+  against the commit before).
+- Not yet (queued as 5c): `z` set at a motion's keys through the animation tracks.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

@@ -1,0 +1,232 @@
+# Layer effects on the GPU (docs/ui-layers-design.md §8, §9): one 800x600 frame from a program
+# walking its own layer plan, written as a BMP (RAE_GPU2D_SCREENSHOT; a temp file when unset) and
+# read back:
+#   1. a toast (a white draw in the toast layer) that slid in from 60 points below (animateLayer)
+#      sits under an open dialog's blurred, tinted scrim (BackdropBlur): it reads darkened, and its
+#      light spreads past its edge (blurred), so the blur copied the layers under the dialog;
+#   2. an isolated layer at opacity 0.5 holding two overlapping white boxes: where they overlap it
+#      reads the same gray as where they do not (the layer faded as one picture; drawn box by box
+#      the overlap would read lighter).
+# Exit 0 when both hold.
+#
+#   compiler/bin/rae run checks/uiLayerEffects/Main.rae
+import Gpu2d
+import Math
+import Sys
+import ui/Components
+open app3d/UiShell
+open ecs/Entity
+open ecs/Schedule
+open ui/Ecs
+open ui/LayerMotion
+open ui/Pipeline
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneLoader
+open ui/UiLayers
+open ui/UiSystems
+open Gpu2dCanvas
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func dialogScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Dialog\",\"nodes\":\{\"Dialog\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"LayerTag\":\{\"id\":\"dialog\"\},\"Children\":[\"Scrim\"]\},\"Scrim\":\{\"Rect\":\{\"x\":0,\"y\":250,\"w\":400,\"h\":350\},\"BackdropBlur\":\{\"radius\":16,\"tint\":\"#00000060\"\}\}\}\}"
+}
+
+func readLe(bytes: view List(Int), at: view Int, count: view Int) ret Int {
+  var value: Int = 0
+  loop var i: Int = count - 1, i >= 0, --i {
+    value = value * 256 + bytes.copyAtFallback(index: at + i, fallback: 0)
+  }
+  ret value
+}
+
+# The green channel at a design-unit point of the 32-bit BMP (rows bottom-up)
+func greenAt(bytes: view List(Int), x: view Float, y: view Float) ret Int {
+  let offset: Int = readLe(bytes: bytes, at: 10, count: 4)
+  let width: Int = readLe(bytes: bytes, at: 18, count: 4)
+  let height: Int = readLe(bytes: bytes, at: 22, count: 4)
+  let px: Int = (x * width.toFloat() / designW.toFloat()).toInt()
+  let py: Int = (y * height.toFloat() / designH.toFloat()).toInt()
+  let row: Int = height - 1 - py
+  ret bytes.copyAtFallback(index: offset + (row * width + px) * 4 + 1, fallback: 0)
+}
+
+func main() ret Int {
+  var shot: String = Sys.getEnv(name: "RAE_GPU2D_SCREENSHOT")
+  if shot.length() is 0 {
+    var folder: String = Sys.getEnv(name: "TMPDIR")
+    if folder.length() is 0 {
+      folder = "/tmp"
+    }
+    shot = "{folder}/rae-uiLayerEffects.bmp"
+    let unusedShotSet: Bool = Sys.setEnv(name: "RAE_GPU2D_SCREENSHOT", value: shot)
+  }
+  if Sys.getEnv(name: "RAE_HEADLESS_FRAMES").length() is 0 {
+    let unusedFramesSet: Bool = Sys.setEnv(name: "RAE_HEADLESS_FRAMES", value: "30")
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI layer effects check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let dialog: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: dialogScene())
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  let fade: Int = addUiLayer(
+    stack: stack
+    layer: UiLayer { name: "fade", order: 550, opacity: 0.5, isolated: true }
+  )
+  let toastLayer: Int = layerIdOf(stack: stack, name: "toast")
+  let unusedToast: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw { layer: toastLayer, kind: LayerDrawKind.app, appKind: 1 }
+  )
+  let unusedBoxes: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw { layer: fade, kind: LayerDrawKind.app, appKind: 2 }
+  )
+  # the toast slides in from 60 points below over a quarter second
+  animateLayer(
+    stack: stack
+    id: toastLayer
+    property: LayerMotionProperty.offsetY
+    to: 60.0
+    seconds: 0.0
+  )
+  animateLayer(
+    stack: stack
+    id: toastLayer
+    property: LayerMotionProperty.offsetY
+    to: 0.0
+    seconds: 0.25
+  )
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    let unusedMoving: Bool = layerMotionStep(stack: stack, deltaTime: 1.0 / 60.0)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+      refreshLayerContribution(
+        contribution: contribution
+        stack: stack
+        world: world
+        uiSystems: uiSystems
+      )
+    }
+    buildLayerPaintPlan(
+      plan: plan
+      stack: stack
+      contributions: contributions
+      editor: false
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    loop let step: view PaintStep in plan.steps {
+      if paintPlanStepRaeG(
+        step: step
+        stack: stack
+        worldKey: 0
+        world: world
+        uiSystems: uiSystems
+        res: gpuUi
+        canvas: canvas
+      ) {
+        continue
+      }
+      if step.kind is PaintStepKind.draw {
+        if step.appKind is 1 {
+          Gpu2d.drawRect(
+            canvas: canvas
+            x: 60.0
+            y: 400.0
+            w: 200.0
+            h: 60.0
+            color: 4294967295
+          )
+        } else if step.appKind is 2 {
+          Gpu2d.drawRect(
+            canvas: canvas
+            x: 450.0
+            y: 350.0
+            w: 150.0
+            h: 100.0
+            color: 4294967295
+          )
+          Gpu2d.drawRect(
+            canvas: canvas
+            x: 500.0
+            y: 380.0
+            w: 150.0
+            h: 100.0
+            color: 4294967295
+          )
+        }
+      }
+    }
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  let bytes: List(Int) = Sys.readFileBytes(path: shot)
+  if bytes.length < 54 {
+    log("UI LAYER EFFECTS FAILED: no picture at {shot}")
+    ret 1
+  }
+  var failures: Int = 0
+  let inside: Int = greenAt(bytes: bytes, x: 160.0, y: 430.0)
+  let beyond: Int = greenAt(bytes: bytes, x: 160.0, y: 395.0)
+  let farAway: Int = greenAt(bytes: bytes, x: 160.0, y: 300.0)
+  let underBlur: Bool = inside > 60 and inside < 230 and beyond > farAway + 8
+  log(
+    "[uiLayerEffects] 1. the toast under the blurred scrim: inside {inside} (darkened), 5 points past its edge {beyond}, far from it {farAway} (its light spread: {underBlur})"
+  )
+  if not underBlur {
+    failures = failures + 1
+  }
+  let alone: Int = greenAt(bytes: bytes, x: 470.0, y: 360.0)
+  let overlap: Int = greenAt(bytes: bytes, x: 550.0, y: 420.0)
+  let asOne: Bool = alone >= 100 and alone <= 160 and Math.abs(value: overlap - alone) <= 6
+  log(
+    "[uiLayerEffects] 2. the isolated layer at 0.5: one box {alone}, the overlap {overlap} (faded as one picture: {asOne})"
+  )
+  if not asOne {
+    failures = failures + 1
+  }
+  if failures > 0 {
+    log("UI LAYER EFFECTS FAILED: {failures} of 2")
+    ret 1
+  }
+  log("UI LAYER EFFECTS PASSED")
+  ret 0
+}

@@ -19,6 +19,7 @@ open ecs/ComponentTable
 open ecs/Entity
 open Gpu2dCanvas
 open Gpu2dCanvasBackdrop
+open Gpu2dCanvasCache
 open ui/UiSystems
 open ui/ZOrder
 open ui/Transform
@@ -98,9 +99,6 @@ func paintSceneRootPartG(
     entityId: root
   ) is false {
     ret
-  }
-  if isNone(this: from) {
-    canvasBackdropLayer(canvas: canvas)
   }
   var range: PaintRange = { from: from, until: until, started: isNone(this: from) }
   paintSubtreeG(
@@ -228,12 +226,34 @@ func endCustomPaintG(canvas: mod Gpu2dCanvas, frame: view CustomPaintFrame) {
 func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod Gpu2dCanvas) {
   if step.kind is PaintStepKind.layerBegin {
     let layer: UiLayer = layerOf(stack: stack, id: step.layer)
-    canvasPushLayer(
-      canvas: canvas
-      opacity: layer.opacity
-      offsetX: layer.offsetX
-      offsetY: layer.offsetY
-    )
+    # a BackdropBlur in this layer sees every layer drawn under it, one copy for the layer
+    canvasBackdropLayer(canvas: canvas)
+    if layer.isolated {
+      # drawn at full strength into a picture of its own, faded once at its end
+      canvasPushLayer(
+        canvas: canvas
+        opacity: 1.0
+        offsetX: layer.offsetX
+        offsetY: layer.offsetY
+      )
+      if canvasCacheBegin(canvas: canvas, key: isolatedLayerKey(id: step.layer)) < 0 {
+        # no picture to be had (another capture is open): faded draw by draw instead
+        canvasPopLayer(canvas: canvas)
+        canvasPushLayer(
+          canvas: canvas
+          opacity: layer.opacity
+          offsetX: layer.offsetX
+          offsetY: layer.offsetY
+        )
+      }
+    } else {
+      canvasPushLayer(
+        canvas: canvas
+        opacity: layer.opacity
+        offsetX: layer.offsetX
+        offsetY: layer.offsetY
+      )
+    }
     # a safeArea layer draws inside the safe rectangle (ui/LayerFrame)
     if layerClips(stack: stack, id: step.layer) {
       let rect: LayerRect = layerRectOf(stack: stack, id: step.layer)
@@ -249,8 +269,40 @@ func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod G
     if layerClips(stack: stack, id: step.layer) {
       Gpu2d.popClipRect(canvas: canvas)
     }
+    let layer: UiLayer = layerOf(stack: stack, id: step.layer)
+    if layer.isolated and canvas.caches.capturing >= 0 and canvas.caches.capturing is canvasCacheFind(
+      canvas: canvas
+      key: isolatedLayerKey(id: step.layer)
+    ) {
+      let slot: Int = canvas.caches.capturing
+      canvasCacheEnd(canvas: canvas)
+      canvasPopLayer(canvas: canvas)
+      canvasPushLayer(
+        canvas: canvas
+        opacity: layer.opacity
+        offsetX: 0.0
+        offsetY: 0.0
+      )
+      canvasDrawCache(
+        canvas: canvas
+        slot: slot
+        fromX: 0.0
+        fromY: 0.0
+        fromW: paintViewWidth()
+        fromH: paintViewHeight()
+        x: 0.0
+        y: 0.0
+        w: paintViewWidth()
+        h: paintViewHeight()
+      )
+    }
     canvasPopLayer(canvas: canvas)
   }
+}
+
+# The paint cache key of an isolated layer's picture
+func isolatedLayerKey(id: view Int) ret Int {
+  ret 1279351040 + id
 }
 
 # Before drawing a draw step (Rae's or the program's): its area pushed as a clip when it has one;
