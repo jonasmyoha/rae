@@ -1,0 +1,47 @@
+# The screen tint of the transparent pass: off until set, its strength held to
+# 0..1, its color divided by the frame's exposure in its record, off again at 0.
+open TransparentForward
+
+func check(ok: view Bool, label: view String) {
+  if ok {
+    log("ok {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func main() {
+  var transparent: TransparentPassCache = createTransparentPassCache(capacity: 4)
+  check(ok: not screenTintOn(cache: transparent), label: "off at first")
+  setScreenTint(
+    cache: transparent
+    r: 0.8
+    g: 0.1
+    b: 0.1
+    strength: 0.4
+  )
+  check(ok: screenTintOn(cache: transparent), label: "on when set")
+  packTintRecord(cache: transparent, exposure: 2.0)
+  check(ok: transparent.tintRecord.copyAtDefault(index: 32) is 0.4, label: "red over exposure")
+  check(ok: transparent.tintRecord.copyAtDefault(index: 34) is 0.05, label: "blue over exposure")
+  check(ok: transparent.tintRecord.copyAtDefault(index: 35) is 0.4, label: "strength")
+  setScreenTint(
+    cache: transparent
+    r: 0.8
+    g: 0.1
+    b: 0.1
+    strength: 3.0
+  )
+  check(ok: transparent.tintStrength is 1.0, label: "strength held to 1")
+  # the batch resets each frame, the tint stays until set again
+  transparent.batch.count = 0
+  check(ok: screenTintOn(cache: transparent), label: "stays")
+  setScreenTint(
+    cache: transparent
+    r: 0.8
+    g: 0.1
+    b: 0.1
+    strength: 0.0
+  )
+  check(ok: not screenTintOn(cache: transparent), label: "off at 0")
+}

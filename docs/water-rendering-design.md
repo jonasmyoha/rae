@@ -143,6 +143,12 @@ Style 4 is a shimmering surface (`addTransparentShimmerInstance` with a
 up the surface that run in time and a fresnel term from the camera position,
 which the shader solves from the view-projection. `Mesh3d.makeOpenCylinder` is
 a wall round a circle (example 139 draws one beside its cubes and spheres).
+`setScreenTint(cache, r, g, b, strength)` (0.4.16) lays a color over the whole
+lit frame after the transparents: one full-screen triangle from a second
+pipeline in the same render pass (no vertex buffer, depth never tested), its
+record after the transparents' in the draws buffer, its color divided by the
+frame's exposure so it reads the same on screen. Strength 0 draws nothing; the
+tint stays until set again (example 139 with RAE_TRANSPARENT_TINT=1).
 
 The copy is full resolution, single-sampled, and uses the selected HDR format
 (RG11B10Ufloat or RGBA16Float). Its C-owned texture/view follow the deferred

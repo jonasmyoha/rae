@@ -139,3 +139,28 @@ fn fs(i: VsOut) -> @location(0) vec4<f32> {
   }
   return vec4<f32>(d.albedoMetallic.rgb * d.albedoMetallic.w, d.albedoMetallic.w);
 }
+
+// The screen tint (TransparentForward setScreenTint): one triangle that covers
+// the screen, its color and strength in the record at instance_index (color
+// over the exposure in albedoMetallic.rgb, strength in .w). It reads the Frame
+// uniform only so the pipeline's layout has both bindings, like the transparents'.
+struct TintOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) @interpolate(flat) inst: u32,
+};
+
+@vertex
+fn vsTint(@builtin(vertex_index) vi: u32, @builtin(instance_index) ii: u32) -> TintOut {
+  let corner = vec2<f32>(f32((vi << 1u) & 2u), f32(vi & 2u));
+  var o: TintOut;
+  o.pos = vec4<f32>(corner * 2.0 - 1.0, 0.5, 1.0 + F.jitter.z * 0.0);
+  o.inst = ii;
+  return o;
+}
+
+@fragment
+fn fsTint(i: TintOut) -> @location(0) vec4<f32> {
+  let d = draws[i.inst];
+  let strength = clamp(d.albedoMetallic.w, 0.0, 1.0);
+  return vec4<f32>(d.albedoMetallic.rgb * strength, strength);
+}

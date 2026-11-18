@@ -17,7 +17,9 @@
 #     running up it, brighter where it is seen side-on, its far side visible
 #     through its near side; and three soft glowing spheres. Three meshes in one
 #     frame, each run one draw. RAE_TRANSPARENT_VIEW=inside puts the camera inside
-#     the wall, =outside far outside it.
+#     the wall, =outside far outside it;
+#   * with RAE_TRANSPARENT_TINT=1 a red screen tint at 0.35 over the whole lit
+#     frame (setScreenTint), as a game shows being outside its safe zone.
 import Gpu2d
 import Sys
 import Vec3
@@ -210,6 +212,15 @@ func main() ret Int {
   }
   let light: Light3d = defaultLight3d()
 
+  if Sys.getEnv(name: "RAE_TRANSPARENT_TINT").length() > 0 {
+    setScreenTint(
+      cache: renderer.passes.transparent
+      r: 0.9
+      g: 0.12
+      b: 0.08
+      strength: 0.35
+    )
+  }
   let graphStatus: Int = compileDeferred(renderer: renderer)
   if graphStatus is not 0 {
     log("deferred graph invalid: {statusName(status: graphStatus)}")

@@ -24,11 +24,13 @@
 # Client API:
 #   addTransparentInstance(cache, mesh, transform, r, g, b, alpha)   # per instance
 #   addTransparentShimmerInstance(cache, mesh, model, r, g, b, alpha, shimmer)
+#   setScreenTint(cache, r, g, b, strength)   # a color over the whole frame
 # Instances of several meshes may be queued in one frame. They are drawn in the
 # order they were queued (sort them farthest first for the blend): each run of
 # instances with one mesh is one instanced draw, all in one render pass.
 # The pass draws whatever was added this frame and resets the batch, so callers
 # never reset it themselves. Adding after the pass ran shows up next frame.
+import Math
 open MeshStore
 open Gbuffer
 open GbufferIssue
@@ -63,6 +65,17 @@ type TransparentPassCache {
   meshIds: List(Int)
   # this frame's draws, one per run of instances with one mesh (transparentRuns)
   runs: List(TransparentRun)
+  # the screen tint (setScreenTint): a color over the whole lit frame after the
+  # transparents, `tintStrength` 0 (none) to 1 (only the color). It stays until changed.
+  tintR: Float = 0.0
+  tintG: Float = 0.0
+  tintB: Float = 0.0
+  tintStrength: Float = 0.0
+  tintMade: Bool = false
+  tintPipeline: RenderPipelineId
+  tintBind: BindGroupId
+  # the tint's one record in the draws buffer (its color and strength)
+  tintRecord: List(Float)
 }
 
 # A run of queued instances with one mesh: slots first .. first + count - 1
@@ -106,6 +119,9 @@ func createTransparentPassCache(capacity: copy Int) pub ret TransparentPassCache
     batch: { meshId: -1, capacity: capacity, count: 0, records: records }
     meshIds: List.create(Int, cap: capacity)
     runs: List.create(TransparentRun, cap: 4)
+    tintPipeline: noRenderPipelineId()
+    tintBind: noBindGroupId()
+    tintRecord: tintRecordFloats()
   }
 }
 
@@ -171,6 +187,50 @@ func addTransparentMaterialInstance(
     cache.meshIds.add(value: mesh.id)
   }
   cache.batch.count = cache.batch.count + 1
+}
+
+# A record's worth of zeros, for the tint
+func tintRecordFloats() ret List(Float) {
+  var records: List(Float) = List.create(Float, cap: instanceRecordFloats)
+  loop records.length < instanceRecordFloats {
+    records.add(value: 0.0)
+  }
+  ret records
+}
+
+# A color over the whole lit frame, drawn after the transparents (being hurt,
+# under water, outside a safe zone): `strength` 0 draws nothing, 1 covers the
+# frame with the color. The color is what the screen shows (it is divided by
+# the frame's exposure), and it stays until set again.
+func setScreenTint(
+  cache: mod TransparentPassCache
+  r: view Float
+  g: view Float
+  b: view Float
+  strength: view Float
+) {
+  cache.tintR = r
+  cache.tintG = g
+  cache.tintB = b
+  cache.tintStrength = Math.clamp(val: strength, low: 0.0, high: 1.0)
+}
+
+# Is a tint to be drawn this frame?
+func screenTintOn(cache: view TransparentPassCache) ret Bool {
+  ret cache.tintStrength > 0.0
+}
+
+# The tint's record for this frame: its color over `exposure` in the color
+# slots, its strength in the alpha slot (the shader's albedoMetallic)
+func packTintRecord(cache: mod TransparentPassCache, exposure: view Float) {
+  var scale: Float = 1.0
+  if exposure > 0.0 {
+    scale = 1.0 / exposure
+  }
+  cache.tintRecord.set(index: 32, value: cache.tintR * scale)
+  cache.tintRecord.set(index: 33, value: cache.tintG * scale)
+  cache.tintRecord.set(index: 34, value: cache.tintB * scale)
+  cache.tintRecord.set(index: 35, value: cache.tintStrength)
 }
 
 # Queue one shimmering instance (style 4, see TransparentShimmer). The time and
@@ -324,6 +384,65 @@ func ensureTransparentPipeline(
   }
 }
 
+# The tint's pipeline: no vertex buffer (one full-screen triangle from the
+# vertex index), the same premultiplied blend into the lit target, and the depth
+# attached to the pass but never tested (Always) nor written.
+func tintPipelineSpec(litFormat: copy Int32) ret RenderPipelineSpec {
+  var colorFormats: List(Int32) = List.create(Int32, cap: 1)
+  colorFormats.add(value: litFormat)
+  ret RenderPipelineSpec {
+    vertexStride: 0
+    attributes: List.create(VertexAttributeSpec, cap: 0)
+    colorFormats: own colorFormats
+    alphaBlend: true
+    premultiplied: true
+    depthFormat: WGPUTextureFormat_Depth32Float
+    depthWrite: false
+    depthCompare: WGPUCompareFunction_Always
+    cullMode: WGPUCullMode_None
+    sampleCount: 1
+  }
+}
+
+# The tint's pipeline and its bind group (over the same frame uniform and draws
+# buffers as the transparents), made once
+func ensureTintObjects(
+  cache: mod TransparentPassCache
+  resources: mod GpuResources
+  gbuffer: view GbufferCache
+  litFormat: copy Int32
+) {
+  if not cache.tintMade {
+    cache.tintMade = true
+    let forwardShader: Shader = shader(files: ["lib/transparentForward.wgsl"])
+    if let pipeline: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: forwardShader
+      vertexEntry: "vsTint"
+      fragmentEntry: "fsTint"
+      spec: tintPipelineSpec(litFormat: litFormat)
+    ) {
+      cache.tintPipeline = pipeline
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: cache.tintPipeline) {
+    ret
+  }
+  if bindGroupIsUsable(resources: resources, id: cache.tintBind) {
+    ret
+  }
+  var entries: List(ResourceRef) = List.create(ResourceRef, cap: 2)
+  entries.add(value: bufferRef(id: gbuffer.frameUniform))
+  entries.add(value: bufferRef(id: gbuffer.draws))
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: resources
+    pipeline: cache.tintPipeline
+    entries: entries
+  ) {
+    cache.tintBind = bind
+  }
+}
+
 # A bind group from THIS pipeline's layout (wgpu auto-layouts are pipeline-
 # exclusive, so the geometry pass's static bind cannot be reused) over the same
 # two buffers: frame uniform @0, draws storage @1. Those buffers are created
@@ -371,17 +490,31 @@ func drawTransparentBatch(
     if count > remaining {
       count = remaining
     }
-    if count <= 0 {
+    # the tint's record goes after the transparents', if there is room
+    let tint: Bool = screenTintOn(cache: cache) and isValidRenderPipeline(
+      resources: resources
+      id: cache.tintPipeline
+    ) and bindGroupIsUsable(resources: resources, id: cache.tintBind) and count < remaining
+    if count <= 0 and not tint {
       ret
     }
     transparentRuns(cache: cache)
     let strideBytes: Int = instanceRecordFloats * 4
-    if not writeBufferFromPtr(
+    if count > 0 and not writeBufferFromPtr(
       resources: resources
       id: gbuffer.draws
       offset: base * strideBytes
       data: cache.batch.records.data
       size: count * strideBytes
+    ) {
+      ret
+    }
+    if tint and not writeBufferFromPtr(
+      resources: resources
+      id: gbuffer.draws
+      offset: (base + count) * strideBytes
+      data: cache.tintRecord.data
+      size: strideBytes
     ) {
       ret
     }
@@ -454,7 +587,21 @@ func drawTransparentBatch(
         )
       }
     }
-    gbAdvanceDraws(cache: gbuffer, count: count)
+    var used: Int = count
+    if tint {
+      let tintDrawn: Bool = recordDrawInPass(
+        resources: resources
+        pass: pass
+        pipeline: cache.tintPipeline
+        bindGroup: cache.tintBind
+        vertexCount: 3
+        instanceCount: 1
+        firstVertex: 0
+        firstInstance: base + count
+      )
+      used = count + 1
+    }
+    gbAdvanceDraws(cache: gbuffer, count: used)
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
   }
@@ -482,11 +629,13 @@ func transparentSnapshot(
   flushPostPasses(targets: targets, resources: resources)
 }
 
+# `exposure` is the frame's (the composite's): the tint's color is divided by it.
 func transparentPass(
   cache: mod TransparentPassCache
   resources: mod GpuResources
   gbuffer: mod GbufferCache
   targets: mod DeferredTargets
+  exposure: view Float
 ) {
   if not targetsReady(targets: targets, resources: resources) {
     cache.batch.count = 0
@@ -499,7 +648,16 @@ func transparentPass(
     copyOpaqueRadiance(resources: resources, targets: targets)
   }
   cache.snapshotDone = false
-  if cache.batch.count > 0 {
+  if screenTintOn(cache: cache) {
+    ensureTintObjects(
+      cache: cache
+      resources: resources
+      gbuffer: gbuffer
+      litFormat: targets.litFormat
+    )
+    packTintRecord(cache: cache, exposure: exposure)
+  }
+  if cache.batch.count > 0 or screenTintOn(cache: cache) {
     ensureTransparentPipeline(cache: cache, resources: resources, litFormat: targets.litFormat)
     if isValidRenderPipeline(resources: resources, id: cache.pipeline) {
       ensureTransparentBind(cache: cache, resources: resources, gbuffer: gbuffer)
@@ -518,6 +676,11 @@ func transparentPass(
 func transparentShutdown(cache: mod TransparentPassCache, resources: mod GpuResources) {
   retireBindGroup(resources: resources, id: cache.bindGroup)
   retireRenderPipeline(resources: resources, id: cache.pipeline)
+  retireBindGroup(resources: resources, id: cache.tintBind)
+  retireRenderPipeline(resources: resources, id: cache.tintPipeline)
+  cache.tintBind = noBindGroupId()
+  cache.tintPipeline = noRenderPipelineId()
+  cache.tintMade = false
   cache.bindGroup = noBindGroupId()
   cache.pipeline = noRenderPipelineId()
   cache.pipeMade = false
