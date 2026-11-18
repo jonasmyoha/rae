@@ -9,7 +9,8 @@
 #   ...for every prop: addPropTilePlacement(tiles: tiles, placement: p)
 #   finishPropField(field: field)          (its own placements: none, or the always-there ones)
 #   let loaded: Int = fillPropTiles(...)    (every tile wanted at the start, at once)
-#   ...each frame: let changed: Bool = streamPropTiles(tiles:, field:, allocator:, centers:)
+#   ...each frame: let changed: Bool = streamPropTiles(tiles:, field:, allocator:, centers:,
+#   deltaTime:)
 #
 # A world's far billboards are made from every tile's props (propTilesPlacements), not the field's.
 import Math
@@ -89,14 +90,22 @@ func propTilesPlacements(tiles: view PropTiles) ret List(PropPlacement) {
 }
 
 # One frame round `centers`: a tile let go clears its slot's group, a tile loaded puts its props in
-# its slot's group. True when the field changed (a body pool near the props places again).
+# its slot's group. True when the field changed (a body pool near the props places again). With
+# the settings' `priority.primaryCenter` the first center is primary (app3d/TileStreaming
+# streamTilesPrimary, its speed measured over `deltaTime`); else every center alike.
 func streamPropTiles(
   tiles: mod PropTiles
   field: mod PropField
   allocator: mod EntityAllocator
   centers: view List(TileCenter)
+  deltaTime: view Float
 ) ret Bool {
-  streamTilesAround(streamer: tiles.streamer, allocator: allocator, centers: centers)
+  streamTilesPrimary(
+    streamer: tiles.streamer
+    allocator: allocator
+    centers: centers
+    deltaTime: deltaTime
+  )
   var changed: Bool = false
   loop var i: Int = 0, i < eventCount(TileGone, this: tiles.streamer.gone), ++i {
     clearPropGroup(
@@ -136,6 +145,7 @@ func fillPropTiles(
       field: field
       allocator: allocator
       centers: centers
+      deltaTime: 0.0
     )
     if not changed {
       break

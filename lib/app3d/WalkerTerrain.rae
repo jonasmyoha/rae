@@ -677,14 +677,22 @@ func fillFarTrees(terrainSystem: mod WalkerTerrain) {
 }
 
 # The forest's tiles: 144 m, loaded within 400 m and let go past 480 m, 64 at most (300 m, 360 m
-# and 40 on a phone), as a game's world in tiles (docs/open-world-tiles.md (a))
+# and 40 on a phone), as a game's world in tiles (docs/open-world-tiles.md (a)). The camera's
+# focus is the primary center (its tiles and those where it is heading first); the walker, the
+# other center, keeps the tiles within 200 m (260 m) for its trunk pool.
 func walkerForestTileSettings() ret TileGridSettings {
+  let priority: TilePriority = {
+    primaryCenter: true
+    otherLoadDistance: 200.0
+    otherUnloadDistance: 260.0
+  }
   if Target.isMobileOs {
     ret TileGridSettings {
       tileSize: 144.0
       loadDistance: 300.0
       unloadDistance: 360.0
       slotCount: 40
+      priority: priority
     }
   }
   ret TileGridSettings {
@@ -692,16 +700,19 @@ func walkerForestTileSettings() ret TileGridSettings {
     loadDistance: 400.0
     unloadDistance: 480.0
     slotCount: 64
+    priority: priority
   }
 }
 
-# The forest's tiles round the camera's focus and the walker, one tile a frame; true when the
-# forest changed (the trunk pool places again)
+# The forest's tiles round the camera's focus (primary) and the walker, one tile a frame,
+# `deltaTime`
+# since the last frame; true when the forest changed (the trunk pool places again)
 func streamWalkerForest(
   terrainSystem: mod WalkerTerrain
   allocator: mod EntityAllocator
   focus: view Vec3
   walker: view Vec3
+  deltaTime: view Float
 ) ret Bool {
   var centers: List(TileCenter) = {
     TileCenter { x: focus.x, y: focus.y }
@@ -712,6 +723,7 @@ func streamWalkerForest(
     field: terrainSystem.forest.field
     allocator: allocator
     centers: centers
+    deltaTime: deltaTime
   )
 }
 

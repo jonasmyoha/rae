@@ -126,6 +126,20 @@ streamTiles is its one-center case; case 1399), and app3d/LeafRelease reads a fi
 with several centers on its host (its camera and every walker it runs or knows) in place of the
 two streamers above; its static colliders (rocks, buildings) stay for its whole level.
 
+**Built (a primary center):** with several centers alike, a fast camera's tiles ahead waited
+for a slot held by tiles behind it and round the other centers (game proto2: a drone at 57 m/s
+among a parked body and bots, 40 slots, 2 to 6 tiles within 300 m missing). TileStreaming's
+streamTilesPrimary with `TileGridSettings.priority` (TilePriority, `primaryCenter` on) makes the
+first center primary: its tiles within the load distance of it, or of where it will be in
+`leadSeconds` at its measured speed (a move over `jumpSpeed` counts as none), come first, one
+ahead `aheadPenalty` m less wanted than one round it; the other centers want and keep only tiles
+within `otherLoadDistance` / `otherUnloadDistance`, less wanted than any of the primary's; with
+every slot held, the least needed tile gives its slot up to a missing one needed more by
+`swapMargin` (released one call, loaded the next, so the app sees TileGone first). Off by
+default, where it is streamTilesAround. streamPropTiles uses it (it takes `deltaTime`), and the
+walkers' forest streams with the camera's focus primary (case 1532: none missing within 200 m of
+a straight 57 m/s flight, against 12 with the centers alike, and none after a sharp turn).
+
 **Built (step 8):** app3d/PropTiles, a PropField's props sorted once into tiles and streamed into
 its groups (createPropTiles, addPropTilePlacement, streamPropTiles, fillPropTiles, its far
 billboards from propTilesPlacements; case 1400). The walker examples' forests, bushes and rocks

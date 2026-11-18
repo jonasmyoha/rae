@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.12, 2026-11-18: tile streaming with a primary center
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.12` moves a project.
+
+- app3d/TileStreaming `streamTilesPrimary` and `TileGridSettings.priority` (TilePriority): the
+  first center (a fast camera) gets the slots first, round it and where it is heading; the other
+  centers keep a smaller reach; a full set of slots gives up its least needed tile to a missing
+  one needed clearly more. Off by default (docs/open-world-tiles.md).
+- `streamPropTiles` takes `deltaTime` (breaking: one more argument); the walkers' forest streams
+  with the camera's focus primary.
+
 ## 0.4.11, 2026-11-18: middle-button pan and wheel zoom on a canvas
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.11` moves a project.

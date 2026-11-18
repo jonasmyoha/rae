@@ -22,6 +22,13 @@
 # streamTilesAround does the same round several centers (a host keeping the
 # world loaded round every player): a tile is kept while any center wants it.
 #
+# streamTilesPrimary, with `priority.primaryCenter` on, gives the first center
+# the slots first (a fast camera among parked bodies and bots): its tiles round
+# it and round where it will be in `leadSeconds` come before any other center's,
+# the others want and keep only tiles within their own smaller reach, and with
+# every slot held the least needed tile gives its slot up to a missing one
+# needed clearly more (TilePriority). Off, it is streamTilesAround.
+#
 # What a tile holds is the app's; this is only which tiles, when, where.
 import Math
 open ecs/Entity
@@ -38,6 +45,30 @@ type TileGridSettings {
   unloadDistance: Float
   # Tiles in memory at most
   slotCount: Int
+  # The first center first (streamTilesPrimary); off by default
+  priority: TilePriority = {}
+}
+
+# streamTilesPrimary's rule. The need of a tile is a distance (m, less is more
+# needed): to the primary center, or to its lead point plus `aheadPenalty`, for
+# the primary's tiles; past every primary one, the distance to the nearest
+# other center for theirs.
+type TilePriority {
+  # the first center is primary (off: every center alike, streamTilesAround)
+  primaryCenter: Bool = false
+  # the primary also wants the tiles round where it will be this long ahead (s)
+  leadSeconds: Float = 3.0
+  # a move faster than this (m/s) is a jump (a teleport, a respawn), not a speed
+  jumpSpeed: Float = 150.0
+  # a tile round the lead point counts as this much further (m): a little less
+  # wanted than one round the center
+  aheadPenalty: Float = 40.0
+  # the other centers want tiles within this (m) and keep them within the second
+  otherLoadDistance: Float = 160.0
+  otherUnloadDistance: Float = 220.0
+  # a missing tile takes a loaded tile's slot only when needed more by this (m),
+  # so two tiles do not swap by turns
+  swapMargin: Float = 60.0
 }
 
 # One tile's place in the grid
@@ -78,6 +109,12 @@ type TileStreamer {
   toFree: List(EntityId)
   loads: Int
   unloads: Int
+  # streamTilesPrimary: the primary center last call, and its speed (m/s)
+  primaryLast: TileCenter = { x: 0.0, y: 0.0 }
+  hasPrimaryLast: Bool = false
+  primaryVelocity: TileCenter = { x: 0.0, y: 0.0 }
+  # tiles that gave up their slot to a more needed one
+  evictions: Int = 0
 }
 
 func createTileStreamer(settings: view TileGridSettings) ret TileStreamer {
@@ -378,6 +415,306 @@ func streamTilesAround(
         value: TileLoaded { entityId: entityId, tile: next, slot: free }
       )
       streamer.loads = streamer.loads + 1
+    }
+  }
+}
+
+# ----- the primary center's rule (streamTilesPrimary) ---------------------------
+# The primary's speed after a move from `last` to `now` in `deltaTime`: half the
+# last speed and half this move's; a move faster than `jumpSpeed`, or no time,
+# is no speed
+func primaryVelocityAfter(
+  priority: view TilePriority
+  velocity: view TileCenter
+  last: view TileCenter
+  now: view TileCenter
+  deltaTime: view Float
+) ret TileCenter {
+  if deltaTime <= 0.0 {
+    ret velocity
+  }
+  let vx: Float = (now.x - last.x) / deltaTime
+  let vy: Float = (now.y - last.y) / deltaTime
+  if Math.sqrt(x: vx * vx + vy * vy) > priority.jumpSpeed {
+    ret TileCenter { x: 0.0, y: 0.0 }
+  }
+  ret TileCenter { x: velocity.x * 0.5 + vx * 0.5, y: velocity.y * 0.5 + vy * 0.5 }
+}
+
+# Where the primary will be in `leadSeconds` at `velocity`
+func primaryLeadPoint(
+  priority: view TilePriority
+  primary: view TileCenter
+  velocity: view TileCenter
+) ret TileCenter {
+  ret TileCenter {
+    x: primary.x + velocity.x * priority.leadSeconds
+    y: primary.y + velocity.y * priority.leadSeconds
+  }
+}
+
+# Above any primary tile's need: where the other centers' needs start
+const otherCentersNeed: Float = 1000000.0
+
+# How much `tile` is needed (less is more), or none when no center wants it:
+# `keeping` a loaded tile reaches to the unload distances, wanting a missing one
+# to the load distances. `centers` first is the primary, `lead` its lead point.
+func tileNeed(
+  settings: view TileGridSettings
+  tile: view GridTile
+  centers: view List(TileCenter)
+  lead: view TileCenter
+  keeping: view Bool
+) ret opt Float {
+  let priority: view TilePriority = settings.priority
+  var primaryReach: Float = settings.loadDistance
+  var otherReach: Float = priority.otherLoadDistance
+  if keeping {
+    primaryReach = settings.unloadDistance
+    otherReach = priority.otherUnloadDistance
+  }
+  var best: Float = otherCentersNeed * 2.0
+  var found: Bool = false
+  loop var i: Int = 0, i < centers.length, ++i {
+    let center: TileCenter = centers.copyAtFallback(
+      index: i
+      fallback: TileCenter { x: 0.0, y: 0.0 }
+    )
+    let distance: Float = tileDistance(
+      settings: settings
+      tile: tile
+      x: center.x
+      y: center.y
+    )
+    if i is 0 {
+      if distance <= primaryReach and distance < best {
+        best = distance
+        found = true
+      }
+      let ahead: Float = tileDistance(
+        settings: settings
+        tile: tile
+        x: lead.x
+        y: lead.y
+      )
+      if ahead <= primaryReach and ahead + priority.aheadPenalty < best {
+        best = ahead + priority.aheadPenalty
+        found = true
+      }
+    } else if distance <= otherReach and otherCentersNeed + distance < best {
+      best = otherCentersNeed + distance
+      found = true
+    }
+  }
+  if found {
+    ret best
+  }
+  ret none
+}
+
+# A tile and its need
+type TileNeed {
+  tile: GridTile
+  need: Float
+}
+
+# The most needed tile not among `loaded` (wanted round the primary, its lead
+# point, or another center), if any
+func mostNeededMissingTile(
+  settings: view TileGridSettings
+  loaded: view List(GridTile)
+  centers: view List(TileCenter)
+  lead: view TileCenter
+) ret opt TileNeed {
+  var best: TileNeed = { tile: { x: 0, y: 0 }, need: 0.0 }
+  var found: Bool = false
+  var points: List(TileCenter) = {}
+  loop let center: view TileCenter in centers {
+    points.add(value: center)
+  }
+  points.add(value: lead)
+  loop let point: view TileCenter in points {
+    loop let tile: view GridTile in tilesToLoad(settings: settings, x: point.x, y: point.y) {
+      var held: Bool = false
+      loop let other: view GridTile in loaded {
+        if sameTile(a: other, b: tile) {
+          held = true
+        }
+      }
+      if held {
+        continue
+      }
+      if let need: Float = tileNeed(
+        settings: settings
+        tile: tile
+        centers: centers
+        lead: lead
+        keeping: false
+      ) {
+        if not found or need < best.need {
+          best = TileNeed { tile: tile, need: need }
+          found = true
+        }
+      }
+    }
+  }
+  if found {
+    ret best
+  }
+  ret none
+}
+
+# The slot of the least needed loaded tile (kept reach), and its need, if any slot is held
+type SlotNeed {
+  slot: Int
+  need: Float
+}
+
+func leastNeededSlot(
+  streamer: view TileStreamer
+  centers: view List(TileCenter)
+  lead: view TileCenter
+) ret opt SlotNeed {
+  var worst: SlotNeed = { slot: -1, need: 0.0 }
+  loop var s: Int = 0, s < streamer.slots.length, ++s {
+    let entityId: EntityId = streamer.slots.copyAtFallback(index: s, fallback: noEntity())
+    if isNone(this: entityId) {
+      continue
+    }
+    var need: Float = otherCentersNeed * 4.0
+    if let kept: Float = tileNeed(
+      settings: streamer.settings
+      tile: componentView(this: streamer.tiles, entityId: entityId).tile
+      centers: centers
+      lead: lead
+      keeping: true
+    ) {
+      need = kept
+    }
+    if worst.slot < 0 or need > worst.need {
+      worst = SlotNeed { slot: s, need: need }
+    }
+  }
+  if worst.slot < 0 {
+    ret none
+  }
+  ret worst
+}
+
+# Let the tile in slot `s` go: a TileGone, and its entity freed next call
+func releaseTileSlot(streamer: mod TileStreamer, s: view Int) {
+  let entityId: EntityId = streamer.slots.copyAtFallback(index: s, fallback: noEntity())
+  if isNone(this: entityId) {
+    ret
+  }
+  let streamed: mod StreamedTile = componentMod(this: streamer.tiles, entityId: entityId)
+  streamed.state = TileState.gone
+  let tile: GridTile = streamed.tile
+  eventSend(
+    TileGone
+    this: streamer.gone
+    value: TileGone { entityId: entityId, tile: tile, slot: s }
+  )
+  streamer.slots.set(index: s, value: noEntity())
+  streamer.toFree.add(value: entityId)
+  streamer.unloads = streamer.unloads + 1
+}
+
+# One frame round `centers`, the first primary (TilePriority; with
+# `primaryCenter` off this is streamTilesAround). `deltaTime` (s) since the last
+# call measures the primary's speed. Tiles no center keeps go; the most needed
+# missing tile loads into a free slot; with every slot held, the least needed
+# loaded tile gives its slot up (a TileGone) when the missing one is needed more
+# by `swapMargin`, and the missing one loads there on the next call.
+func streamTilesPrimary(
+  streamer: mod TileStreamer
+  allocator: mod EntityAllocator
+  centers: view List(TileCenter)
+  deltaTime: view Float
+) {
+  let settings: TileGridSettings = streamer.settings
+  if not settings.priority.primaryCenter or centers.length is 0 {
+    streamTilesAround(streamer: streamer, allocator: allocator, centers: centers)
+    ret
+  }
+  loop let entityId: view EntityId in streamer.toFree {
+    componentRemove(this: streamer.tiles, entityId: entityId)
+    freeEntity(this: allocator, entityId: entityId)
+  }
+  streamer.toFree.clear()
+  eventClear(TileLoaded, this: streamer.loaded)
+  eventClear(TileGone, this: streamer.gone)
+  let primary: TileCenter = centers.copyAtFallback(
+    index: 0
+    fallback: TileCenter { x: 0.0, y: 0.0 }
+  )
+  if streamer.hasPrimaryLast {
+    streamer.primaryVelocity = primaryVelocityAfter(
+      priority: settings.priority
+      velocity: streamer.primaryVelocity
+      last: streamer.primaryLast
+      now: primary
+      deltaTime: deltaTime
+    )
+  }
+  streamer.primaryLast = primary
+  streamer.hasPrimaryLast = true
+  let lead: TileCenter = primaryLeadPoint(
+    priority: settings.priority
+    primary: primary
+    velocity: streamer.primaryVelocity
+  )
+  loop var s: Int = 0, s < settings.slotCount, ++s {
+    let entityId: EntityId = streamer.slots.copyAtFallback(index: s, fallback: noEntity())
+    if isNone(this: entityId) {
+      continue
+    }
+    let kept: opt Float = tileNeed(
+      settings: settings
+      tile: componentView(this: streamer.tiles, entityId: entityId).tile
+      centers: centers
+      lead: lead
+      keeping: true
+    )
+    if kept is none {
+      releaseTileSlot(streamer: streamer, s: s)
+    }
+  }
+  if let next: TileNeed = mostNeededMissingTile(
+    settings: settings
+    loaded: streamedTiles(streamer: streamer)
+    centers: centers
+    lead: lead
+  ) {
+    var free: Int = -1
+    loop var s: Int = 0, s < settings.slotCount and free < 0, ++s {
+      if isNone(this: streamer.slots.copyAtFallback(index: s, fallback: noEntity())) {
+        free = s
+      }
+    }
+    if free >= 0 {
+      let entityId: EntityId = allocEntity(this: allocator)
+      componentSet(
+        this: streamer.tiles
+        entityId: entityId
+        data: StreamedTile { tile: next.tile, slot: free, state: TileState.loaded }
+      )
+      streamer.slots.set(index: free, value: entityId)
+      eventSend(
+        TileLoaded
+        this: streamer.loaded
+        value: TileLoaded { entityId: entityId, tile: next.tile, slot: free }
+      )
+      streamer.loads = streamer.loads + 1
+    } else if let worst: SlotNeed = leastNeededSlot(
+      streamer: streamer
+      centers: centers
+      lead: lead
+    ) {
+      if next.need + settings.priority.swapMargin < worst.need {
+        releaseTileSlot(streamer: streamer, s: worst.slot)
+        streamer.evictions = streamer.evictions + 1
+      }
     }
   }
 }
