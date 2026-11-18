@@ -730,6 +730,15 @@ program set `setUiTextFocus`. Hover and the wheel are the same walk at the point
   against the commit before).
 - Not yet (queued as 5c): `z` set at a motion's keys through the animation tracks.
 
+**Built (step 5c, 2026-11-18):** `lib/ui/ZKeys.rae`, case 1547. The animation system's tracks are
+springs over float channels, with no timed keys, so `z` is not a channel: it is keyed beside them.
+`keyNodeZ(world, node, keys)` sets a node's `z` at each key's time and holds it between keys;
+`zDuringFlight(world, node, raisedZ, landedZ)` raises it now and lowers it when its animation
+track ends (or at once when no motion starts within 3 frames). `setNodeZ` writes the `ZIndex` and,
+when there is one, the `LayerTag`'s `z`, so `ZChildOrder` and the layer contributions re-sort only at
+a key. `zKeySystem` runs at the start of `animationSystem`, and pending keys keep
+`animationInFlight` true.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

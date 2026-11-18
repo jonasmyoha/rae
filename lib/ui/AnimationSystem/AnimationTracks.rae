@@ -18,6 +18,7 @@ open ui/Ecs
 open ui/ScenePolicy
 open ui/ThemeResolved
 open ui/UiSystems
+open ui/ZKeys
 
 # Each world steps by the real frame time, but never more than this: a long frame slows a motion and
 # never skips it
@@ -87,7 +88,9 @@ func animationSettingsFromEnv() ret AnimationSettings {
 # True while something moves or waits to start. A held animation is not in flight: it has stopped,
 # and a test may take its picture.
 func animationInFlight(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
-  if world.animationRequests.length > 0 or queueIsEmpty(this: uiSystems.animation.commands) is false {
+  if world.animationRequests.length > 0 or queueIsEmpty(this: uiSystems.animation.commands) is false or zKeysInFlight(
+    world: world
+  ) {
     ret true
   }
   ret uiSystems.animation.settings.hold < 0.0 and (componentCount(
@@ -827,6 +830,8 @@ func animationWriteRadius(
 # One update: drain the inbox, then step every track by `deltaTime` s
 func animationSystem(world: mod UiWorld, uiSystems: mod UiSystems, deltaTime: view Float) {
   uiSystems.animation.updates = uiSystems.animation.updates + 1
+  # z keyed in time, or held up while a node flies (ui/ZKeys)
+  zKeySystem(world: world, uiSystems: uiSystems, deltaTime: deltaTime)
   let commandCount: Int = queueCount(this: uiSystems.animation.commands)
   # Read as motion starts, so a change in the system's settings counts from the next motion on
   if commandCount > 0 and uiSystems.animation.settings.reduceMotionFixed is false {

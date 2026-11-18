@@ -1,0 +1,133 @@
+# z at a motion's keys (ui/ZKeys; docs/ui-layers-design.md §9), headless, at 1/60 s a frame. Three
+# cards A, Card, B lie on one spot in a hand, in that tree order.
+#   1. Card flies (animationTo) raised for its flight (zDuringFlight: 10, then 0): it is on top for
+#      every frame its motion runs, and back between A and B once it lands;
+#   2. B's z keyed in time (keyNodeZ: -1 at 0.1 s, 5 at 0.3 s): the order changes only at those
+#      two frames and holds between them.
+import ui/Components
+open ui/AnimationSystem
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiSystems
+open ui/ZKeys
+open ui/ZOrder
+open ecs/Entity
+open ecs/ComponentTable
+
+func handScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Hand\",\"nodes\":\{\"Hand\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"A\",\"Card\",\"B\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\},\"Card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "A", "Card", "B" } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "?"
+}
+
+# The hand's children in paint order
+func paintOrder(world: view UiWorld) ret String {
+  let hand: EntityId = nodeOf(world: world, nodeId: "Hand")
+  let children: view Children = componentView(this: world.childrens, entityId: hand)
+  var text: String = ""
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    text = "{text} {nameIn(
+      world: world
+      entityId: orderedChildAt(
+        world: world
+        parentEntityId: hand
+        children: children
+        i: i
+      )
+    )}"
+  }
+  ret text
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems) {
+  animationSystem(world: world, uiSystems: uiSystems, deltaTime: 1.0 / 60.0)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let hand: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: handScene())
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  log("before:{paintOrder(world: world)}")
+
+  zDuringFlight(
+    world: world
+    entityId: card
+    raisedZ: 10
+    landedZ: 0
+  )
+  animationTo(
+    uiSystems: uiSystems
+    entityId: card
+    to: AnimationPose { x: 200.0 }
+    motion: "smooth"
+    opacityMotion: "smooth"
+    delaySeconds: 0.0
+  )
+  var flightFrames: Int = 0
+  var onTopFrames: Int = 0
+  var landedAt: Int = -1
+  loop var f: Int = 0, f < 240 and landedAt < 0, ++f {
+    frame(world: world, uiSystems: uiSystems)
+    let moving: Bool = componentHas(this: uiSystems.animation.tracks, entityId: card)
+    let order: String = paintOrder(world: world)
+    if moving {
+      flightFrames = flightFrames + 1
+      if order is " A B Card" {
+        onTopFrames = onTopFrames + 1
+      }
+    } else if order is " A Card B" {
+      landedAt = f
+    }
+  }
+  log(
+    "1. Card's flight: {flightFrames} frames moving, on top in {onTopFrames} of them; landed back between A and B: {landedAt >= 0}:{paintOrder(
+      world: world
+    )}"
+  )
+
+  let b: EntityId = nodeOf(world: world, nodeId: "B")
+  keyNodeZ(
+    world: world
+    entityId: b
+    keys: List(ZKey) { ZKey { at: 0.1, z: -1 }, ZKey { at: 0.3, z: 5 } }
+  )
+  var last: String = paintOrder(world: world)
+  var changes: String = ""
+  loop var f: Int = 1, f <= 30, ++f {
+    frame(world: world, uiSystems: uiSystems)
+    let order: String = paintOrder(world: world)
+    if order is not last {
+      changes = "{changes} [frame {f}:{order}]"
+      last = order
+    }
+  }
+  log("2. B keyed (-1 at 0.1 s, 5 at 0.3 s), the order changed only at:{changes}")
+}

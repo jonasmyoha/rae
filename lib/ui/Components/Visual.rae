@@ -262,6 +262,28 @@ type LayerScope {
   clip: Bool = true
 }
 
+# A node's z keyed in time (ui/ZKeys keyNodeZ): at `at` seconds into the run, z becomes `z`
+type ZKey {
+  at: Float
+  z: Int
+}
+
+# Runtime: a node's z keys and how far into them the run is; z is held between keys (no order
+# change but at a key)
+type ZKeyRun {
+  keys: List(ZKey)
+  elapsed: Float = 0.0
+  applied: Int = -1
+}
+
+# Runtime: a node raised for its motion (ui/ZKeys zDuringFlight) and lowered when the motion ends
+type ZFlight {
+  landedZ: Int
+  # its track was seen (the motion began); frames waited for it
+  seen: Bool = false
+  waited: Int = 0
+}
+
 # Runtime, on a parent with a ZIndex child (never authored): its children in paint order and the z
 # each had when sorted, kept by the transform pass (zOrderSystem)
 type ZChildOrder {

@@ -1,0 +1,110 @@
+# ui/ZKeys — a node's z set at a motion's keys (docs/ui-layers-design.md §9): a card is raised
+# when its flight starts and lowered when it lands, and between keys its order does not change.
+# z is a whole number, so it is not eased: it is set at a key and held. The node's ZIndex (its
+# order among its siblings) and, when it has one, its LayerTag (its order in its layer) are set
+# together, and ui/ZOrder and the layer contributions re-sort only then.
+#
+#   zDuringFlight(world: world, uiSystems: uiSystems, entityId: card, raisedZ: 10, landedZ: 0)
+#   animationTo(uiSystems: uiSystems, entityId: card, to: ..., ...)   # its flight
+#   keyNodeZ(world: world, entityId: card, keys: List(ZKey) { ... })  # or keys by time
+#
+# zKeySystem runs inside animationSystem (each frame something moves).
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiSystems
+
+# Set a node's z now: its ZIndex, and its LayerTag's z when it has one
+func setNodeZ(world: mod UiWorld, entityId: view EntityId, z: view Int) {
+  if componentHas(this: world.zIndexes, entityId: entityId) {
+    if componentView(this: world.zIndexes, entityId: entityId).z is not z {
+      componentMod(this: world.zIndexes, entityId: entityId).z = z
+    }
+  } else {
+    componentSet(this: world.zIndexes, entityId: entityId, data: ZIndex { z: z })
+  }
+  if componentHas(this: world.layerTags, entityId: entityId) {
+    if componentView(this: world.layerTags, entityId: entityId).z is not z {
+      componentMod(this: world.layerTags, entityId: entityId).z = z
+    }
+  }
+}
+
+# Key a node's z in time from now: each key's z at its time, held until the next
+func keyNodeZ(world: mod UiWorld, entityId: view EntityId, keys: view List(ZKey)) {
+  componentSet(this: world.zKeyRuns, entityId: entityId, data: ZKeyRun { keys: keys })
+}
+
+# Raise the node now and lower it to `landedZ` when its motion (its animation track) ends
+func zDuringFlight(
+  world: mod UiWorld
+  entityId: view EntityId
+  raisedZ: view Int
+  landedZ: view Int
+) {
+  setNodeZ(world: world, entityId: entityId, z: raisedZ)
+  componentSet(this: world.zFlights, entityId: entityId, data: ZFlight { landedZ: landedZ })
+}
+
+# A motion waiting to start this many frames is taken as none: the node lands at once
+const zFlightWaitFrames: Int = 3
+
+# Something keyed waits: the animation keeps running
+func zKeysInFlight(world: view UiWorld) ret Bool {
+  ret componentCount(this: world.zKeyRuns) > 0 or componentCount(this: world.zFlights) > 0
+}
+
+# One frame of the keyed z values: a key whose time came sets its z; a flight whose track ended
+# lands
+func zKeySystem(world: mod UiWorld, uiSystems: view UiSystems, deltaTime: view Float) {
+  loop var i: Int = componentCount(this: world.zKeyRuns) - 1, i >= 0, --i {
+    let entityId: EntityId = componentEntityAt(this: world.zKeyRuns, i: i)
+    var z: Int = 0
+    var index: Int = -1
+    var done: Bool = false
+    if componentHas(this: world.zKeyRuns, entityId: entityId) {
+      let run: mod ZKeyRun = componentMod(this: world.zKeyRuns, entityId: entityId)
+      run.elapsed = run.elapsed + deltaTime
+      loop var k: Int = 0, k < run.keys.length, ++k {
+        if let key: view ZKey = run.keys.viewAt(index: k) {
+          if key.at <= run.elapsed {
+            index = k
+            z = key.z
+          }
+        }
+      }
+      done = index is run.keys.length - 1
+      if index is run.applied {
+        index = -1
+      } else {
+        run.applied = index
+      }
+    }
+    if index >= 0 {
+      setNodeZ(world: world, entityId: entityId, z: z)
+    }
+    if done {
+      componentRemove(this: world.zKeyRuns, entityId: entityId)
+    }
+  }
+  loop var i: Int = componentCount(this: world.zFlights) - 1, i >= 0, --i {
+    let entityId: EntityId = componentEntityAt(this: world.zFlights, i: i)
+    let moving: Bool = componentHas(this: uiSystems.animation.tracks, entityId: entityId)
+    var land: Bool = false
+    var landedZ: Int = 0
+    if componentHas(this: world.zFlights, entityId: entityId) {
+      let flight: mod ZFlight = componentMod(this: world.zFlights, entityId: entityId)
+      if moving {
+        flight.seen = true
+      } else {
+        flight.waited = flight.waited + 1
+        land = flight.seen or flight.waited >= zFlightWaitFrames
+      }
+      landedZ = flight.landedZ
+    }
+    if land {
+      setNodeZ(world: world, entityId: entityId, z: landedZ)
+      componentRemove(this: world.zFlights, entityId: entityId)
+    }
+  }
+}
