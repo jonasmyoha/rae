@@ -1,31 +1,39 @@
 # UI layers: one paint and input order for everything 2D
 
-Status: design (2026-11-18). Implementation steps are queued in `QUEUE.md`, right after the
-design task, each named "ui layers: ...". Breaking changes are allowed; the UI stays ECS.
+Status: design (2026-11-18), revised the same day after a review against every local Rae
+program (§15). The build is queued in `QUEUE.md` right after the design task, as "ui layers
+1/8" to "8/8". Breaking changes are allowed; the UI stays ECS.
 
 ## 1. The problem
 
 Rae has two orders today, and they do not meet:
 
-1. **Inside the scene UI**, `ui/Layer`: `LayerRoot { id, order }` entities (`createStandardLayers`:
-   content 0, dock 100, back-button 200, dialog 300, debug 400), a `LayerRef` on a root, and
+1. **Inside one scene UI world**, `ui/Layer`: `LayerRoot { id, order }` entities
+   (`createStandardLayers`: content 0, dock 100, back-button 200, dialog 300, debug 400), a
+   `LayerRef` on a root, the authored `LayerTag { id }` that `layerTagSystem` turns into one, and
    raised nodes (`raiseNodeToLayer`, used by `app3d/ModeMenu`'s "..." menu). `collectPaintableRoots`
    sorts the roots by their layer's order every frame, and the paint and the hit test walk that.
 2. **Between whole blocks**, `ui/HudOverlay`: `HudOverlay { draw, order, shows }` entities (world
    labels 10, the whole scene UI 20, log strip 80, debug readout 90, `OverlayDraw.app` for an
-   app's own), drawn by `app3d/HudOverlays.drawOverlays`.
+   app's own), drawn by `app3d/HudOverlays.drawOverlays`. Programs without that shell order their
+   blocks by the order of their calls.
 
-The whole scene UI, with its dialog layer, is ONE overlay. So anything an app paints on the
-`Gpu2dCanvas` itself (a compass, a kill feed, health bars, a reticle, a full-screen map, a QR code
-over a button) is either under every scene node or over every scene node, dialogs included.
-Game proto2 had its kill feed and compass over the open "..." menu; it now draws them at overlay
-order 15, under the whole scene UI. Its full-screen map, and a QR code drawn over a button, still
-cannot be placed right, because they must be over some scene nodes and under others.
+The whole scene UI, with its dialog layer, is one block. So anything a program paints on the
+`Gpu2dCanvas` itself is either under every scene node or over every scene node, dialogs included.
+The review found this in every program that draws anything itself:
 
-Input has the same split. The scene's hit test walks the sorted roots top first, so a dialog takes
-the taps over the scene's own nodes. But the camera's touch turn, the touch stick and an app's
-own drawn buttons do not ask the scene. Each checks its own things (`presentedPageBlocks`, the
-stick's zone), and an app's immediate drawing has no hit areas at all.
+- Game proto2's compass and kill feed were drawn over the open "..." menu. Its map and its QR codes
+  are still drawn after the whole frame, over that menu. One QR code belongs inside a button.
+- Example 147 paints its QR code node after the whole scene UI, so it would show over a dialog.
+- The media editor draws its whole canvas and viewer after the scene UI, inside a node's
+  rectangle, so no scene node (a future inspector or menu) can go over them.
+- SUMU paints five UI worlds in a fixed call order. It fixes up input afterwards: notifications
+  cancel the screen's press after the screen has seen it (`suppressUiPress`).
+
+Input has the same split. The scene's hit test walks the sorted roots of one world, top first. The
+camera's touch turn, the touch stick, keys, a program's own drawn controls and the other UI worlds
+each check their own things (`presentedPageBlocks`, a `mapOpen` flag, `uiPointerCaptured`, the
+stick's zone, a chain of "took the press" booleans).
 
 ## 2. What the canvas already gives
 
@@ -33,8 +41,8 @@ stick's zone), and an app's immediate drawing has no hit areas at all.
 text glyph run. `canvasKeepOrder` flushes only when an item would land under what is already
 batched: one flush draws its boxes, then its images, then its text, font by font. So:
 
-- **The order of the calls IS the paint order**, across everything that draws on the canvas in a
-  frame: the scene renderer, world labels, the log strip, an app's compass.
+- **The order of the calls IS the paint order**, across everything drawn on the canvas in a frame:
+  every UI world, world labels, the log strip, a program's compass.
 - Two draws of the same kind in a row share a batch, whoever made them. A layer boundary costs
   nothing by itself; only the kind changing costs a flush.
 
@@ -42,279 +50,439 @@ The design builds on this. Nothing in it needs a depth buffer or a render target
 
 ## 3. Decision: one stack of layers, one paint plan, painted in order
 
-Alternatives weighed:
-
 | Approach | Verdict |
 |---|---|
-| **A. One stack of layer entities; per frame a paint plan in layer order; each step draws on the shared canvas in order** | **Chosen.** Uses what the canvas does now. Alpha blending is right because the order is right. Batches carry across layer boundaries. No new GPU state. |
-| B. One sorted draw list `(layer, z, clip, pipeline)`, collected from every source, sorted, then drawn | Sorting by pipeline inside a layer reorders overlapping translucent items, which is wrong without depth. Every source would have to emit into a retained list instead of drawing: a second API for apps. The canvas already batches in order, so the win is small. |
-| C. An offscreen target per layer, composited | One full-screen RGBA target per layer is about 30 MB at 2556x1179 for eight layers, plus a composite pass each. Too costly on a phone. Kept only as an opt-in for one layer (§7, `isolated`). |
+| **A. One stack of layers per window; per frame a paint plan in layer order, made from every UI world and every program draw; each step draws on the shared canvas in order** | **Chosen.** Uses what the canvas does now. Alpha blending is right because the order is right. Batches carry across layer boundaries. No new GPU state. |
+| B. One sorted draw list `(layer, z, clip, pipeline)`, collected from every source, sorted, then drawn | Sorting by pipeline inside a layer reorders overlapping translucent items, which is wrong without depth. Every source would have to emit into a retained list instead of drawing: a second API for programs. The canvas already batches in order, so the win is small. |
+| C. An offscreen target per layer, composited | One full-screen RGBA target per layer is about 30 MB at 2556x1179 for eight layers, plus a composite pass each. Too costly on a phone. Kept only as an opt-in for one layer (§8, `isolated`). |
 | D. A depth buffer, z per item | Translucent UI (text edges, shadows, scrims) still needs back-to-front order. Depth would only help opaque boxes, which are not the cost. |
 
-Rae has no function references, so the app cannot hand a callback to a layer. As with a
-`Schedule` and with today's `overlaysInOrder`, **Rae owns the order and the app calls the draws**.
-Each frame `layerPaintPlan` returns the steps in order. The app walks them. A Rae step
-(`paintStepRae`) draws itself, and an app step comes back to the app with its kind. The 3D apps' shell
-(`app3d/HudOverlays`) does this walk for the standard kinds.
+Rae has no function references, so a program cannot hand a callback to a layer. As with a
+`Schedule` and with today's `overlaysInOrder`, **Rae owns the order and the program calls the
+draws**. Each frame the program walks the plan. A Rae step draws itself (`paintStepRae`), and a
+program's step comes back to the program with its kind. The 3D shell (`app3d/HudOverlays`) does this
+walk for the standard kinds.
 
 ## 4. The model
 
-### 4.1 Components (lib/ui/UiLayers, replacing ui/Layer's LayerRoot and ui/HudOverlay)
+### 4.1 The stack belongs to the window, not to a UI world
+
+A program can have several UI worlds in one window:
+- SUMU has a background world, a screen world that is replaced on every screen change, a top bar,
+  a screensaver and notifications, plus the outgoing screen world during a page transition.
+- The 3D editor panel (`app3d/EditorPanel`) is a second world over a game's own.
+- Example 121 keeps an edited document and the editor around it.
+
+So the stack is a resource of the window, held by the program next to its canvas:
 
 ```
-type UiLayer {            # on a layer entity in the UI world
-  name: String            # "hud", "dialog", an app's "minimap"
-  order: Int              # lower paints first; standard layers are 100 apart
-  modal: Bool = false     # while it shows anything, input below it is blocked (§6)
-  shows: LayerShows       # always | gameMode | editorMode (was OverlayShows)
-  opacity: Float = 1.0    # multiplies every draw of the layer (§7)
-  offsetX: Float = 0.0    # moves every draw of the layer, in design units (§8)
+type LayerStack {                   # one per window (a resource on the App)
+  layers: List(UiLayer)             # sorted by order
+  generation: Int                   # a layer added or removed
+}
+
+type UiLayer {
+  name: String                      # "hud", "dialog", a program's "minimap"
+  order: Int                        # lower paints first; standard layers are 100 apart
+  modal: Bool = false               # while it shows anything, input below it is blocked (§7)
+  dismissOnOutsideTap: Bool = false # a press outside what it shows sends LayerTappedOutside (§7)
+  hidesBelow: Bool = false          # while it shows anything, the layers under it are not painted
+  shows: LayerShows                 # always | gameMode | editorMode (was OverlayShows)
+  opacity: Float = 1.0              # multiplies every draw of the layer (§8)
+  offsetX: Float = 0.0              # moves every draw of the layer, in design units (§9)
   offsetY: Float = 0.0
-  safeArea: Bool = false  # its roots are laid out inside the safe area (§9)
-  isolated: Bool = false  # opt-in: drawn to an offscreen target, composited with opacity
+  safeArea: Bool = false            # its clip and its full-screen roots keep inside the safe
+                                    # area and the host's reserved insets (§10)
+  isolated: Bool = false            # opt-in: drawn to an offscreen target, composited once
+}
+```
+
+Each UI world joins the stack. `layerStackAddWorld(stack, worldKey)` names it with a small `Int`
+key, and the key orders worlds that share a layer: the outgoing screen under the incoming one, and
+a program's main world under the editor panel. A world's nodes name their layer as they do now. The
+world keeps, per layer name, its roots sorted by `z` (§6): its **contribution**. Plan building
+merges the worlds' contributions, which are already sorted. That is a merge, not a sort.
+
+### 4.2 Components in a UI world
+
+```
+type LayerTag {          # authored in a .raescene (the key exists today) and set by code
+  id: String             # the layer's name
+  z: Int = 0             # order inside the layer (§6)
 }
 
-type OnLayer {            # on a scene node: which layer it is painted and hit in
-  layer: EntityId         # (replaces LayerRef)
-  z: Int = 0              # order inside the layer (§5)
+type OnLayer {           # runtime: the resolved layer (replaces LayerRef)
+  layer: Int             # index into the window's LayerStack
+  z: Int
 }
 
-type LayerDraw {          # one non-scene thing drawn in a layer
-  layer: EntityId
-  kind: LayerDrawKind     # worldLabels | logStrip | debugReadout | app
-  z: Int = 0              # order among the layer's draws and its scene roots
-  appKind: Int = 0        # an app tells its own draws apart (its own enum, as an Int)
+type CustomPaint {       # this node's content is drawn by the program, in the node's place (§5)
+  kind: Int              # the program's own meaning (its enum, as an Int)
+  hit: Bool = false      # the program also hit-tests inside it (a surface, §7)
 }
+```
 
-type HitArea {            # an app's immediate drawing that takes input (§6)
-  layer: EntityId
-  x: Float  y: Float  w: Float  h: Float   # design units, screen space
-  radius: Float = 0.0     # a rounded or round area
+And in the stack, for what is drawn but is not a node:
+
+```
+type LayerDraw {         # one program or Rae draw in a layer
+  layer: Int
+  kind: LayerDrawKind    # worldLabels | logStrip | debugReadout | app
   z: Int = 0
-  id: Int                 # the app's own meaning
+  appKind: Int = 0
+  hit: Bool = false      # it also hit-tests, as a surface, inside `area`
+  area: Rect             # where it draws (the whole layer by default); its clip
+  modal: Bool = false    # it blocks input under it while active (a full-screen map)
   active: Bool = true
 }
 ```
 
-`UiLayer` entities live in the `UiWorld` with the scene nodes, as `LayerRoot` does now. A layer is
-looked up by name once (`layerNamed(world, "dialog")`) and then held as an `EntityId`.
+### 4.3 The standard stack
 
-### 4.2 The standard stack
+`createStandardLayers(stack)` makes these. A program adds its own in a gap
+(`addLayer(stack, "minimap", order: 250)`, or `layerOrderAbove(stack, "hud")`) and never needs the
+other numbers.
 
-`createStandardLayers(world)` makes these. An app adds its own between them with an order in a gap
-(`addLayer(world, "minimap", order: 250)`), and never needs to know the others' numbers beyond
-the one it sits next to (`layerOrderAbove(world, "hud")`).
-
-| order | name | holds | modal |
+| order | name | holds | flags |
 |---|---|---|---|
-| 100 | `world` | world-anchored text and bars (app3d/WorldLabel), drawn over the 3D view | |
-| 200 | `hud` | the scene's default layer: page content, a game's HUD nodes, the touch stick | |
-| 300 | `hudOver` | over the HUD: a full-screen map, a QR code over a button | |
-| 400 | `dock` | the dock, toolbars, the back button (was `dock` and `back-button`) | |
-| 500 | `popover` | non-modal popovers, tooltips, dropdowns | |
-| 600 | `toast` | toasts and notifications (under a modal dialog) | |
-| 700 | `dialog` | dialogs, sheets, context menus, the "..." menu | yes |
-| 800 | `log` | the log strip (editor mode) | |
-| 900 | `debug` | the debug readout, the debug button and menu | |
+| 100 | `world` | world-anchored text and bars over the 3D view, depth-sorted (§5.3) | |
+| 200 | `hud` | the default layer: page content, a game's HUD, the touch stick | |
+| 300 | `hudOver` | over the HUD: a full-screen map, a shade | |
+| 400 | `dock` | the dock, toolbars, the back button, a top bar | `safeArea` |
+| 500 | `popover` | non-modal popovers, tooltips, dropdowns, a radial menu | `dismissOnOutsideTap` |
+| 600 | `toast` | toasts under a modal dialog | `safeArea` |
+| 700 | `dialog` | dialogs, sheets, context menus, the "..." menu | `modal`, `dismissOnOutsideTap` |
+| 750 | `cover` | a screensaver, a lock screen: full screen over dialogs | `modal`, `hidesBelow` |
+| 800 | `notification` | system notifications: over dialogs, still pressable | `safeArea` |
+| 850 | `log` | the log strip (editor mode) | |
+| 900 | `debug` | the debug readout, the debug button and its menu | |
 
-A scene node with no `OnLayer` is in `hud`, as a root with no `LayerRef` is in `content` now. 106's
-"content" becomes "hud": the name stays generic ("the main layer"), not a game term.
+A node with no layer is in `hud`, as a root with no `LayerRef` is in `content` now. 106's
+"content" becomes "hud". The name means the main layer, not a game term.
 
-### 4.3 The paint plan
+A toast goes under a dialog and a notification goes over one. That difference is why both exist.
+The cover's first press is taken by `modal`. Its `LayerTappedOutside` (a press on nothing it shows,
+which for a full-screen cover is any press) is how a screensaver closes.
 
-`layerPaintPlan(world, uiSystems, editor)` returns `List(PaintStep)`:
+### 4.4 The paint plan
 
 ```
 type PaintStep {
-  layer: EntityId
-  kind: PaintStepKind     # sceneRoots | worldLabels | logStrip | debugReadout | app | layerBegin | layerEnd
-  entityId: EntityId      # the scene root (sceneRoots) or the LayerDraw entity
-  appKind: Int
+  layer: Int
+  kind: PaintStepKind   # layerBegin | layerEnd | sceneRoot | sceneRootPart | customPaint
+                        # | worldAnchor | draw
+  world: Int            # the world's key (scene steps)
+  entityId: EntityId    # the root, the CustomPaint node, or the LayerDraw's entity
+  appKind: Int          # a draw's or a CustomPaint's kind
+  part: Int             # which part of a root split at CustomPaint nodes (§5.1)
 }
 ```
 
-Within a layer the steps are sorted by `z`, scene roots and `LayerDraw`s together, with ties kept
-in a fixed order: mount order for roots, then creation order. `layerBegin`/`layerEnd` frame each
-layer that has anything, and set the layer's opacity, offset and clip on the canvas
-(`canvasPushLayer` / `canvasPopLayer`, §7). The plan is cached on the world and rebuilt only when
-something changes its shape: a layer, an `OnLayer`, a `LayerDraw`, a mount or an unmount (a
-`layersGeneration` counter, as the theme has). So a still frame does not allocate (§10).
+`layerPaintPlan(stack, contributions, editor)` returns the steps in order:
+- Within a layer, scene roots and `LayerDraw`s are sorted by `z`.
+- At an equal `z`, draws come before roots, so they paint under them. A compass and a kill feed at
+  the layer's default `z` sit under the HUD's buttons, which is what game proto2 needs. A draw that
+  must go over sets a higher `z`.
+- Roots at an equal `z` keep the world key's order, then mount order.
 
-The app's frame then reads:
+`layerBegin`/`layerEnd` frame each layer that has anything to show. They set the layer's
+opacity, offset and clip on the canvas (`canvasPushLayer` / `canvasPopLayer`). A step carries the
+layer's rectangle, its safe area included, so a draw knows where it may go. A program that captures the
+frame (game proto2 scans QR codes from it) does it at a `layerEnd`, so it chooses which layers the
+picture includes.
+
+The program's frame then reads:
 
 ```
-loop let step: view PaintStep in layerPaintPlan(world: world, uiSystems: uiSystems, editor: editor) {
-  if step.kind is PaintStepKind.app {
-    match step.appKind { case compassDraw { drawCompass(...) } case killFeedDraw { ... } }
+loop let step: view PaintStep in plan {
+  if step.kind is PaintStepKind.draw or step.kind is PaintStepKind.customPaint {
+    drawMine(step: step, ...)               # its compass, its map, its waveform, its QR code
   } else {
-    paintStepRae(step: step, ...)        # scene roots, world labels, log strip, debug readout
+    paintStepRae(step: step, worlds: ...)   # scene roots, world labels, log strip, debug
   }
 }
 ```
 
-`renderSystemGpu2d` stays as the one-call form for an app with only scene nodes: it walks the plan
-and draws every Rae step.
+`renderSystemGpu2d` stays as the one-call form for a program with one world and only scene nodes.
 
-## 5. Order inside a layer, and raised nodes
+## 5. A program's drawing in its right place
 
-- **Roots** of a layer are ordered by `OnLayer.z`, then by mount order. A dialog presented later
-  is over one presented earlier because `presentPage` gives each a rising `z`
-  (`PresentedPage.order` already counts this). It does not depend on where its entity happens to
-  sit in the alive list.
-- **Inside a subtree**, children paint in tree order, as now. A child may carry `ZIndex { z }`
-  to paint over or under its siblings: siblings are sorted by `z`, keeping tree order for ties.
-  Hit tests walk the same order backwards. `z` never takes a node out of its parent's clip.
-- **A raised node** (a node with an `OnLayer` and a parent) is laid out and placed by its parent,
-  as now, and painted and hit as a root of its layer, at its `z`. The rules, now written down:
+The review found three places where a program's drawing must go, and the first design had only one
+of them (a whole-layer draw).
+
+### 5.1 Inside a node: CustomPaint
+
+A node with `CustomPaint` is painted by the program, where the node is:
+- in its subtree's order, under its ancestors' clip, opacity and transform;
+- at its own rectangle, with its own clip pushed.
+
+The renderer stops before the node, the step comes back to the program, and the renderer goes on
+with the rest of the root. Users:
+- QR codes: example 147's QrCode node, game proto2's Drone button and join code (the qr package's
+  `qrCodePaint` becomes this);
+- the media editor's canvas and viewer, in `CanvasArea` / `ViewerArea`;
+- a particle trail between cards (game proto4), as a sibling node at a `z` among the cards;
+- a hosted guest's frame in a rectangle (SUMU's game host plan).
+
+To make this possible, the renderer walks a root as a flat **paint list** instead of recursing. The list
+is the root's nodes in paint order, with clip push and pop markers, cached per root and rebuilt
+when the root's tree changes. A root with `CustomPaint` nodes becomes several `sceneRootPart`
+steps around the `customPaint` steps. The flat list also speeds up the walk and the culling.
+
+### 5.2 Over a whole layer: LayerDraw
+
+A compass, a kill feed, a full-screen map, the log strip and the debug readout belong to no node.
+They are `LayerDraw`s, with an `area` that is the layer's rectangle by default.
+
+### 5.3 At a point in the 3D world: the world layer sorts by depth
+
+The `world` layer holds Rae's `WorldLabel`s and a program's own per-anchor drawing (health bars,
+names, a struck-through name). The two must interleave far to near; today all bars are drawn,
+then all names, so a far player's name covers a near player's bar. A program adds an anchor with
+`worldAnchorDraw(stack, x, y, z, appKind, id)` each frame. The plan sorts Rae's labels and the
+program's anchors together by camera distance, far first, into a buffer that is reused.
+
+## 6. Order inside a layer, raised nodes, the stage
+
+- **Roots** of a layer are ordered by `z`, then by world key, then by mount order. A dialog
+  presented later is over one presented earlier because `presentPage` gives it a rising `z`. It no
+  longer depends on where its entity sits in the alive list, and a shade mounted first is under
+  the HUD because of its layer, not its mount order.
+- **Inside a subtree**, children paint in tree order. A child may carry `ZIndex { z }` to paint
+  over or under its siblings: siblings are sorted by `z`, keeping tree order for ties. Hit tests walk
+  the same order backwards. `z` never takes a node out of its parent's clip.
+- **Changing a z is cheap.** Setting `z` on a node or a root re-sorts only its siblings or its
+  layer's bucket: an insertion sort of a list that is already nearly sorted, with no allocation.
+  It does not rebuild the plan. Game proto4's cards change `z` on every grab, hover and flight.
+  Only adding or removing a layer, a world or a root changes the generation.
+- **A raised node** (a node with a `LayerTag` and a parent) is laid out and placed by its parent,
+  as now, and painted and hit as a root of its layer, at its `z`:
   - Layout: unchanged. Its rectangle comes from its parent's layout.
-  - Transform: its parent's world transform applies, so it moves with its parent.
+  - Transform: its parent's whole world transform applies, a `ScaleToFit` stage's scale
+    included, so a card raised out of the scaled table keeps the table's scale and position.
   - Visibility: an inactive or hidden ancestor hides it (`raisedNodeShown`).
-  - Opacity: its ancestors' opacity does NOT multiply into it. It takes its layer's opacity
-    instead, so a dimmed page does not dim the menu raised out of it.
-  - Clip: its parent's clip does not cut it. The layer's own clip does (the window, or the safe
-    area when `safeArea` is on).
-- `raiseNodeToLayer(world, entityId, layerName, z)` stays the one call. The `.raescene` spelling is
-  in §11.
+  - Opacity: its ancestors' opacity does not multiply into it; its layer's does.
+  - Clip: its parent's clip does not cut it. The layer's clip does.
+- **A node declared in a scene as a dialog** (game proto4's dialogs are scene nodes switched on
+  with `Active`, not presented pages) is raised by its `LayerTag { id: "dialog" }` and is modal
+  while it is shown, exactly as a presented one.
+- **Moving a node to another parent without a jump**: `reparentKeepingPlace(node, newParent)`
+  keeps its place on screen. It sets the node's offset from the old and the new parent's
+  transforms, and keeps its layer and `z`. This is for a card going from hand to slot to reveal row.
+- **A stack inside a node (`LayerScope`)**: 121 shows an edited document inside its own view.
+  The document's own `LayerTag`s (its dock, its dialogs) must stay inside that view, under the
+  editor's panels. A node with `LayerScope` opens a nested stack: names in its subtree resolve to
+  a stack of its own, and the nested stack is painted, clipped and hit as one step in the node's
+  place.
 
-## 6. Input in the same order
+## 7. Input in the same order
 
-One hit test, `uiHitAt(world, uiSystems, x, y, kind)`, walks the paint plan from the top step
-down. It returns a `UiHit`:
+One hit test, `uiHitAt(stack, worlds, x, y, kind)`, walks the plan from the top step down and
+returns a `UiHit`:
 
 ```
 type UiHit {
-  entityId: EntityId      # the scene node hit, or noEntity()
-  hitAreaId: Int          # the HitArea's id when an app's area was hit, else -1
-  layer: EntityId         # the layer it was in
-  blockedByModal: Bool    # nothing was hit, but a modal layer above took the press
+  world: Int             # the world it hit in
+  entityId: EntityId     # the scene node hit, or noEntity()
+  surface: Int           # a LayerDraw or CustomPaint with `hit`: its appKind; -1 when none
+  surfaceEntityId: EntityId
+  layer: Int
+  blockedByModal: Bool   # nothing was hit, but a modal layer or draw above took the press
 }
 ```
 
-- **Scene roots** are hit as now (the hit index, reversed paint order inside the root).
-- **HitAreas** are the hit targets of an app's own drawing: the app keeps one entity per button or
-  map it draws, and moves it when the drawing moves. They sort with the scene roots by `z`, so a
-  map in `hudOver` hit over a scene button in `hud` is the map's.
-- **A modal layer that shows anything** stops the walk. A press inside its content goes to that
-  content. A press outside goes to nothing (`blockedByModal: true`), and the layer gets a
-  `LayerTappedOutside { layer }` event. `dialogSystem` answers it with the dialog's
-  `dismissActionId`, which replaces the scrim's own hit node, and an open context menu closes the
-  same way.
-- **Everything else asks the same question.** `uiClaimsPointer(input)` and
-  `uiClaimsTouch(input, touchId)` are true for a press that began on a UI hit or under a modal
-  layer, until it is let go. The camera rig's touch turn, the walker's click-to-move, the touch
-  stick and an app's own gestures check this, instead of each knowing about dialogs. The stick
-  and its zone become one more claimant: the stick's node is a scene node in `hud`, so a dialog
-  over it takes the touch first.
-- Hover, scroll and drag targets use the same walk, so a wheel over an open dialog scrolls the
-  dialog, never the page under it.
+- **Scene roots** are hit as now: the hit index, in reverse paint order inside the root.
+- **Surfaces**: a `LayerDraw` or a `CustomPaint` node with `hit` answers "something of mine is
+  here" for its whole area at its place in the order. The program then runs its own fine hit test
+  inside it. The media editor's canvas has hundreds of targets that change with the zoom; it does
+  not register one entity per target. A program button drawn alone is a small surface.
+- **A modal layer, or a modal draw, that shows anything** stops the walk. "Shows anything" means
+  a visible root, a shown raised node or an active modal draw. A mounted root that is inactive
+  does not count: 106 keeps full-screen pages mounted and hidden on the dialog layer. A press
+  inside its content goes to that content. A press outside goes to nothing (`blockedByModal`).
+- **A press outside** what a `dismissOnOutsideTap` layer shows sends `LayerTappedOutside { layer
+  }`. `dialogSystem` answers it with the dialog's `dismissActionId`, which replaces the scrim's
+  own click node. A context menu, a popover or the radial menu closes the same way. For a modal
+  layer the press stops there. For a non-modal popover it then goes on to what is under it.
+- **One claim for everything else.** A press is **captured** by its hit target until it is let go:
+  a node, a surface or nothing-under-a-modal. Then:
+  - `uiClaimsPointer(input)` and `uiClaimsTouch(input, touchId)` answer whether the UI took this
+    pointer or finger. The camera rig's touch turn, the walker's click-to-move, the touch stick,
+    weapon touches and a program's gestures ask this, instead of each knowing about dialogs. The
+    stick is a scene node in `hud`, so a dialog over it takes the touch first.
+  - `uiClaimsKeys(input)` is true while a text field has focus or a modal layer shows. Shortcut
+    and movement keys check it (the media editor's Space, X and Delete; game proto2's M, R and
+    WASD).
+  - **A capture survives what appears later**, unless that is modal. A toast that slides in under
+    a dragged card does not take the drag. A modal that opens cancels every capture under it
+    (`PointerCanceled` to the holder), so a drag ends cleanly.
+  - Hover, the wheel and a drag go to the same target in the same order. A wheel over an open
+    dialog scrolls the dialog, and a wheel over the media editor's canvas goes to the canvas
+    surface.
+- **Across worlds**: the walk is over the merged plan, so SUMU's notifications take a press before
+  the screen world sees it, and `suppressUiPress` is no longer needed. The UI input system runs
+  once per frame over every world, from the plan.
+- **Drop targets**: `uiHitAtSkipping(..., skipEntityId)` hits what is under a dragged node,
+  leaving out the node and its subtree.
+- **Raw readers**: code that reads `Gpu2d.pointerPressed` directly sees every press, as now. The
+  layers cannot block a read they never see. Such code moves to a surface (`LayerDraw` with `hit`)
+  and `uiHitAt`. Game proto2's map is the known one.
 
-## 7. Transparency and effects
+## 8. Transparency and effects
 
 - **Alpha blending in order** comes from the order: premultiplied alpha, as the canvas does now.
-- **A layer's opacity** multiplies into every draw while the layer is pushed. The canvas already
-  multiplies a chain alpha into each node's colors (`chain255`), and `canvasPushLayer` sets a
-  canvas-wide factor that the box, image and text paths read. Overlapping translucent items in a
-  faded layer then show through each other, as in CSS without isolation. A layer that must fade
-  as one picture sets `isolated`: it draws to a pooled offscreen target the size of its content
-  and is composited once. This costs a target, so only a layer that needs it pays.
-- **Dim and blur behind a dialog**: the scrim is the dialog layer's first root at the lowest `z`,
-  as now. `BackdropBlur` reads "what the frame has drawn so far", so a blur in the `dialog` layer
-  blurs every layer under it, and nothing over it. The backdrop's one-blur-per-layer sharing keys
-  on the `UiLayer` entity instead of the old root order.
-- **Shadows** stay a node's own paint (the box pipeline's soft edge), so they sort with the node.
-- **Clipping**: each layer pushes its clip at `layerBegin`, the window or the safe area. Node clips
-  nest inside it as now.
+- **A layer's opacity** multiplies into every draw while the layer is pushed: a canvas-wide factor
+  that the box, image and text paths read. Overlapping translucent items in a faded layer show
+  through each other, as in CSS without isolation. A layer that must fade as one picture sets
+  `isolated`. It is drawn to a pooled offscreen target the size of its content and composited
+  once, so only a layer that needs this pays for it.
+- **Dim and blur behind a dialog**: the scrim is the dialog layer's lowest root. `BackdropBlur`
+  reads what the frame has drawn so far, so a blur in `dialog` blurs every layer and every world
+  under it (SUMU's glass over its background world) and nothing over it. The shared blurred copy
+  is made once per layer and reused while nothing under it changed.
+- **Shadows** stay a node's own paint, so they sort with the node.
+- **Clipping**: each layer pushes its clip at `layerBegin`. Node clips, `CustomPaint` clips and a
+  `LayerDraw`'s `area` nest inside it.
+- **`hidesBelow`**: while a cover shows, the layers under it are not painted (a screensaver costs
+  only itself). Their systems still run.
 
-## 8. Animation
+## 9. Animation
 
-- `UiLayer.opacity`, `offsetX`, `offsetY` are plain fields, so the animation system's tracks
-  (docs/ui-animation-design.md) can drive them like a node's. A whole HUD fades out for a cut
-  scene with one track on the layer.
-- Dialogs and toasts keep their own node motion (`Appear`/`Disappear`, `dialogMotion`). A toast
-  sliding in is a node in the `toast` layer with an offset track. Order never changes during a
-  motion, because the layer and `z` decide it, not the transform.
-- A scale on a layer is not offered: scaling every draw about a point is a node transform's job
-  (the root's `Transform`), and a layer has no single middle.
+- `UiLayer.opacity`, `offsetX` and `offsetY` are plain fields, so animation tracks
+  (docs/ui-animation-design.md) drive them like a node's. One track on a layer fades a whole HUD.
+- Dialogs, toasts and notifications keep their own node motion (`Appear`, `Disappear`,
+  `dialogMotion`). A toast sliding in is a node in `toast` with an offset track.
+- A transform never changes the order. `z` and the layer do. A motion may set `z` or the layer at
+  a key, at its start or its end: a card is raised when its flight starts and lowered when it
+  lands. The order between keys stays fixed, so nothing flickers.
+- A page transition paints two screen worlds at once, with the outgoing world's key under the
+  incoming one's in every layer they share. Each world's dialogs stay over its own pages, and a
+  shared element that stays put is in the incoming world.
+- A layer has no scale. Scaling every draw about a point is a node transform's job (the root's
+  `Transform`), and a layer has no single middle.
 
-## 9. Layout stays apart from paint
+## 10. Layout stays apart from paint
 
-Layout reads the tree, the window and the safe area, never a layer's order or `z`. Moving a node
-to another layer changes where it is painted and hit, not where it is laid out. The one thing a layer
-adds is `safeArea` for its roots that fill the screen: their rectangle is the safe area instead of
-the window (a toast column, a dock), as `applySafeAreas` does for named nodes now.
+Layout reads the tree, the window, the safe area and the host's reserved insets, never a layer's
+order or `z`. Moving a node to another layer changes where it is painted and hit, not where it is
+laid out. The one thing a layer adds is `safeArea`: its clip and its full-screen roots keep inside the
+safe area less the reserved insets (SUMU keeps a top bar band for itself with `setReservedInsets`).
+A `LayerDraw` gets the same rectangle, so a compass placed by a program stays out of the notch.
 
-## 10. Performance
+## 11. Performance
 
-- **No extra GPU work for layers.** The canvas batches across layer boundaries. A layer adds a flush
-  only when its first draw is of a lower kind than the last draw of the layer under it (text, then
-  a box). That is the same cost a node boundary has now.
-- **No per-frame allocation.** The plan, the per-layer root buckets and the sorted `z` lists are
-  rebuilt on `layersGeneration` changes, not every frame. Today `collectPaintableRoots` scans
-  every live entity and sorts the roots by selection sort (O(roots^2)) twice a frame, once for
-  paint and once for the hit test. The buckets remove both.
-- **Culling and dirty tracking stay.** `RenderCull` and the paint cache work per root, and a root
-  is still a root, only found through its layer.
-- **Measured on a phone** (step 8 in §13): frame time and draw calls of 106 and of a walker with
-  the HUD, before and after, on the iPhone. The bar is "no worse than today".
+- **No extra GPU work for layers.** The canvas batches across layer and world boundaries. A layer
+  adds a flush only when its first draw is of a lower kind than the last draw under it (text,
+  then a box). That is the same cost a node boundary has now.
+- **No per-frame allocation.** The plan, the contributions, the paint lists and the depth buffer
+  are reused. A structural change rebuilds them, and a `z` change re-sorts only its bucket.
+  Today `collectPaintableRoots` scans every live entity and sorts the roots by selection sort
+  (O(roots^2)) for the paint and again for each hit test.
+- **Culling and dirty tracking stay.** `RenderCull` and the paint cache work per root; the flat
+  paint list makes the walk cheaper, not dearer.
+- **Measured on a phone** (step 8, §14): frame time and draw calls of 106 and of a walker with its
+  HUD on the iPhone, before and after. The bar is "no worse than today".
 
-## 11. Developer experience
+## 12. Developer experience
 
-- **A `.raescene` says a node's layer and z**: `"OnLayer": { "layer": "hudOver", "z": 2 }`, on a
-  root or on a node inside a scene (raised). `"ZIndex": { "z": 1 }` orders a node among its
-  siblings. A scene may declare its own layers at the top: `"layers": { "minimap": { "order":
-  250 } }`, made when the scene is mounted if the world has none of that name.
-- **One concept.** `ui/HudOverlay` and the `LayerRoot`/`LayerRef` half of `ui/Layer` are removed.
-  An overlay is a `LayerDraw` in a layer. "The whole scene UI" is no longer a thing that is drawn
-  as one piece.
-- **The scene editor (example 121)** shows a node's layer and z in the inspector, edits them, and
-  has a Layers list: each layer, its order, and what is in it.
-- **A debug view**: `layerReport(world)` lists every layer in order with its roots, its
-  `LayerDraw`s, its hit areas and whether it is modal and showing. The debug overlay gets a
-  "Layers" page, and the devtools page can show the same text.
+- **A `.raescene` says a node's layer and z** with the key it has today, which gains `z`:
+  `"LayerTag": { "id": "hudOver", "z": 2 }`, on a root or on a node inside a scene (raised).
+  `"ZIndex": { "z": 1 }` orders a node among its siblings. `"CustomPaint": { "kind": 3 }` marks a
+  node the program paints. `"LayerScope": {}` opens a nested stack. A scene may declare its own
+  layers: `"layers": { "minimap": { "order": 250 } }`, made when it is mounted if the stack has none
+  of that name.
+- **One concept.** `ui/HudOverlay` and `LayerRoot`/`LayerRef` are removed. An overlay is a
+  `LayerDraw` in a layer, and the scene UI is no longer drawn as one piece.
+- **The scene editor (example 121)** shows and edits a node's `LayerTag`, `ZIndex` and
+  `CustomPaint`, and has a Layers list: each layer, its order, its flags and what is in it, from
+  every world. The edited document is in a `LayerScope`.
+- **A debug view**: `layerReport(stack, contributions)` lists every layer in order, with its
+  worlds' roots, its draws, its surfaces, and whether it is modal and showing. The debug overlay
+  gets a "Layers" page, and the devtools page can show the same text.
 
-## 12. What moves to it
+## 13. What moves to it
 
-- `lib/ui`: `Layer.rae` becomes `UiLayers.rae` (§4). `HudOverlay.rae` goes. `RenderSystem` paints
-  per step. `InputSystem` and `HitIndexQuery` hit through the plan. `dialogSystem` uses `z` and
-  `LayerTappedOutside`. `touchStickSystem` claims through `uiClaimsTouch`.
-- `lib/app3d`: `HudOverlays` walks the plan (world labels in `world`, the log strip in `log`,
-  the debug readout in `debug`). `ModeMenu` raises its menu into `dialog`. `SettingsDialog` is a
-  dialog already. `CameraRig` and `WalkerInput` ask `uiClaimsPointer`/`uiClaimsTouch`. `Minimap`
-  draws as a `LayerDraw` in `hudOver`.
-- Examples: 106 (its layer names), 121 (the editor: §11), and the walkers 136, 137, 143, 148.
-- game proto2 moves its compass and kill feed to `hud` `LayerDraw`s, its map to `hudOver`, and its
-  QR code to a `LayerDraw` with a `HitArea` (that is its own repo's task).
+- `lib/ui`:
+  - `Layer.rae` becomes `UiLayers.rae`, and `HudOverlay.rae` goes.
+  - `RenderSystem` paints from the plan through flat paint lists.
+  - `InputSystem` and `HitIndexQuery` hit through the plan.
+  - `dialogSystem` uses `z` and `LayerTappedOutside`.
+  - `touchStickSystem` claims through `uiClaimsTouch`.
+- `lib/app3d`:
+  - `HudOverlays` walks the plan: world labels in `world`, the log strip in `log`, the debug
+    readout in `debug`.
+  - `ModeMenu`'s menu is raised into `dialog`; `SettingsDialog` is a dialog already.
+  - `CameraRig`, `WalkerInput` and the weapon touches ask the claims.
+  - `Minimap` draws as a `LayerDraw` in `hudOver`.
+  - `EditorPanel`'s world joins the game's stack.
+- The qr package: `qrCodePaint` becomes a `CustomPaint` kind.
+- Examples:
+  - 106: its layer names; its resident full-screen pages stay on `dialog`, modal while shown.
+  - 121: the document in a `LayerScope`; its guides and chrome become its own layers.
+  - 147: the QR code node.
+  - The walkers 136, 137, 143 and 148.
+  - 91 and 94: their boards become `LayerDraw`s under their scene UI.
+- Programs in their own repositories, each a task in its own queue:
+  - game proto2: the compass and feed as `hud` draws, the map as a modal `hudOver` draw with a
+    surface, the QR codes as `CustomPaint`, health bars and names as world anchors, its input
+    gates replaced by the claims.
+  - SUMU: its five worlds join one stack; notifications go in `notification`, the screensaver in
+    `cover`, the debug widget in `debug`; `suppressUiPress` goes.
+  - The media editor: the canvas and viewer as `CustomPaint` surfaces; its tooltip and future
+    menus in `popover`; its shortcuts ask `uiClaimsKeys`.
+  - game proto4: cards with `z` and raised nodes on its table stage, dialogs by `LayerTag`.
 
-## 13. The order of work (queued in QUEUE.md)
+## 14. The order of work (queued in QUEUE.md)
 
-1. **The stack and the plan** (lib/ui/UiLayers): `UiLayer`, `OnLayer`, `LayerDraw`, the
-   standard stack, `layerPaintPlan` with cached buckets and `z`. The old `createStandardLayers`,
-   `raiseNodeToLayer`, `setLayerById` and `collectPaintableRoots` are kept as wrappers over it for
-   now. Case: the plan's order (layers, z, mount order, a raised node, `shows` by mode, an app's
-   layer between two standard ones).
-2. **Paint by the plan**: `RenderSystem` draws one root at a time from the plan, with the layer's
-   push and pop on the canvas (opacity, offset, clip). `app3d/HudOverlays` walks the plan, and
-   `HudOverlay` is removed. A check frame (checks/) shows an app's canvas drawing between two scene
-   layers, read back by pixels.
-3. **Input by the plan**: `uiHitAt`, `UiHit`, `HitArea`, modal layers with
-   `LayerTappedOutside`, `uiClaimsPointer`/`uiClaimsTouch`. The camera rig, walker input, touch
-   stick and dialog system use them. Case: under an open modal, presses, taps and drags on
-   scene nodes, hit areas, the stick and the camera reach nothing, and a tap outside closes it.
-4. **Order inside a layer**: `ZIndex` among siblings, the raised-node rules of §5 (no ancestor
-   opacity, the layer's clip), and the `.raescene` keys `OnLayer`, `ZIndex` and `layers`. Case.
-5. **Layer effects and motion**: layer opacity and offset as animatable fields, the backdrop blur
-   per layer, `isolated` layers, a toast in `toast` sliding in under a dialog. Case and a check
-   frame.
-6. **Move the 3D apps and the examples**: app3d's ModeMenu, SettingsDialog, Minimap, the touch
-   stick and the walkers (136, 137, 143, 148), and 106. Then remove the old wrappers and
-   `LayerRoot`/`LayerRef`.
-7. **The editor and the debug view**: 121's inspector and Layers list, `layerReport`, and the
+1. **The stack and the plan.** `LayerStack` with the standard stack, worlds joining it, each
+   world's contributions with `LayerTag`'s `z`, the merge, cheap re-sorts, and the old API kept as
+   wrappers for now. Case: the plan's order.
+2. **Paint by the plan.** Flat paint lists per root, `CustomPaint` steps, `LayerDraw` steps with
+   their area, world anchors sorted by depth, the layer's push and pop on the canvas. `HudOverlay`
+   is removed. A check frame reads back pixels of program drawing between two scene layers and a
+   `CustomPaint` under a dialog.
+3. **Input by the plan.** `uiHitAt` over every world, surfaces, modal layers and draws,
+   `LayerTappedOutside`, captures and their cancel, `uiClaimsPointer`, `uiClaimsTouch` and
+   `uiClaimsKeys`, and drop targets. Case.
+4. **Order inside a layer.** `ZIndex`, the raised-node rules (the stage's scale included), scene
+   dialogs by `LayerTag`, `reparentKeepingPlace`, `LayerScope`, and the `.raescene` keys. Case.
+5. **Layer effects and motion.** Opacity and offset as animated fields, `z` set at a motion's
+   keys, the blur per layer, `isolated`, `hidesBelow`, a toast sliding in under a dialog, and two
+   worlds in a page transition. Case and a check frame.
+6. **Move Rae's own programs.** app3d, the qr package, the walkers, 106, 121's document scope,
+   147, 91 and 94; then remove the old wrappers.
+7. **The editor and the debug view.** 121's inspector and Layers list, `layerReport`, and the
    debug overlay's Layers page.
-8. **Measure on a phone**: 106 and a walker with the HUD on the iPhone, before and after.
+8. **Measure on a phone.** 106 and a walker with its HUD on the iPhone, before and after.
 
-## 14. Not in this design
+## 15. The review (2026-11-18)
+
+The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:
+it has no UI code yet), game proto2, and the examples here, the Featured ones (106, 121, the
+walkers, 91, 94) and 147 among them. What changed because of it:
+
+| Found | Change |
+|---|---|
+| SUMU paints five UI worlds and two during a transition; the 3D editor panel is a second world | the stack belongs to the window; worlds join it and merge (§4.1) |
+| notifications must go over dialogs; a screensaver takes its first press and hides what is under it | `notification` and `cover` layers, `hidesBelow` (§4.3) |
+| QR codes in buttons, the media editor's canvas, a trail between cards, a hosted guest | `CustomPaint`, painted in the node's place (§5.1) |
+| bars and names from two sources overlap wrongly | the world layer sorts anchors by depth (§5.3) |
+| a compass and a feed must sit under the HUD's buttons | at an equal `z`, draws paint before roots (§4.4) |
+| hundreds of drawn targets that change with the zoom | surfaces with the program's own fine hit test (§7) |
+| shortcuts and movement keys fire under a dialog | `uiClaimsKeys` (§7) |
+| a drag must survive a toast and end when a modal opens; a drop must hit what is under the dragged card | captures and their cancel, `uiHitAtSkipping` (§7) |
+| popovers and a radial menu close on a tap outside | `dismissOnOutsideTap`, apart from `modal` (§4.1, §7) |
+| cards change `z` on every grab and flight | cheap bucket re-sorts, `z` set at a motion's keys (§6, §9) |
+| cards raised out of a scaled table; cards moving between parents; dialogs that are scene nodes | the stage's transform kept, `reparentKeepingPlace`, `LayerTag` dialogs modal (§6) |
+| 121's edited document has layers of its own | `LayerScope` (§6) |
+| 106 keeps hidden full-screen pages mounted on the dialog layer | "shows anything" means visible (§7) |
+| the scene key `LayerTag` already exists | it stays and gains `z` (§4.2, §12) |
+| a top bar band kept by the host | `safeArea` includes the reserved insets (§10) |
+| a frame capture for QR scanning | at a `layerEnd`, so the program picks the layers (§4.4) |
+
+## 16. Not in this design
 
 - 3D-in-UI and UI-in-3D (a screen in the world): the `world` layer is only for 2D drawn over the
   3D view at a projected point.
 - A depth-tested 2D: §3, D.
-- Several windows: one UI world draws in one window, as now.
+- Several windows: each window has its own stack, and nothing is shared between them.
