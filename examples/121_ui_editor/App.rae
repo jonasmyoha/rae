@@ -561,6 +561,22 @@ func runApp(app: mod App) ret Int {
           changed = true
         }
       }
+      # L: the Layers list (inspectorSystem/LayersPanel)
+      if Sdl3.isKeyPressed(key: Keys.keyL) {
+        toggleEditorPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          kind: EditorPanelKind.layers
+        )
+        syncLayersPanel(
+          chromeSystem: app.chromeSystem
+          world: app.world
+          uiSystems: app.uiSystems
+          inspectorSystem: app.inspectorSystem
+          sceneRoot: documentSceneRoot(world: app.world, pageRoot: app.document.pageRoot)
+        )
+        changed = true
+      }
       if Sdl3.isKeyPressed(key: Keys.keyP) {
         toggleEditorPanel(
           chromeSystem: app.chromeSystem

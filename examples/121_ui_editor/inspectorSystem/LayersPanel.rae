@@ -1,0 +1,165 @@
+# inspectorSystem/LayersPanel — the edited document's layers (docs/ui-layers-design.md §12): every
+# layer of the standard stack in paint order with its order and flags, and under each the
+# document's nodes on it: its scene root, and the nodes its LayerScope keeps (a LayerTag naming a
+# layer, by z). The rows are ui/LayerReport's; a node's row selects the node. L opens the panel;
+# RAE_EDITOR_LAYERS=1 opens it at launch.
+open ui/Ecs
+open ui/Components
+open ui/Layer
+open ui/UiLayers
+open ui/LayerReport
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# The document's part in the standard stack: its scene root, then its scoped tagged nodes, sorted
+# as a contribution's entries (layer, z, then the order found)
+func documentLayerContribution(
+  stack: view LayerStack
+  world: view UiWorld
+  uiSystems: view UiSystems
+  sceneRoot: view EntityId
+) ret LayerContribution {
+  var contribution: LayerContribution = createLayerContribution(worldKey: 0)
+  if isNone(this: sceneRoot) {
+    ret contribution
+  }
+  var nodes: List(EntityId) = { sceneRoot }
+  loop let tagged: view EntityId in scopedTaggedNodes(
+    world: world
+    uiSystems: uiSystems
+    scope: sceneRoot
+  ) {
+    nodes.add(value: tagged)
+  }
+  var hud: Int = layerIdOf(stack: stack, name: "hud")
+  loop var seq: Int = 0, seq < nodes.length, ++seq {
+    let entityId: EntityId = nodes.copyAtFallback(index: seq, fallback: noEntity())
+    var layer: Int = nodeLayerId(stack: stack, world: world, entityId: entityId)
+    if layer < 0 {
+      contribution.unknownLayers = contribution.unknownLayers + 1
+      layer = hud
+    }
+    let entry: LayerEntry = {
+      layer: layer
+      layerPosition: layerPosition(stack: stack, id: layer)
+      z: nodeLayerZ(world: world, entityId: entityId)
+      seq: seq
+      entityId: entityId
+      shown: sceneRootShown(world: world, uiSystems: uiSystems, root: entityId)
+    }
+    var at: Int = contribution.entries.length
+    loop at > 0 and entryBefore(
+      a: entry
+      b: contribution.entries.copyAtFallback(index: at - 1, fallback: entry)
+    ) {
+      at = at - 1
+    }
+    contribution.entries.insert(index: at, value: entry)
+  }
+  ret contribution
+}
+
+# One list row
+func layerListRow(
+  id: view String
+  label: view String
+  marker: view String
+  action: view String
+) ret ListViewRow {
+  ret ListViewRow {
+    keys: List(String) { "id", "label", "marker", "action" }
+    values: List(String) { "{id}", "{label}", "{marker}", "{action}" }
+  }
+}
+
+# Rebuild the Layers list (when it is open): a row per layer, a row per node on it
+func syncLayersPanel(
+  chromeSystem: view ChromeSystem
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  inspectorSystem: view InspectorSystem
+  sceneRoot: view EntityId
+) {
+  if not editorPanelOpen(chromeSystem: chromeSystem, world: world, kind: EditorPanelKind.layers) {
+    ret
+  }
+  let list: EntityId = editorListEntityId(
+    chromeSystem: chromeSystem
+    world: world
+    source: EditorListSource.layers
+  )
+  if isNone(this: list) {
+    ret
+  }
+  let stack: LayerStack = createStandardLayerStack()
+  let contributions: List(LayerContribution) = { documentLayerContribution(
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+    sceneRoot: sceneRoot
+  ) }
+  var rows: List(ListViewRow) = {}
+  var index: Int = 0
+  loop let row: view LayerReportRow in layerReportRows(stack: stack, contributions: contributions) {
+    if row.isLayer {
+      rows.add(value: layerListRow(
+        id: "layer{index}"
+        label: row.text
+        marker: ""
+        action: ""
+      ))
+    } else if not isNone(this: row.entityId) {
+      var marker: String = ""
+      if row.entityId is inspectorSystem.selected {
+        marker = ">"
+      }
+      rows.add(value: layerListRow(
+        id: "node{row.entityId.index}"
+        label: "   {treeRowLabelOf(world: world, entityId: row.entityId)}, z {nodeLayerZ(
+          world: world
+          entityId: row.entityId
+        )}"
+        marker: marker
+        action: "layerSelect:{row.entityId.index}"
+      ))
+    } else if row.layer < 0 and index > 0 {
+      rows.add(value: layerListRow(
+        id: "note{index}"
+        label: row.text
+        marker: ""
+        action: ""
+      ))
+    }
+    index = index + 1
+  }
+  setEditorListRows(world: world, list: list, rows: own rows)
+}
+
+# A Layers row was clicked (`layerSelect:<entity index>`): select that node. Returns whether the
+# selection changed.
+func layersPanelAction(
+  inspectorSystem: mod InspectorSystem
+  world: mod UiWorld
+  actionId: view String
+) ret Bool {
+  if not actionId.startsWith(prefix: "layerSelect:") {
+    ret false
+  }
+  let index: Int = actionId.sub(start: 12, len: actionId.length() - 12).toInt()
+  var found: EntityId = noEntity()
+  loop let entityId: view EntityId in world.allocator.alive {
+    if entityId.index is index {
+      found = entityId
+    }
+  }
+  if isNone(this: found) {
+    ret false
+  }
+  ret applySelect(
+    inspectorSystem: inspectorSystem
+    world: world
+    entityId: found
+    mode: SelectMode.replace
+  )
+}

@@ -17,7 +17,10 @@ func feedDebugLayers(
   if not debugOverlay.wantLayers {
     ret
   }
-  debugOverlay.layerLines = layerReport(stack: stack, contributions: contributions).split(sep: "\n")
+  debugOverlay.layerLines.clear()
+  loop let row: view LayerReportRow in layerReportRows(stack: stack, contributions: contributions) {
+    debugOverlay.layerLines.add(value: row.text)
+  }
 }
 
 # Is the Layers page open (a program that builds its report only then asks)?

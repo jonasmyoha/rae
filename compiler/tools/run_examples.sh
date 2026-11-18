@@ -822,7 +822,7 @@ sys.exit(0 if json.load(open(sys.argv[1]))['motion']['quick']['damping']==0.8 el
              RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayLabel cmd:PlayIcon parent" \
              perl -e 'alarm shift; exec @ARGV' 30 "$TMP_OUT/app") > "$TMP_OUT/render-parent.log" 2>&1 \
              && grep -qaF "select parent (1): PlayButton" "$TMP_OUT/render-parent.log" \
-             && grep -qaF "identity: entity=#10 gen 0 node=PlayButton name=PlayButton type=(none) parent=Panel #9 children=PlayIcon #11, PlayLabel #12" "$TMP_OUT/render-parent.log" \
+             && grep -qaF "identity: entity=#8 gen 0 node=PlayButton name=PlayButton type=(none) parent=Panel #7 children=PlayIcon #9, PlayLabel #10" "$TMP_OUT/render-parent.log" \
              && (cd .. && RAE_UI_EDITOR_SCENE="examples/121_ui_editor/assets/samples/MainMenu.raescene" \
                 RAE_UI_HEADLESS=1 RAE_UI_EDITOR_TREE=1 RAE_SDL_HEADLESS_MS=1200 \
                 RAE_UI_EDITOR_TEST_TREE_CLICKS="PlayLabel cmd:ContinueLabel parent" \

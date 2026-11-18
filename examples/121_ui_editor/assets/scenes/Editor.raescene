@@ -359,6 +359,59 @@
       "ScrollRoot": {"axis": "y", "floor": "content", "endInset": 0},
       "EditorList": {"source": "motionTokens"}
     },
+    "LayersPanel": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fill"}
+      },
+      "Active": {"value": false},
+      "Layout": {"type": "Vertical", "gap": 8, "alignCross": "Stretch"},
+      "Children": ["LayersTitle", "LayersViewport"],
+      "EditorPanel": {"panel": "layers"}
+    },
+    "LayersTitle": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 30},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fixed"}
+      },
+      "Text": {"text": "Layers (L)", "styleId": "muted", "styleOverride": {"size": 17, "color": "#78E6DC"}},
+      "OpticalAlign": {"enabled": true, "centerX": false, "centerY": true, "bias": {"x": 0, "y": 0}}
+    },
+    "LayersViewport": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Fill"}
+      },
+      "Overflow": {"mode": "Clip"},
+      "Children": ["LayersList"]
+    },
+    "LayersList": {
+      "Rect": {"x": 0, "y": 0, "w": 0, "h": 0},
+      "ScrollState": {"y": 0},
+      "ListView": {
+        "itemSceneId": "chrome/LayerRow",
+        "itemKeyField": "id",
+        "itemHeight": 26,
+        "itemGap": 0,
+        "visibleItemCount": 24,
+        "overscanRows": 1,
+        "bindings": [
+          {"nodeId": "LayerRow", "component": "OnClick", "field": "actionId", "itemField": "action"},
+          {"nodeId": "LayerRow", "component": "OnClick", "field": "label", "itemField": "label", "prefix": "Select "},
+          {"nodeId": "LayerMarker", "component": "Text", "field": "text", "itemField": "marker"},
+          {"nodeId": "LayerLabel", "component": "Text", "field": "text", "itemField": "label"}
+        ]
+      },
+      "EditorList": {"source": "layers"},
+      "ScrollRoot": {"axis": "y", "floor": "content", "endInset": 0},
+      "Size": {
+        "w": {"mode": "Fill"},
+        "h": {"mode": "Hug"}
+      }
+    },
     "LeftPanel": {
       "bundles": ["appearFade"],
       "Rect": {"x": 0, "y": 0, "w": 384, "h": 0},
@@ -369,7 +422,7 @@
       "Shape": {"kind": "Rect", "fill": "#041A18", "stroke": "#00000000", "strokeWidth": 0},
       "Layout": {"type": "Vertical", "gap": 20, "alignCross": "Stretch"},
       "Padding": {"l": 19, "t": 19, "r": 19, "b": 19},
-      "Children": ["ProjectPanel", "TreePanel", "MotionTokenPanel"],
+      "Children": ["ProjectPanel", "TreePanel", "LayersPanel", "MotionTokenPanel"],
       "EditorPanel": {"panel": "left"},
       "Overflow": {"mode": "Clip"}
     },

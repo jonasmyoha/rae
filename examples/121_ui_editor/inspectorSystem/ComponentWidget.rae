@@ -27,6 +27,7 @@ open ui/Scene
 open inspectorSystem/RectWidget
 open inspectorSystem/FieldSource
 open inspectorSystem/LabelEdit
+open inspectorSystem/LayerEdit
 
 # Field types that are runtime plumbing, never something a person edits: a
 # handle, a list of handles, a ListView's materialized rows. Hidden by TYPE so
@@ -349,15 +350,40 @@ func tableWidgetRows(
         text = "{text} · {tag}"
       }
     }
-    addWidgetRow(
-      rows: rows
-      id: "{name}.{field}"
-      name: "{field}"
-      value: text
-      indent: 1
-      # an OnClick label is typed into (LabelEdit.rae)
-      action: labelFieldAction(component: name, field: field)
-    )
+    let layerAction: String = layerFieldAction(component: name, field: field)
+    if layerFieldSteps(component: name, field: field) {
+      # a click raises it by one, the "-" lowers it (LayerEdit.rae)
+      addWidgetRowWithAffordance(
+        rows: rows
+        id: "{name}.{field}"
+        name: "{field}"
+        value: text
+        indent: 1
+        rowAction: layerAction
+        affordanceAction: "{layerEditPrefix}{name}.{field}-"
+        affordanceIcon: "-"
+        affordanceFill: "editorConfirmAction"
+      )
+    } else if layerAction.length() > 0 {
+      addWidgetRow(
+        rows: rows
+        id: "{name}.{field}"
+        name: "{field}"
+        value: text
+        indent: 1
+        action: layerAction
+      )
+    } else {
+      addWidgetRow(
+        rows: rows
+        id: "{name}.{field}"
+        name: "{field}"
+        value: text
+        indent: 1
+        # an OnClick label is typed into (LabelEdit.rae)
+        action: labelFieldAction(component: name, field: field)
+      )
+    }
   }
 }
 

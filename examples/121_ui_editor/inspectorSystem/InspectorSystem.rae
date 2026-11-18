@@ -562,6 +562,9 @@ func inspectorUpdate(
   let actionCount: Int = uiActionCount(world: world)
   loop var a: Int = 0, a < actionCount, ++a {
     let actionId: String = uiActionAt(world: world, index: a)
+    if layersPanelAction(inspectorSystem: inspectorSystem, world: world, actionId: actionId) {
+      changed = true
+    }
     if treeWasDragged is false and actionId.startsWith(prefix: "inspect:") {
       let index: Int = actionId.sub(start: 8, len: actionId.length() - 8).toInt()
       loop var t: Int = 0, t < inspectorSystem.treeEntities.length, ++t {
@@ -784,6 +787,13 @@ func inspectorUpdate(
       inspectorSystem: inspectorSystem
       sceneRoot: sceneRoot
     )
+    syncLayersPanel(
+      chromeSystem: chromeSystem
+      world: world
+      uiSystems: uiSystems
+      inspectorSystem: inspectorSystem
+      sceneRoot: sceneRoot
+    )
   }
   # Outlines follow the layout of this frame; placed every frame, cheap.
   if placeOutlines(
@@ -954,9 +964,25 @@ func inspectorAfterLoad(
     sceneRoot: sceneRoot
     scene: scene
   )
+  # RAE_EDITOR_LAYERS=1: the Layers list open at launch (LayersPanel)
+  if Sys.getEnv(name: "RAE_EDITOR_LAYERS") is "1" {
+    setEditorPanelOpen(
+      chromeSystem: chromeSystem
+      world: world
+      kind: EditorPanelKind.layers
+      open: true
+    )
+  }
   syncTreePanel(
     chromeSystem: chromeSystem
     world: world
+    inspectorSystem: inspectorSystem
+    sceneRoot: sceneRoot
+  )
+  syncLayersPanel(
+    chromeSystem: chromeSystem
+    world: world
+    uiSystems: uiSystems
     inspectorSystem: inspectorSystem
     sceneRoot: sceneRoot
   )

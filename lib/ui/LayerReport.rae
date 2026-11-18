@@ -79,24 +79,55 @@ func layerDrawText(index: view Int, draw: view LayerDraw) ret String {
   ret text
 }
 
-# Every layer in paint order and what is in it, one line each, the empty layers marked so
-func layerReport(stack: view LayerStack, contributions: view List(LayerContribution)) ret String {
-  var text: String = "layers, bottom first ({stack.layers.length}, {stack.worlds.length} worlds, {stack.draws.length} draws, generation {stack.generation}):"
+# One line of the report: a layer (its order, name and flags), or what is in one (a world's root,
+# with its node, or a draw)
+type LayerReportRow {
+  text: String
+  # the layer's id, on every row (-1 on the header and the notes)
+  layer: Int = -1
+  isLayer: Bool = false
+  # the root's node; none on a layer, a draw or a note
+  entityId: EntityId = { index: -1, generation: 0 }
+  # the draw's index in the stack (-1 on anything else)
+  draw: Int = -1
+}
+
+# Every layer in paint order and what is in it, a row each: the header, then each layer (marked
+# empty when nothing is in it) followed by its draws and its roots, then a note per world with
+# roots on a layer the stack has not. Its text is layerReport's.
+func layerReportRows(
+  stack: view LayerStack
+  contributions: view List(LayerContribution)
+) ret List(LayerReportRow) {
+  var rows: List(LayerReportRow) = {}
+  rows.add(
+    value: LayerReportRow {
+      text: "layers, bottom first ({stack.layers.length}, {stack.worlds.length} worlds, {stack.draws.length} draws, generation {stack.generation}):"
+    }
+  )
   loop var position: Int = 0, position < stack.layers.length, ++position {
     let layer: UiLayer = stack.layers.copyAtFallback(
       index: position
       fallback: UiLayer { name: "", order: 0 }
     )
     let flags: String = layerFlagsText(layer: layer)
-    var line: String = "\n{layer.order} {layer.name}"
+    var line: String = "{layer.order} {layer.name}"
     if flags.length() > 0 {
       line = "{line} ({flags})"
     }
+    let layerRow: Int = rows.length
+    rows.add(value: LayerReportRow { text: line, layer: layer.id, isLayer: true })
     var items: Int = 0
     loop let index: view Int in stack.drawOrder {
       if let draw: view LayerDraw = stack.draws.viewAt(index: index) {
         if draw.layer is layer.id {
-          line = "{line}\n  {layerDrawText(index: index, draw: draw)}"
+          rows.add(
+            value: LayerReportRow {
+              text: "  {layerDrawText(index: index, draw: draw)}"
+              layer: layer.id
+              draw: index
+            }
+          )
           items = items + 1
         }
       }
@@ -108,19 +139,43 @@ func layerReport(stack: view LayerStack, contributions: view List(LayerContribut
           if not entry.shown {
             shown = "hidden"
           }
-          line = "{line}\n  world {contribution.worldKey} root {entry.entityId.index}.{entry.entityId.generation}, z {entry.z}, {shown}"
+          rows.add(
+            value: LayerReportRow {
+              text: "  world {contribution.worldKey} root {entry.entityId.index}.{entry.entityId.generation}, z {entry.z}, {shown}"
+              layer: layer.id
+              entityId: entry.entityId
+            }
+          )
           items = items + 1
         }
       }
     }
     if items is 0 {
-      line = "{line}: empty"
+      if let row: mod LayerReportRow = rows.modAt(index: layerRow) {
+        row.text = "{row.text}: empty"
+      }
     }
-    text = "{text}{line}"
   }
   loop let contribution: view LayerContribution in contributions {
     if contribution.unknownLayers > 0 {
-      text = "{text}\nworld {contribution.worldKey}: {contribution.unknownLayers} roots name a layer the stack has not (painted in hud)"
+      rows.add(
+        value: LayerReportRow {
+          text: "world {contribution.worldKey}: {contribution.unknownLayers} roots name a layer the stack has not (painted in hud)"
+        }
+      )
+    }
+  }
+  ret rows
+}
+
+# Every layer in paint order and what is in it, one line each (layerReportRows' text)
+func layerReport(stack: view LayerStack, contributions: view List(LayerContribution)) ret String {
+  var text: String = ""
+  loop let row: view LayerReportRow in layerReportRows(stack: stack, contributions: contributions) {
+    if text.length() > 0 {
+      text = "{text}\n{row.text}"
+    } else {
+      text = "{row.text}"
     }
   }
   ret text

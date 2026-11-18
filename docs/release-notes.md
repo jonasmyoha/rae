@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.18, 2026-11-18: the layers in the debug overlay and the UI editor
+
+- The debug overlay's dialog has a Layers row: the window's layers in paint order with what is
+  in each (`ui/DebugLayers` `feedDebugLayers`, `RAE_DEBUG_LAYERS=1`). The walkers feed it.
+- `ui/LayerReport` `layerReportRows`: the report as rows, each with its layer, node or draw.
+- `componentNamesFor` lists `LayerTag`.
+- Example 121: a Layers panel (L) for the edited document, and inspector edits of `LayerTag`,
+  `ZIndex` and `CustomPaint`.
+
 ## 0.4.17, 2026-11-18: LayerTag is the one link from a node to its layer
 
 A patch release in the 0.4 line, breaking. `./rae toolchain pin 0.4.17` moves a project.

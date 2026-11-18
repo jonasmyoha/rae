@@ -782,6 +782,18 @@ entries against the LayerTags when the tag table changed, so a tag that moves it
 layer is seen without `markLayerContributionStale`. `sceneRootShown` and `sceneRootTakesInput`
 moved to `ui/Layer`.
 
+**Built (7b, Rae 0.4.18):** the debug overlay's dialog has a Layers row: while it is on, the
+program hands the overlay its stack (`ui/DebugLayers` `feedDebugLayers`) and the overlay draws the
+report's lines where the readouts were (`RAE_DEBUG_LAYERS=1` opens it at launch; the walkers hand
+their `HudLayerPaint`'s). `ui/LayerReport` gives the report as rows (`layerReportRows`: a layer,
+or a root with its node, or a draw), and `layerReport`'s text is made from them. Example 121 has a
+Layers panel (L, or `RAE_EDITOR_LAYERS=1`) listing the document's layers in the standard stack,
+with its scene root and the tagged nodes its `LayerScope` keeps under each; a node's row selects
+the node. Its inspector lists `LayerTag` with the node's components (`componentNamesFor`) and
+edits it: a click on `id` moves the tag to the next layer, a click on a `z` (LayerTag, ZIndex) or
+CustomPaint's `kind` raises it, the row's "-" lowers it, and a click on CustomPaint's `hit` flips
+it (`inspectorSystem/LayerEdit`); each counts as an edit for the save.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

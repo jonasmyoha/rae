@@ -543,6 +543,7 @@ func logInspectorPanel(
 #   RAE_UI_EDITOR_TEST_COMPONENT="remove:Shape"      strip from those that have it
 #   RAE_UI_EDITOR_TEST_COMPONENT="filter:tran"       narrow the component list
 #   RAE_UI_EDITOR_TEST_COMPONENT="scroll:-280"       scroll the component viewport
+#   RAE_UI_EDITOR_TEST_COMPONENT="action:<actionId>" a row's click (LayerEdit, LayersPanel)
 #
 # Several steps run in order when separated by spaces ("filter:onclick
 # scroll:-200").
@@ -591,7 +592,7 @@ func runTestComponentStep(
     colon = found
   }
   if colon <= 0 {
-    log("[ui-editor] component: expected add:/remove:/filter:/scroll:<value>, got {script}")
+    log("[ui-editor] component: expected add:/remove:/filter:/scroll:/action:<value>, got {script}")
     ret
   }
   let verb: String = script.sub(start: 0, len: colon)
@@ -613,6 +614,18 @@ func runTestComponentStep(
       inspectorSystem: inspectorSystem
       world: world
       actionId: "compRemove:{name}"
+    )
+  }
+  if verb is "action" {
+    let unusedTook: Bool = applyComponentAction(
+      inspectorSystem: inspectorSystem
+      world: world
+      actionId: name
+    )
+    let unusedSelected: Bool = layersPanelAction(
+      inspectorSystem: inspectorSystem
+      world: world
+      actionId: name
     )
   }
   if verb is "scroll" {

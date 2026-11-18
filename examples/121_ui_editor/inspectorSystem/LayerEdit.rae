@@ -1,0 +1,131 @@
+# inspectorSystem/LayerEdit — editing a node's layer and order in the inspector
+# (docs/ui-layers-design.md §12). The generated LayerTag, ZIndex and CustomPaint rows take a
+# click, applied to every selected node that has the component:
+#
+#   LayerTag id           the next layer of the standard stack ("" is only a z, then world, hud,
+#   ...)
+#   LayerTag z, ZIndex z  one higher; the row's "-" one lower
+#   CustomPaint kind      one higher; "-" one lower
+#   CustomPaint hit       on / off
+#
+# Each edit counts as one and is noted for the save, as a Rect or label edit is.
+open ui/Ecs
+open ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+
+const layerEditPrefix: String = "layerEdit:"
+
+# The row action of a field these edits own ("" for any other)
+func layerFieldAction(component: view String, field: view String) ret String {
+  if component is "LayerTag" and field is "id" {
+    ret "{layerEditPrefix}LayerTag.id"
+  }
+  if component is "CustomPaint" and field is "hit" {
+    ret "{layerEditPrefix}CustomPaint.hit"
+  }
+  if layerFieldSteps(component: component, field: field) {
+    ret "{layerEditPrefix}{component}.{field}+"
+  }
+  ret ""
+}
+
+# A field stepped by one: its row raises it, the row's "-" lowers it
+func layerFieldSteps(component: view String, field: view String) ret Bool {
+  ret (component is "LayerTag" or component is "ZIndex") and field is "z" or component is "CustomPaint" and field is "kind"
+}
+
+# The layer after `name` in the standard stack's order, "" after the last
+func nextLayerName(name: view String) ret String {
+  let names: List(String) = {
+    ""
+    "world"
+    "hud"
+    "hudOver"
+    "dock"
+    "popover"
+    "toast"
+    "dialog"
+    "cover"
+    "notification"
+    "log"
+    "debug"
+  }
+  loop var i: Int = 0, i < names.length, ++i {
+    if names.copyAtFallback(index: i, fallback: "") is name {
+      ret names.copyAtFallback(index: (i + 1) % names.length, fallback: "")
+    }
+  }
+  ret "hud"
+}
+
+# Apply `actionId` (a layerEdit: action) to the selection; how many nodes changed
+func applyLayerEdit(
+  world: mod UiWorld
+  selection: view List(EntityId)
+  actionId: view String
+) ret Int {
+  if not actionId.startsWith(prefix: layerEditPrefix) {
+    ret 0
+  }
+  let what: String = actionId.sub(
+    start: layerEditPrefix.length()
+    len: actionId.length() - layerEditPrefix.length()
+  )
+  var step: Int = 1
+  if what.endsWith(suffix: "-") {
+    step = -1
+  }
+  var changed: Int = 0
+  loop let entityId: view EntityId in selection {
+    if isNone(this: entityId) {
+      continue
+    }
+    if what.startsWith(prefix: "LayerTag.") and componentHas(
+      this: world.layerTags
+      entityId: entityId
+    ) {
+      let tag: mod LayerTag = componentMod(this: world.layerTags, entityId: entityId)
+      if what is "LayerTag.id" {
+        tag.id = nextLayerName(name: tag.id)
+      } else {
+        tag.z = tag.z + step
+      }
+      changed = changed + 1
+    } else if what.startsWith(prefix: "ZIndex.") and componentHas(
+      this: world.zIndexes
+      entityId: entityId
+    ) {
+      let zIndex: mod ZIndex = componentMod(this: world.zIndexes, entityId: entityId)
+      zIndex.z = zIndex.z + step
+      changed = changed + 1
+    } else if what.startsWith(prefix: "CustomPaint.") and componentHas(
+      this: world.customPaints
+      entityId: entityId
+    ) {
+      let paint: mod CustomPaint = componentMod(this: world.customPaints, entityId: entityId)
+      if what is "CustomPaint.hit" {
+        paint.hit = not paint.hit
+      } else {
+        paint.kind = paint.kind + step
+      }
+      changed = changed + 1
+    }
+  }
+  ret changed
+}
+
+# The name of the component a layerEdit: action changes ("" for another action)
+func layerEditComponent(actionId: view String) ret String {
+  if not actionId.startsWith(prefix: layerEditPrefix) {
+    ret ""
+  }
+  let what: String = actionId.sub(
+    start: layerEditPrefix.length()
+    len: actionId.length() - layerEditPrefix.length()
+  )
+  if let dot: Int = what.indexOf(sub: ".") {
+    ret what.sub(start: 0, len: dot)
+  }
+  ret ""
+}
