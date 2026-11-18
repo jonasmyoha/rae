@@ -1,0 +1,129 @@
+# Raised nodes and moving between parents (ui/Transform, ui/Reparent; docs/ui-layers-design.md §6),
+# headless:
+#   1. under a node at opacity 0.5, a raised card (its LayerTag puts it in the popover layer) keeps
+#      its own opacity (its layer's is applied when painted), its sibling takes the half;
+#   2. a piece raised out of a stage scaled by ScaleToFit (a 200x200 design in a 400x400 box) keeps
+#      the stage's scale and place;
+#   3. a card moved from the hand to a slot (reparentKeepingPlace) stays where it was on screen,
+#      with its layer and z.
+import ui/Components
+open ui/Ecs
+open ui/Layer
+open ui/Reparent
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/fitSystem/FitSystem
+open ui/Transform
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+func tableScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Table\",\"nodes\":\{\"Table\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Fade\",\"Hand\",\"Slot\"]\},\"Fade\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\},\"Opacity\":\{\"value\":0.5\},\"Children\":[\"Card\",\"Plain\"]\},\"Card\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":50\},\"LayerTag\":\{\"id\":\"popover\",\"z\":3\}\},\"Plain\":\{\"Rect\":\{\"x\":60,\"y\":0,\"w\":50,\"h\":50\}\},\"Hand\":\{\"Rect\":\{\"x\":0,\"y\":300,\"w\":200,\"h\":100\},\"Children\":[\"Moving\"]\},\"Moving\":\{\"Rect\":\{\"x\":10,\"y\":10,\"w\":40,\"h\":40\},\"LayerTag\":\{\"id\":\"\",\"z\":4\},\"ZIndex\":\{\"z\":2\}\},\"Slot\":\{\"Rect\":\{\"x\":250,\"y\":100,\"w\":100,\"h\":100\}\}\}\}"
+}
+
+func boardScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Board\",\"nodes\":\{\"Board\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Stage\"]\},\"Stage\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":200\},\"ScaleToFit\":\{\"mode\":\"Contain\"\},\"Children\":[\"Piece\"]\},\"Piece\":\{\"Rect\":\{\"x\":10,\"y\":20,\"w\":40,\"h\":30\},\"LayerTag\":\{\"id\":\"popover\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func alphaOf(uiSystems: view UiSystems, entityId: view EntityId) ret Float {
+  ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: entityId).alpha
+}
+
+func placeText(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  let at: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: entityId
+  )
+  let size: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  ret "{at.position.x},{at.position.y} {size.size.x * at.scale.x}x{size.size.y * at.scale.y}"
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  fitSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+const plainId: String = "Plain"
+
+const stageId: String = "Stage"
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let table: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: tableScene())
+  )
+  place(world: world, uiSystems: uiSystems)
+  place(world: world, uiSystems: uiSystems)
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  log(
+    "1. the raised card (raised {isRaisedNode(world: world, uiSystems: uiSystems, entityId: card)}): opacity {alphaOf(
+      uiSystems: uiSystems
+      entityId: card
+    )}; its sibling under the half: {alphaOf(
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: plainId)
+    )}"
+  )
+
+  var boardWorld: UiWorld = createUiWorld()
+  var boardSystems: UiSystems = createUiSystems()
+  boardWorld.layoutW = 400.0
+  boardWorld.layoutH = 400.0
+  let board: EntityId = loadScene(
+    world: boardWorld
+    uiSystems: boardSystems
+    scene: parseScene(source: boardScene())
+  )
+  place(world: boardWorld, uiSystems: boardSystems)
+  place(world: boardWorld, uiSystems: boardSystems)
+  let piece: EntityId = nodeOf(world: boardWorld, nodeId: "Piece")
+  log(
+    "2. the stage at {placeText(
+      uiSystems: boardSystems
+      entityId: nodeOf(world: boardWorld, nodeId: stageId)
+    )}; the piece raised out of it ({isRaisedNode(
+      world: boardWorld
+      uiSystems: boardSystems
+      entityId: piece
+    )}) at {placeText(uiSystems: boardSystems, entityId: piece)} (its 10,20 40x30 at the stage's scale 2)"
+  )
+
+  let moving: EntityId = nodeOf(world: world, nodeId: "Moving")
+  let slot: EntityId = nodeOf(world: world, nodeId: "Slot")
+  let before: String = placeText(uiSystems: uiSystems, entityId: moving)
+  reparentKeepingPlace(
+    world: world
+    uiSystems: uiSystems
+    node: moving
+    newParent: slot
+  )
+  place(world: world, uiSystems: uiSystems)
+  let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: moving).parent
+  log(
+    "3. the card in the hand at {before}; moved to the slot (its parent the slot {parent is slot}) at {placeText(
+      uiSystems: uiSystems
+      entityId: moving
+    )}; its LayerTag z {componentView(this: world.layerTags, entityId: moving).z}, its ZIndex {componentView(
+      this: world.zIndexes
+      entityId: moving
+    ).z}"
+  )
+}

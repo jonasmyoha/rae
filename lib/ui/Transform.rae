@@ -458,6 +458,11 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
         entityId: link.parent
       )
       var inherited: Float = parentWv.alpha
+      # a raised node takes its layer's opacity when painted, not its ancestors' (it is still hidden
+      # with them: `visible` is inherited below); docs/ui-layers-design.md §6
+      if isRaisedNode(world: world, uiSystems: uiSystems, entityId: entityId) {
+        inherited = 1.0
+      }
       if componentHas(this: uiSystems.animation.sharedNodes, entityId: entityId) {
         let root: EntityId = componentView(
           this: uiSystems.animation.sharedNodes

@@ -1,0 +1,58 @@
+# ui/Reparent — a node moved to another parent without moving on screen (docs/ui-layers-design.md
+# §6): a card going from the hand to a slot to the reveal row keeps its place where it was let go,
+# and its LayerTag (layer and z) and ZIndex stay as they were.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/Ecs
+open ui/UiSystems
+
+# Move `node` under `newParent` (as its last child). When `newParent` places its children itself
+# (it has a Layout), the node takes the place the layout gives it; otherwise its Rect is set so its
+# world position stays where it is now, through the new parent's world position and scale. Needs
+# this frame's world transforms (after the transform pass); run the transform pass again after it.
+func reparentKeepingPlace(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  node: view EntityId
+  newParent: view EntityId
+) {
+  var keepX: Float = 0.0
+  var keepY: Float = 0.0
+  let known: Bool = componentHas(this: uiSystems.transform2d.worldTransforms, entityId: node) and componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: newParent
+  ) and componentHas(this: world.rects, entityId: node)
+  if known {
+    let at: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: node
+    )
+    let under: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: newParent
+    )
+    var scaleX: Float = under.scale.x
+    var scaleY: Float = under.scale.y
+    if scaleX is 0.0 {
+      scaleX = 1.0
+    }
+    if scaleY is 0.0 {
+      scaleY = 1.0
+    }
+    keepX = (at.position.x - under.position.x) / scaleX
+    keepY = (at.position.y - under.position.y) / scaleY
+  }
+  setParent(
+    parents: uiSystems.hierarchy.parents
+    childrens: world.childrens
+    child: node
+    parent: newParent
+  )
+  if known and not componentHas(this: world.layouts, entityId: newParent) {
+    let rect: mod Rect = componentMod(this: world.rects, entityId: node)
+    rect.position.x = keepX
+    rect.position.y = keepY
+  }
+}

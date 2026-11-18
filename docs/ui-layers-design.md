@@ -683,6 +683,21 @@ program set `setUiTextFocus`. Hover and the wheel are the same walk at the point
 - `feedUiTextFocus(captures, world)` sets the text focus from the world's `TextField.focused`;
   the walkers call it each frame in `hudCapturesStep`.
 
+**Built (step 4b, 2026-11-18):** `lib/ui/Reparent.rae`, case 1545.
+
+- A raised node takes no opacity from its ancestors: the transform pass gives it 1.0 as the
+  inherited alpha, and its layer's opacity is applied when its layer is painted. It is still hidden
+  with them (`visible` is inherited). Its parent's clip never cut it (it is painted as a root of its
+  layer), and its layer's clip does (2c-2).
+- A raised node keeps a ScaleToFit stage's scale and place without anything new: ScaleToFit scales
+  its subtree's layout (`fitScaleSubtree`), so the raised node's rectangle and world position
+  already carry it.
+- `reparentKeepingPlace(world, uiSystems, node, newParent)` moves a node under another parent: when
+  the new parent has no Layout, its Rect is set so its world position stays (through the new
+  parent's world position and scale); in a layout container it takes the container's place. Its
+  LayerTag and ZIndex stay.
+- Not yet (queued as 4c): `LayerScope` and a scene's own `layers`.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not
