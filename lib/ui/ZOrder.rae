@@ -1,0 +1,124 @@
+# ui/ZOrder — siblings ordered by ZIndex for paint and the hit test (docs/ui-layers-design.md §6).
+#
+# A parent with a child that has a ZIndex gets a ZChildOrder: its children sorted by z, tree order
+# where z is equal. zOrderSystem (run at the end of the transform pass) keeps it: an order is made
+# again only when its children or one of their z values changed, so a z change re-sorts only that
+# parent's children, and a still frame does nothing. Layout keeps tree order; paint, the hit test
+# and the hit index read orderedChildAt.
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/UiSystems
+
+# A child's z: its ZIndex's, 0 without one
+func childZ(world: view UiWorld, entityId: view EntityId) ret Int {
+  if componentHas(this: world.zIndexes, entityId: entityId) {
+    ret componentView(this: world.zIndexes, entityId: entityId).z
+  }
+  ret 0
+}
+
+# The `i`th of `parentEntityId`'s children (`children`) in paint order: by its ZChildOrder when it
+# has one that matches its children, else tree order
+func orderedChildAt(
+  world: view UiWorld
+  parentEntityId: view EntityId
+  children: view Children
+  i: view Int
+) ret EntityId {
+  if componentHas(this: world.zChildOrders, entityId: parentEntityId) {
+    let order: view ZChildOrder = componentView(this: world.zChildOrders, entityId: parentEntityId)
+    if order.ids.length is children.ids.length {
+      ret order.ids.copyAtFallback(index: i, fallback: noEntity())
+    }
+  }
+  ret children.ids.copyAtFallback(index: i, fallback: noEntity())
+}
+
+# Is the order still right for the parent's children: the same children, with the z each had?
+func zOrderCurrent(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  parentEntityId: view EntityId
+  order: view ZChildOrder
+  childCount: view Int
+) ret Bool {
+  if order.ids.length is not childCount or order.zs.length is not childCount {
+    ret false
+  }
+  loop var i: Int = 0, i < childCount, ++i {
+    let child: EntityId = order.ids.copyAtFallback(index: i, fallback: noEntity())
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: child) {
+      ret false
+    }
+    if componentView(this: uiSystems.hierarchy.parents, entityId: child).parent is not parentEntityId {
+      ret false
+    }
+    if childZ(world: world, entityId: child) is not order.zs.copyAtFallback(index: i, fallback: 0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Keep every ZChildOrder right: a parent of a ZIndex node gets one, a parent whose children have
+# none any more loses it, and an order whose children or z values changed is sorted again (its
+# lists reused)
+func zOrderSystem(world: mod UiWorld, uiSystems: view UiSystems) {
+  if componentCount(this: world.zIndexes) is 0 and componentCount(this: world.zChildOrders) is 0 {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: world.zIndexes), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.zIndexes, i: i)
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+      let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+      if not componentHas(this: world.zChildOrders, entityId: parent) {
+        componentSet(
+          this: world.zChildOrders
+          entityId: parent
+          data: ZChildOrder { ids: {}, zs: {} }
+        )
+      }
+    }
+  }
+  loop var i: Int = componentCount(this: world.zChildOrders) - 1, i >= 0, --i {
+    let parent: EntityId = componentEntityAt(this: world.zChildOrders, i: i)
+    if not componentHas(this: world.childrens, entityId: parent) {
+      componentRemove(this: world.zChildOrders, entityId: parent)
+      continue
+    }
+    let children: view List(EntityId) = componentView(this: world.childrens, entityId: parent).ids
+    var anyZ: Bool = false
+    loop let child: view EntityId in children {
+      if componentHas(this: world.zIndexes, entityId: child) {
+        anyZ = true
+        break
+      }
+    }
+    if not anyZ {
+      componentRemove(this: world.zChildOrders, entityId: parent)
+      continue
+    }
+    if zOrderCurrent(
+      world: world
+      uiSystems: uiSystems
+      parentEntityId: parent
+      order: componentView(this: world.zChildOrders, entityId: parent)
+      childCount: children.length
+    ) {
+      continue
+    }
+    let order: mod ZChildOrder = componentMod(this: world.zChildOrders, entityId: parent)
+    order.ids.clear()
+    order.zs.clear()
+    loop let child: view EntityId in children {
+      let z: Int = childZ(world: world, entityId: child)
+      var at: Int = order.ids.length
+      loop at > 0 and order.zs.copyAtFallback(index: at - 1, fallback: 0) > z {
+        at = at - 1
+      }
+      order.ids.insert(index: at, value: child)
+      order.zs.insert(index: at, value: z)
+    }
+  }
+}

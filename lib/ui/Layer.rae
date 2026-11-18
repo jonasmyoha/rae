@@ -151,6 +151,77 @@ func raiseNodeToLayer(
   componentSet(this: world.layerRefs, entityId: entityId, data: LayerRef { layer: layer })
 }
 
+# The old-scale order (content 0 .. debug 400) a layer named `name` is made at when a scene's
+# LayerTag asks for it and the world has none: the standard stack's names in their order
+# (ui/UiLayers stackOrderOfLegacy maps them back), 0 for a name of the program's own
+func legacyLayerOrderOf(name: view String) ret Int {
+  if name is "world" {
+    ret -100
+  }
+  if name is "hudOver" {
+    ret 50
+  }
+  if name is "dock" or name is "back-button" {
+    ret 100
+  }
+  if name is "popover" {
+    ret 150
+  }
+  if name is "toast" {
+    ret 250
+  }
+  if name is "dialog" {
+    ret layerDialogOrder
+  }
+  if name is "cover" {
+    ret 325
+  }
+  if name is "notification" {
+    ret 350
+  }
+  if name is "log" {
+    ret 375
+  }
+  if name is "debug" {
+    ret 400
+  }
+  ret 0
+}
+
+# Every node whose LayerTag names a layer (a .raescene's "LayerTag": { "id": "dialog" }) and that
+# is not on it is put on it (raiseNodeToLayer; the layer made at legacyLayerOrderOf when the world
+# has none): a root moves to that layer, a node inside a scene is raised, and a tag changed later
+# moves it again. "hud" is the old "content" layer. An empty id is only a z (ui/UiLayers
+# setRootZ). Run by the transform pass.
+func raiseTaggedNodes(world: mod UiWorld) {
+  loop var i: Int = 0, i < componentCount(this: world.layerTags), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.layerTags, i: i)
+    var name: String = componentView(this: world.layerTags, entityId: entityId).id
+    if name.length() is 0 {
+      continue
+    }
+    if name is "hud" {
+      name = "content"
+    }
+    # already on the layer its tag names (a tag changed later moves it)
+    if componentHas(this: world.layerRefs, entityId: entityId) {
+      let layer: EntityId = componentView(this: world.layerRefs, entityId: entityId).layer
+      if componentHas(this: world.layerRoots, entityId: layer) and componentView(
+        this: world.layerRoots
+        entityId: layer
+      ).id is name {
+        continue
+      }
+    }
+    raiseNodeToLayer(
+      world: world
+      entityId: entityId
+      layerId: name
+      order: legacyLayerOrderOf(name: name)
+    )
+  }
+}
+
 # Collect every parentless root with a WorldTransform2D, and every raised node
 # (isRaisedNode), in ascending Layer order. Used by both `renderSystem`
 # (painter's algorithm) and the input hit-test (which walks the result in

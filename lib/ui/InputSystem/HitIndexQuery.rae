@@ -23,6 +23,7 @@ open ui/HitIndex
 open ui/Layer
 open ui/Transform
 open ui/UiSystems
+open ui/ZOrder
 
 # The generations of the tables the hit test reads, and how many entities are alive
 func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
@@ -39,6 +40,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     componentTableGeneration(this: uiSystems.transform2d.worldVisuals)
     componentTableGeneration(this: uiSystems.layout.computedRects)
     aliveCount(world: world)
+    componentTableGeneration(this: world.zChildOrders)
   }
 }
 
@@ -46,7 +48,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 12 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 13 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
@@ -64,7 +66,9 @@ func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
     index: 10
   ) is componentTableGeneration(this: uiSystems.layout.computedRects) and key.copyAtDefault(
     index: 11
-  ) is aliveCount(world: world)
+  ) is aliveCount(world: world) and key.copyAtDefault(index: 12) is componentTableGeneration(
+    this: world.zChildOrders
+  )
 }
 
 # A clickable node in hit order, and the root of its space
@@ -93,7 +97,12 @@ func hitCollect(
       let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 {
-        let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+        let child: EntityId = orderedChildAt(
+          world: world
+          parentEntityId: entityId
+          children: children
+          i: i
+        )
         if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
           hitCollect(
             world: world

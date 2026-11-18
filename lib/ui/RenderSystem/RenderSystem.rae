@@ -38,6 +38,7 @@ open ecs/Entity
 open Gpu2dCanvas
 open Gpu2dCanvasBackdrop
 open ui/UiSystems
+open ui/ZOrder
 open ui/Transform
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
@@ -648,7 +649,12 @@ func paintChildrenG(
       loop var i: Int = 0, i < n, ++i {
         let rank: Int = subtreeHoverPaintRank(
           world: world
-          entityId: rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+          entityId: orderedChildAt(
+            world: world
+            parentEntityId: entityId
+            children: ch
+            i: i
+          )
         )
         ranks.add(value: rank)
         passes = Math.max(a: passes, b: rank + 1)
@@ -658,7 +664,12 @@ func paintChildrenG(
     loop pass < passes {
       var i: Int = 0
       loop i < n {
-        let cid: EntityId = rae_ext_rae_buf_get(buf: ch.ids.data, index: i)
+        let cid: EntityId = orderedChildAt(
+          world: world
+          parentEntityId: entityId
+          children: ch
+          i: i
+        )
         # a raised node (ui/Layer isRaisedNode) is painted with its layer's roots instead
         if ranks.copyAtFallback(index: i, fallback: 0) is pass and componentHas(
           this: uiSystems.animation.sharedNodes

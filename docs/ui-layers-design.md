@@ -525,6 +525,28 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
   and drag by the walk; Rae's own input systems, dialogs, the camera rig, walker input and the
   touch stick on it.
 
+**Built (step 4, the first part, 2026-11-18):** `lib/ui/ZOrder.rae`, `raiseTaggedNodes` in
+`lib/ui/Layer.rae`, case 1536.
+
+- `ZIndex { z }` is a scene key and a world table. A parent with a `ZIndex` child gets a runtime
+  `ZChildOrder`: its children sorted by `z`, tree order for ties, with the `z` each had. The
+  transform pass ends with `zOrderSystem`, which makes an order again only when that parent's
+  children or one of their `z` values changed (checked against the stored `z`s, so a direct
+  write to `ZIndex` is noticed too), reusing its lists; it removes the order when no child has a
+  `ZIndex` left. `zIndexes` is in the transform entry's reads, so a `z` change wakes it.
+- Paint (`paintChildrenG`, the hover passes included), the hit test (`uiHitTestEntity`), the hit
+  index and the wheel route read children through `orderedChildAt`, which falls back to tree
+  order when the order does not match the children yet. The hit index's key includes the orders'
+  table generation.
+- `raiseTaggedNodes` (run by the transform pass, before the z orders) puts every node whose
+  `LayerTag` names a layer on it with `raiseNodeToLayer`, making the layer at
+  `legacyLayerOrderOf(name)` when the world has none; a tag changed later moves the node again.
+  "hud" is the old "content". A node tagged "dialog" inside a scene is raised and, through the
+  hit walk, modal while shown, as a presented page. 106's own `layerTagSystem` does the same and
+  stays until step 6.
+- Not yet (queued as 4b): the raised-node opacity and clip rules in code, `reparentKeepingPlace`,
+  `LayerScope`, a scene's own `layers`.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

@@ -236,6 +236,21 @@ type LayerRoot {
   order: Int
 }
 
+# Paint order among a node's siblings (docs/ui-layers-design.md §6): siblings are painted by z,
+# lowest first, and in tree order where z is equal; the hit test walks the same order backwards.
+# Layout keeps tree order. A node without one has z 0. `z` never takes a node out of its parent's
+# clip.
+type ZIndex {
+  z: Int = 0
+}
+
+# Runtime, on a parent with a ZIndex child (never authored): its children in paint order and the z
+# each had when sorted, kept by the transform pass (zOrderSystem)
+type ZChildOrder {
+  ids: List(EntityId)
+  zs: List(Int)
+}
+
 # Soft link from a root entity to the layer it lives on. The renderer
 # groups parentless roots by their `LayerRef.layer`, looks up each
 # group's `LayerRoot.order`, and paints in ascending order. Roots

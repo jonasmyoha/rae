@@ -31,6 +31,7 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Event
 open ui/UiSystems
+open ui/ZOrder
 open ui/ButtonSystem
 open ui/InputKind
 open ui/DesignUnits
@@ -225,7 +226,12 @@ func uiHitTestEntity(
       let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 {
-        let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+        let child: EntityId = orderedChildAt(
+          world: world
+          parentEntityId: entityId
+          children: children
+          i: i
+        )
         # a raised node (ui/Layer isRaisedNode) is tested with its layer's roots instead
         if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
           let hit: EntityId = uiHitTestEntity(
@@ -438,7 +444,12 @@ func uiWheelRouteEntity(
       let children: view Children = componentView(this: world.childrens, entityId: entityId)
       var i: Int = children.ids.length - 1
       loop i >= 0 and route.blocked is false and isNone(this: route.target) {
-        let child: EntityId = rae_ext_rae_buf_get(buf: children.ids.data, index: i)
+        let child: EntityId = orderedChildAt(
+          world: world
+          parentEntityId: entityId
+          children: children
+          i: i
+        )
         if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
           route = uiWheelRouteEntity(
             world: world

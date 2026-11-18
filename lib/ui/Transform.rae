@@ -30,6 +30,8 @@ import ecs/Transform
 open ecs/hierarchySystem/HierarchySystem
 open ecs/transformSystem/TransformSystem
 open ui/UiSystems
+open ui/ZOrder
+open ui/Layer
 open ui/AnimationSystem
 
 # Returns the active flag for entity; defaults to true if no Active.
@@ -499,6 +501,10 @@ func transformSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
     childrens: world.childrens
   )
   accumulateVisibility(world: world, uiSystems: uiSystems)
+  # nodes a scene put on a layer (LayerTag) raised to it, and siblings' paint order by ZIndex
+  # (ui/ZOrder), after the hierarchy is settled
+  raiseTaggedNodes(world: world)
+  zOrderSystem(world: world, uiSystems: uiSystems)
 }
 
 # Per-call cache for `systemIfDirty`. SUPERSEDED by the declared schedule

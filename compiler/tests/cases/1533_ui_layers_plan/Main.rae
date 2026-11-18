@@ -212,6 +212,8 @@ func main() {
   # world B's panel moves into hud with A's roots: at an equal z worlds go in key order
   componentMod(this: b.layerTags, entityId: panel).id = "hud"
   componentMod(this: b.layerTags, entityId: panel).z = 0
+  # the next frame's transform pass moves it to the layer its tag names now
+  place(world: b, uiSystems: bSystems)
   layerStackAddWorld(stack: stack, worldKey: 1)
   let generationBefore: Int = stack.generation
   var rebuildsBefore: Int = 0

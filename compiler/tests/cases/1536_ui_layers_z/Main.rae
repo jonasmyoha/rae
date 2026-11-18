@@ -1,0 +1,217 @@
+# Order inside a layer (ui/ZOrder, ui/Layer raiseTaggedNodes; docs/ui-layers-design.md §6),
+# headless. Three cards A, B, C lie on one spot under one parent, in that tree order; a fourth
+# node, Card, is tagged for the dialog layer in the scene.
+#   1. with no ZIndex the last in the tree (C) is on top and takes the press;
+#   2. B's ZIndex 2 from the scene puts it on top: it is painted last and hit first;
+#   3. A's z set to 5 at run time re-sorts only that parent's children;
+#   4. A and B both at 5: tree order breaks the tie, B over A;
+#   5. Card is raised to the dialog layer by its LayerTag; shown, a press anywhere off it is
+#      blocked (the dialog layer is modal); hidden, the cards take presses again.
+import ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/LayerHit
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ui/ZOrder
+open ecs/Entity
+open ecs/ComponentTable
+
+func cardsScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Table\",\"nodes\":\{\"Table\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"A\",\"B\",\"C\",\"Card\"]\},\"A\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"OnClick\":\{\"actionId\":\"a\",\"label\":\"A\"\}\},\"B\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"OnClick\":\{\"actionId\":\"b\",\"label\":\"B\"\},\"ZIndex\":\{\"z\":2\}\},\"C\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"OnClick\":\{\"actionId\":\"c\",\"label\":\"C\"\}\},\"Card\":\{\"Rect\":\{\"x\":200,\"y\":200,\"w\":100,\"h\":100\},\"OnClick\":\{\"actionId\":\"card\",\"label\":\"Card\"\},\"LayerTag\":\{\"id\":\"dialog\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) {
+    "Table"
+    "A"
+    "B"
+    "C"
+    "Card"
+  } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "nothing"
+}
+
+# The table's children in paint order
+func paintOrder(world: view UiWorld) ret String {
+  let table: EntityId = nodeOf(world: world, nodeId: "Table")
+  let children: view Children = componentView(this: world.childrens, entityId: table)
+  var text: String = ""
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    text = "{text} {nameIn(
+      world: world
+      entityId: orderedChildAt(
+        world: world
+        parentEntityId: table
+        children: children
+        i: i
+      )
+    )}"
+  }
+  ret text
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func pressAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  ret nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+    )
+  )
+}
+
+# Where a press lands by the layer plan (the modal dialog layer included)
+func walkAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret String {
+  var stack: LayerStack = createStandardLayerStack()
+  adoptWorldLayers(stack: stack, world: world)
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  let hit: UiHit = uiHitAt(
+    plan: plan
+    stack: stack
+    worldKey: 0
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: 0.0
+  )
+  if hit.blockedByModal {
+    ret "nothing (blocked by the modal {layerNameOf(stack: stack, id: hit.layer)} layer)"
+  }
+  ret nameIn(world: world, entityId: hit.entityId)
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let table: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: cardsScene())
+  )
+  let card: EntityId = nodeOf(world: world, nodeId: "Card")
+  componentSet(this: world.actives, entityId: card, data: Active { value: false })
+  let b: EntityId = nodeOf(world: world, nodeId: "B")
+  let a: EntityId = nodeOf(world: world, nodeId: "A")
+  log(
+    "0. the scene gave B a ZIndex: {componentHas(this: world.zIndexes, entityId: b)}, z {componentView(
+      this: world.zIndexes
+      entityId: b
+    ).z}"
+  )
+  componentRemove(this: world.zIndexes, entityId: b)
+  place(world: world, uiSystems: uiSystems)
+  log("1. no ZIndex: painted{paintOrder(world: world)}; a press lands on {pressAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}")
+  componentSet(this: world.zIndexes, entityId: b, data: ZIndex { z: 2 })
+  place(world: world, uiSystems: uiSystems)
+  log("2. B at z 2 (as its scene says): painted{paintOrder(world: world)}; a press lands on {pressAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}")
+  componentSet(this: world.zIndexes, entityId: a, data: ZIndex { z: 5 })
+  place(world: world, uiSystems: uiSystems)
+  log("3. A at z 5: painted{paintOrder(world: world)}; a press lands on {pressAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}; orders kept: {componentCount(this: world.zChildOrders)}")
+  componentMod(this: world.zIndexes, entityId: b).z = 5
+  place(world: world, uiSystems: uiSystems)
+  log("4. A and B at z 5: painted{paintOrder(world: world)}; a press lands on {pressAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}")
+  log("5. Card raised by its LayerTag: {isRaisedNode(
+    world: world
+    uiSystems: uiSystems
+    entityId: card
+  )}; hidden, a press on the cards lands on {walkAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}")
+  componentSet(this: world.actives, entityId: card, data: Active { value: true })
+  place(world: world, uiSystems: uiSystems)
+  log("   shown: on the cards {walkAt(
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    y: 50.0
+  )}; on Card {walkAt(
+    world: world
+    uiSystems: uiSystems
+    x: 250.0
+    y: 250.0
+  )}")
+  componentRemove(this: world.zIndexes, entityId: a)
+  componentRemove(this: world.zIndexes, entityId: b)
+  place(world: world, uiSystems: uiSystems)
+  log(
+    "6. no ZIndex left: orders kept {componentCount(this: world.zChildOrders)}, painted{paintOrder(
+      world: world
+    )}"
+  )
+}
