@@ -637,6 +637,18 @@ draw areas as clips, the safe rectangle, the depth-sorted world layer.
 - Moved: adopting a world's own old layers (`adoptWorldLayers`, `stackOrderOfLegacy`) to
   `lib/ui/LayerLegacy.rae`, which goes in step 6b.
 
+**Built (step 3b, 2026-11-18):** `lib/ui/LayerCapture.rae`, case 1542. `UiCaptures` is a resource the
+program keeps next to its stack. `capturesFrameBegin` (after the plan is built) clears last frame's
+events and finds the topmost modal layer that shows something, or the topmost layer with an active
+modal draw (`planModalPosition`, from the plan and the contributions' `shown`); every capture whose
+hit is below it, and was not itself blocked by it, ends with a `PointerCanceled`. A toast is not
+modal, so it cancels nothing. `capturePress(captures, pointerId, walk)` keeps the walk's hit for the
+pointer (-1 the mouse, else the touch id) until `captureRelease`, and turns the walk's `outside` list
+into `LayerTappedOutside` events. `uiClaimsPointer` / `uiClaimsTouch` are true while that press is
+held and took a node, a surface or was blocked by a modal; `uiClaimsKeys` while a modal shows or the
+program set `setUiTextFocus`. Hover and the wheel are the same walk at the pointer's place
+(`uiHitWalkAt`), so they need nothing of their own. Rae's systems and dialogs move onto these in 3c.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not

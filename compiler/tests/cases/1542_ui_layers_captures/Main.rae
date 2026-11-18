@@ -1,0 +1,296 @@
+# Captures and claims in layer order (ui/LayerCapture; docs/ui-layers-design.md §7), headless. A
+# page with a button, a toast, a dialog (modal) and a menu (a popover), each a scene with its
+# LayerTag, the toast, dialog and menu hidden at first.
+#   1. the mouse presses the button and holds it (a drag);
+#   2. a toast shows: the drag goes on;
+#   3. the dialog opens: the drag is canceled (PointerCanceled), and keys are the UI's;
+#   4. under the open dialog a finger's press is blocked and claimed (the touch stick and the camera
+#      leave it alone), and the dialog hears it was tapped outside;
+#   5. the dialog closed: keys are free, and a finger on empty space is not claimed;
+#   6. the menu open: a press on the button presses the button and the menu hears the tap outside.
+import ui/Components
+open ui/Ecs
+open ui/LayerCapture
+open ui/LayerHit
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# A window-sized root `<name>Root` (no press of its own) holding the box `name`, on `layer`
+func boxScene(
+  name: view String
+  layer: view String
+  x: view Int
+  y: view Int
+  w: view Int
+  h: view Int
+) ret String {
+  var tag: String = ""
+  if layer.length() > 0 {
+    tag = ",\"LayerTag\":\{\"id\":\"{layer}\"\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}Root\",\"nodes\":\{\"{name}Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}{tag},\"Children\":[\"{name}\"]\},\"{name}\":\{\"Rect\":\{\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h}\},\"OnClick\":\{\"actionId\":\"{name}\",\"label\":\"{name}\"\}\}\}\}"
+}
+
+func mount(world: mod UiWorld, uiSystems: mod UiSystems, source: view String) ret EntityId {
+  ret loadScene(world: world, uiSystems: uiSystems, scene: parseScene(source: source))
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Button", "Toast", "Dialog", "Menu" } {
+    if let index: Int = world.nodeIds.get(k: id) {
+      if nodeEntityId(world: world, index: index) is entityId {
+        ret id
+      }
+    }
+  }
+  ret "nothing"
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  stack: view LayerStack
+  contributions: mod List(LayerContribution)
+  plan: mod LayerPaintPlan
+  captures: mod UiCaptures
+) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  capturesFrameBegin(
+    captures: captures
+    plan: plan
+    stack: stack
+    contributions: contributions
+  )
+}
+
+func press(
+  captures: mod UiCaptures
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pointerId: view Int
+  x: view Float
+  y: view Float
+) ret String {
+  let hit: UiHit = capturePress(
+    captures: captures
+    pointerId: pointerId
+    walk: uiHitWalkAt(
+      plan: plan
+      stack: stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+      targetSize: 0.0
+      skip: noEntity()
+    )
+  )
+  var text: String = nameIn(world: world, entityId: hit.entityId)
+  if hit.blockedByModal {
+    text = "nothing (blocked by the modal {layerNameOf(stack: stack, id: hit.layer)} layer)"
+  }
+  loop let outside: view LayerTappedOutside in captures.tappedOutside {
+    if outside.pointerId is pointerId {
+      text = "{text}; the {layerNameOf(stack: stack, id: outside.layer)} layer hears a tap outside"
+    }
+  }
+  ret text
+}
+
+func show(world: mod UiWorld, root: view EntityId, shown: view Bool) {
+  componentSet(this: world.actives, entityId: root, data: Active { value: shown })
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Button"
+      layer: ""
+      x: 0
+      y: 0
+      w: 200
+      h: 200
+    )
+  )
+  let toast: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Toast"
+      layer: "toast"
+      x: 0
+      y: 350
+      w: 400
+      h: 50
+    )
+  )
+  let dialog: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Dialog"
+      layer: "dialog"
+      x: 250
+      y: 250
+      w: 100
+      h: 100
+    )
+  )
+  let menu: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Menu"
+      layer: "popover"
+      x: 250
+      y: 0
+      w: 100
+      h: 100
+    )
+  )
+  show(world: world, root: toast, shown: false)
+  show(world: world, root: dialog, shown: false)
+  show(world: world, root: menu, shown: false)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  var captures: UiCaptures = createUiCaptures()
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+
+  log("1. the mouse presses {press(
+    captures: captures
+    plan: plan
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+    pointerId: -1
+    x: 50.0
+    y: 50.0
+  )} and holds it; claimed {uiClaimsPointer(captures: captures)}")
+  show(world: world, root: toast, shown: true)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  log(
+    "2. a toast shows: canceled {captures.canceled.length}, the drag still held {captureOf(
+      captures: captures
+      pointerId: -1
+    ) is not none}"
+  )
+  show(world: world, root: dialog, shown: true)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  var canceledWhat: String = ""
+  loop let canceled: view PointerCanceled in captures.canceled {
+    canceledWhat = "{canceledWhat} pointer {canceled.pointerId} on {nameIn(
+      world: world
+      entityId: canceled.hit.entityId
+    )}"
+  }
+  log(
+    "3. the dialog opens: canceled{canceledWhat}; the drag held {captureOf(
+      captures: captures
+      pointerId: -1
+    ) is not none}; keys are the UI's {uiClaimsKeys(captures: captures)}"
+  )
+  log("4. finger 3 under the dialog: {press(
+    captures: captures
+    plan: plan
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+    pointerId: 3
+    x: 50.0
+    y: 50.0
+  )}; claimed for the stick and the camera {uiClaimsTouch(captures: captures, touchId: 3)}")
+  captureRelease(captures: captures, pointerId: 3)
+  show(world: world, root: dialog, shown: false)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  log("5. the dialog closed: keys are the UI's {uiClaimsKeys(captures: captures)}; finger 5 on empty space presses {press(
+    captures: captures
+    plan: plan
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+    pointerId: 5
+    x: 300.0
+    y: 200.0
+  )}, claimed {uiClaimsTouch(captures: captures, touchId: 5)}")
+  captureRelease(captures: captures, pointerId: 5)
+  show(world: world, root: menu, shown: true)
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+    captures: captures
+  )
+  log("6. the menu open: a press on the button presses {press(
+    captures: captures
+    plan: plan
+    stack: stack
+    world: world
+    uiSystems: uiSystems
+    pointerId: -1
+    x: 50.0
+    y: 50.0
+  )}")
+}

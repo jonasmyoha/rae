@@ -1,0 +1,185 @@
+# ui/LayerCapture — presses captured in layer order, and what the UI claims
+# (docs/ui-layers-design.md
+# §7). A resource the program keeps next to its LayerStack, one per window:
+#
+#   capturesFrameBegin(captures: captures, plan: plan, stack: stack, contributions: contributions)
+#   ...a press of pointer `id` (the mouse -1, a finger its touch id) at (x, y):
+#   capturePress(captures: captures, pointerId: id, walk: uiHitWalkAt(...))   # the walk's answer
+#   ...while held: captureOf(captures, id) is where the drag goes; on release:
+#   captureRelease(captures: captures, pointerId: id)
+#   ...anything else that reads input asks first:
+#   uiClaimsPointer(captures) / uiClaimsTouch(captures, touchId) / uiClaimsKeys(captures)
+#
+# A press is captured by what the hit walk found (a node, a surface, or nothing under a modal) until
+# it is let go. When a modal layer or a modal draw starts showing over a capture, the capture ends
+# with a PointerCanceled to its holder; a toast or anything not modal leaves it alone. The layers a
+# press landed outside of (dismissOnOutsideTap) are sent as LayerTappedOutside: under a modal layer
+# the press stopped there, under a popover it went on to what is under it (the walk's hit).
+# Hover and the wheel are the same walk at the pointer's place each frame (uiHitWalkAt).
+open ecs/Entity
+open ui/LayerHit
+open ui/UiLayers
+
+# A held press: its pointer (-1 the mouse, else a touch id), what the walk found, and whether the
+# UI took it (a node, a surface, or blocked under a modal), so nothing else may act on it
+type PointerCapture {
+  pointerId: Int
+  hit: UiHit
+  claimed: Bool
+}
+
+# A capture ended because a modal opened over it: its holder lets the drag go
+type PointerCanceled {
+  pointerId: Int
+  hit: UiHit
+}
+
+# A press landed outside what the layer `layer` shows (it has dismissOnOutsideTap): close it
+type LayerTappedOutside {
+  layer: Int
+  pointerId: Int
+}
+
+type UiCaptures {
+  captures: List(PointerCapture)
+  # this frame's events
+  canceled: List(PointerCanceled)
+  tappedOutside: List(LayerTappedOutside)
+  # the place in the stack of the topmost modal layer or draw that shows something (-1: none)
+  modalPosition: Int = -1
+  # a text field has focus (the program sets it from its focus): keys are the UI's
+  textFocus: Bool = false
+}
+
+func createUiCaptures() ret UiCaptures {
+  ret UiCaptures { captures: {}, canceled: {}, tappedOutside: {} }
+}
+
+# Does the contribution's root `entityId` show anything (as of its last refresh)?
+func entryShownIn(contributions: view List(LayerContribution), entityId: view EntityId) ret Bool {
+  loop let contribution: view LayerContribution in contributions {
+    loop let entry: view LayerEntry in contribution.entries {
+      if entry.entityId is entityId {
+        ret entry.shown
+      }
+    }
+  }
+  ret false
+}
+
+# The place in the stack of the topmost modal layer that shows something, or of the topmost
+# layer with an active modal draw (-1: none), from this frame's plan
+func planModalPosition(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  contributions: view List(LayerContribution)
+) ret Int {
+  var top: Int = -1
+  loop let step: view PaintStep in plan.steps {
+    let position: Int = layerPosition(stack: stack, id: step.layer)
+    if position <= top {
+      continue
+    }
+    if step.kind is PaintStepKind.draw {
+      if let draw: view LayerDraw = stack.draws.viewAt(index: step.draw) {
+        if draw.modal and draw.active {
+          top = position
+        } else if draw.active and layerOf(stack: stack, id: step.layer).modal {
+          top = position
+        }
+      }
+    } else if step.kind is PaintStepKind.sceneRoot or step.kind is PaintStepKind.sceneRootPart {
+      if layerOf(stack: stack, id: step.layer).modal and entryShownIn(
+        contributions: contributions
+        entityId: step.entityId
+      ) {
+        top = position
+      }
+    }
+  }
+  ret top
+}
+
+# A new frame: last frame's events gone, and every capture under a modal that shows now ended
+# (a PointerCanceled each). Call after the plan is built and before this frame's presses.
+func capturesFrameBegin(
+  captures: mod UiCaptures
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  contributions: view List(LayerContribution)
+) {
+  captures.canceled.clear()
+  captures.tappedOutside.clear()
+  captures.modalPosition = planModalPosition(plan: plan, stack: stack, contributions: contributions)
+  if captures.modalPosition < 0 {
+    ret
+  }
+  loop var i: Int = captures.captures.length - 1, i >= 0, --i {
+    if let capture: view PointerCapture = captures.captures.viewAt(index: i) {
+      if layerPosition(stack: stack, id: capture.hit.layer) < captures.modalPosition and not capture.hit.blockedByModal {
+        captures.canceled.add(
+          value: PointerCanceled { pointerId: capture.pointerId, hit: capture.hit }
+        )
+        captures.captures.removeAt(index: i)
+      }
+    }
+  }
+}
+
+# A press of `pointerId`, with the hit walk's answer for its place: captured until released, and
+# the layers it landed outside of sent as LayerTappedOutside. Returns what it hit.
+func capturePress(captures: mod UiCaptures, pointerId: view Int, walk: view UiHitWalk) ret UiHit {
+  captureRelease(captures: captures, pointerId: pointerId)
+  let claimed: Bool = walk.hit.blockedByModal or not uiHitIsNothing(hit: walk.hit)
+  captures.captures.add(
+    value: PointerCapture { pointerId: pointerId, hit: walk.hit, claimed: claimed }
+  )
+  loop let layer: view Int in walk.outside {
+    captures.tappedOutside.add(value: LayerTappedOutside { layer: layer, pointerId: pointerId })
+  }
+  ret walk.hit
+}
+
+# The press of `pointerId` was let go
+func captureRelease(captures: mod UiCaptures, pointerId: view Int) {
+  loop var i: Int = captures.captures.length - 1, i >= 0, --i {
+    if let capture: view PointerCapture = captures.captures.viewAt(index: i) {
+      if capture.pointerId is pointerId {
+        captures.captures.removeAt(index: i)
+      }
+    }
+  }
+}
+
+# Where the held press of `pointerId` goes (a drag), if it is held
+func captureOf(captures: view UiCaptures, pointerId: view Int) ret opt PointerCapture {
+  loop let capture: view PointerCapture in captures.captures {
+    if capture.pointerId is pointerId {
+      ret capture
+    }
+  }
+  ret none
+}
+
+# The UI took the press of `pointerId` (it began on the UI or under a modal): the camera, the
+# touch stick, a game's gestures leave it alone
+func uiClaimsTouch(captures: view UiCaptures, touchId: view Int) ret Bool {
+  if let capture: PointerCapture = captureOf(captures: captures, pointerId: touchId) {
+    ret capture.claimed
+  }
+  ret false
+}
+
+# The same for the mouse (pointer -1)
+func uiClaimsPointer(captures: view UiCaptures) ret Bool {
+  ret uiClaimsTouch(captures: captures, touchId: -1)
+}
+
+# Keys are the UI's: a text field has focus, or a modal shows
+func uiClaimsKeys(captures: view UiCaptures) ret Bool {
+  ret captures.textFocus or captures.modalPosition >= 0
+}
+
+func setUiTextFocus(captures: mod UiCaptures, focused: view Bool) {
+  captures.textFocus = focused
+}
