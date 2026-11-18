@@ -4,6 +4,7 @@
 import Math
 open Atomic
 open collections/SpscRing
+open audio/Sound
 
 const audioMaxVoices: Int = 64
 
@@ -167,4 +168,34 @@ func voiceSlot(voices: view List(AudioVoice)) ret Int {
     }
   }
   ret chosen
+}
+
+# The sound's channel `channel` at fractional frame `position`, linearly
+# between the two frames around it.
+func voiceSampleAt(voice: view AudioVoice, position: view Float64, channel: view Int) ret Float {
+  var first: Int = position as Int
+  let fraction: Float = (position - (first as Float64)) as Float
+  # never a frame outside the sound: a looping voice wraps, any other is silent there
+  if first < 0 or first >= voice.frameCount {
+    if not voice.looping or voice.frameCount <= 0 {
+      ret 0.0
+    }
+    first = first % voice.frameCount
+    if first < 0 {
+      first = first + voice.frameCount
+    }
+  }
+  let a: Float = sampleAt(samples: voice.samples, index: first * voice.channels + channel)
+  if fraction <= 0.0 {
+    ret a
+  }
+  var next: Int = first + 1
+  if next >= voice.frameCount {
+    if not voice.looping {
+      ret a * (1.0 - fraction)
+    }
+    next = 0
+  }
+  let b: Float = sampleAt(samples: voice.samples, index: next * voice.channels + channel)
+  ret a + (b - a) * fraction
 }

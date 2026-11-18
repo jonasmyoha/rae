@@ -433,7 +433,13 @@ func startVoice(mixer: mod AudioMixer, command: view AudioCommand) {
     voice.samples = command.samples
     voice.frameCount = command.frameCount
     voice.channels = command.channels
-    voice.position = command.startFrame as Float64
+    # a start before the sound is its first frame; a looping voice's start past the end wraps
+    # into the sound, and a one-shot's at or past the end ends on its first frame (renderVoice)
+    var startFrame: Int = Math.max(a: 0, b: command.startFrame)
+    if command.looping and command.frameCount > 0 {
+      startFrame = startFrame % command.frameCount
+    }
+    voice.position = startFrame as Float64
     voice.step = step
     voice.rate = steadyRamp(value: command.rate)
     voice.startedAt = sampleTime
@@ -618,26 +624,6 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
   }
 }
 
-# The sound's channel `channel` at fractional frame `position`, linearly
-# between the two frames around it.
-func voiceSampleAt(voice: view AudioVoice, position: view Float64, channel: view Int) ret Float {
-  let first: Int = position as Int
-  let fraction: Float = (position - (first as Float64)) as Float
-  let a: Float = sampleAt(samples: voice.samples, index: first * voice.channels + channel)
-  if fraction <= 0.0 {
-    ret a
-  }
-  var next: Int = first + 1
-  if next >= voice.frameCount {
-    if not voice.looping {
-      ret a * (1.0 - fraction)
-    }
-    next = 0
-  }
-  let b: Float = sampleAt(samples: voice.samples, index: next * voice.channels + channel)
-  ret a + (b - a) * fraction
-}
-
 # One frame of a streamed voice: its channels from the ring (already at the
 # device's rate), gain and pan as for a sound. An empty ring is silence and an
 # underrun, unless the stream has finished, which ends the voice.
@@ -714,6 +700,12 @@ func renderVoice(
   loop var frame: Int = from, frame < from + frames and voice.active, ++frame {
     if voice.delayFrames > 0 {
       voice.delayFrames = voice.delayFrames - 1
+      continue
+    }
+    # a one-shot started at or past its sound's end (an entry part-way into a clip longer than
+    # its sound) ends here, before it reads a frame
+    if not voice.isStream and not voice.looping and voice.position >= (voice.frameCount as Float64) {
+      voice.active = false
       continue
     }
     if marks {
