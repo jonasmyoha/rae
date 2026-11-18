@@ -1,0 +1,228 @@
+# simulation/StandingSpot — a free place for a character to stand near a point: on the ground,
+# not inside anything, within a search radius, and if a camera is given out of its view, so a
+# subject coming near (simulation/SimLevelSystem CameNear) does not pop in where a player looks
+# (docs/simulation-levels.md).
+#
+# The ground and the colliders are the app's, so the search hands out candidates and the app
+# answers each one (Rae passes no functions, and this keeps the search free of any one physics):
+#
+#   var search: SpotSearch = beginSpotSearch(x: x, y: y, radius: 12.0, step: 1.0)
+#   spotSearchAvoidView(search: search, spotView: cameraView)          # optional
+#   loop {
+#     if let candidate: SpotCandidate = nextSpotCandidate(search: search) {
+#       let z: Float = groundHeightAt(candidate.x, candidate.y)       # the app's height function
+#       let free: Bool = noOverlap(candidate.x, candidate.y, z)        # its physics overlap query
+#       reportSpot(search: search, z: z, free: free, occluded: false) # occluded: its own ray test
+#     } else {
+#       break
+#     }
+#   }
+#   if let spot: StandingSpot = spotSearchResult(search: search) { ... }
+#
+# The candidates go out from the point in rings `step` apart, the point itself first, so the
+# nearest free spot wins. Without a view the search ends at the first free spot; with one it
+# ends at the first free spot out of view (behind the camera, past its reach, outside its cone,
+# or occluded as the app says), and when every free spot is in view it gives the nearest of them
+# (StandingSpot.hidden false).
+import Math
+
+# A camera's view: its eye, the direction it looks (any length), its half angle (radians, the
+# wider of its two) and how far it sees (m)
+type SpotView {
+  eyeX: Float
+  eyeY: Float
+  eyeZ: Float
+  forwardX: Float
+  forwardY: Float
+  forwardZ: Float
+  halfAngle: Float = 0.8
+  reach: Float = 1000.0
+}
+
+type SpotCandidate {
+  x: Float
+  y: Float
+}
+
+type StandingSpot {
+  x: Float
+  y: Float
+  z: Float
+  # Out of the view (always true without one)
+  hidden: Bool
+}
+
+type SpotSearch {
+  centerX: Float
+  centerY: Float
+  radius: Float
+  step: Float
+  # Points on the first ring; ring k has k times as many, so they stay about `step` apart
+  perRing: Int = 8
+  # A character's height (m): its feet and its head must both be out of view
+  bodyHeight: Float = 1.8
+  hasView: Bool = false
+  spotView: SpotView = {
+    eyeX: 0.0
+    eyeY: 0.0
+    eyeZ: 0.0
+    forwardX: 1.0
+    forwardY: 0.0
+    forwardZ: 0.0
+  }
+  ring: Int = 0
+  index: Int = 0
+  done: Bool = false
+  # The candidate handed out last, waiting for its report
+  pending: SpotCandidate = { x: 0.0, y: 0.0 }
+  hasPending: Bool = false
+  found: Bool = false
+  best: StandingSpot = { x: 0.0, y: 0.0, z: 0.0, hidden: false }
+  # How many candidates were handed out
+  tried: Int = 0
+}
+
+func beginSpotSearch(
+  x: view Float
+  y: view Float
+  radius: view Float
+  step: view Float
+) ret SpotSearch {
+  ret SpotSearch { centerX: x, centerY: y, radius: radius, step: Math.max(a: step, b: 0.05) }
+}
+
+# Prefer a spot out of `view`
+func spotSearchAvoidView(search: mod SpotSearch, spotView: view SpotView) {
+  search.spotView = spotView
+  search.hasView = true
+}
+
+# Is the point (x, y, z) in the view: in front of the eye, within its reach and its cone?
+func pointInView(
+  spotView: view SpotView
+  x: view Float
+  y: view Float
+  z: view Float
+) ret Bool {
+  let dx: Float = x - spotView.eyeX
+  let dy: Float = y - spotView.eyeY
+  let dz: Float = z - spotView.eyeZ
+  let distance: Float = Math.sqrt(x: dx * dx + dy * dy + dz * dz)
+  if distance > spotView.reach {
+    ret false
+  }
+  if distance < 0.001 {
+    ret true
+  }
+  let forward: Float = Math.sqrt(
+    x: spotView.forwardX * spotView.forwardX + spotView.forwardY * spotView.forwardY + spotView.forwardZ * spotView.forwardZ
+  )
+  if forward < 0.000001 {
+    ret false
+  }
+  let cosine: Float = (dx * spotView.forwardX + dy * spotView.forwardY + dz * spotView.forwardZ) / (distance * forward)
+  ret cosine >= Math.cos(x: spotView.halfAngle)
+}
+
+# Can the view see a character standing at (x, y) on ground height z (its feet or its head)?
+func spotInView(
+  search: view SpotSearch
+  x: view Float
+  y: view Float
+  z: view Float
+) ret Bool {
+  ret pointInView(
+    spotView: search.spotView
+    x: x
+    y: y
+    z: z
+  ) or pointInView(
+    spotView: search.spotView
+    x: x
+    y: y
+    z: z + search.bodyHeight
+  )
+}
+
+# The next place to try (none when the search is over)
+func nextSpotCandidate(search: mod SpotSearch) ret opt SpotCandidate {
+  if search.done {
+    ret none
+  }
+  if search.ring is 0 {
+    if search.index > 0 {
+      search.ring = 1
+      search.index = 0
+    }
+  } else if search.index >= search.perRing * search.ring {
+    search.ring = search.ring + 1
+    search.index = 0
+  }
+  let reach: Float = search.ring.toFloat() * search.step
+  if reach > search.radius + 0.0001 {
+    search.done = true
+    ret none
+  }
+  var candidate: SpotCandidate = { x: search.centerX, y: search.centerY }
+  if search.ring > 0 {
+    let count: Int = search.perRing * search.ring
+    # each ring starts half a step round from the last, so the rings do not line up
+    let angle: Float = (search.index.toFloat() + 0.5 * search.ring.toFloat()) / count.toFloat() * Math.pi * 2.0
+    candidate = {
+      x: search.centerX + Math.cos(x: angle) * reach
+      y: search.centerY + Math.sin(x: angle) * reach
+    }
+  }
+  search.index = search.index + 1
+  search.pending = candidate
+  search.hasPending = true
+  search.tried = search.tried + 1
+  ret candidate
+}
+
+# The app's answer for the last candidate: the ground height there, whether a character can stand
+# there (on ground it may stand on, overlapping nothing), and whether something hides it from the
+# view (the app's own ray test; false when it does not test)
+func reportSpot(
+  search: mod SpotSearch
+  z: view Float
+  free: view Bool
+  occluded: view Bool
+) {
+  if not search.hasPending {
+    ret
+  }
+  search.hasPending = false
+  if not free {
+    ret
+  }
+  let x: Float = search.pending.x
+  let y: Float = search.pending.y
+  var hidden: Bool = true
+  if search.hasView {
+    hidden = occluded or not spotInView(
+      search: search
+      x: x
+      y: y
+      z: z
+    )
+  }
+  if hidden {
+    search.best = { x: x, y: y, z: z, hidden: true }
+    search.found = true
+    search.done = true
+  } else if not search.found {
+    # the nearest free spot in view, kept in case no hidden one is free
+    search.best = { x: x, y: y, z: z, hidden: false }
+    search.found = true
+  }
+}
+
+# Where to stand: the first free spot out of view, else the nearest free one (none when nothing
+# within the radius was free)
+func spotSearchResult(search: view SpotSearch) ret opt StandingSpot {
+  if search.found {
+    ret search.best
+  }
+  ret none
+}

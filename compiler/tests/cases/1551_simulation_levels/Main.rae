@@ -1,0 +1,276 @@
+# simulation/SimLevelSystem and simulation/StandingSpot, headless:
+#   1. a subject walking in to a center and out again gets one CameNear at the enter distance and
+#      one WentFar past the leave distance; one wandering at the edge in between gets none; a
+#      second center keeps a subject near; a new subject already near comes near on the first run
+#   2. a standing spot near a point avoids a box collider and stands on the ground the app gives;
+#      with a camera it picks a free spot out of its view, and when every free spot is in view it
+#      gives the nearest one, marked not hidden
+import Math
+open ecs/Entity
+open ecs/Event
+open ecs/World
+open simulation/SimLevelSystem
+open simulation/StandingSpot
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+# One run: the subject `entityId` moved to (x, 0), and what happened to it
+func step(
+  system: mod SimLevelSystem
+  centers: view List(RelevanceCenter)
+  entityId: view EntityId
+  x: view Float
+) ret String {
+  moveSimSubject(
+    system: system
+    entityId: entityId
+    x: x
+    y: 0.0
+  )
+  simLevelSystem(system: system, centers: centers)
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(CameNear, this: system.cameNear), ++i {
+    let event: CameNear = eventAt(CameNear, this: system.cameNear, i: i)
+    if event.entityId is entityId {
+      text = "{text} near at {x}"
+    }
+  }
+  loop var i: Int = 0, i < eventCount(WentFar, this: system.wentFar), ++i {
+    let event: WentFar = eventAt(WentFar, this: system.wentFar, i: i)
+    if event.entityId is entityId {
+      text = "{text} far at {x}"
+    }
+  }
+  ret text
+}
+
+# The app's ground: a slope rising along x
+func groundAt(x: view Float, y: view Float) ret Float {
+  ret 0.1 * x
+}
+
+# The app's collider: a box from (2, -1) to (4, 1) on the ground; a character is a circle of 0.4
+func blockedAt(x: view Float, y: view Float) ret Bool {
+  let nearestX: Float = Math.clamp(val: x, low: 2.0, high: 4.0)
+  let nearestY: Float = Math.clamp(val: y, low: -1.0, high: 1.0)
+  let dx: Float = x - nearestX
+  let dy: Float = y - nearestY
+  ret dx * dx + dy * dy < 0.4 * 0.4
+}
+
+func search(spotSearch: mod SpotSearch) ret opt StandingSpot {
+  loop {
+    if let candidate: SpotCandidate = nextSpotCandidate(search: spotSearch) {
+      reportSpot(
+        search: spotSearch
+        z: groundAt(x: candidate.x, y: candidate.y)
+        free: not blockedAt(x: candidate.x, y: candidate.y)
+        occluded: false
+      )
+    } else {
+      break
+    }
+  }
+  ret spotSearchResult(search: spotSearch)
+}
+
+func main() {
+  var allocator: EntityAllocator = createEntityAllocator()
+  var system: SimLevelSystem = createSimLevelSystem(
+    settings: SimLevelSettings { enterDistance: 10.0, leaveDistance: 12.0 }
+  )
+  let centers: List(RelevanceCenter) = { RelevanceCenter { x: 0.0, y: 0.0 } }
+  let walker: EntityId = allocEntity(this: allocator)
+  addSimSubject(
+    system: system
+    entityId: walker
+    x: 20.0
+    y: 0.0
+  )
+  var walk: String = ""
+  loop let x: view Float in List(Float) {
+    20.0
+    15.0
+    11.0
+    10.5
+    10.0
+    9.0
+    3.0
+    9.0
+    11.0
+    11.9
+    12.0
+    12.5
+    20.0
+  } {
+    walk = "{walk}{step(
+      system: system
+      centers: centers
+      entityId: walker
+      x: x
+    )}"
+  }
+  log("1. walking in and out:{walk}")
+  check(label: "one event each way", ok: walk is " near at 10 far at 12.5")
+  # a subject that came near wanders at the edge, between enter and leave: no event
+  var edge: String = ""
+  loop let x: view Float in List(Float) {
+    11.0
+    10.2
+    11.8
+    10.6
+    11.4
+    9.9
+    11.99
+  } {
+    edge = "{edge}{step(
+      system: system
+      centers: centers
+      entityId: walker
+      x: x
+    )}"
+  }
+  log("   wandering at the edge after coming near:{edge}")
+  check(label: "the edge: only the first coming near", ok: edge is " near at 9.9")
+  check(label: "near now", ok: simLevelOf(system: system, entityId: walker) is SimLevel.near)
+  # a second center keeps it near past the first one's leave distance
+  let twoCenters: List(RelevanceCenter) = {
+    RelevanceCenter { x: 0.0, y: 0.0 }
+    RelevanceCenter { x: 30.0, y: 0.0 }
+  }
+  let carried: String = "{step(
+    system: system
+    centers: twoCenters
+    entityId: walker
+    x: 22.0
+  )}"
+  check(
+    label: "the nearer of two centers keeps it near"
+    ok: carried.length() is 0 and simLevelOf(system: system, entityId: walker) is SimLevel.near
+  )
+  # a new subject already near comes near on the first run; with no centers everything goes far
+  let close: EntityId = allocEntity(this: allocator)
+  addSimSubject(
+    system: system
+    entityId: close
+    x: 1.0
+    y: 1.0
+  )
+  simLevelSystem(system: system, centers: centers)
+  # (the walker, at 22 with only the first center now, goes far in the same run)
+  check(
+    label: "a new subject near a center comes near at once"
+    ok: eventCount(CameNear, this: system.cameNear) is 1 and eventCount(
+      WentFar
+      this: system.wentFar
+    ) is 1 and system.nearCount is 1
+  )
+  simLevelSystem(system: system, centers: List.create(RelevanceCenter, cap: 0))
+  check(
+    label: "no centers: all far"
+    ok: eventCount(WentFar, this: system.wentFar) is 1 and system.nearCount is 0
+  )
+
+  # 2. a spot near (3, 0), inside the box: the nearest free one outside it, on the ground
+  var plain: SpotSearch = beginSpotSearch(
+    x: 3.0
+    y: 0.0
+    radius: 6.0
+    step: 1.0
+  )
+  if let spot: StandingSpot = search(spotSearch: plain) {
+    log("2. no camera: {spot.x}, {spot.y}, z {spot.z} after {plain.tried} tries")
+    check(label: "not in the box", ok: not blockedAt(x: spot.x, y: spot.y))
+    check(
+      label: "on the ground"
+      ok: Math.abs(value: spot.z - groundAt(x: spot.x, y: spot.y)) < 0.0001
+    )
+    check(
+      label: "within the radius"
+      ok: Math.sqrt(x: (spot.x - 3.0) * (spot.x - 3.0) + spot.y * spot.y) <= 6.0001
+    )
+  } else {
+    check(label: "a spot without a camera", ok: false)
+  }
+  # with a camera at (3, -8) looking along +y: a free spot out of its 35-degree cone
+  let cameraView: SpotView = {
+    eyeX: 3.0
+    eyeY: -8.0
+    eyeZ: 1.7
+    forwardX: 0.0
+    forwardY: 1.0
+    forwardZ: 0.0
+    halfAngle: 0.61
+    reach: 100.0
+  }
+  var hiddenSearch: SpotSearch = beginSpotSearch(
+    x: 3.0
+    y: 0.0
+    radius: 6.0
+    step: 1.0
+  )
+  spotSearchAvoidView(search: hiddenSearch, spotView: cameraView)
+  if let spot: StandingSpot = search(spotSearch: hiddenSearch) {
+    let seen: Bool = pointInView(
+      spotView: cameraView
+      x: spot.x
+      y: spot.y
+      z: spot.z
+    ) or pointInView(
+      spotView: cameraView
+      x: spot.x
+      y: spot.y
+      z: spot.z + 1.8
+    )
+    log("   with a camera: {spot.x}, {spot.y}, hidden {spot.hidden}")
+    check(label: "out of the camera's view", ok: spot.hidden and not seen)
+    check(label: "and still free", ok: not blockedAt(x: spot.x, y: spot.y))
+  } else {
+    check(label: "a spot with a camera", ok: false)
+  }
+  # a wide camera sees every spot: the nearest free one, not hidden
+  var seenSearch: SpotSearch = beginSpotSearch(
+    x: 3.0
+    y: 0.0
+    radius: 3.0
+    step: 1.0
+  )
+  spotSearchAvoidView(
+    search: seenSearch
+    spotView: SpotView {
+      eyeX: 3.0
+      eyeY: -30.0
+      eyeZ: 1.7
+      forwardX: 0.0
+      forwardY: 1.0
+      forwardZ: 0.0
+      halfAngle: 1.4
+      reach: 100.0
+    }
+  )
+  if let spot: StandingSpot = search(spotSearch: seenSearch) {
+    log("   every spot in view: {spot.x}, {spot.y}, hidden {spot.hidden}")
+    check(
+      label: "the nearest free spot, marked seen"
+      ok: not spot.hidden and not blockedAt(x: spot.x, y: spot.y)
+    )
+  }
+  # all blocked: nothing
+  var boxed: SpotSearch = beginSpotSearch(
+    x: 3.0
+    y: 0.0
+    radius: 0.5
+    step: 1.0
+  )
+  var nothing: Bool = true
+  if let found: StandingSpot = search(spotSearch: boxed) {
+    nothing = false
+  }
+  check(label: "nothing free in the radius: none", ok: nothing)
+}

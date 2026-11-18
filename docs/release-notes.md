@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.23, 2026-11-19: simulation levels round relevance centers
+
+- `simulation/SimLevelSystem`: a subject (an entity id with a `SimRelevance` component) is near
+  or far by its distance to a list of centers, with an enter and a larger leave distance, and
+  `CameNear` / `WentFar` events the app answers (build the full entity, or keep only its record).
+- `simulation/StandingSpot`: a free place to stand near a point, on the app's ground, clear of its
+  colliders, within a radius, and out of a camera's view when one is free; the app answers each
+  candidate. docs/simulation-levels.md (with TileStreaming's centers).
+
 ## 0.4.22, 2026-11-19: makeBox shows pictures upright
 
 - `Mesh3d.makeBox`: a picture on any face now reads upright and the right way round: u runs to

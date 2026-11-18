@@ -1,0 +1,174 @@
+# simulation/SimLevelSystem — which things are simulated fully (near) and which are only kept as
+# data (far), by their distance to relevance centers (docs/simulation-levels.md). A host keeps
+# its world alive round every player: a character or vehicle near a player is a full entity (a
+# body, its systems, the ground streamed under it); one far from every player is a cheap record
+# the app moves by its own rules, with nothing more than an id.
+#
+# A subject is an entity id (from the app's allocator) with a SimRelevance component: its place
+# on the ground plane and its level. Each frame the app moves its subjects (moveSimSubject) and
+# runs simLevelSystem with this frame's centers. A far subject comes near once its nearest center
+# is within `enterDistance`, and a near one goes far once every center is past `leaveDistance`
+# (further: an entity at the edge does not change by turns). Each change is one event the app
+# answers:
+#
+#   CameNear  make the full entity (its body, its components) from the record, at a place out of
+#             sight if it should not pop in (simulation/StandingSpot)
+#   WentFar   keep what the record needs (its place, its state) and remove the full entity
+#
+# A new subject starts far, so one already near a center comes near on the first run.
+import Math
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+enum SimLevel { far, near }
+
+type SimLevelSettings {
+  # A far subject comes near within this distance of a center (m)
+  enterDistance: Float = 60.0
+  # A near subject goes far past this distance from every center (m; more than enterDistance)
+  leaveDistance: Float = 75.0
+}
+
+# A point the world is simulated round (a player); distances are on the ground plane (x, y)
+type RelevanceCenter {
+  x: Float
+  y: Float
+}
+
+# A subject's place and level
+type SimRelevance {
+  x: Float
+  y: Float
+  level: SimLevel = SimLevel.far
+  # The nearest center at the last run (-1: none) and its distance
+  center: Int = -1
+  distance: Float = 0.0
+}
+
+type CameNear {
+  entityId: EntityId
+  # The center it came near (its index in the run's centers) and its distance from it
+  center: Int
+  distance: Float
+}
+
+type WentFar {
+  entityId: EntityId
+  # The distance to its nearest center (-1 when there were none)
+  distance: Float
+}
+
+type SimLevelSystem {
+  settings: SimLevelSettings
+  subjects: ComponentTable(SimRelevance)
+  cameNear: EventQueue(CameNear)
+  wentFar: EventQueue(WentFar)
+  # Subjects near after the last run
+  nearCount: Int = 0
+}
+
+func createSimLevelSystem(settings: view SimLevelSettings) ret SimLevelSystem {
+  ret SimLevelSystem {
+    settings: settings
+    subjects: ComponentTable.create(SimRelevance)
+    cameNear: createEventQueue(CameNear)
+    wentFar: createEventQueue(WentFar)
+  }
+}
+
+# Track `entityId` at (x, y), far until the next run says otherwise
+func addSimSubject(
+  system: mod SimLevelSystem
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+) {
+  componentSet(this: system.subjects, entityId: entityId, data: SimRelevance { x: x, y: y })
+}
+
+# Stop tracking `entityId` (no event: the app removes what it holds itself)
+func removeSimSubject(system: mod SimLevelSystem, entityId: view EntityId) {
+  if componentHas(this: system.subjects, entityId: entityId) {
+    if componentView(this: system.subjects, entityId: entityId).level is SimLevel.near {
+      system.nearCount = system.nearCount - 1
+    }
+    componentRemove(this: system.subjects, entityId: entityId)
+  }
+}
+
+# The subject's place now (the full entity's while near, the record's while far)
+func moveSimSubject(
+  system: mod SimLevelSystem
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+) {
+  if componentHas(this: system.subjects, entityId: entityId) {
+    let subject: mod SimRelevance = componentMod(this: system.subjects, entityId: entityId)
+    subject.x = x
+    subject.y = y
+  }
+}
+
+# The subject's level (far for one not tracked)
+func simLevelOf(system: view SimLevelSystem, entityId: view EntityId) ret SimLevel {
+  if componentHas(this: system.subjects, entityId: entityId) {
+    ret componentView(this: system.subjects, entityId: entityId).level
+  }
+  ret SimLevel.far
+}
+
+# This frame's levels round `centers`: last frame's events gone, each subject's nearest center
+# and distance found, and a CameNear or WentFar for each one that changed
+func simLevelSystem(system: mod SimLevelSystem, centers: view List(RelevanceCenter)) {
+  eventClear(CameNear, this: system.cameNear)
+  eventClear(WentFar, this: system.wentFar)
+  let settings: SimLevelSettings = system.settings
+  let leave: Float = Math.max(a: settings.leaveDistance, b: settings.enterDistance)
+  var nearCount: Int = 0
+  loop var i: Int = 0, i < componentCount(this: system.subjects), ++i {
+    let entityId: EntityId = componentEntityAt(this: system.subjects, i: i)
+    let subject: mod SimRelevance = componentMod(this: system.subjects, entityId: entityId)
+    var best: Int = -1
+    var bestSquared: Float = 0.0
+    loop var c: Int = 0, c < centers.length, ++c {
+      if let center: view RelevanceCenter = centers.viewAt(index: c) {
+        let dx: Float = subject.x - center.x
+        let dy: Float = subject.y - center.y
+        let squared: Float = dx * dx + dy * dy
+        if best < 0 or squared < bestSquared {
+          best = c
+          bestSquared = squared
+        }
+      }
+    }
+    var distance: Float = -1.0
+    if best >= 0 {
+      distance = Math.sqrt(x: bestSquared)
+    }
+    subject.center = best
+    subject.distance = distance
+    if subject.level is SimLevel.far {
+      if best >= 0 and distance <= settings.enterDistance {
+        subject.level = SimLevel.near
+        eventSend(
+          CameNear
+          this: system.cameNear
+          value: CameNear { entityId: entityId, center: best, distance: distance }
+        )
+      }
+    } else if best < 0 or distance > leave {
+      subject.level = SimLevel.far
+      eventSend(
+        WentFar
+        this: system.wentFar
+        value: WentFar { entityId: entityId, distance: distance }
+      )
+    }
+    if subject.level is SimLevel.near {
+      nearCount = nearCount + 1
+    }
+  }
+  system.nearCount = nearCount
+}
