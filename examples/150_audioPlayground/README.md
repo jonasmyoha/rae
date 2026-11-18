@@ -43,8 +43,16 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
   the sound of that ground, louder at speed, and a heavy stomp under the 12 t mech, each a
   little varied. The walker kit has no sound code.
 - **Synth and MIDI** (the third column): the package's own synth (`audio/AudioSynth`).
-  - The **keyboard**, C4 to C5, plays with the mouse (drag across the keys to slide from note
-    to note) and with several fingers at once on a touch screen.
+  - The **keyboard**, one octave from a C (C4 at launch), plays with the mouse (drag across
+    the keys to slide from note to note) and with several fingers at once on a touch screen.
+    **-** and **+** move it an octave down or up (C1 to C7); the C between them is its lowest
+    key.
+  - **Keyjazz** (on at launch; its button turns it off) plays the synth from the computer
+    keyboard as in a tracker, in the same octave as the on-screen keys: the bottom row
+    `Z S X D C V G B H N J M` is that octave (Z its C, the row above for the black keys), going
+    on with `, L . ; /`; the row `Q 2 W 3 E R 5 T 6 Y 7 U` is the octave above, going on with
+    `I 9 O 0 P [ = ]`. The keys are positions, so they are in the same places on any layout;
+    with Ctrl, Command or Alt held they play nothing.
   - **Waveform** steps through soft (a sine and its octave, the synth's own tone), sine,
     triangle, square and saw; the four sliders set the envelope (attack, decay, sustain,
     release). The notes sounding take a change at once.
@@ -56,10 +64,11 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
     names them, or says none is connected; one plugged in later is found within two seconds.
     The last note received is shown, and its key lights up.
 - **Microphone: record and play back** (under the synth; `audio/AudioInput`).
-  - **Allow** asks for the microphone. The engine opens with the input only once it is allowed
-    (opening it unasked would bring up the system's question at launch), so allowing it later
-    opens the engine again with the input and loads every sound again (the music and the orbit
-    stop). A refusal says where to allow it: Settings > Privacy & Security > Microphone.
+  - The microphone is **off** at launch. **Mic** turns it on or off: on, it asks for the
+    microphone when it was not asked yet (**Allow** only asks), and once it is allowed the
+    engine is opened again with the input and every sound loaded again (the music and the
+    orbit stop); off, the engine is opened again without it. A refusal says where to allow it:
+    Settings > Privacy & Security > Microphone.
   - The **level** bar is what came in during the last frame (0 % is 60 dB down).
   - **Record 3 s** records a take while five clicks play, half a second apart. The take is cut
     by the round trip (output plus input latency), so its frame i lines up with what played at
@@ -139,7 +148,7 @@ compiler/bin/rae run examples/150_audioPlayground/Main.rae
 | `RAE_AUDIO_DEVICE=offline` | the offline engine in a windowed run |
 | `RAE_AUDIO_PLAYGROUND_DEMO=1` | presses the controls by itself (the effects measured, then the reverb turned on; Now Playing's pause, play and a new position sent as the lock screen would; two sounds, the stream, an alert and the chime, a seek to 16 s, pan left, a varied step, a capped burst, the orbit at 6 m with its engine rate raised to 150 % and then past its far distance, a walker and a mech crossing the strip of grounds, the metronome at 240 beats a minute, and three simulated fingers on the keyboard, one sliding to another key) and logs a summary line at the end; with the offline engine it ends after 320 frames (5.3 s of audio), so its result does not depend on the machine's speed |
 | `RAE_AUDIO_PLAYGROUND_SECONDS=N` | ends a run on the real device after N seconds |
-| `RAE_AUDIO_PLAYGROUND_RECORD=1` | with a device and the microphone allowed: records a take at frame 60, plays it back and saves it, and logs a line `[audioPlayground] input: ...` at the end (the clicks heard and their offset, the saved path) |
+| `RAE_AUDIO_PLAYGROUND_RECORD=1` | with a device and the microphone allowed: opens the microphone at launch, records a take at frame 60, plays it back and saves it, and logs a line `[audioPlayground] input: ...` at the end (the clicks heard and their offset, the saved path) |
 | `RAE_AUDIO_PLAYGROUND_BACKGROUND=1` | starts the stream at frame 30 and logs every 2 s its place, whether it plays, the underruns, the device's callbacks and whether the window is on screen (for a background check: open another app on top and read the log) |
 | `RAE_AUDIO_RENDER_HELPERS=n` | n helper threads render the bus graph's stages with the device's callback; the Status section shows them |
 | `RAE_REALTIME_CHECK=1` | fails the run if the audio thread allocated, locked or logged |

@@ -6,15 +6,25 @@ open audio/MidiPorts
 open audio/MusicalTime
 open ecs/Entity
 
-# The keyboard's notes: C4 (MIDI 60) to C5
+# C4 (MIDI 60): the keyboard's lowest note at the starting octave, and the metronome's base
 const keyboardLowNote: Int = 60
 
+# The on-screen keyboard: thirteen keys, from the C of `octave` to the next C
 const keyboardKeys: Int = 13
+
+# The octaves the - and + buttons reach (C1 .. C7 as the keyboard's lowest C)
+const lowestOctave: Int = 1
+
+const highestOctave: Int = 7
 
 type SynthDemo {
   sound: SynthSound
   # the waveforms the waveform button steps through, and which it shows
   waveformIndex: Int = 0
+  # the octave of the keyboard's lowest C (4: C4, MIDI 60), for the on-screen keys and keyjazz
+  octave: Int = 4
+  # keyjazz: the computer keyboard plays the synth (Z..M and Q..P rows), on at launch
+  keyjazz: Bool = true
   # the notes held by the on-screen keyboard this frame (MIDI numbers), and by MIDI
   keyboardHeld: List(Int)
   midiHeld: List(Int)
@@ -50,4 +60,9 @@ func createSynthDemo(sampleRate: view Int) ret SynthDemo {
 
 func endSynthDemo(demo: view SynthDemo) {
   closeMidi(this: demo.midi)
+}
+
+# The MIDI note of the keyboard's lowest key: the C of `octave`
+func lowNoteOf(demo: view SynthDemo) ret Int {
+  ret 12 * (demo.octave + 1)
 }

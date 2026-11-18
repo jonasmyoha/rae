@@ -1,10 +1,16 @@
 # The Synth section: the package's own synth (audio/AudioSynth) played from an on-screen
 # keyboard, a MIDI keyboard and a metronome.
 #
-# - The keyboard is thirteen keys, C4 to C5. Every frame each pointer on it, the mouse and each
-#   finger (Gpu2d's touches), is hit-tested against the keys; a note starts when a key is first
-#   held and is released when nothing holds it any more, so a drag slides from key to key and
-#   several fingers play a chord.
+# - The keyboard is thirteen keys, one octave from a C (C4 at launch; - and + move it, and the
+#   C shows between them). Every frame each pointer on it, the mouse and each finger (Gpu2d's
+#   touches), is hit-tested against the keys; a note starts when a key is first held and is
+#   released when nothing holds it any more, so a drag slides from key to key and several
+#   fingers play a chord.
+# - Keyjazz (on at launch, its button turns it off): the computer keyboard plays the synth as in
+#   a tracker. The bottom row Z S X D C V G B H N J M is the keyboard's octave (Z its C, the
+#   row above for the black keys), going on with , L . ; / into the next; Q 2 W 3 E R 5 T 6 Y 7
+#   U is the octave above, going on with I 9 O 0 P [ = ]. The keys are positions (scancodes),
+#   so they are in the same places on any layout.
 # - The waveform button and the envelope sliders set the synth's sound (setSynthSound).
 # - The metronome plays two bars of 4/4 at the tempo slider's speed, each beat a short note and
 #   the first of each bar an octave up and louder: a technical click, not music. Its notes are
@@ -15,7 +21,9 @@
 #   seconds.
 import Gpu2d
 import Gpu2dSimulatedInput
+import Keys
 import Math
+import Sdl3
 open audio/Audio
 open audio/AudioMixer
 open audio/AudioSchedule
@@ -138,7 +146,7 @@ func keyNoteAt(
   )
   loop var key: Int = 0, key < demo.keyEntityIds.length, ++key {
     if demo.keyEntityIds.copyAtDefault(index: key) is hit {
-      ret keyboardLowNote + key
+      ret lowNoteOf(demo: demo) + key
     }
   }
   ret -1
@@ -151,6 +159,124 @@ func holds(notes: view List(Int), note: view Int) ret Bool {
     }
   }
   ret false
+}
+
+# Keyjazz: each computer key (a scancode) and its semitone from the keyboard's lowest C
+func keyjazzKeys() ret List(Int) {
+  ret List(Int) {
+    Keys.keyZ
+    0
+    Keys.keyS
+    1
+    Keys.keyX
+    2
+    Keys.keyD
+    3
+    Keys.keyC
+    4
+    Keys.keyV
+    5
+    Keys.keyG
+    6
+    Keys.keyB
+    7
+    Keys.keyH
+    8
+    Keys.keyN
+    9
+    Keys.keyJ
+    10
+    Keys.keyM
+    11
+    Keys.keyComma
+    12
+    Keys.keyL
+    13
+    Keys.keyPeriod
+    14
+    Keys.keySemicolon
+    15
+    Keys.keySlash
+    16
+    Keys.keyQ
+    12
+    Keys.key2
+    13
+    Keys.keyW
+    14
+    Keys.key3
+    15
+    Keys.keyE
+    16
+    Keys.keyR
+    17
+    Keys.key5
+    18
+    Keys.keyT
+    19
+    Keys.key6
+    20
+    Keys.keyY
+    21
+    Keys.key7
+    22
+    Keys.keyU
+    23
+    Keys.keyI
+    24
+    Keys.key9
+    25
+    Keys.keyO
+    26
+    Keys.key0
+    27
+    Keys.keyP
+    28
+    Keys.keyLeftBracket
+    29
+    Keys.keyEquals
+    30
+    Keys.keyRightBracket
+    31
+  }
+}
+
+# The notes the computer keys hold now (keyjazz on), not with Ctrl, Command or Alt held (a
+# shortcut is not a note)
+func keyjazzNotes(demo: view SynthDemo) ret List(Int) {
+  var notes: List(Int) = {}
+  if not demo.keyjazz {
+    ret notes
+  }
+  if Sdl3.isKeyDown(key: Keys.keyLCtrl) or Sdl3.isKeyDown(key: Keys.keyRCtrl) or Sdl3.isKeyDown(
+    key: Keys.keyLGui
+  ) or Sdl3.isKeyDown(key: Keys.keyRGui) or Sdl3.isKeyDown(key: Keys.keyLAlt) or Sdl3.isKeyDown(
+    key: Keys.keyRAlt
+  ) {
+    ret notes
+  }
+  let keys: List(Int) = keyjazzKeys()
+  loop var pair: Int = 0, pair * 2 + 1 < keys.length, ++pair {
+    if Sdl3.isKeyDown(key: keys.copyAtFallback(index: pair * 2, fallback: 0)) {
+      let note: Int = lowNoteOf(demo: demo) + keys.copyAtFallback(index: pair * 2 + 1, fallback: 0)
+      if note <= 127 and not holds(notes: notes, note: note) {
+        notes.add(value: note)
+      }
+    }
+  }
+  ret notes
+}
+
+# The octave's name as the keyboard's lowest C (C4)
+func octaveName(demo: view SynthDemo) ret String {
+  ret "C{demo.octave}"
+}
+
+func keyjazzLabel(demo: view SynthDemo) ret String {
+  if demo.keyjazz {
+    ret "Keyjazz: on"
+  }
+  ret "Keyjazz: off"
 }
 
 # The notes the mouse and the fingers hold on the keyboard now
@@ -195,7 +321,7 @@ func keyboardNotes(
 # Each key painted held or not (held by the keyboard or by MIDI)
 func paintKeys(demo: view SynthDemo, world: mod UiWorld) {
   loop var key: Int = 0, key < keyboardKeys, ++key {
-    let note: Int = keyboardLowNote + key
+    let note: Int = lowNoteOf(demo: demo) + key
     var slot: String = "keyWhite"
     let semitone: Int = key % 12
     if semitone is 1 or semitone is 3 or semitone is 6 or semitone is 8 or semitone is 10 {
@@ -215,12 +341,17 @@ func playKeyboard(
   uiSystems: view UiSystems
   input: view UiInput
 ) ret Bool {
-  let now: List(Int) = keyboardNotes(
+  var now: List(Int) = keyboardNotes(
     demo: playground.synthDemo
     world: world
     uiSystems: uiSystems
     input: input
   )
+  loop let note: Int in keyjazzNotes(demo: playground.synthDemo) {
+    if not holds(notes: now, note: note) {
+      now.add(value: note)
+    }
+  }
   let at: Int = playground.audio.nextSafeSampleTime()
   var changed: Bool = false
   loop let note: Int in now {
@@ -335,6 +466,29 @@ func synthSection(
     applySynthSound(playground: playground, values: values)
     let waveform: SynthWaveform = playground.synthDemo.sound.waveform
     setNodeText(world: world, nodeId: "SynthWaveLabel", value: "Waveform: {waveform}")
+    changed = true
+  }
+  if uiActionFired(world: world, actionId: "synth.keyjazz") {
+    playground.synthDemo.keyjazz = not playground.synthDemo.keyjazz
+    setNodeText(
+      world: world
+      nodeId: "KeyjazzLabel"
+      value: keyjazzLabel(demo: playground.synthDemo)
+    )
+    changed = true
+  }
+  var octave: Int = playground.synthDemo.octave
+  if uiActionFired(world: world, actionId: "synth.octaveDown") {
+    octave = Math.max(a: lowestOctave, b: octave - 1)
+  }
+  if uiActionFired(world: world, actionId: "synth.octaveUp") {
+    octave = Math.min(a: highestOctave, b: octave + 1)
+  }
+  if octave is not playground.synthDemo.octave {
+    # the held keys keep their notes until let go (playKeyboard releases what is no longer held)
+    playground.synthDemo.octave = octave
+    setNodeText(world: world, nodeId: "OctaveLabel", value: octaveName(demo: playground.synthDemo))
+    paintKeys(demo: playground.synthDemo, world: world)
     changed = true
   }
   if uiActionFired(world: world, actionId: "synth.envelope") {

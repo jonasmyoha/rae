@@ -15,6 +15,8 @@ type InputDemo {
   # the microphone's permission as last read (audio/AudioInput: 3 allowed)
   permission: Int = 0
   asked: Bool = false
+  # the Mic button: the engine is opened with the input only while it is on (off at launch)
+  microphoneOn: Bool = false
   # when the permission is read next (s, the window's clock)
   nextPermissionSeconds: Float64 = 0.0
   # what the input ring gives: a take while recording, else a short running capture for the meter
@@ -42,6 +44,7 @@ type InputDemo {
 func createInputDemo(audio: view AudioEngine) ret InputDemo {
   ret InputDemo {
     permission: microphonePermission()
+    microphoneOn: audio.inputAvailable()
     capture: audio.beginRecording()
     clickSamples: {}
     take: Sound {

@@ -116,9 +116,11 @@ func playgroundAudioSettings(withInput: view Bool) ret AudioSettings {
 }
 
 func createPlayground() ret Playground {
-  # the microphone opens with the engine only when it is already allowed: opening the input
-  # unasked would bring up the system's question at launch
-  let microphoneAllowed: Bool = microphonePermission() is 3
+  # the microphone starts off: the Mic button turns it on (and asks for it). A run that records
+  # by itself (RAE_AUDIO_PLAYGROUND_RECORD=1) opens it at once when it is already allowed.
+  let microphoneAllowed: Bool = microphonePermission() is 3 and getEnv(
+    name: "RAE_AUDIO_PLAYGROUND_RECORD"
+  ) is "1"
   var audio: AudioEngine = audioStart(
     settings: playgroundAudioSettings(withInput: microphoneAllowed)
   )

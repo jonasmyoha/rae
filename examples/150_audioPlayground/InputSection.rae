@@ -11,8 +11,9 @@
 # playback starts the take, less that offset, and the same clicks from one sample time, so they
 # sound together.
 #
-# The engine opens with the input only once the microphone is allowed (Playground): when it is
-# allowed later, here, the engine is opened again with the input and every sound loaded again.
+# The microphone starts off. The Mic button turns it on: it asks for the microphone when it was
+# not asked yet, and once it is allowed the engine is opened again with the input and every sound
+# loaded again; turned off, the engine is opened again without it.
 import Filesystem
 import Gpu2d
 import Math
@@ -40,11 +41,11 @@ func decibelsOf(level: view Float) ret Float {
   ret 20.0 * Math.naturalLog(x: level) / 2.302585093
 }
 
-# The engine opened again, now with the microphone, and everything it held set up again (the
-# music, the orbit and the take were on the old engine: they stop)
-func reopenWithInput(playground: mod Playground, values: view UiValues) {
+# The engine opened again, with the microphone or without it, and everything it held set up
+# again (the music, the orbit and the take were on the old engine: they stop)
+func reopenEngine(playground: mod Playground, values: view UiValues, withInput: view Bool) {
   let unusedBlocks: Int = playground.audio.stopAudio()
-  playground.audio = audioStart(settings: playgroundAudioSettings(withInput: true))
+  playground.audio = audioStart(settings: playgroundAudioSettings(withInput: withInput))
   playground.click = playground.audio.loadSound(path: "{playgroundAssets}click.wav")
   playground.bell = playground.audio.loadSound(path: "{playgroundAssets}bell.wav")
   playground.whoosh = playground.audio.loadSound(path: "{playgroundAssets}whoosh.wav")
@@ -107,6 +108,9 @@ func inputStatus(playground: view Playground) ret String {
   }
   if demo.permission is 1 {
     ret "Restricted on this device: it cannot be allowed here"
+  }
+  if not demo.microphoneOn {
+    ret "Microphone off: press Mic to turn it on"
   }
   if demo.permission is 0 and demo.asked {
     ret "Asked: answer the system's question"
@@ -295,6 +299,33 @@ func newLevel(demo: view InputDemo, from: view Int) ret Float {
   ret peak
 }
 
+# The Mic button's text
+func micLabel(demo: view InputDemo) ret String {
+  if demo.microphoneOn {
+    ret "Mic: on"
+  }
+  ret "Mic: off"
+}
+
+# The Mic button: on asks for the microphone when it was not asked yet and, when it is allowed,
+# opens the engine again with the input (else the permission poll does it once it is allowed);
+# off opens the engine again without it, and a take being recorded is dropped
+func toggleMicrophone(playground: mod Playground, values: view UiValues) {
+  playground.inputDemo.microphoneOn = not playground.inputDemo.microphoneOn
+  if playground.inputDemo.microphoneOn {
+    if playground.inputDemo.permission is 0 {
+      let unusedAsked: Bool = requestMicrophone()
+      playground.inputDemo.asked = true
+    }
+    if microphonePermission() is 3 and not playground.audio.inputAvailable() {
+      reopenEngine(playground: playground, values: values, withInput: true)
+    }
+  } else if playground.audio.inputAvailable() {
+    reopenEngine(playground: playground, values: values, withInput: false)
+    playground.inputDemo.levelDecibels = -100.0
+  }
+}
+
 # The section's buttons, meter and take this frame; true when what it shows changed
 func inputSection(playground: mod Playground, world: mod UiWorld, values: mod UiValues) ret Bool {
   var changed: Bool = false
@@ -306,11 +337,19 @@ func inputSection(playground: mod Playground, world: mod UiWorld, values: mod Ui
       playground.inputDemo.permission = permission
       changed = true
     }
-    # allowed now, and the engine was opened without the input: open it again with it
-    if permission is 3 and not playground.audio.inputAvailable() {
-      reopenWithInput(playground: playground, values: values)
+    # on and allowed now, and the engine was opened without the input: open it again with it
+    if playground.inputDemo.microphoneOn and permission is 3 and not playground.audio.inputAvailable() {
+      reopenEngine(playground: playground, values: values, withInput: true)
       changed = true
     }
+  }
+  if uiActionFired(world: world, actionId: "input.mic") and not playground.rendersItself {
+    toggleMicrophone(playground: playground, values: values)
+    setNodeText(world: world, nodeId: "InputMicLabel", value: micLabel(demo: playground.inputDemo))
+    if not playground.inputDemo.microphoneOn {
+      let unusedLevel: Bool = setUiValue(values: values, key: "input.level", value: 0.0)
+    }
+    changed = true
   }
   if uiActionFired(world: world, actionId: "input.allow") and not playground.rendersItself {
     if playground.inputDemo.permission is 0 {
@@ -352,6 +391,7 @@ func inputSection(playground: mod Playground, world: mod UiWorld, values: mod Ui
   }
   if changed or playground.frames % 15 is 1 {
     setNodeText(world: world, nodeId: "InputStatus", value: inputStatus(playground: playground))
+    setNodeText(world: world, nodeId: "InputMicLabel", value: micLabel(demo: playground.inputDemo))
     setNodeText(world: world, nodeId: "InputTake", value: takeText(demo: playground.inputDemo))
     setNodeText(world: world, nodeId: "InputClicks", value: clicksText(demo: playground.inputDemo))
     var saved: String = ""
