@@ -1,0 +1,11 @@
+the stack: 12 layers; a program layer in the gap above hud at order 250
+1. game mode: hud[ draw:compass A:Hud A:Later] minimap[ draw:minimap] hudOver[ draw:map] dock[ B:Panel] dialog[ A:Menu]
+2. editor mode: hud[ draw:compass A:Hud A:Later] minimap[ draw:minimap] hudOver[ draw:map] dock[ B:Panel] dialog[ A:Menu] log[ draw:log strip]
+   B's panel has the z its scene gave it: 3
+3. B's panel in hud at z 0 (adding a world twice changes nothing: true): hud[ draw:compass A:Hud A:Later B:Panel] minimap[ draw:minimap] hudOver[ draw:map] dialog[ A:Menu]
+4. Hud at z 5: made again 0 times, its LayerTag z 5
+   plan: hud[ draw:compass A:Later B:Panel A:Hud] minimap[ draw:minimap] hudOver[ draw:map] dialog[ A:Menu]
+5. Hud at z -1, under the compass too: hud[ A:Hud draw:compass A:Later B:Panel] minimap[ draw:minimap] hudOver[ draw:map] dialog[ A:Menu]
+6. the map hidden, Later gone: made again 1 time
+   plan: hud[ A:Hud draw:compass B:Panel] minimap[ draw:minimap] dialog[ A:Menu]
+draw indexes stay: compass 0, map 1, minimap 2, log strip 3

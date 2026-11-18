@@ -455,6 +455,30 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
    debug overlay's Layers page.
 8. **Measure on a phone.** 106 and a walker with its HUD on the iPhone, before and after.
 
+**Built (step 1, 2026-11-18):** `lib/ui/UiLayers.rae` and case 1533. What the code decided:
+
+- A layer has a stable `id` given by the stack, because a layer added in a gap shifts every list
+  position after it. `OnLayer`, `LayerDraw.layer` and a plan step name the id; `layerIdOf(stack, name)`
+  finds it (-1 for none). `addUiLayer` takes a whole `UiLayer` (for its flags), `addLayer` a name and
+  an order.
+- `LayerDraw`s are kept in the order they were added, so a draw's index stays its own, with a
+  separate list of indexes sorted by `z`. `setLayerDrawActive` hides one without a rebuild.
+- `LayerContribution` is the world's roots and raised nodes, found as `collectPaintableRoots` finds
+  them, sorted by (layer, `z`, the order the world lists them). `refreshLayerContribution` makes it
+  again only when the stack's generation changed or the roots are not the ones it holds (an O(roots)
+  check in reused lists). A root that moves to another layer while it stays mounted is not noticed
+  by that check: `markLayerContributionStale` makes it again. `setRootZ` writes the `z` on the
+  node's `LayerTag` (one with an empty id when it had none) and moves its entry in place.
+- A world's layer names still come from the old API: a `LayerRef`'s `LayerRoot.id`, else the
+  `LayerTag`'s id, else `hud`; "content" is `hud` and "back-button" is `dock`. A name the stack does
+  not have goes in `hud` and is counted (`unknownLayers`); 121's own layers are moved in step 6.
+- `buildLayerPaintPlan` refills the plan's list (no allocation once it has grown): layers in order,
+  in each the draws and the worlds' entries merged by `z`, draws first at an equal `z`, then the
+  world key, then the world's order. A layer with nothing has no steps; a layer the mode does not
+  show has none either.
+- The old `createStandardLayers`, `raiseNodeToLayer`, `setLayerById` and `collectPaintableRoots` are
+  unchanged and still paint and hit; the plan is not painted by yet (step 2).
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

@@ -1,0 +1,324 @@
+# The window's layer stack and its paint plan (ui/UiLayers; docs/ui-layers-design.md §4, §6),
+# headless: two UI worlds join one stack (keys 0 and 1). World A has a HUD scene whose menu is
+# raised to the dialog layer and a later scene; world B has a panel. The program draws a compass
+# in hud (at the roots' z: under them), a map in hudOver, a minimap in a layer of its own in the
+# gap above hud, and a log strip in log (editor mode only). The plan lists each layer's steps in
+# paint order; a z change moves a root without making the contribution again.
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+func hudScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Hud\",\"nodes\":\{\"Hud\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Menu\"]\},\"Menu\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":100\}\}\}\}"
+}
+
+func laterScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Later\",\"nodes\":\{\"Later\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\}\}\}\}"
+}
+
+func panelScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Panel\",\"nodes\":\{\"Panel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":100\},\"LayerTag\":\{\"id\":\"dock\",\"z\":3\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Hud", "Menu", "Later", "Panel" } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "?"
+}
+
+func drawName(appKind: view Int) ret String {
+  if appKind is 1 {
+    ret "compass"
+  }
+  if appKind is 2 {
+    ret "map"
+  }
+  if appKind is 3 {
+    ret "minimap"
+  }
+  if appKind is 4 {
+    ret "log strip"
+  }
+  ret "?"
+}
+
+# The plan as text: each layer and its steps
+func planText(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  a: view UiWorld
+  b: view UiWorld
+) ret String {
+  var text: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.layerBegin {
+      text = "{text} {layerNameOf(stack: stack, id: step.layer)}["
+    } else if step.kind is PaintStepKind.layerEnd {
+      text = "{text}]"
+    } else if step.kind is PaintStepKind.draw {
+      text = "{text} draw:{drawName(appKind: step.appKind)}"
+    } else if step.world is 0 {
+      text = "{text} A:{nameIn(world: a, entityId: step.entityId)}"
+    } else {
+      text = "{text} B:{nameIn(world: b, entityId: step.entityId)}"
+    }
+  }
+  ret text
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func main() {
+  var stack: LayerStack = createStandardLayerStack()
+  let minimapOrder: Int = layerOrderAbove(stack: stack, name: "hud")
+  let minimap: Int = addLayer(stack: stack, name: "minimap", order: minimapOrder)
+  log(
+    "the stack: {stack.layers.length} layers; a program layer in the gap above hud at order {minimapOrder}"
+  )
+  layerStackAddWorld(stack: stack, worldKey: 1)
+  layerStackAddWorld(stack: stack, worldKey: 0)
+
+  var a: UiWorld = createUiWorld()
+  var aSystems: UiSystems = createUiSystems()
+  a.layoutW = 400.0
+  a.layoutH = 400.0
+  createStandardLayers(world: a)
+  let hud: EntityId = loadScene(
+    world: a
+    uiSystems: aSystems
+    scene: parseScene(source: hudScene())
+  )
+  let later: EntityId = loadScene(
+    world: a
+    uiSystems: aSystems
+    scene: parseScene(source: laterScene())
+  )
+  raiseNodeToLayer(
+    world: a
+    entityId: nodeOf(world: a, nodeId: "Menu")
+    layerId: layerDialogId
+    order: layerDialogOrder
+  )
+  place(world: a, uiSystems: aSystems)
+
+  var b: UiWorld = createUiWorld()
+  var bSystems: UiSystems = createUiSystems()
+  b.layoutW = 400.0
+  b.layoutH = 400.0
+  let panel: EntityId = loadScene(
+    world: b
+    uiSystems: bSystems
+    scene: parseScene(source: panelScene())
+  )
+  place(world: b, uiSystems: bSystems)
+
+  let hudLayer: Int = layerIdOf(stack: stack, name: "hud")
+  let compass: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw { layer: hudLayer, kind: LayerDrawKind.app, appKind: 1 }
+  )
+  let map: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "hudOver")
+      kind: LayerDrawKind.app
+      appKind: 2
+      modal: true
+      hit: true
+    }
+  )
+  let minimapDraw: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw { layer: minimap, kind: LayerDrawKind.app, appKind: 3 }
+  )
+  let logStrip: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "log")
+      kind: LayerDrawKind.logStrip
+      appKind: 4
+    }
+  )
+
+  var contributions: List(LayerContribution) = {
+    createLayerContribution(worldKey: 0)
+    createLayerContribution(worldKey: 1)
+  }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: a
+      uiSystems: aSystems
+    )
+  }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 1) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: b
+      uiSystems: bSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("1. game mode:{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: true
+  )
+  log("2. editor mode:{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+
+  log(
+    "   B's panel has the z its scene gave it: {componentView(this: b.layerTags, entityId: panel).z}"
+  )
+  # world B's panel moves into hud with A's roots: at an equal z worlds go in key order
+  componentMod(this: b.layerTags, entityId: panel).id = "hud"
+  componentMod(this: b.layerTags, entityId: panel).z = 0
+  layerStackAddWorld(stack: stack, worldKey: 1)
+  let generationBefore: Int = stack.generation
+  var rebuildsBefore: Int = 0
+  if let contribution: mod LayerContribution = contributions.modAt(index: 1) {
+    markLayerContributionStale(contribution: contribution)
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: b
+      uiSystems: bSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("3. B's panel in hud at z 0 (adding a world twice changes nothing: {stack.generation is generationBefore}):{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+
+  # a z change: Hud over Later and over B's panel, no rebuild
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    rebuildsBefore = contribution.rebuilds
+    setRootZ(
+      contribution: contribution
+      world: a
+      entityId: hud
+      z: 5
+    )
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: a
+      uiSystems: aSystems
+    )
+    log(
+      "4. Hud at z 5: made again {contribution.rebuilds - rebuildsBefore} times, its LayerTag z {componentView(
+        this: a.layerTags
+        entityId: hud
+      ).z}"
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("   plan:{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    setRootZ(
+      contribution: contribution
+      world: a
+      entityId: hud
+      z: -1
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("5. Hud at z -1, under the compass too:{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+
+  # a draw hidden; a scene unmounted (the contribution is made again)
+  setLayerDrawActive(stack: stack, index: map, active: false)
+  destroyEntity(world: a, entityId: later)
+  place(world: a, uiSystems: aSystems)
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    rebuildsBefore = contribution.rebuilds
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: a
+      uiSystems: aSystems
+    )
+    log("6. the map hidden, Later gone: made again {contribution.rebuilds - rebuildsBefore} time")
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("   plan:{planText(
+    plan: plan
+    stack: stack
+    a: a
+    b: b
+  )}")
+  log(
+    "draw indexes stay: compass {compass}, map {map}, minimap {minimapDraw}, log strip {logStrip}"
+  )
+}
