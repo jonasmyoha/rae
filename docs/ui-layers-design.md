@@ -572,6 +572,34 @@ never been laid out (inactive from its mount) has no world transform, so the pai
 the report all leave it out. The editor's inspector and Layers list and the debug overlay's page
 wait for step 6 (queued as 7b).
 
+**Built (step 2b, 2026-11-18):** case 1539.
+
+- `CustomPaint { kind, hit }` is a scene key and a world table. Rae paints nothing of such a node
+  or its subtree. With `hit` it is a hit target in the tree's hit test and the hit index, as an
+  `OnClick` node is.
+- Each refresh, a contribution collects its world's `CustomPaint` nodes, grouped by the root they
+  are painted with (`paintRootOf`: the first raised ancestor, else the top), each root's in paint
+  order (children by `ZIndex` order; the hover passes are not followed). Only roots holding one
+  are walked.
+- The plan paints such a root as `sceneRootPart` steps (`fromNode` .. `untilNode`) around
+  `customPaint` steps (the node, its root in `fromNode`, its kind in `appKind`).
+- The flat paint list of the first design was not built. `paintSubtreeG` and `paintChildrenG`
+  take a `PaintRange` instead: a part walks its root's tree as before, paints only the nodes
+  after `from` up to `until`, and still pushes and pops every clip and mask on the way. A subtree
+  holding a marker is walked whole, never cut off screen or taken from a cached picture, so the
+  markers are always met. A root without `CustomPaint` is one walk as before; a split root is
+  walked once per part.
+- `beginCustomPaintG(world, uiSystems, canvas, node)` pushes the node's opacity (its ancestors'
+  with its own) as a canvas layer, the clips of its ancestors that clip their children up to its
+  root, and its own box as a clip, and returns its box. `endCustomPaintG` pops them. Rotation and
+  mask shapes of its ancestors are not applied.
+- The hit walk hands a split root back once, at its top part, and passes over `customPaint` steps:
+  the tree's hit test finds a `CustomPaint` with `hit` in its place.
+- `renderSystemGpu2d` skips `customPaint` steps, so only a program that walks the plan draws
+  them. The plan walk and the custom-node frame are in `lib/ui/RenderSystem/RenderPlan.rae`, and
+  the layer motion functions moved to `lib/ui/LayerMotion.rae` to keep the files under the cap.
+- Not yet (queued as 2b-2): the qr package on `CustomPaint`, its release, 147 moved.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

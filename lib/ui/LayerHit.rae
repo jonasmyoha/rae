@@ -127,6 +127,10 @@ func uiHitWalkNext(
           walk.done = true
         }
       }
+    } else if step.kind is PaintStepKind.customPaint {
+      # hit with its root's tree (a CustomPaint with hit is a target there)
+    } else if step.kind is PaintStepKind.sceneRootPart and isNone(this: step.untilNode) is false {
+      # a root split around CustomPaint nodes is hit once, at its top part
     } else if step.entityId is not walk.skip {
       ret step
     }

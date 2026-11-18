@@ -1,0 +1,149 @@
+# CustomPaint (ui/UiLayers customPaint steps, ui/RenderSystem beginCustomPaintG;
+# docs/ui-layers-design.md §5.1), headless:
+#   1. a panel whose children are Title, Qr (a CustomPaint with hit), Label, Map (a CustomPaint)
+#      and Footer is split in its layer's plan: the panel's paint up to Qr, Qr for the program,
+#      the panel from Qr up to Map, Map, then the rest; a whole root without one stays one step;
+#   2. a press on Qr lands on it (a CustomPaint with hit is a hit target), one on Map does not;
+#   3. a CustomPaint inside a clipping scroll view gets its box, the scroll view's clip and its
+#      own (two clips) and its opacity from beginCustomPaintG, and endCustomPaintG pops them.
+import ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/RenderSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+open Gpu2dCanvas
+
+func panelScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Panel\",\"nodes\":\{\"Panel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Title\",\"Qr\",\"Label\",\"Map\",\"Footer\"]\},\"Title\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":40\}\},\"Qr\":\{\"Rect\":\{\"x\":0,\"y\":50,\"w\":100,\"h\":100\},\"CustomPaint\":\{\"kind\":3,\"hit\":true\}\},\"Label\":\{\"Rect\":\{\"x\":0,\"y\":160,\"w\":400,\"h\":40\}\},\"Map\":\{\"Rect\":\{\"x\":200,\"y\":50,\"w\":100,\"h\":100\},\"CustomPaint\":\{\"kind\":4\}\},\"Footer\":\{\"Rect\":\{\"x\":0,\"y\":360,\"w\":400,\"h\":40\}\}\}\}"
+}
+
+func scrollScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"Scroll\"]\},\"Scroll\":\{\"Rect\":\{\"x\":50,\"y\":50,\"w\":200,\"h\":100\},\"Opacity\":\{\"value\":0.5\},\"Children\":[\"Inner\"]\},\"Inner\":\{\"Rect\":\{\"x\":0,\"y\":80,\"w\":200,\"h\":100\},\"CustomPaint\":\{\"kind\":5\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) {
+    "Panel"
+    "Title"
+    "Qr"
+    "Label"
+    "Map"
+    "Footer"
+    "Page"
+    "Scroll"
+    "Inner"
+  } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "nothing"
+}
+
+func planText(plan: view LayerPaintPlan, world: view UiWorld) ret String {
+  var text: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.sceneRoot {
+      text = "{text} [{nameIn(world: world, entityId: step.entityId)}]"
+    } else if step.kind is PaintStepKind.sceneRootPart {
+      text = "{text} [{nameIn(world: world, entityId: step.entityId)} after {nameIn(
+        world: world
+        entityId: step.fromNode
+      )} until {nameIn(world: world, entityId: step.untilNode)}]"
+    } else if step.kind is PaintStepKind.customPaint {
+      text = "{text} <{nameIn(world: world, entityId: step.entityId)} kind {step.appKind}>"
+    }
+  }
+  ret text
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let panel: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: panelScene())
+  )
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: scrollScene())
+  )
+  componentSet(
+    this: world.overflows
+    entityId: nodeOf(world: world, nodeId: "Scroll")
+    data: OverflowPolicy { mode: OverflowMode.clip }
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  log("1. the plan:{planText(plan: plan, world: world)}")
+  log("2. a press on Qr lands on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 50.0
+      y: 100.0
+    )
+  )}; on Map on {nameIn(
+    world: world
+    entityId: uiHitTest(
+      world: world
+      uiSystems: uiSystems
+      x: 250.0
+      y: 100.0
+    )
+  )}")
+
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let clipsBefore: Int = canvas.clipStack.length
+  let frame: CustomPaintFrame = beginCustomPaintG(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    node: nodeOf(world: world, nodeId: "Inner")
+  )
+  log(
+    "3. Inner: shown {frame.shown}, box {frame.x},{frame.y} {frame.w}x{frame.h}, clips pushed {frame.clips} (the stack {clipsBefore} -> {canvas.clipStack.length}), opacity {frame.opacity}, the canvas layer alpha {canvas.layerAlpha}"
+  )
+  endCustomPaintG(canvas: canvas, frame: frame)
+  log("   popped: the clip stack {canvas.clipStack.length}, layer alpha {canvas.layerAlpha}")
+  canvasShutdown(canvas: canvas)
+}

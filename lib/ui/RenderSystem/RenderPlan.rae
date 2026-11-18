@@ -1,0 +1,272 @@
+# ui/RenderSystem's walk of a layer paint plan (ui/UiLayers; docs/ui-layers-design.md §4.4, §5.1):
+# a root painted whole or in parts around its CustomPaint nodes (PaintRange), a layer's push and
+# pop, the program's frame for a CustomPaint node, and one world's walk of a plan.
+open ui/Ecs
+import Gpu2d
+import Math
+import Gpu2dText
+import SdfText
+import ui/AnimationSystem
+import ui/Components
+import ui/IconCodepoints
+import ui/Layer
+open ui/UiLayers
+import ui/Theme
+import ui/ThemeResolved
+import ui/TextStyle
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasBackdrop
+open ui/UiSystems
+open ui/ZOrder
+open ui/Transform
+
+# Which of a root's nodes a paint walk paints: those after the CustomPaint node `from` (all from
+# the start when none) up to the node `until` (to the end when none). A CustomPaint node and its
+# subtree are never painted (the program draws them, ui/UiLayers customPaint steps).
+type PaintRange {
+  from: EntityId = noEntity()
+  until: EntityId = noEntity()
+  started: Bool = true
+  stopped: Bool = false
+}
+
+# A whole root's range
+func fullPaintRange() ret PaintRange {
+  ret PaintRange {}
+}
+
+# Is `range`'s from or until node inside `entityId`'s subtree (below it)?
+func rangeMarkerUnder(
+  uiSystems: view UiSystems
+  range: view PaintRange
+  entityId: view EntityId
+) ret Bool {
+  loop let marker: EntityId in List(EntityId) { range.from, range.until } {
+    var at: EntityId = marker
+    loop var depth: Int = 0, depth < 256 and not isNone(this: at), ++depth {
+      if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+        break
+      }
+      at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+      if at is entityId {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# The root (or raised node) `root` of `world`, as a plan's sceneRoot step paints it: a layer
+# entity has nothing to paint, and a raised node whose scene is hidden is hidden with it
+func paintSceneRootG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  root: view EntityId
+) {
+  paintSceneRootPartG(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    canvas: canvas
+    root: root
+    from: noEntity()
+    until: noEntity()
+  )
+}
+
+# A plan's sceneRootPart step: `root`'s paint after the CustomPaint node `from` (from the start
+# when none) up to the node `until` (to the end when none)
+func paintSceneRootPartG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+  root: view EntityId
+  from: view EntityId
+  until: view EntityId
+) {
+  if componentHas(this: world.layerRoots, entityId: root) {
+    ret
+  }
+  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
+    uiSystems: uiSystems
+    entityId: root
+  ) is false {
+    ret
+  }
+  if isNone(this: from) {
+    canvasBackdropLayer(canvas: canvas)
+  }
+  var range: PaintRange = { from: from, until: until, started: isNone(this: from) }
+  paintSubtreeG(
+    world: world
+    uiSystems: uiSystems
+    entityId: root
+    res: res
+    canvas: canvas
+    range: range
+  )
+}
+
+# Where a customPaint step's node is and what is pushed for it (endCustomPaintG pops it)
+type CustomPaintFrame {
+  # the node's box on screen, in design units
+  x: Float = 0.0
+  y: Float = 0.0
+  w: Float = 0.0
+  h: Float = 0.0
+  # its opacity (its ancestors' with its own), pushed as a canvas layer
+  opacity: Float = 1.0
+  # the clips pushed: its ancestors' that clip their children, then its own box
+  clips: Int = 0
+  # it is shown (when not, nothing was pushed and the program draws nothing)
+  shown: Bool = false
+}
+
+# Push a CustomPaint node's place for the program's drawing: its ancestors' clips (up to its
+# root), its own box as a clip, and its opacity as a canvas layer. The program draws in the
+# returned box, then calls endCustomPaintG.
+func beginCustomPaintG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvas: mod Gpu2dCanvas
+  node: view EntityId
+) ret CustomPaintFrame {
+  var frame: CustomPaintFrame = {}
+  if not componentHas(this: uiSystems.transform2d.worldTransforms, entityId: node) or not componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: node
+  ) {
+    ret frame
+  }
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: node) {
+    let visual: view WorldVisual = componentView(
+      this: uiSystems.transform2d.worldVisuals
+      entityId: node
+    )
+    if not visual.visible {
+      ret frame
+    }
+    frame.opacity = visual.alpha
+  }
+  let rect: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: node)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: node)
+  )
+  frame.x = rect.x
+  frame.y = rect.y
+  frame.w = rect.w
+  frame.h = rect.h
+  frame.shown = true
+  # the ancestors up to its root (a raised one or the top), top first
+  var ancestors: List(EntityId) = {}
+  var at: EntityId = node
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if isRaisedNode(world: world, uiSystems: uiSystems, entityId: at) or not componentHas(
+      this: uiSystems.hierarchy.parents
+      entityId: at
+    ) {
+      break
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    ancestors.insert(index: 0, value: at)
+  }
+  canvasPushLayer(
+    canvas: canvas
+    opacity: frame.opacity
+    offsetX: 0.0
+    offsetY: 0.0
+  )
+  loop let ancestor: view EntityId in ancestors {
+    if entityClipsChildrenG(world: world, entityId: ancestor) and componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: ancestor
+    ) and componentHas(this: uiSystems.transform2d.worldTransforms, entityId: ancestor) {
+      let clip: WorldRect = worldRectOf(
+        wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: ancestor)
+        cr: componentView(this: uiSystems.layout.computedRects, entityId: ancestor)
+      )
+      Gpu2d.pushClipRect(
+        canvas: canvas
+        x: clip.x
+        y: clip.y
+        w: clip.w
+        h: clip.h
+      )
+      frame.clips = frame.clips + 1
+    }
+  }
+  Gpu2d.pushClipRect(
+    canvas: canvas
+    x: rect.x
+    y: rect.y
+    w: rect.w
+    h: rect.h
+  )
+  frame.clips = frame.clips + 1
+  ret frame
+}
+
+# Pop what beginCustomPaintG pushed
+func endCustomPaintG(canvas: mod Gpu2dCanvas, frame: view CustomPaintFrame) {
+  if not frame.shown {
+    ret
+  }
+  loop var i: Int = 0, i < frame.clips, ++i {
+    Gpu2d.popClipRect(canvas: canvas)
+  }
+  canvasPopLayer(canvas: canvas)
+}
+
+# A plan's layerBegin or layerEnd step on the canvas: the layer's opacity and offset pushed, or
+# popped (ui/UiLayers; Gpu2dCanvas canvasPushLayer). Other steps do nothing here.
+func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod Gpu2dCanvas) {
+  if step.kind is PaintStepKind.layerBegin {
+    let layer: UiLayer = layerOf(stack: stack, id: step.layer)
+    canvasPushLayer(
+      canvas: canvas
+      opacity: layer.opacity
+      offsetX: layer.offsetX
+      offsetY: layer.offsetY
+    )
+  } else if step.kind is PaintStepKind.layerEnd {
+    canvasPopLayer(canvas: canvas)
+  }
+}
+
+# Every step of `plan` that Rae paints for the world `worldKey`: the layers' edges and that
+# world's roots. A program with several worlds walks the plan itself (paintLayerEdgeG once per
+# step, paintSceneRootPartG with the step's world, its own draws for draw steps, and for a
+# customPaint step beginCustomPaintG, its drawing, endCustomPaintG). A CustomPaint node's step is
+# the program's: this walk leaves it out, so renderSystemGpu2d paints nothing there.
+func renderLayerPlanGpu2d(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.sceneRoot or step.kind is PaintStepKind.sceneRootPart {
+      if step.world is worldKey {
+        paintSceneRootPartG(
+          world: world
+          uiSystems: uiSystems
+          res: res
+          canvas: canvas
+          root: step.entityId
+          from: step.fromNode
+          until: step.untilNode
+        )
+      }
+    } else if step.kind is PaintStepKind.layerBegin or step.kind is PaintStepKind.layerEnd {
+      paintLayerEdgeG(step: step, stack: stack, canvas: canvas)
+    }
+  }
+}

@@ -41,6 +41,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     componentTableGeneration(this: uiSystems.layout.computedRects)
     aliveCount(world: world)
     componentTableGeneration(this: world.zChildOrders)
+    componentTableGeneration(this: world.customPaints)
   }
 }
 
@@ -48,7 +49,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 13 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 14 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
@@ -68,7 +69,7 @@ func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
     index: 11
   ) is aliveCount(world: world) and key.copyAtDefault(index: 12) is componentTableGeneration(
     this: world.zChildOrders
-  )
+  ) and key.copyAtDefault(index: 13) is componentTableGeneration(this: world.customPaints)
 }
 
 # A clickable node in hit order, and the root of its space
@@ -115,7 +116,10 @@ func hitCollect(
         i = i - 1
       }
     }
-    if componentHas(this: world.onClicks, entityId: entityId) {
+    if componentHas(this: world.onClicks, entityId: entityId) or customPaintHits(
+      world: world
+      entityId: entityId
+    ) {
       found.add(value: HitFound { entityId: entityId, spaceRootEntityId: space })
     }
   }

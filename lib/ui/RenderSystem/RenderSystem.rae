@@ -507,8 +507,28 @@ func paintSubtreeG(
   entityId: view EntityId
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
+  range: mod PaintRange
 ) {
   unsafe {
+    if range.stopped {
+      ret
+    }
+    if isNone(this: range.until) is false and entityId is range.until {
+      range.stopped = true
+      ret
+    }
+    # the program draws a CustomPaint node and its subtree; the part after it starts here
+    if componentHas(this: world.customPaints, entityId: entityId) {
+      if isNone(this: range.from) is false and entityId is range.from {
+        range.started = true
+      }
+      ret
+    }
+    # a part that starts or stops inside this subtree walks all of it, whatever is cut or cached
+    var holdsMarker: Bool = false
+    if isNone(this: range.from) is false or isNone(this: range.until) is false {
+      holdsMarker = rangeMarkerUnder(uiSystems: uiSystems, range: range, entityId: entityId)
+    }
     # Off screen (RenderCull): not painted, and when it clips its children (their pixels are
     # inside its box) none of its subtree is either
     let offScreen: Bool = paintOffScreen(
@@ -518,7 +538,7 @@ func paintSubtreeG(
       viewW: paintViewWidth()
       viewH: paintViewHeight()
     )
-    if offScreen and paintClipsSubtree(world: world, entityId: entityId) {
+    if offScreen and paintClipsSubtree(world: world, entityId: entityId) and not holdsMarker {
       ret
     }
     # MaskShape (#1000): the entity AND its descendants are clipped to a
@@ -534,7 +554,7 @@ func paintSubtreeG(
         canvas: canvas
       )
     }
-    if not offScreen {
+    if not offScreen and range.started {
       paintEntityG(
         world: world
         uiSystems: uiSystems
@@ -600,12 +620,15 @@ func paintSubtreeG(
       )
     }
     # as they are, not at all (a speck), or into a cached picture (RenderPaintCache)
-    let children: PaintChildren = paintChildrenChoose(
-      world: world
-      uiSystems: uiSystems
-      entityId: entityId
-      canvas: canvas
-    )
+    var children: PaintChildren = PaintChildren.walk
+    if not holdsMarker {
+      children = paintChildrenChoose(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        canvas: canvas
+      )
+    }
     if children is not PaintChildren.skip {
       paintChildrenG(
         world: world
@@ -613,6 +636,7 @@ func paintSubtreeG(
         entityId: entityId
         res: res
         canvas: canvas
+        range: range
       )
     }
     if children is PaintChildren.capture {
@@ -634,6 +658,7 @@ func paintChildrenG(
   entityId: view EntityId
   res: view Gpu2dUi
   canvas: mod Gpu2dCanvas
+  range: mod PaintRange
 ) {
   unsafe {
     let ch: view Children = componentView(this: world.childrens, entityId: entityId)
@@ -681,6 +706,7 @@ func paintChildrenG(
             entityId: cid
             res: res
             canvas: canvas
+            range: range
           )
         }
         i = i + 1
@@ -713,90 +739,19 @@ func gpu2dLayerRange(
         if ord >= minOrder {
           if ord < maxOrder {
             canvasBackdropLayer(canvas: canvas)
+            var full: PaintRange = fullPaintRange()
             paintSubtreeG(
               world: world
               uiSystems: uiSystems
               entityId: root
               res: res
               canvas: canvas
+              range: full
             )
           }
         }
       }
       p = p + 1
-    }
-  }
-}
-
-# The root (or raised node) `root` of `world`, as a plan's sceneRoot step paints it: a layer
-# entity has nothing to paint, and a raised node whose scene is hidden is hidden with it
-func paintSceneRootG(
-  world: view UiWorld
-  uiSystems: view UiSystems
-  res: view Gpu2dUi
-  canvas: mod Gpu2dCanvas
-  root: view EntityId
-) {
-  if componentHas(this: world.layerRoots, entityId: root) {
-    ret
-  }
-  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
-    uiSystems: uiSystems
-    entityId: root
-  ) is false {
-    ret
-  }
-  canvasBackdropLayer(canvas: canvas)
-  paintSubtreeG(
-    world: world
-    uiSystems: uiSystems
-    entityId: root
-    res: res
-    canvas: canvas
-  )
-}
-
-# A plan's layerBegin or layerEnd step on the canvas: the layer's opacity and offset pushed, or
-# popped (ui/UiLayers; Gpu2dCanvas canvasPushLayer). Other steps do nothing here.
-func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod Gpu2dCanvas) {
-  if step.kind is PaintStepKind.layerBegin {
-    let layer: UiLayer = layerOf(stack: stack, id: step.layer)
-    canvasPushLayer(
-      canvas: canvas
-      opacity: layer.opacity
-      offsetX: layer.offsetX
-      offsetY: layer.offsetY
-    )
-  } else if step.kind is PaintStepKind.layerEnd {
-    canvasPopLayer(canvas: canvas)
-  }
-}
-
-# Every step of `plan` that Rae paints for the world `worldKey`: the layers' edges and that
-# world's roots. A program with several worlds walks the plan itself (paintLayerEdgeG once per
-# step, paintSceneRootG with the step's world, its own draws for draw steps).
-func renderLayerPlanGpu2d(
-  plan: view LayerPaintPlan
-  stack: view LayerStack
-  worldKey: view Int
-  world: view UiWorld
-  uiSystems: view UiSystems
-  res: view Gpu2dUi
-  canvas: mod Gpu2dCanvas
-) {
-  loop let step: view PaintStep in plan.steps {
-    if step.kind is PaintStepKind.sceneRoot {
-      if step.world is worldKey {
-        paintSceneRootG(
-          world: world
-          uiSystems: uiSystems
-          res: res
-          canvas: canvas
-          root: step.entityId
-        )
-      }
-    } else {
-      paintLayerEdgeG(step: step, stack: stack, canvas: canvas)
     }
   }
 }
@@ -860,12 +815,14 @@ func renderSharedNodesGpu2d(
   loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
     let entityId: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
     if sharedPaintsLast(uiSystems: uiSystems, entityId: entityId) {
+      var full: PaintRange = fullPaintRange()
       paintSubtreeG(
         world: world
         uiSystems: uiSystems
         entityId: entityId
         res: res
         canvas: canvas
+        range: full
       )
     }
   }
@@ -890,12 +847,14 @@ func paintSharedUnderG(
   loop var i: Int = 0, i < componentCount(this: uiSystems.animation.sharedNodes), ++i {
     let shared: EntityId = componentEntityAt(this: uiSystems.animation.sharedNodes, i: i)
     if componentView(this: uiSystems.animation.sharedNodes, entityId: shared).paintUnder is entityId {
+      var full: PaintRange = fullPaintRange()
       paintSubtreeG(
         world: world
         uiSystems: uiSystems
         entityId: shared
         res: res
         canvas: canvas
+        range: full
       )
     }
   }

@@ -1,0 +1,115 @@
+# ui/LayerMotion — a layer's opacity and offsets eased to a value over time
+# (docs/ui-layers-design.md §9). The motions live on the LayerStack (ui/UiLayers), as a layer is
+# not an entity: animateLayer starts one, layerMotionStep moves them each frame.
+open ui/UiLayers
+
+# ----- motion (docs/ui-layers-design.md §9) ----------------------------------------------
+func layerPropertyValue(layer: view UiLayer, property: view LayerMotionProperty) ret Float {
+  if property is LayerMotionProperty.opacity {
+    ret layer.opacity
+  }
+  if property is LayerMotionProperty.offsetX {
+    ret layer.offsetX
+  }
+  ret layer.offsetY
+}
+
+func setLayerProperty(
+  stack: mod LayerStack
+  id: view Int
+  property: view LayerMotionProperty
+  value: view Float
+) {
+  loop var i: Int = 0, i < stack.layers.length, ++i {
+    if let layer: mod UiLayer = stack.layers.modAt(index: i) {
+      if layer.id is id {
+        if property is LayerMotionProperty.opacity {
+          layer.opacity = value
+        } else if property is LayerMotionProperty.offsetX {
+          layer.offsetX = value
+        } else {
+          layer.offsetY = value
+        }
+      }
+    }
+  }
+}
+
+# Ease the layer `id`'s `property` from where it is to `to` over `seconds` (0: at once); a motion
+# of the same layer and property already running is replaced, from where it got to
+func animateLayer(
+  stack: mod LayerStack
+  id: view Int
+  property: view LayerMotionProperty
+  to: view Float
+  seconds: view Float
+) {
+  let from: Float = layerPropertyValue(layer: layerOf(stack: stack, id: id), property: property)
+  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
+    if let motion: view LayerMotion = stack.motions.viewAt(index: i) {
+      if motion.layer is id and motion.property is property {
+        stack.motions.removeAt(index: i)
+      }
+    }
+  }
+  if seconds <= 0.0 {
+    setLayerProperty(
+      stack: stack
+      id: id
+      property: property
+      value: to
+    )
+    ret
+  }
+  stack.motions.add(value: LayerMotion {
+    layer: id
+    property: property
+    from: from
+    to: to
+    seconds: seconds
+  })
+}
+
+# The share of a motion done at `progress` (0..1): a cubic ease-out, fast at first and settling
+func layerMotionEase(progress: view Float) ret Float {
+  var left: Float = 1.0 - progress
+  if left < 0.0 {
+    left = 0.0
+  }
+  if left > 1.0 {
+    left = 1.0
+  }
+  ret 1.0 - left * left * left
+}
+
+# Every layer motion moved on by `deltaTime` (s), the finished ones at their end and removed;
+# true while any is still running (the program keeps drawing frames)
+func layerMotionStep(stack: mod LayerStack, deltaTime: view Float) ret Bool {
+  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
+    var finished: Bool = false
+    var id: Int = -1
+    var property: LayerMotionProperty = LayerMotionProperty.opacity
+    var value: Float = 0.0
+    if let motion: mod LayerMotion = stack.motions.modAt(index: i) {
+      motion.elapsed = motion.elapsed + deltaTime
+      let share: Float = layerMotionEase(progress: motion.elapsed / motion.seconds)
+      id = motion.layer
+      property = motion.property
+      value = motion.from + (motion.to - motion.from) * share
+      finished = motion.elapsed >= motion.seconds
+      if finished {
+        value = motion.to
+      }
+    }
+    setLayerProperty(
+      stack: stack
+      id: id
+      property: property
+      value: value
+    )
+    if finished {
+      stack.motions.removeAt(index: i)
+    }
+  }
+  ret stack.motions.length > 0
+}

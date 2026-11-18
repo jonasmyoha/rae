@@ -32,6 +32,7 @@ open ecs/ComponentTable
 open ui/Ecs
 open ui/Layer
 open ui/UiSystems
+open ui/ZOrder
 
 # In which of the game / editor modes a layer is painted
 enum LayerShows { always, gameMode, editorMode }
@@ -381,10 +382,28 @@ type LayerContribution {
   rebuilds: Int = 0
   # Roots whose layer name the stack does not have (they go in hud)
   unknownLayers: Int = 0
+  # The CustomPaint nodes, grouped by their root, each root's in paint order (every refresh)
+  customs: List(LayerCustom)
+  # This refresh's roots that hold a CustomPaint node, reused
+  customRoots: List(EntityId)
+}
+
+# A CustomPaint node and the root (or raised node) it is painted with
+type LayerCustom {
+  root: EntityId
+  node: EntityId
+  kind: Int
+  hit: Bool
 }
 
 func createLayerContribution(worldKey: view Int) ret LayerContribution {
-  ret LayerContribution { worldKey: worldKey, entries: {}, scratch: {} }
+  ret LayerContribution {
+    worldKey: worldKey
+    entries: {}
+    scratch: {}
+    customs: {}
+    customRoots: {}
+  }
 }
 
 func entryBefore(a: view LayerEntry, b: view LayerEntry) ret Bool {
@@ -530,6 +549,100 @@ func refreshLayerContribution(
   updateEntriesShown(contribution: contribution, world: world, uiSystems: uiSystems)
 }
 
+# The root `node` is painted with: its first raised ancestor (itself included), else its top
+func paintRootOf(world: view UiWorld, uiSystems: view UiSystems, node: view EntityId) ret EntityId {
+  var at: EntityId = node
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if isRaisedNode(world: world, uiSystems: uiSystems, entityId: at) {
+      ret at
+    }
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: at) {
+      ret at
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret at
+}
+
+# `entityId`'s subtree in paint order (children by ZIndex order, raised children left to their
+# own root), adding each CustomPaint node to the customs (its own subtree is the program's)
+func collectCustomsUnder(
+  contribution: mod LayerContribution
+  world: view UiWorld
+  uiSystems: view UiSystems
+  root: view EntityId
+  entityId: view EntityId
+) {
+  if componentHas(this: world.customPaints, entityId: entityId) {
+    let custom: view CustomPaint = componentView(this: world.customPaints, entityId: entityId)
+    contribution.customs.add(
+      value: LayerCustom { root: root, node: entityId, kind: custom.kind, hit: custom.hit }
+    )
+    ret
+  }
+  if not componentHas(this: world.childrens, entityId: entityId) {
+    ret
+  }
+  let children: view Children = componentView(this: world.childrens, entityId: entityId)
+  loop var i: Int = 0, i < children.ids.length, ++i {
+    let child: EntityId = orderedChildAt(
+      world: world
+      parentEntityId: entityId
+      children: children
+      i: i
+    )
+    if not isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) {
+      collectCustomsUnder(
+        contribution: contribution
+        world: world
+        uiSystems: uiSystems
+        root: root
+        entityId: child
+      )
+    }
+  }
+}
+
+# The world's CustomPaint nodes now, grouped by the root they are painted with, in paint order:
+# only the roots that hold one are walked
+func updateLayerCustoms(
+  contribution: mod LayerContribution
+  world: view UiWorld
+  uiSystems: view UiSystems
+) {
+  contribution.customs.clear()
+  contribution.customRoots.clear()
+  if componentCount(this: world.customPaints) is 0 {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: world.customPaints), ++i {
+    let root: EntityId = paintRootOf(
+      world: world
+      uiSystems: uiSystems
+      node: componentEntityAt(this: world.customPaints, i: i)
+    )
+    var known: Bool = false
+    loop let seen: view EntityId in contribution.customRoots {
+      if seen is root {
+        known = true
+      }
+    }
+    if not known {
+      contribution.customRoots.add(value: root)
+    }
+  }
+  loop var r: Int = 0, r < contribution.customRoots.length, ++r {
+    let root: EntityId = contribution.customRoots.copyAtFallback(index: r, fallback: noEntity())
+    collectCustomsUnder(
+      contribution: contribution
+      world: world
+      uiSystems: uiSystems
+      root: root
+      entityId: root
+    )
+  }
+}
+
 # Each entry's root shows anything now (every refresh: a page shown or hidden is no rebuild)
 func updateEntriesShown(
   contribution: mod LayerContribution
@@ -541,6 +654,7 @@ func updateEntriesShown(
       entry.shown = sceneRootShown(world: world, uiSystems: uiSystems, root: entry.entityId)
     }
   }
+  updateLayerCustoms(contribution: contribution, world: world, uiSystems: uiSystems)
 }
 
 # Does the root (or raised node) show anything a press could land on or a cover could hide
@@ -632,7 +746,17 @@ func emptyLayerEntry() ret LayerEntry {
 }
 
 # ----- the paint plan ----------------------------------------------------------------
-enum PaintStepKind { layerBegin, sceneRoot, draw, layerEnd }
+# sceneRoot paints a whole root; a root with CustomPaint nodes is instead sceneRootPart steps
+# (the root's paint after `fromNode` up to `untilNode`) around customPaint steps (the program
+# draws that node)
+enum PaintStepKind {
+  layerBegin
+  sceneRoot
+  sceneRootPart
+  customPaint
+  draw
+  layerEnd
+}
 
 type PaintStep {
   kind: PaintStepKind
@@ -645,6 +769,10 @@ type PaintStep {
   draw: Int
   appKind: Int
   z: Int
+  # sceneRootPart: the root's paint between these two CustomPaint nodes (noEntity: its start, its
+  # end); customPaint: the node is entityId and its root is fromNode
+  fromNode: EntityId = noEntity()
+  untilNode: EntityId = noEntity()
 }
 
 type LayerPaintPlan {
@@ -764,11 +892,16 @@ func buildLayerPaintPlan(
           layerShows = true
         }
         if shown {
-          var step: PaintStep = paintStepOf(kind: PaintStepKind.sceneRoot, layer: layer.id)
-          step.world = bestWorld
-          step.entityId = bestEntry.entityId
-          step.z = bestEntry.z
-          plan.steps.add(value: step)
+          if let contribution: view LayerContribution = contributions.viewAt(index: best) {
+            addRootSteps(
+              plan: plan
+              contribution: contribution
+              layer: layer.id
+              world: bestWorld
+              root: bestEntry.entityId
+              z: bestEntry.z
+            )
+          }
         }
         plan.cursors.set(
           index: best
@@ -790,6 +923,46 @@ func buildLayerPaintPlan(
   }
 }
 
+# One root's steps: a sceneRoot, or, when it holds CustomPaint nodes, a sceneRootPart before
+# each, a customPaint for each and a last sceneRootPart after them
+func addRootSteps(
+  plan: mod LayerPaintPlan
+  contribution: view LayerContribution
+  layer: view Int
+  world: view Int
+  root: view EntityId
+  z: view Int
+) {
+  var step: PaintStep = paintStepOf(kind: PaintStepKind.sceneRoot, layer: layer)
+  step.world = world
+  step.entityId = root
+  step.z = z
+  var from: EntityId = noEntity()
+  var split: Bool = false
+  loop let custom: view LayerCustom in contribution.customs {
+    if custom.root is root {
+      split = true
+      var part: PaintStep = step
+      part.kind = PaintStepKind.sceneRootPart
+      part.fromNode = from
+      part.untilNode = custom.node
+      plan.steps.add(value: part)
+      var node: PaintStep = step
+      node.kind = PaintStepKind.customPaint
+      node.entityId = custom.node
+      node.fromNode = root
+      node.appKind = custom.kind
+      plan.steps.add(value: node)
+      from = custom.node
+    }
+  }
+  if split {
+    step.kind = PaintStepKind.sceneRootPart
+    step.fromNode = from
+  }
+  plan.steps.add(value: step)
+}
+
 # The steps from `cut` on moved to the front, the ones before dropped (in place)
 func dropStepsBefore(plan: mod LayerPaintPlan, cut: view Int) {
   let kept: Int = plan.steps.length - cut
@@ -799,115 +972,4 @@ func dropStepsBefore(plan: mod LayerPaintPlan, cut: view Int) {
   loop plan.steps.length > kept {
     plan.steps.removeLast()
   }
-}
-
-# ----- motion (docs/ui-layers-design.md §9) ----------------------------------------------
-func layerPropertyValue(layer: view UiLayer, property: view LayerMotionProperty) ret Float {
-  if property is LayerMotionProperty.opacity {
-    ret layer.opacity
-  }
-  if property is LayerMotionProperty.offsetX {
-    ret layer.offsetX
-  }
-  ret layer.offsetY
-}
-
-func setLayerProperty(
-  stack: mod LayerStack
-  id: view Int
-  property: view LayerMotionProperty
-  value: view Float
-) {
-  loop var i: Int = 0, i < stack.layers.length, ++i {
-    if let layer: mod UiLayer = stack.layers.modAt(index: i) {
-      if layer.id is id {
-        if property is LayerMotionProperty.opacity {
-          layer.opacity = value
-        } else if property is LayerMotionProperty.offsetX {
-          layer.offsetX = value
-        } else {
-          layer.offsetY = value
-        }
-      }
-    }
-  }
-}
-
-# Ease the layer `id`'s `property` from where it is to `to` over `seconds` (0: at once); a motion
-# of the same layer and property already running is replaced, from where it got to
-func animateLayer(
-  stack: mod LayerStack
-  id: view Int
-  property: view LayerMotionProperty
-  to: view Float
-  seconds: view Float
-) {
-  let from: Float = layerPropertyValue(layer: layerOf(stack: stack, id: id), property: property)
-  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
-    if let motion: view LayerMotion = stack.motions.viewAt(index: i) {
-      if motion.layer is id and motion.property is property {
-        stack.motions.removeAt(index: i)
-      }
-    }
-  }
-  if seconds <= 0.0 {
-    setLayerProperty(
-      stack: stack
-      id: id
-      property: property
-      value: to
-    )
-    ret
-  }
-  stack.motions.add(value: LayerMotion {
-    layer: id
-    property: property
-    from: from
-    to: to
-    seconds: seconds
-  })
-}
-
-# The share of a motion done at `progress` (0..1): a cubic ease-out, fast at first and settling
-func layerMotionEase(progress: view Float) ret Float {
-  var left: Float = 1.0 - progress
-  if left < 0.0 {
-    left = 0.0
-  }
-  if left > 1.0 {
-    left = 1.0
-  }
-  ret 1.0 - left * left * left
-}
-
-# Every layer motion moved on by `deltaTime` (s), the finished ones at their end and removed;
-# true while any is still running (the program keeps drawing frames)
-func layerMotionStep(stack: mod LayerStack, deltaTime: view Float) ret Bool {
-  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
-    var finished: Bool = false
-    var id: Int = -1
-    var property: LayerMotionProperty = LayerMotionProperty.opacity
-    var value: Float = 0.0
-    if let motion: mod LayerMotion = stack.motions.modAt(index: i) {
-      motion.elapsed = motion.elapsed + deltaTime
-      let share: Float = layerMotionEase(progress: motion.elapsed / motion.seconds)
-      id = motion.layer
-      property = motion.property
-      value = motion.from + (motion.to - motion.from) * share
-      finished = motion.elapsed >= motion.seconds
-      if finished {
-        value = motion.to
-      }
-    }
-    setLayerProperty(
-      stack: stack
-      id: id
-      property: property
-      value: value
-    )
-    if finished {
-      stack.motions.removeAt(index: i)
-    }
-  }
-  ret stack.motions.length > 0
 }

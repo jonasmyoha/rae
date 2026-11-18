@@ -244,6 +244,16 @@ type ZIndex {
   z: Int = 0
 }
 
+# A node whose content the program draws itself, in the node's place (docs/ui-layers-design.md
+# §5.1): Rae paints nothing of it or its subtree. A program that walks the layer paint plan gets a
+# customPaint step for it between the rest of its root's paint, with the node's rect, its
+# ancestors' clips and its opacity (ui/RenderSystem beginCustomPaintG). `kind` is the program's
+# own meaning; with `hit` the hit test takes it as a target (the program's fine test runs inside).
+type CustomPaint {
+  kind: Int = 0
+  hit: Bool = false
+}
+
 # Runtime, on a parent with a ZIndex child (never authored): its children in paint order and the z
 # each had when sorted, kept by the transform pass (zOrderSystem)
 type ZChildOrder {

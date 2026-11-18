@@ -10,6 +10,14 @@ open ecs/ComponentTable
 open ui/Ecs
 open ui/UiSystems
 
+# Is `entityId` a CustomPaint node the hit test takes as a target (its `hit`)?
+func customPaintHits(world: view UiWorld, entityId: view EntityId) ret Bool {
+  ret componentHas(this: world.customPaints, entityId: entityId) and componentView(
+    this: world.customPaints
+    entityId: entityId
+  ).hit
+}
+
 # A child's z: its ZIndex's, 0 without one
 func childZ(world: view UiWorld, entityId: view EntityId) ret Int {
   if componentHas(this: world.zIndexes, entityId: entityId) {
