@@ -238,6 +238,40 @@ func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod G
   }
 }
 
+# One step of a plan as Rae paints it for the world `worldKey`: a root (whole or a part) of that
+# world, or a layer's push or pop. A draw or customPaint step is the program's: nothing here, and
+# false; true when the step was Rae's. A program's loop over the plan calls this for each step and
+# draws its own where it returns false.
+func paintPlanStepRaeG(
+  step: view PaintStep
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) ret Bool {
+  if step.kind is PaintStepKind.sceneRoot or step.kind is PaintStepKind.sceneRootPart {
+    if step.world is worldKey {
+      paintSceneRootPartG(
+        world: world
+        uiSystems: uiSystems
+        res: res
+        canvas: canvas
+        root: step.entityId
+        from: step.fromNode
+        until: step.untilNode
+      )
+    }
+    ret true
+  }
+  if step.kind is PaintStepKind.layerBegin or step.kind is PaintStepKind.layerEnd {
+    paintLayerEdgeG(step: step, stack: stack, canvas: canvas)
+    ret true
+  }
+  ret false
+}
+
 # Every step of `plan` that Rae paints for the world `worldKey`: the layers' edges and that
 # world's roots. A program with several worlds walks the plan itself (paintLayerEdgeG once per
 # step, paintSceneRootPartG with the step's world, its own draws for draw steps, and for a

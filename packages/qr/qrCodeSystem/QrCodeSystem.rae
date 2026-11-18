@@ -10,9 +10,13 @@
 # modules in a row), never as a scaled picture.
 #
 # The system owns its tables (docs/ecs-systems-own-their-tables.md): an app
-# hands it the scene's pending components (`qrCodeTakePending`) and calls
-# `qrCodePaint` after the UI's own render, on the same canvas. A code is
-# encoded once and again only when its text or level changes.
+# hands it the scene's pending components (`qrCodeTakePending`), which also
+# gives each QrCode node a CustomPaint of kind `qrCustomPaintKind`
+# (docs/ui-layers-design.md §5.1). A program that walks its layer paint plan
+# paints the code at its node's place in the order, under a dialog over it,
+# with `qrCodePaintStep` for each customPaint step. `qrCodePaint`, after the
+# UI's own render, is the older way: over everything. A code is encoded once
+# and again only when its text or level changes.
 open ecs/Entity
 open ecs/ComponentTable
 open ui/Ecs
@@ -21,10 +25,15 @@ open ui/Transform
 open ui/ScenePolicy
 open ui/Registry
 open ui/RenderSystem
+open ui/UiLayers
+import ui/Components
 open qr/QrTables
 open qr/QrEncoder
 open Gpu2dCanvas
 import Gpu2d
+
+# The CustomPaint kind of a QrCode node (a program's own kinds are other numbers)
+const qrCustomPaintKind: Int = 20818
 
 # The authored component
 type QrCode {
@@ -73,6 +82,68 @@ func qrCodeTakePending(world: mod UiWorld, qrCodeSystem: mod QrCodeSystem) {
     })
   }
   world.pendingComponents = own kept
+  qrCodeMarkNodes(qrCodeSystem: qrCodeSystem, world: world)
+}
+
+# Give every QrCode node a CustomPaint of the qr kind, so a layer paint plan
+# leaves its place to qrCodePaintStep (a node set from code is marked here too)
+func qrCodeMarkNodes(qrCodeSystem: view QrCodeSystem, world: mod UiWorld) {
+  loop var i: Int = 0, i < componentCount(this: qrCodeSystem.qrCodes), ++i {
+    let entityId: EntityId = componentEntityAt(this: qrCodeSystem.qrCodes, i: i)
+    if not componentHas(this: world.customPaints, entityId: entityId) {
+      componentSet(
+        this: world.customPaints
+        entityId: entityId
+        data: CustomPaint { kind: qrCustomPaintKind }
+      )
+    }
+  }
+}
+
+# A plan's customPaint step, if it is a QR code: the code painted in its node's
+# place (its clips and opacity pushed by beginCustomPaintG). True when the step
+# was a QR code's.
+func qrCodePaintStep(
+  qrCodeSystem: mod QrCodeSystem
+  world: view UiWorld
+  uiSystems: view UiSystems
+  canvas: mod Gpu2dCanvas
+  step: view PaintStep
+) ret Bool {
+  if step.kind is not PaintStepKind.customPaint or step.appKind is not qrCustomPaintKind {
+    ret false
+  }
+  qrCodeUpdate(qrCodeSystem: qrCodeSystem)
+  let entityId: EntityId = step.entityId
+  if not componentHas(this: qrCodeSystem.symbols, entityId: entityId) or not componentHas(
+    this: qrCodeSystem.qrCodes
+    entityId: entityId
+  ) {
+    ret true
+  }
+  let frame: CustomPaintFrame = beginCustomPaintG(
+    world: world
+    uiSystems: uiSystems
+    canvas: canvas
+    node: entityId
+  )
+  let cached: view QrCodeSymbol = componentView(this: qrCodeSystem.symbols, entityId: entityId)
+  if frame.shown and frame.opacity > 0.0 and cached.valid {
+    paintSymbol(
+      symbol: cached.symbol
+      quietZone: componentView(this: qrCodeSystem.qrCodes, entityId: entityId).quietZone
+      box: PaintBox {
+        x: frame.x
+        y: frame.y
+        w: frame.w
+        h: frame.h
+        scale: 1.0
+      }
+      canvas: canvas
+    )
+  }
+  endCustomPaintG(canvas: canvas, frame: frame)
+  ret true
 }
 
 # Set (or change) a node's text from code

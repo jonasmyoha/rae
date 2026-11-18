@@ -4,6 +4,26 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.13, 2026-11-18: UI layers, the first steps
+
+A patch release in the 0.4 line. `./rae toolchain pin 0.4.13` moves a project. The first steps of
+docs/ui-layers-design.md (one paint and input order for everything 2D); the rest is queued.
+
+- `ui/UiLayers`: one LayerStack per window (the standard layers world, hud, hudOver, dock, popover,
+  toast, dialog, cover, notification, log, debug; a program's own in a gap), several UI worlds
+  joining it, each world's contribution, and the paint plan (`buildLayerPaintPlan`). `LayerTag`
+  gains `z`; a scene's LayerTag now raises its node by itself (`raiseTaggedNodes`).
+- `renderSystemGpu2d` paints by the plan; `Gpu2dCanvas` has a layer push (`canvasPushLayer`:
+  opacity and offset). `collectPaintableRoots` sorts stably.
+- `ui/LayerHit`: a hit walk down the plan over every world (surfaces, modal layers and draws, the
+  layers a press missed, drop targets).
+- `ZIndex` orders siblings in paint and hit (`ui/ZOrder`).
+- A cover layer hides what is under it; `ui/LayerMotion` eases a layer's opacity and offsets.
+- `CustomPaint`: a node the program draws in its own place in the order (plan steps,
+  `beginCustomPaintG` / `endCustomPaintG`); `ui/LayerReport` lists what is drawn in which layer.
+- qr 1.2.0: a QrCode node is a CustomPaint of kind `qrCustomPaintKind`, painted by
+  `qrCodePaintStep` in its place (under a dialog over it); `qrCodePaint` still works.
+
 ## 0.4.12, 2026-11-18: tile streaming with a primary center
 
 A patch release in the 0.4 line. `./rae toolchain pin 0.4.12` moves a project.
