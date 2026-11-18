@@ -563,6 +563,15 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
 - Not yet (queued as 5b): the blur per layer, isolated layers, page transitions on the plan, z at
   a motion's keys through the tracks, and the GPU check frame.
 
+**Built (step 7, the first part, 2026-11-18):** `lib/ui/LayerReport.rae`, case 1538.
+`layerReport(stack, contributions)` lists every layer bottom first with its order and flags
+(modal, dismissOnOutsideTap, hidesBelow, safeArea, isolated, the mode it shows in, an opacity or
+offset other than none), then its draws (kind, app kind, z, area, surface, modal, hidden) and each
+world's roots (world key, entity, z, shown or hidden), and marks the empty layers. A root that has
+never been laid out (inactive from its mount) has no world transform, so the paint, the hit test and
+the report all leave it out. The editor's inspector and Layers list and the debug overlay's page
+wait for step 6 (queued as 7b).
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

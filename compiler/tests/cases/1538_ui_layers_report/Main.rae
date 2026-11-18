@@ -1,0 +1,103 @@
+# The layer report (ui/LayerReport; docs/ui-layers-design.md §12), headless: a page, a toast and a
+# dialog (each a scene with its LayerTag) and a cover that is mounted but hidden; the program draws
+# world labels, a compass under the page and a modal map that is also a surface; the hud is faded
+# to half. The report lists every layer bottom first with its flags and what is in it.
+open ui/Ecs
+open ui/Layer
+open ui/LayerReport
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+func taggedScene(name: view String, layer: view String) ret String {
+  if layer.length() is 0 {
+    ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}\}\}\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"LayerTag\":\{\"id\":\"{layer}\",\"z\":1\}\}\}\}"
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Page", layer: ""))
+  )
+  let toast: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Toast", layer: "toast"))
+  )
+  let dialog: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Dialog", layer: "dialog"))
+  )
+  let cover: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Cover", layer: "cover"))
+  )
+  componentSet(this: world.actives, entityId: cover, data: Active { value: false })
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  let labels: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "world")
+      kind: LayerDrawKind.worldLabels
+    }
+  )
+  let compass: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "hud")
+      kind: LayerDrawKind.app
+      appKind: 1
+      z: -1
+    }
+  )
+  let map: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "hudOver")
+      kind: LayerDrawKind.app
+      appKind: 2
+      hit: true
+      modal: true
+      active: false
+      areaX: 20.0
+      areaY: 20.0
+      areaW: 360.0
+      areaH: 360.0
+    }
+  )
+  animateLayer(
+    stack: stack
+    id: layerIdOf(stack: stack, name: "hud")
+    property: LayerMotionProperty.opacity
+    to: 0.5
+    seconds: 0.0
+  )
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  log(layerReport(stack: stack, contributions: contributions))
+}

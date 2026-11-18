@@ -1,0 +1,127 @@
+# ui/LayerReport — what is drawn in which layer, as text (docs/ui-layers-design.md §12): every
+# layer of a window's stack in paint order, with its order and flags, then what is in it: each
+# world's roots (their z, whether they show anything) and the program's draws (their kind, z,
+# area, whether they hit-test, block input or are hidden). For a debug page, a log line or a test.
+#
+#   log(layerReport(stack: stack, contributions: contributions))
+#
+# The contributions are read as the last refresh left them (refreshLayerContribution).
+open ecs/Entity
+open ui/UiLayers
+
+# A layer's flags as words ("modal, dismissOnOutsideTap"), "" for none
+func layerFlagsText(layer: view UiLayer) ret String {
+  var text: String = ""
+  if layer.modal {
+    text = "{text}, modal"
+  }
+  if layer.dismissOnOutsideTap {
+    text = "{text}, dismissOnOutsideTap"
+  }
+  if layer.hidesBelow {
+    text = "{text}, hidesBelow"
+  }
+  if layer.safeArea {
+    text = "{text}, safeArea"
+  }
+  if layer.isolated {
+    text = "{text}, isolated"
+  }
+  if layer.shows is LayerShows.gameMode {
+    text = "{text}, game mode only"
+  } else if layer.shows is LayerShows.editorMode {
+    text = "{text}, editor mode only"
+  }
+  if layer.opacity is not 1.0 {
+    text = "{text}, opacity {layer.opacity}"
+  }
+  if layer.offsetX is not 0.0 or layer.offsetY is not 0.0 {
+    text = "{text}, offset {layer.offsetX},{layer.offsetY}"
+  }
+  if text.length() > 2 {
+    ret text.sub(start: 2, len: text.length() - 2)
+  }
+  ret ""
+}
+
+func drawKindText(kind: view LayerDrawKind) ret String {
+  if kind is LayerDrawKind.worldLabels {
+    ret "world labels"
+  }
+  if kind is LayerDrawKind.logStrip {
+    ret "log strip"
+  }
+  if kind is LayerDrawKind.debugReadout {
+    ret "debug readout"
+  }
+  ret "app"
+}
+
+# One draw as text
+func layerDrawText(index: view Int, draw: view LayerDraw) ret String {
+  var text: String = "draw {index}: {drawKindText(kind: draw.kind)}"
+  if draw.kind is LayerDrawKind.app {
+    text = "{text} {draw.appKind}"
+  }
+  text = "{text}, z {draw.z}"
+  if draw.areaW > 0.0 and draw.areaH > 0.0 {
+    text = "{text}, area {draw.areaX},{draw.areaY} {draw.areaW}x{draw.areaH}"
+  }
+  if draw.hit {
+    text = "{text}, a surface"
+  }
+  if draw.modal {
+    text = "{text}, modal"
+  }
+  if not draw.active {
+    text = "{text}, hidden"
+  }
+  ret text
+}
+
+# Every layer in paint order and what is in it, one line each, the empty layers marked so
+func layerReport(stack: view LayerStack, contributions: view List(LayerContribution)) ret String {
+  var text: String = "layers, bottom first ({stack.layers.length}, {stack.worlds.length} worlds, {stack.draws.length} draws, generation {stack.generation}):"
+  loop var position: Int = 0, position < stack.layers.length, ++position {
+    let layer: UiLayer = stack.layers.copyAtFallback(
+      index: position
+      fallback: UiLayer { name: "", order: 0 }
+    )
+    let flags: String = layerFlagsText(layer: layer)
+    var line: String = "\n{layer.order} {layer.name}"
+    if flags.length() > 0 {
+      line = "{line} ({flags})"
+    }
+    var items: Int = 0
+    loop let index: view Int in stack.drawOrder {
+      if let draw: view LayerDraw = stack.draws.viewAt(index: index) {
+        if draw.layer is layer.id {
+          line = "{line}\n  {layerDrawText(index: index, draw: draw)}"
+          items = items + 1
+        }
+      }
+    }
+    loop let contribution: view LayerContribution in contributions {
+      loop let entry: view LayerEntry in contribution.entries {
+        if entry.layer is layer.id {
+          var shown: String = "shown"
+          if not entry.shown {
+            shown = "hidden"
+          }
+          line = "{line}\n  world {contribution.worldKey} root {entry.entityId.index}.{entry.entityId.generation}, z {entry.z}, {shown}"
+          items = items + 1
+        }
+      }
+    }
+    if items is 0 {
+      line = "{line}: empty"
+    }
+    text = "{text}{line}"
+  }
+  loop let contribution: view LayerContribution in contributions {
+    if contribution.unknownLayers > 0 {
+      text = "{text}\nworld {contribution.worldKey}: {contribution.unknownLayers} roots name a layer the stack has not (painted in hud)"
+    }
+  }
+  ret text
+}
