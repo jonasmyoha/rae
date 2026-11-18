@@ -1,6 +1,7 @@
 # mesh/RoundedBox: a box with its vertical edges rounded and a flat, sharp top. Its vertex and
 # index counts, its bounds, unit normals that face the way each triangle is wound, flat side
-# normals, UVs 0..1 on each side, and the parts adding up to the whole.
+# normals, UVs 0..1 on each side, and the parts adding up to the whole. Mesh3d.makeBox's faces
+# follow the same picture rule: u to the right seen from outside, v 0 at the top.
 import Math
 open Mesh3d
 open mesh/RoundedBox
@@ -87,6 +88,33 @@ func bounds(mesh: view MeshData) ret String {
   )}..{high.copyAtFallback(index: 2, fallback: 0.0)}"
 }
 
+# Every makeBox vertex: on a side, u runs to the right seen from outside (z x normal) and v is 0
+# at the top; on the top, u along +x and v 0 toward +y; on the bottom, seen from below, u along -x
+func boxPicturesUpright() ret Bool {
+  let box: MeshData = makeBox(size: 2.0)
+  loop var i: Int = 0, i < box.vertCount, ++i {
+    let x: Float = at(mesh: box, vertex: i, field: 0)
+    let y: Float = at(mesh: box, vertex: i, field: 1)
+    let z: Float = at(mesh: box, vertex: i, field: 2)
+    let nx: Float = at(mesh: box, vertex: i, field: 3)
+    let ny: Float = at(mesh: box, vertex: i, field: 4)
+    let nz: Float = at(mesh: box, vertex: i, field: 5)
+    var u: Float = (x * -ny + y * nx) * 0.5 + 0.5
+    var v: Float = 0.5 - z * 0.5
+    if nz > 0.5 {
+      u = x * 0.5 + 0.5
+      v = 0.5 - y * 0.5
+    } else if nz < -0.5 {
+      u = 0.5 - x * 0.5
+      v = 0.5 - y * 0.5
+    }
+    if at(mesh: box, vertex: i, field: 6) is not u or at(mesh: box, vertex: i, field: 7) is not v {
+      ret false
+    }
+  }
+  ret true
+}
+
 func main() {
   let spec: RoundedBoxSpec = {
     width: 1.0
@@ -160,4 +188,5 @@ func main() {
   })
   log("round: bounds {bounds(mesh: round)}")
   check(label: "held radius winding", ok: windingAgrees(mesh: round))
+  check(label: "makeBox: every face's picture upright and not mirrored", ok: boxPicturesUpright())
 }

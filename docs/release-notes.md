@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.22, 2026-11-19: makeBox shows pictures upright
+
+- `Mesh3d.makeBox`: a picture on any face now reads upright and the right way round: u runs to
+  the right as seen from outside the face and v is 0 at its top (where the shader reads a
+  picture's first row). Before, the side faces showed a picture upside down (-X and -Y mirrored,
+  +X and +Y turned half round), and so did the top. A program that drew a picture made to look
+  right on the old faces sees it flipped now; QR codes on cubes (example 147, the walker's QR
+  cubes) now read like the code itself.
+
 ## 0.4.21, 2026-11-19: a rounded box mesh
 
 - `mesh/RoundedBox`: a box with its vertical edges rounded (`radius`, `segments`) and a flat,
