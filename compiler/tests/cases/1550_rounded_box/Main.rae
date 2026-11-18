@@ -1,0 +1,163 @@
+# mesh/RoundedBox: a box with its vertical edges rounded and a flat, sharp top. Its vertex and
+# index counts, its bounds, unit normals that face the way each triangle is wound, flat side
+# normals, UVs 0..1 on each side, and the parts adding up to the whole.
+import Math
+open Mesh3d
+open mesh/RoundedBox
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
+
+func at(mesh: view MeshData, vertex: view Int, field: view Int) ret Float {
+  ret mesh.verts.copyAtFallback(index: vertex * 8 + field, fallback: 0.0)
+}
+
+# Every triangle's winding agrees with its corners' normals (counter-clockwise seen from outside)
+func windingAgrees(mesh: view MeshData) ret Bool {
+  loop var triangle: Int = 0, triangle < mesh.indices.length / 3, ++triangle {
+    let t: Int = triangle * 3
+    let a: Int = mesh.indices.copyAtFallback(index: t, fallback: 0)
+    let b: Int = mesh.indices.copyAtFallback(index: t + 1, fallback: 0)
+    let c: Int = mesh.indices.copyAtFallback(index: t + 2, fallback: 0)
+    let ux: Float = at(mesh: mesh, vertex: b, field: 0) - at(mesh: mesh, vertex: a, field: 0)
+    let uy: Float = at(mesh: mesh, vertex: b, field: 1) - at(mesh: mesh, vertex: a, field: 1)
+    let uz: Float = at(mesh: mesh, vertex: b, field: 2) - at(mesh: mesh, vertex: a, field: 2)
+    let vx: Float = at(mesh: mesh, vertex: c, field: 0) - at(mesh: mesh, vertex: a, field: 0)
+    let vy: Float = at(mesh: mesh, vertex: c, field: 1) - at(mesh: mesh, vertex: a, field: 1)
+    let vz: Float = at(mesh: mesh, vertex: c, field: 2) - at(mesh: mesh, vertex: a, field: 2)
+    let cx: Float = uy * vz - uz * vy
+    let cy: Float = uz * vx - ux * vz
+    let cz: Float = ux * vy - uy * vx
+    let area: Float = Math.sqrt(x: cx * cx + cy * cy + cz * cz)
+    if area > 0.0000001 {
+      let dot: Float = cx * (at(mesh: mesh, vertex: a, field: 3) + at(
+        mesh: mesh
+        vertex: b
+        field: 3
+      ) + at(mesh: mesh, vertex: c, field: 3)) + cy * (at(mesh: mesh, vertex: a, field: 4) + at(
+        mesh: mesh
+        vertex: b
+        field: 4
+      ) + at(mesh: mesh, vertex: c, field: 4)) + cz * (at(mesh: mesh, vertex: a, field: 5) + at(
+        mesh: mesh
+        vertex: b
+        field: 5
+      ) + at(mesh: mesh, vertex: c, field: 5))
+      if dot <= 0.0 {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+func normalsUnit(mesh: view MeshData) ret Bool {
+  loop var i: Int = 0, i < mesh.vertCount, ++i {
+    let nx: Float = at(mesh: mesh, vertex: i, field: 3)
+    let ny: Float = at(mesh: mesh, vertex: i, field: 4)
+    let nz: Float = at(mesh: mesh, vertex: i, field: 5)
+    if Math.abs(value: Math.sqrt(x: nx * nx + ny * ny + nz * nz) - 1.0) > 0.0001 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func bounds(mesh: view MeshData) ret String {
+  var low: List(Float) = { 1000.0, 1000.0, 1000.0 }
+  var high: List(Float) = { -1000.0, -1000.0, -1000.0 }
+  loop var i: Int = 0, i < mesh.vertCount, ++i {
+    loop var k: Int = 0, k < 3, ++k {
+      let value: Float = at(mesh: mesh, vertex: i, field: k)
+      low.set(index: k, value: Math.min(a: low.copyAtFallback(index: k, fallback: 0.0), b: value))
+      high.set(index: k, value: Math.max(a: high.copyAtFallback(index: k, fallback: 0.0), b: value))
+    }
+  }
+  ret "x {low.copyAtFallback(index: 0, fallback: 0.0)}..{high.copyAtFallback(
+    index: 0
+    fallback: 0.0
+  )} y {low.copyAtFallback(index: 1, fallback: 0.0)}..{high.copyAtFallback(index: 1, fallback: 0.0)} z {low.copyAtFallback(
+    index: 2
+    fallback: 0.0
+  )}..{high.copyAtFallback(index: 2, fallback: 0.0)}"
+}
+
+func main() {
+  let spec: RoundedBoxSpec = {
+    width: 1.0
+    depth: 0.8
+    height: 2.0
+    radius: 0.1
+    segments: 6
+  }
+  let mesh: MeshData = makeRoundedBox(spec: spec)
+  log(
+    "vertices {mesh.vertCount} (18 + 16 x 7 = 130), triangles {mesh.indices.length / 3} (sides 8 + corners 48 + caps 56 = 112)"
+  )
+  check(label: "counts", ok: mesh.vertCount is 130 and mesh.indices.length is 48 + 48 * 6)
+  check(label: "floats per vertex", ok: mesh.verts.length is mesh.vertCount * 8)
+  log("bounds {bounds(mesh: mesh)}")
+  check(label: "unit normals", ok: normalsUnit(mesh: mesh))
+  check(label: "winding faces the normals", ok: windingAgrees(mesh: mesh))
+  let parts: RoundedBoxParts = makeRoundedBoxParts(spec: spec)
+  var sum: Int = parts.body.vertCount
+  loop let side: view MeshData in parts.sides {
+    sum = sum + side.vertCount
+  }
+  check(label: "parts add up", ok: parts.sides.length is 4 and sum is mesh.vertCount)
+  # the front side (-y): flat normal, u left to right seen from outside (+x), v 0 at the top
+  let front: MeshData = parts.sides.copyAtFallback(index: 0, fallback: parts.body)
+  var frontOk: Bool = front.vertCount is 4
+  loop var i: Int = 0, i < front.vertCount, ++i {
+    let x: Float = at(mesh: front, vertex: i, field: 0)
+    let u: Float = at(mesh: front, vertex: i, field: 6)
+    let v: Float = at(mesh: front, vertex: i, field: 7)
+    frontOk = frontOk and at(mesh: front, vertex: i, field: 4) is -1.0 and Math.abs(
+      value: u - (x + 0.4) / 0.8
+    ) < 0.0001 and Math.abs(value: v - (1.0 - at(mesh: front, vertex: i, field: 2) / 2.0)) < 0.0001
+  }
+  check(label: "front side: flat normal, uv 0..1 left to right and top down", ok: frontOk)
+  # the right side (+x): u runs toward +y (to the right seen from +x)
+  let right: MeshData = parts.sides.copyAtFallback(index: 1, fallback: parts.body)
+  check(
+    label: "right side: u toward +y"
+    ok: at(mesh: right, vertex: 0, field: 6) is 0.0 and at(mesh: right, vertex: 0, field: 1) < at(
+      mesh: right
+      vertex: 2
+      field: 1
+    )
+  )
+  # a corner's middle normal points out between its two sides
+  let middle: Int = 3 * 2
+  let cornerNx: Float = at(mesh: parts.body, vertex: middle, field: 3)
+  let cornerNy: Float = at(mesh: parts.body, vertex: middle, field: 4)
+  check(
+    label: "a corner's middle normal at 45 degrees"
+    ok: Math.abs(value: cornerNx - 0.70710678) < 0.0001 and Math.abs(value: cornerNy + 0.70710678) < 0.0001
+  )
+  # a sharp box (radius 0): no corner strips, 4-sided caps
+  let sharp: MeshData = makeRoundedBox(spec: RoundedBoxSpec {
+    width: 1.0
+    depth: 1.0
+    height: 1.0
+    radius: 0.0
+    segments: 6
+  })
+  log("sharp: vertices {sharp.vertCount}, triangles {sharp.indices.length / 3}")
+  check(label: "sharp box winding", ok: windingAgrees(mesh: sharp))
+  # a radius past half the depth is held to it
+  let round: MeshData = makeRoundedBox(spec: RoundedBoxSpec {
+    width: 1.0
+    depth: 0.4
+    height: 1.0
+    radius: 5.0
+    segments: 4
+  })
+  log("round: bounds {bounds(mesh: round)}")
+  check(label: "held radius winding", ok: windingAgrees(mesh: round))
+}

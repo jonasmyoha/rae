@@ -1,0 +1,324 @@
+# mesh/RoundedBox — a box whose four vertical edges are rounded and whose top and bottom are cut
+# flat with sharp edges: a vending machine, a cabinet, a kiosk (Mesh3d.makeBox is the sharp cube).
+#
+#   let spec: RoundedBoxSpec = { width: 0.9, depth: 0.8, height: 1.9, radius: 0.08, segments: 6 }
+#   let mesh: MeshData = makeRoundedBox(spec: spec)              # one mesh, one material
+#   let parts: RoundedBoxParts = makeRoundedBoxParts(spec: spec) # the body and the four sides
+#
+# It stands on z = 0 (its bottom), centered on x and y, z up: `width` along x, `depth` along y.
+# The cross-section is a rectangle with its corners rounded by `radius` (at most half the smaller
+# side), each corner in `segments` steps. The flat faces have flat normals; a corner's normals turn
+# with the arc and meet the flat faces' normals at its ends, so the rounded edge shades smooth and
+# the top and bottom edges stay sharp.
+#
+# UVs: each flat side face is its own 0..1 square, u to the right as seen from outside and v down
+# (0 at the top: a picture's first row, as the shader samples it), so a picture (a QR code) put on
+# a side reads upright and the right way round. A corner runs 0..1 along its arc; the top and
+# bottom are mapped from above, the picture's top toward +y. To give one side its own material,
+# draw the parts: the
+# body (corners, top, bottom) and each side as a mesh of its own, in RoundedBoxSide order.
+import Math
+open Mesh3d
+
+type RoundedBoxSpec {
+  width: Float
+  depth: Float
+  height: Float
+  radius: Float = 0.1
+  segments: Int = 6
+}
+
+# The flat sides, counter-clockwise seen from above
+enum RoundedBoxSide { front, right, back, left }
+
+# The box in parts: the body (the corners, the top and the bottom) and the four flat sides
+# (`sides` in RoundedBoxSide order: front -y, right +x, back +y, left -x)
+type RoundedBoxParts {
+  body: MeshData
+  sides: List(MeshData)
+}
+
+func emptyMeshData() ret MeshData {
+  ret MeshData {
+    verts: List.create(Float, cap: 64)
+    indices: List.create(Int, cap: 64)
+    vertCount: 0
+  }
+}
+
+# The radius used: at least 0, at most half the smaller of width and depth
+func roundedBoxRadius(spec: view RoundedBoxSpec) ret Float {
+  ret Math.clamp(val: spec.radius, low: 0.0, high: Math.min(a: spec.width, b: spec.depth) * 0.5)
+}
+
+# The steps of a corner: none when it is not rounded
+func roundedBoxSegments(spec: view RoundedBoxSpec) ret Int {
+  if roundedBoxRadius(spec: spec) <= 0.0 {
+    ret 0
+  }
+  if spec.segments < 1 {
+    ret 1
+  }
+  ret spec.segments
+}
+
+# A vertical strip of columns, one quad between each two, wound counter-clockwise seen from
+# outside: columns in counter-clockwise order seen from above, which is left to right from outside
+func addStrip(
+  mesh: mod MeshData
+  xs: view List(Float)
+  ys: view List(Float)
+  normalsX: view List(Float)
+  normalsY: view List(Float)
+  us: view List(Float)
+  height: view Float
+) {
+  let first: Int = mesh.vertCount
+  loop var j: Int = 0, j < xs.length, ++j {
+    loop var top: Int = 0, top < 2, ++top {
+      pushVert(
+        verts: mesh.verts
+        px: xs.copyAtFallback(index: j, fallback: 0.0)
+        py: ys.copyAtFallback(index: j, fallback: 0.0)
+        pz: top.toFloat() * height
+        nx: normalsX.copyAtFallback(index: j, fallback: 0.0)
+        ny: normalsY.copyAtFallback(index: j, fallback: 0.0)
+        nz: 0.0
+        u: us.copyAtFallback(index: j, fallback: 0.0)
+        value: 1.0 - top.toFloat()
+      )
+    }
+  }
+  loop var j: Int = 0, j + 1 < xs.length, ++j {
+    let bottom: Int = first + j * 2
+    let nextBottom: Int = bottom + 2
+    mesh.indices.add(value: bottom)
+    mesh.indices.add(value: nextBottom)
+    mesh.indices.add(value: nextBottom + 1)
+    mesh.indices.add(value: bottom)
+    mesh.indices.add(value: nextBottom + 1)
+    mesh.indices.add(value: bottom + 1)
+  }
+  mesh.vertCount = mesh.vertCount + xs.length * 2
+}
+
+# A corner's center: the rounded rectangle's corner pulled in by the radius
+func cornerCenterX(spec: view RoundedBoxSpec, corner: view Int) ret Float {
+  let inner: Float = spec.width * 0.5 - roundedBoxRadius(spec: spec)
+  if corner is 0 or corner is 1 {
+    ret inner
+  }
+  ret -inner
+}
+
+func cornerCenterY(spec: view RoundedBoxSpec, corner: view Int) ret Float {
+  let inner: Float = spec.depth * 0.5 - roundedBoxRadius(spec: spec)
+  if corner is 1 or corner is 2 {
+    ret inner
+  }
+  ret -inner
+}
+
+# The flat side `side` as a mesh: a 0..1 square of UVs
+func roundedBoxSide(spec: view RoundedBoxSpec, side: view RoundedBoxSide) ret MeshData {
+  var mesh: MeshData = emptyMeshData()
+  let r: Float = roundedBoxRadius(spec: spec)
+  let hw: Float = spec.width * 0.5
+  let hd: Float = spec.depth * 0.5
+  var xs: List(Float) = {}
+  var ys: List(Float) = {}
+  var nx: Float = 0.0
+  var ny: Float = 0.0
+  if side is RoundedBoxSide.front {
+    xs = { -hw + r, hw - r }
+    ys = { -hd, -hd }
+    ny = -1.0
+  } else if side is RoundedBoxSide.right {
+    xs = { hw, hw }
+    ys = { -hd + r, hd - r }
+    nx = 1.0
+  } else if side is RoundedBoxSide.back {
+    xs = { hw - r, -hw + r }
+    ys = { hd, hd }
+    ny = 1.0
+  } else {
+    xs = { -hw, -hw }
+    ys = { hd - r, -hd + r }
+    nx = -1.0
+  }
+  addStrip(
+    mesh: mesh
+    xs: xs
+    ys: ys
+    normalsX: List(Float) { nx, nx }
+    normalsY: List(Float) { ny, ny }
+    us: List(Float) { 0.0, 1.0 }
+    height: spec.height
+  )
+  ret mesh
+}
+
+# The corner `corner` (0 front-right, 1 back-right, 2 back-left, 3 front-left) as an arc strip
+func addRoundedBoxCorner(mesh: mod MeshData, spec: view RoundedBoxSpec, corner: view Int) {
+  let segments: Int = roundedBoxSegments(spec: spec)
+  if segments is 0 {
+    ret
+  }
+  let r: Float = roundedBoxRadius(spec: spec)
+  let start: Float = (corner.toFloat() - 1.0) * Math.pi * 0.5
+  var xs: List(Float) = {}
+  var ys: List(Float) = {}
+  var normalsX: List(Float) = {}
+  var normalsY: List(Float) = {}
+  var us: List(Float) = {}
+  loop var j: Int = 0, j <= segments, ++j {
+    let angle: Float = start + Math.pi * 0.5 * j.toFloat() / segments.toFloat()
+    let c: Float = Math.cos(x: angle)
+    let s: Float = Math.sin(x: angle)
+    xs.add(value: cornerCenterX(spec: spec, corner: corner) + c * r)
+    ys.add(value: cornerCenterY(spec: spec, corner: corner) + s * r)
+    normalsX.add(value: c)
+    normalsY.add(value: s)
+    us.add(value: j.toFloat() / segments.toFloat())
+  }
+  addStrip(
+    mesh: mesh
+    xs: xs
+    ys: ys
+    normalsX: normalsX
+    normalsY: normalsY
+    us: us
+    height: spec.height
+  )
+}
+
+# The outline seen from above, counter-clockwise: each corner's arc (one point when not rounded)
+func roundedBoxOutline(spec: view RoundedBoxSpec, xs: mod List(Float), ys: mod List(Float)) {
+  let segments: Int = roundedBoxSegments(spec: spec)
+  let r: Float = roundedBoxRadius(spec: spec)
+  loop var corner: Int = 0, corner < 4, ++corner {
+    let start: Float = (corner.toFloat() - 1.0) * Math.pi * 0.5
+    loop var j: Int = 0, j <= segments, ++j {
+      var angle: Float = start + Math.pi * 0.25
+      if segments > 0 {
+        angle = start + Math.pi * 0.5 * j.toFloat() / segments.toFloat()
+      }
+      var reach: Float = r
+      if segments is 0 {
+        # a sharp corner is the corner itself
+        reach = 0.0
+      }
+      xs.add(value: cornerCenterX(spec: spec, corner: corner) + Math.cos(x: angle) * reach)
+      ys.add(value: cornerCenterY(spec: spec, corner: corner) + Math.sin(x: angle) * reach)
+    }
+  }
+}
+
+# A flat cap at height `z`: a fan from its middle, facing up (`up`) or down
+func addRoundedBoxCap(
+  mesh: mod MeshData
+  spec: view RoundedBoxSpec
+  z: view Float
+  up: view Bool
+) {
+  var xs: List(Float) = {}
+  var ys: List(Float) = {}
+  roundedBoxOutline(spec: spec, xs: xs, ys: ys)
+  var nz: Float = -1.0
+  if up {
+    nz = 1.0
+  }
+  let center: Int = mesh.vertCount
+  pushVert(
+    verts: mesh.verts
+    px: 0.0
+    py: 0.0
+    pz: z
+    nx: 0.0
+    ny: 0.0
+    nz: nz
+    u: 0.5
+    value: 0.5
+  )
+  loop var i: Int = 0, i < xs.length, ++i {
+    let x: Float = xs.copyAtFallback(index: i, fallback: 0.0)
+    let y: Float = ys.copyAtFallback(index: i, fallback: 0.0)
+    pushVert(
+      verts: mesh.verts
+      px: x
+      py: y
+      pz: z
+      nx: 0.0
+      ny: 0.0
+      nz: nz
+      u: x / spec.width + 0.5
+      value: 0.5 - y / spec.depth
+    )
+  }
+  let count: Int = xs.length
+  loop var i: Int = 0, i < count, ++i {
+    let a: Int = center + 1 + i
+    let b: Int = center + 1 + (i + 1) % count
+    mesh.indices.add(value: center)
+    if up {
+      mesh.indices.add(value: a)
+      mesh.indices.add(value: b)
+    } else {
+      mesh.indices.add(value: b)
+      mesh.indices.add(value: a)
+    }
+  }
+  mesh.vertCount = mesh.vertCount + 1 + count
+}
+
+# `part`'s vertices and triangles added to `mesh`
+func appendMeshData(mesh: mod MeshData, part: view MeshData) {
+  let offset: Int = mesh.vertCount
+  loop let value: view Float in part.verts {
+    mesh.verts.add(value: value)
+  }
+  loop let index: view Int in part.indices {
+    mesh.indices.add(value: offset + index)
+  }
+  mesh.vertCount = mesh.vertCount + part.vertCount
+}
+
+# The box in parts: the body (corners, top, bottom) and the four sides
+func makeRoundedBoxParts(spec: view RoundedBoxSpec) ret RoundedBoxParts {
+  var body: MeshData = emptyMeshData()
+  loop var corner: Int = 0, corner < 4, ++corner {
+    addRoundedBoxCorner(mesh: body, spec: spec, corner: corner)
+  }
+  addRoundedBoxCap(
+    mesh: body
+    spec: spec
+    z: spec.height
+    up: true
+  )
+  addRoundedBoxCap(
+    mesh: body
+    spec: spec
+    z: 0.0
+    up: false
+  )
+  ret RoundedBoxParts {
+    body: own body
+    sides: List(MeshData) {
+      roundedBoxSide(spec: spec, side: RoundedBoxSide.front)
+      roundedBoxSide(spec: spec, side: RoundedBoxSide.right)
+      roundedBoxSide(spec: spec, side: RoundedBoxSide.back)
+      roundedBoxSide(spec: spec, side: RoundedBoxSide.left)
+    }
+  }
+}
+
+# The whole box as one mesh (the sides first, in RoundedBoxSide order, then the body)
+func makeRoundedBox(spec: view RoundedBoxSpec) ret MeshData {
+  let parts: RoundedBoxParts = makeRoundedBoxParts(spec: spec)
+  var mesh: MeshData = emptyMeshData()
+  loop let side: view MeshData in parts.sides {
+    appendMeshData(mesh: mesh, part: side)
+  }
+  appendMeshData(mesh: mesh, part: parts.body)
+  ret mesh
+}

@@ -2,7 +2,9 @@
 # faces carry a code as a material picture (qr/QrImage, crisp: every
 # module a whole number of texels), and a QrCode node in the .raescene UI
 # (qr/qrCodeSystem, painted as whole-pixel rectangles). A phone camera
-# scans both. Drag to turn the view, the wheel zooms.
+# scans both. Beside the box stands a machine (mesh/RoundedBox: rounded vertical edges, a flat
+# top) with the code on its front and right sides only: each side is a mesh of its own with its own
+# material, and its UVs are a 0..1 square. Drag to turn the view, the wheel zooms.
 #
 #   RAE_QR_TEST_FRAME=1 holds the box still at a fixed angle (screenshots);
 #   RAE_QR_YAW / RAE_QR_DISTANCE look at a face straight on;
@@ -32,6 +34,7 @@ open qr/QrEncoder
 open qr/QrImage
 open qr/QrReader
 open qr/qrScanSystem/QrScanSystem
+open mesh/RoundedBox
 
 const boxText: String = "https://example.com/rae/qr/box"
 
@@ -66,6 +69,47 @@ func plainMaterial(color: view Vec3, roughness: view Float) ret Material3d {
   }
 }
 
+# A machine about the size of a vending machine at (x, y), standing on the ground: its body and
+# back and left sides in `color`, its front and right sides in `coded` (the QR code)
+func addMachine(
+  renderer: mod DeferredRenderer
+  scene: mod World3d
+  x: view Float
+  y: view Float
+  color: view Material3d
+  coded: view Material3d
+) {
+  let parts: RoundedBoxParts = makeRoundedBoxParts(spec: RoundedBoxSpec {
+    width: 0.9
+    depth: 0.8
+    height: 1.9
+    radius: 0.12
+    segments: 8
+  })
+  var meshes: List(MeshData) = { parts.body }
+  loop let side: view MeshData in parts.sides {
+    meshes.add(value: side)
+  }
+  loop var i: Int = 0, i < meshes.length, ++i {
+    var material: Material3d = color
+    # the sides follow the body: front (1) and right (2) carry the code
+    if i is 1 or i is 2 {
+      material = coded
+    }
+    let unusedEntityId: EntityId = world3dAddMeshInstance(
+      world: scene
+      mesh: meshOf(
+        renderer: renderer
+        meshData: meshes.copyAtFallback(index: i, fallback: parts.body)
+      )
+      material: material
+      position: Vec3.create(x: x, y: y, z: 0.0)
+      rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+      scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+    )
+  }
+}
+
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "147: QR codes in 3D and UI")
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
@@ -92,6 +136,14 @@ func main() ret Int {
     position: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     rotation: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
     scale: Vec3.create(x: 1.0, y: 1.0, z: 1.0)
+  )
+  addMachine(
+    renderer: renderer
+    scene: scene
+    x: -2.3
+    y: -0.4
+    color: plainMaterial(color: Vec3.create(x: 0.75, y: 0.18, z: 0.16), roughness: 0.45)
+    coded: boxMaterial
   )
   var camera: Camera3d = defaultCamera3d()
   camera.target = Vec3.create(x: 0.0, y: 0.0, z: 1.2)

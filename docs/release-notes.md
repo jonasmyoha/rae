@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.21, 2026-11-19: a rounded box mesh
+
+- `mesh/RoundedBox`: a box with its vertical edges rounded (`radius`, `segments`) and a flat,
+  sharp top and bottom, standing on z = 0: `makeRoundedBox` (one mesh) and
+  `makeRoundedBoxParts` (the body and the four sides as meshes of their own, so a side can have
+  its own material). Each side is a 0..1 UV square that shows a picture upright. Example 147 has
+  a machine with its QR code on two sides.
+
 ## 0.4.20, 2026-11-19: UI layers, released
 
 A patch release in the 0.4 line that closes the UI layers work (docs/ui-layers-design.md):
