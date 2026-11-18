@@ -1,0 +1,116 @@
+# ui/LayerFrame — a window's frame for its layer stack (docs/ui-layers-design.md §4.4, §5.3, §10):
+# the window and its safe rectangle (a safeArea layer is clipped to it and a step knows it), and
+# the world anchors the world layer draws far to near. A program sets both once a frame, before
+# building its plan:
+#
+#   setLayerStackFrame(stack: stack, width: w, height: h, safe: insets, reserved: band)
+#   clearWorldAnchors(stack: stack)
+#   worldAnchorDraw(stack: stack, x: x, y: y, z: z, appKind: barKind, id: playerIndex)  # each
+#   sortWorldAnchors(stack: stack, cameraX: ..., cameraY: ..., cameraZ: ...)
+import Math
+import ui/Components
+open ui/UiLayers
+
+# Rae's world labels (app3d/WorldLabel) as anchors: this kind, the label's index as the id
+const worldLabelAnchorKind: Int = -2
+
+# A rectangle of the window (design units)
+type LayerRect {
+  x: Float
+  y: Float
+  w: Float
+  h: Float
+}
+
+# The window this frame and its safe area: the OS's (or a simulated) insets plus the host's
+# reserved band
+func setLayerStackFrame(
+  stack: mod LayerStack
+  width: view Float
+  height: view Float
+  safe: view Insets
+  reserved: view Insets
+) {
+  stack.frameW = width
+  stack.frameH = height
+  stack.safeLeft = safe.l + reserved.l
+  stack.safeTop = safe.t + reserved.t
+  stack.safeRight = safe.r + reserved.r
+  stack.safeBottom = safe.b + reserved.b
+}
+
+# Where the layer `id` may draw: the safe rectangle for a safeArea layer, else the window
+# (a zero rectangle when the frame is not set)
+func layerRectOf(stack: view LayerStack, id: view Int) ret LayerRect {
+  if layerOf(stack: stack, id: id).safeArea {
+    ret LayerRect {
+      x: stack.safeLeft
+      y: stack.safeTop
+      w: Math.max(a: 0.0, b: stack.frameW - stack.safeLeft - stack.safeRight)
+      h: Math.max(a: 0.0, b: stack.frameH - stack.safeTop - stack.safeBottom)
+    }
+  }
+  ret LayerRect { x: 0.0, y: 0.0, w: stack.frameW, h: stack.frameH }
+}
+
+# Does the layer `id` clip its drawing (a safeArea layer, once the frame is set)?
+func layerClips(stack: view LayerStack, id: view Int) ret Bool {
+  ret stack.frameW > 0.0 and layerOf(stack: stack, id: id).safeArea
+}
+
+func clearWorldAnchors(stack: mod LayerStack) {
+  stack.anchors.clear()
+}
+
+# Something drawn at (x, y, z) in the 3D world this frame, in the world layer
+func worldAnchorDraw(
+  stack: mod LayerStack
+  x: view Float
+  y: view Float
+  z: view Float
+  appKind: view Int
+  id: view Int
+) {
+  stack.anchors.add(value: WorldAnchor {
+    x: x
+    y: y
+    z: z
+    appKind: appKind
+    id: id
+  })
+}
+
+func anchorDistanceAt(stack: view LayerStack, index: view Int) ret Float {
+  if let anchor: view WorldAnchor = stack.anchors.viewAt(index: index) {
+    ret anchor.distance
+  }
+  ret 0.0
+}
+
+# The anchors far to near from the camera (an insertion sort in place: from one frame to the
+# next they are nearly sorted already)
+func sortWorldAnchors(
+  stack: mod LayerStack
+  cameraX: view Float
+  cameraY: view Float
+  cameraZ: view Float
+) {
+  loop var i: Int = 0, i < stack.anchors.length, ++i {
+    if let anchor: mod WorldAnchor = stack.anchors.modAt(index: i) {
+      let dx: Float = anchor.x - cameraX
+      let dy: Float = anchor.y - cameraY
+      let dz: Float = anchor.z - cameraZ
+      anchor.distance = Math.sqrt(x: dx * dx + dy * dy + dz * dz)
+    }
+  }
+  loop var i: Int = 1, i < stack.anchors.length, ++i {
+    var at: Int = i
+    loop at > 0 and anchorDistanceAt(stack: stack, index: at - 1) < anchorDistanceAt(
+      stack: stack
+      index: at
+    ) {
+      stack.anchors.swap(i: at, j: at - 1)
+      at = at - 1
+    }
+  }
+}

@@ -1,6 +1,7 @@
 # What Rae's 3D shell draws in 2D over the frame, in layer order (app3d/HudOverlays
-# HudLayerPaint; docs/ui-layers-design.md): the world's labels in the world layer (game mode
-# only), the scene UI's roots in their layers, the log strip in the log layer (editor mode only),
+# HudLayerPaint; docs/ui-layers-design.md): the world's labels as world anchors in the world
+# layer (game mode only; here one anchor), the scene UI's roots in their layers, the log strip in
+# the log layer (editor mode only),
 # the debug readout in the debug layer. An app's own drawing is a LayerDraw it adds: here a
 # compass in hudOver, over the scene's hud page and under its dialog, then hidden again.
 open ui/Ecs
@@ -10,6 +11,7 @@ open ui/SceneLoader
 open ui/LayoutSystem
 open ui/Transform
 open ui/UiLayers
+open ui/LayerFrame
 open ui/UiSystems
 open app3d/HudOverlays
 open ecs/Entity
@@ -40,6 +42,8 @@ func planText(paint: view HudLayerPaint, world: view UiWorld) ret String {
       text = "{text} {layerNameOf(stack: paint.stack, id: step.layer)}["
     } else if step.kind is PaintStepKind.layerEnd {
       text = "{text} ]"
+    } else if step.kind is PaintStepKind.worldAnchor {
+      text = "{text} anchor"
     } else if step.kind is PaintStepKind.draw {
       let draw: LayerDraw = paint.stack.draws.copyAtFallback(
         index: step.draw
@@ -76,6 +80,14 @@ func main() {
   transformSystem(world: world, uiSystems: uiSystems)
 
   var paint: HudLayerPaint = createHudLayerPaint()
+  worldAnchorDraw(
+    stack: paint.stack
+    x: 0.0
+    y: 0.0
+    z: 0.0
+    appKind: worldLabelAnchorKind
+    id: 0
+  )
   buildHudLayerPlan(
     paint: paint
     world: world

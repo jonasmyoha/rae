@@ -5,6 +5,7 @@
 # toggles. Used by the walker examples (136, 137, 143) and by apps
 # with their own shell.
 import Gpu2d
+import Vec3
 open app3d/UiModes
 open RendererDeferred
 open app3d/SettingsDialog
@@ -20,8 +21,11 @@ open ui/visualBoundsSystem/VisualBoundsSystem
 open app3d/CameraRig
 open ui/safeAreaSystem/SafeAreaSystem
 open Gpu2dCanvas
+open SdfText
 open ui/UiSystems
 open ui/UiLayers
+open ui/LayerLegacy
+open ui/LayerFrame
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -98,13 +102,6 @@ func createHudLayerPaint() ret HudLayerPaint {
   # the world's labels are a game-mode thing
   setLayerShows(stack: stack, name: "world", shows: LayerShows.gameMode)
   layerStackAddWorld(stack: stack, worldKey: 0)
-  let unusedLabels: Int = addLayerDraw(
-    stack: stack
-    draw: LayerDraw {
-      layer: layerIdOf(stack: stack, name: "world")
-      kind: LayerDrawKind.worldLabels
-    }
-  )
   let unusedLog: Int = addLayerDraw(
     stack: stack
     draw: LayerDraw { layer: layerIdOf(stack: stack, name: "log"), kind: LayerDrawKind.logStrip }
@@ -164,6 +161,22 @@ func drawHudLayers(
   camera: view Camera3d
   editor: view Bool
 ) {
+  # the window and its safe area (a safeArea layer is clipped to it), and the world's labels as
+  # world anchors, sorted far to near with any of the app's own (ui/LayerFrame)
+  setLayerStackFrame(
+    stack: paint.stack
+    width: windowExtentW()
+    height: windowExtentH()
+    safe: screenSafeInsets(world: world)
+    reserved: reservedInsets(world: world)
+  )
+  addWorldLabelAnchors(paint: paint, labels: labels, transforms: transforms)
+  sortWorldAnchors(
+    stack: paint.stack
+    cameraX: camera.position.x
+    cameraY: camera.position.y
+    cameraZ: camera.position.z
+  )
   buildHudLayerPlan(
     paint: paint
     world: world
@@ -171,6 +184,17 @@ func drawHudLayers(
     editor: editor
   )
   loop let step: view PaintStep in paint.plan.steps {
+    if step.kind is PaintStepKind.worldAnchor and step.appKind is worldLabelAnchorKind {
+      drawWorldLabelAnchor(
+        paint: paint
+        step: step
+        labels: labels
+        camera: camera
+        canvas: canvas
+        font: gpuUi.textFont
+      )
+      continue
+    }
     if not paintPlanStepRaeG(
       step: step
       stack: paint.stack
@@ -180,6 +204,7 @@ func drawHudLayers(
       res: gpuUi
       canvas: canvas
     ) and step.kind is PaintStepKind.draw {
+      let clipped: Bool = beginLayerDrawG(step: step, stack: paint.stack, canvas: canvas)
       let draw: LayerDraw = paint.stack.draws.copyAtFallback(
         index: step.draw
         fallback: LayerDraw { layer: -1, kind: LayerDrawKind.app }
@@ -208,6 +233,7 @@ func drawHudLayers(
           didRealWork: true
         )
       }
+      endLayerDrawG(canvas: canvas, pushed: clipped)
     }
   }
   renderSharedNodesGpu2d(
@@ -218,4 +244,53 @@ func drawHudLayers(
   )
   # a dragged canvas node's snapping guides, over everything (ui/canvasGestureSystem)
   paintCanvasGuidesG(world: world, canvas: canvas)
+}
+
+# This frame's world anchors: cleared, then every world label added (kind worldLabelAnchorKind,
+# its index as the id); an app with anchors of its own adds them after this, before its plan is
+# built
+func addWorldLabelAnchors(
+  paint: mod HudLayerPaint
+  labels: view ComponentTable(WorldLabel)
+  transforms: view ComponentTable(Transform3D)
+) {
+  clearWorldAnchors(stack: paint.stack)
+  loop var i: Int = 0, i < componentCount(this: labels), ++i {
+    let label: view WorldLabel = componentView(
+      this: labels
+      entityId: componentEntityAt(this: labels, i: i)
+    )
+    if let at: Vec3 = labelWorldPoint(label: label, transforms: transforms) {
+      worldAnchorDraw(
+        stack: paint.stack
+        x: at.x
+        y: at.y
+        z: at.z
+        appKind: worldLabelAnchorKind
+        id: i
+      )
+    }
+  }
+}
+
+# One world label, at its anchor step
+func drawWorldLabelAnchor(
+  paint: view HudLayerPaint
+  step: view PaintStep
+  labels: view ComponentTable(WorldLabel)
+  camera: view Camera3d
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+) {
+  if let anchor: view WorldAnchor = paint.stack.anchors.viewAt(index: step.draw) {
+    if anchor.id < componentCount(this: labels) {
+      drawLabelAt(
+        canvas: canvas
+        font: font
+        camera: camera
+        label: componentView(this: labels, entityId: componentEntityAt(this: labels, i: anchor.id))
+        at: Vec3.create(x: anchor.x, y: anchor.y, z: anchor.z)
+      )
+    }
+  }
 }

@@ -1,0 +1,156 @@
+# A window's frame for its layer stack (ui/LayerFrame, ui/RenderSystem paintLayerEdgeG and
+# beginLayerDrawG; docs/ui-layers-design.md §4.4, §5.3, §10), headless:
+#   1. a 400x800 window with a safe area of 50 points at the top and 30 at the bottom and a host
+#      band of 20 more at the top: the dock layer (safeArea) may draw in 0,70 400x700, the hud
+#      layer in the whole window; the dock layer's begin pushes that clip and its end pops it;
+#   2. a draw with an area is clipped to it while drawn, one without is not;
+#   3. Rae's world labels and a program's own anchors are sorted together far to near, and the
+#      world layer's steps follow that order.
+import ui/Components
+open ui/LayerFrame
+open ui/RenderSystem
+open ui/UiLayers
+open Gpu2dCanvas
+
+func rectText(rect: view LayerRect) ret String {
+  ret "{rect.x},{rect.y} {rect.w}x{rect.h}"
+}
+
+func main() {
+  var stack: LayerStack = createStandardLayerStack()
+  setLayerStackFrame(
+    stack: stack
+    width: 400.0
+    height: 800.0
+    safe: Insets { l: 0.0, t: 50.0, r: 0.0, b: 30.0 }
+    reserved: Insets { l: 0.0, t: 20.0, r: 0.0, b: 0.0 }
+  )
+  let dock: Int = layerIdOf(stack: stack, name: "dock")
+  let hud: Int = layerIdOf(stack: stack, name: "hud")
+  log(
+    "1. dock may draw in {rectText(rect: layerRectOf(stack: stack, id: dock))}, hud in {rectText(
+      rect: layerRectOf(stack: stack, id: hud)
+    )}"
+  )
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  paintLayerEdgeG(
+    step: paintStepOf(kind: PaintStepKind.layerBegin, layer: dock)
+    stack: stack
+    canvas: canvas
+  )
+  let inDock: Int = canvas.clipStack.length
+  paintLayerEdgeG(
+    step: paintStepOf(kind: PaintStepKind.layerEnd, layer: dock)
+    stack: stack
+    canvas: canvas
+  )
+  paintLayerEdgeG(
+    step: paintStepOf(kind: PaintStepKind.layerBegin, layer: hud)
+    stack: stack
+    canvas: canvas
+  )
+  let inHud: Int = canvas.clipStack.length
+  paintLayerEdgeG(
+    step: paintStepOf(kind: PaintStepKind.layerEnd, layer: hud)
+    stack: stack
+    canvas: canvas
+  )
+  log(
+    "   clips while drawing the dock layer {inDock}, the hud layer {inHud}, after both {canvas.clipStack.length}"
+  )
+
+  let map: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: layerIdOf(stack: stack, name: "hudOver")
+      kind: LayerDrawKind.app
+      appKind: 2
+      areaX: 20.0
+      areaY: 100.0
+      areaW: 360.0
+      areaH: 500.0
+    }
+  )
+  let compass: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw { layer: hud, kind: LayerDrawKind.app, appKind: 1 }
+  )
+  var mapStep: PaintStep = paintStepOf(
+    kind: PaintStepKind.draw
+    layer: layerIdOf(stack: stack, name: "hudOver")
+  )
+  mapStep.draw = map
+  var compassStep: PaintStep = paintStepOf(kind: PaintStepKind.draw, layer: hud)
+  compassStep.draw = compass
+  let mapClipped: Bool = beginLayerDrawG(step: mapStep, stack: stack, canvas: canvas)
+  let whileMap: Int = canvas.clipStack.length
+  endLayerDrawG(canvas: canvas, pushed: mapClipped)
+  let compassClipped: Bool = beginLayerDrawG(step: compassStep, stack: stack, canvas: canvas)
+  endLayerDrawG(canvas: canvas, pushed: compassClipped)
+  log(
+    "2. the map (an area) clipped: {mapClipped} ({whileMap} clip while drawn); the compass (none): {compassClipped}; after: {canvas.clipStack.length}"
+  )
+  canvasShutdown(canvas: canvas)
+
+  # two labels (Rae's) and two health bars (the program's, kind 5), the camera at the origin
+  clearWorldAnchors(stack: stack)
+  worldAnchorDraw(
+    stack: stack
+    x: 0.0
+    y: 10.0
+    z: 0.0
+    appKind: worldLabelAnchorKind
+    id: 0
+  )
+  worldAnchorDraw(
+    stack: stack
+    x: 0.0
+    y: 30.0
+    z: 0.0
+    appKind: worldLabelAnchorKind
+    id: 1
+  )
+  worldAnchorDraw(
+    stack: stack
+    x: 20.0
+    y: 0.0
+    z: 0.0
+    appKind: 5
+    id: 7
+  )
+  worldAnchorDraw(
+    stack: stack
+    x: 0.0
+    y: 0.0
+    z: 5.0
+    appKind: 5
+    id: 8
+  )
+  sortWorldAnchors(
+    stack: stack
+    cameraX: 0.0
+    cameraY: 0.0
+    cameraZ: 0.0
+  )
+  var contributions: List(LayerContribution) = {}
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  var order: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.worldAnchor {
+      if let anchor: view WorldAnchor = stack.anchors.viewAt(index: step.draw) {
+        var whose: String = "bar"
+        if anchor.appKind is worldLabelAnchorKind {
+          whose = "label"
+        }
+        order = "{order} {whose} {anchor.id} at {anchor.distance}"
+      }
+    }
+  }
+  log("3. the world layer, far to near:{order}")
+}

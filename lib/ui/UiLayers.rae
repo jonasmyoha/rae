@@ -116,6 +116,29 @@ type LayerStack {
   generation: Int = 0
   # Layers' opacity and offsets on their way to a value (animateLayer)
   motions: List(LayerMotion)
+  # The window this frame (design units) and its safe insets, the host's reserved band
+  # included (ui/LayerFrame setLayerStackFrame); 0 wide: not set, layers are not clipped
+  frameW: Float = 0.0
+  frameH: Float = 0.0
+  safeLeft: Float = 0.0
+  safeTop: Float = 0.0
+  safeRight: Float = 0.0
+  safeBottom: Float = 0.0
+  # This frame's world anchors, far to near once sorted (ui/LayerFrame worldAnchorDraw)
+  anchors: List(WorldAnchor)
+}
+
+# A point in the 3D world something is drawn at in the world layer: Rae's world labels and a
+# program's own (a health bar, a name), all sorted together far to near
+type WorldAnchor {
+  x: Float
+  y: Float
+  z: Float
+  # whose it is and which (Rae's labels: worldLabelAnchorKind and the label's index)
+  appKind: Int
+  id: Int
+  # its distance from the camera, once sorted
+  distance: Float = 0.0
 }
 
 # What of a layer a motion moves
@@ -138,6 +161,7 @@ func createLayerStack() ret LayerStack {
     drawOrder: {}
     worlds: {}
     motions: {}
+    anchors: {}
   }
 }
 
@@ -327,46 +351,6 @@ func layerOf(stack: view LayerStack, id: view Int) ret UiLayer {
     }
   }
   ret UiLayer { name: "", order: 0 }
-}
-
-# The stack's order for an old ui/Layer order (content 0, dock 100, back-button 200, dialog 300,
-# debug 400), in steps between the standard layers they became, so a world's own layers keep
-# their place among them: 0 is hud (200), 100 dock (400), 300 dialog (700), 400 debug (900)
-func stackOrderOfLegacy(order: view Int) ret Int {
-  if order < 0 {
-    ret layerOrderHud + order
-  }
-  if order <= 100 {
-    ret layerOrderHud + order * 2
-  }
-  if order <= 300 {
-    ret layerOrderDock + (order - 100) * 3 / 2
-  }
-  if order <= 400 {
-    ret layerOrderDialog + (order - 300) * 2
-  }
-  ret layerOrderDebug + order - 400
-}
-
-# Add to the stack every layer `world` made itself (ui/Layer createLayerEntity) whose name the
-# stack does not have, at stackOrderOfLegacy of its order: example 121's document, guides and
-# chrome. The standard names ("content", "dock", "back-button", "dialog", "debug") are the
-# stack's own.
-func adoptWorldLayers(stack: mod LayerStack, world: view UiWorld) {
-  loop var i: Int = 0, i < componentCount(this: world.layerRoots), ++i {
-    let layerRoot: view LayerRoot = componentView(
-      this: world.layerRoots
-      entityId: componentEntityAt(this: world.layerRoots, i: i)
-    )
-    let name: String = stackLayerName(legacy: layerRoot.id)
-    if layerIdOf(stack: stack, name: name) < 0 {
-      let unusedId: Int = addLayer(
-        stack: stack
-        name: name
-        order: stackOrderOfLegacy(order: layerRoot.order)
-      )
-    }
-  }
 }
 
 # ----- a world's contribution ------------------------------------------------------
@@ -767,6 +751,8 @@ enum PaintStepKind {
   sceneRootPart
   customPaint
   draw
+  # one of the stack's anchors (`draw` is its index), in the world layer far to near
+  worldAnchor
   layerEnd
 }
 
@@ -855,6 +841,20 @@ func buildLayerPaintPlan(
     let begin: Int = plan.steps.length
     var layerShows: Bool = false
     plan.steps.add(value: paintStepOf(kind: PaintStepKind.layerBegin, layer: layer.id))
+    # the world layer starts with the world anchors, far to near (sortWorldAnchors)
+    if layer.name is "world" {
+      loop var a: Int = 0, a < stack.anchors.length, ++a {
+        layerShows = true
+        if shown {
+          var step: PaintStep = paintStepOf(kind: PaintStepKind.worldAnchor, layer: layer.id)
+          step.draw = a
+          if let anchor: view WorldAnchor = stack.anchors.viewAt(index: a) {
+            step.appKind = anchor.appKind
+          }
+          plan.steps.add(value: step)
+        }
+      }
+    }
     var draw: Int = nextDrawIn(stack: stack, layer: layer.id, from: 0)
     # entries of a layer the stack no longer has (made before it changed) are passed over
     loop var c: Int = 0, c < contributions.length, ++c {

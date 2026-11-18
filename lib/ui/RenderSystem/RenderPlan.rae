@@ -11,6 +11,7 @@ import ui/Components
 import ui/IconCodepoints
 import ui/Layer
 open ui/UiLayers
+open ui/LayerFrame
 import ui/Theme
 import ui/ThemeResolved
 import ui/TextStyle
@@ -233,8 +234,53 @@ func paintLayerEdgeG(step: view PaintStep, stack: view LayerStack, canvas: mod G
       offsetX: layer.offsetX
       offsetY: layer.offsetY
     )
+    # a safeArea layer draws inside the safe rectangle (ui/LayerFrame)
+    if layerClips(stack: stack, id: step.layer) {
+      let rect: LayerRect = layerRectOf(stack: stack, id: step.layer)
+      Gpu2d.pushClipRect(
+        canvas: canvas
+        x: rect.x
+        y: rect.y
+        w: rect.w
+        h: rect.h
+      )
+    }
   } else if step.kind is PaintStepKind.layerEnd {
+    if layerClips(stack: stack, id: step.layer) {
+      Gpu2d.popClipRect(canvas: canvas)
+    }
     canvasPopLayer(canvas: canvas)
+  }
+}
+
+# Before drawing a draw step (Rae's or the program's): its area pushed as a clip when it has one;
+# true when a clip was pushed (endLayerDrawG pops it)
+func beginLayerDrawG(
+  step: view PaintStep
+  stack: view LayerStack
+  canvas: mod Gpu2dCanvas
+) ret Bool {
+  if step.kind is not PaintStepKind.draw {
+    ret false
+  }
+  if let draw: view LayerDraw = stack.draws.viewAt(index: step.draw) {
+    if draw.areaW > 0.0 and draw.areaH > 0.0 {
+      Gpu2d.pushClipRect(
+        canvas: canvas
+        x: draw.areaX
+        y: draw.areaY
+        w: draw.areaW
+        h: draw.areaH
+      )
+      ret true
+    }
+  }
+  ret false
+}
+
+func endLayerDrawG(canvas: mod Gpu2dCanvas, pushed: view Bool) {
+  if pushed {
+    Gpu2d.popClipRect(canvas: canvas)
   }
 }
 

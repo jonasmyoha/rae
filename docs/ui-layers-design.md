@@ -619,6 +619,24 @@ walkers keep it on `WalkerRender.layerPaint`. `ui/HudOverlay` and `UiWorld.hudOv
 `addStandardHudOverlays`, `drawRaeOverlay` and `drawOverlays` are gone. Not yet (queued as 2c-2):
 draw areas as clips, the safe rectangle, the depth-sorted world layer.
 
+**Built (step 2c-2, 2026-11-18):** `lib/ui/LayerFrame.rae`, case 1541.
+
+- `setLayerStackFrame(stack, width, height, safe, reserved)` keeps the window and its safe insets
+  (the OS's or simulated ones plus the host's reserved band) on the stack each frame.
+  `layerRectOf(stack, id)` is the safe rectangle for a `safeArea` layer, else the window.
+  `paintLayerEdgeG` pushes that clip at a safeArea layer's begin and pops it at its end, once the
+  frame is set.
+- `beginLayerDrawG` / `endLayerDrawG` push a `LayerDraw`'s area as a clip around its drawing,
+  when it has one; `drawHudLayers` uses them for Rae's draws.
+- World anchors: `clearWorldAnchors`, `worldAnchorDraw(stack, x, y, z, appKind, id)` and
+  `sortWorldAnchors(stack, camera)` (an insertion sort in place, far first). The world layer's
+  steps start with one `worldAnchor` step per anchor, in that order. Rae's world labels are
+  anchors of kind `worldLabelAnchorKind`, added each frame by `drawHudLayers` and drawn one by one
+  (`drawLabelAt`), so an app's bars added after them interleave by distance; the separate
+  world-labels draw is gone.
+- Moved: adopting a world's own old layers (`adoptWorldLayers`, `stackOrderOfLegacy`) to
+  `lib/ui/LayerLegacy.rae`, which goes in step 6b.
+
 **Steering (2026-11-18, after steps 1 to 5 in part):**
 
 - **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not
