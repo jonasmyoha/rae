@@ -619,6 +619,18 @@ walkers keep it on `WalkerRender.layerPaint`. `ui/HudOverlay` and `UiWorld.hudOv
 `addStandardHudOverlays`, `drawRaeOverlay` and `drawOverlays` are gone. Not yet (queued as 2c-2):
 draw areas as clips, the safe rectangle, the depth-sorted world layer.
 
+**Steering (2026-11-18, after steps 1 to 5 in part):**
+
+- **`LayerTag` is the one link from a node to its layer.** The runtime `OnLayer` of §4.2 is not
+  built: `LayerTag { id, z }` plus the stack's lookup by name does its work. `LayerRoot`,
+  `LayerRef`, `collectPaintableRoots` and adopting a world's own layers go in step 6b, once every
+  program has moved (step 6).
+- **Hit testing follows the plan where a program keeps one.** A program that keeps a plan (the
+  walkers' `HudLayerPaint`) hits through `ui/LayerHit`'s walk. A one-world program that only calls
+  `renderSystemGpu2d` keeps `uiHitTest`'s root walk, which is in the plan's order since step 2,
+  until 6b replaces it with a one-world plan (3c).
+- **The remaining order of work** is 2c-2, 2d, 3b, 3c, 4b, 5b, 6, 6b, 7b, 8, then the release.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:
