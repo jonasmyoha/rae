@@ -1,0 +1,451 @@
+# Input in paint order (ui/LayerHit; docs/ui-layers-design.md §7), headless. World A (key 0) has
+# a page with a button over the whole window, a dialog card in the middle (the modal dialog
+# layer) and a menu (the popover layer); world B (key 1) has a notice (the notification layer).
+# The program draws a map (a modal draw in hudOver) and a corner button (a surface in hudOver).
+# Each line is where one press lands, walking the plan from the top.
+import ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/LayerHit
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# A window-sized root `<name>Root` (it takes no press) holding the box `name` at (x, y)
+func boxScene(
+  name: view String
+  x: view Int
+  y: view Int
+  w: view Int
+  h: view Int
+) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}Root\",\"nodes\":\{\"{name}Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"Children\":[\"{name}\"]\},\"{name}\":\{\"Rect\":\{\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h}\},\"OnClick\":\{\"actionId\":\"{name}\",\"label\":\"{name}\"\}\}\}\}"
+}
+
+func mount(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  name: view String
+  x: view Int
+  y: view Int
+  w: view Int
+  h: view Int
+) ret EntityId {
+  ret loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: boxScene(
+      name: name
+      x: x
+      y: y
+      w: w
+      h: h
+    ))
+  )
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Page", "Dialog", "Menu", "Notice" } {
+    if nodeOf(world: world, nodeId: id) is entityId {
+      ret id
+    }
+  }
+  ret "?"
+}
+
+func place(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+# Where a press lands across both worlds, and the layers it missed
+func press(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  a: view UiWorld
+  aSystems: view UiSystems
+  b: view UiWorld
+  bSystems: view UiSystems
+  x: view Float
+  y: view Float
+  skip: view EntityId
+) ret String {
+  var walk: UiHitWalk = beginUiHitWalk(
+    plan: plan
+    x: x
+    y: y
+    skip: skip
+  )
+  loop true {
+    if let step: PaintStep = uiHitWalkNext(walk: walk, plan: plan, stack: stack) {
+      var shown: Bool = false
+      var hit: EntityId = noEntity()
+      if step.world is 0 {
+        shown = sceneRootShown(world: a, uiSystems: aSystems, root: step.entityId)
+        if shown {
+          hit = uiHitTestEntity(
+            world: a
+            uiSystems: aSystems
+            entityId: step.entityId
+            x: x
+            y: y
+            targetSize: 0.0
+          )
+        }
+      } else {
+        shown = sceneRootShown(world: b, uiSystems: bSystems, root: step.entityId)
+        if shown {
+          hit = uiHitTestEntity(
+            world: b
+            uiSystems: bSystems
+            entityId: step.entityId
+            x: x
+            y: y
+            targetSize: 0.0
+          )
+        }
+      }
+      uiHitWalkRoot(
+        walk: walk
+        step: step
+        shown: shown
+        hitEntityId: hit
+      )
+    } else {
+      break
+    }
+  }
+  var text: String = "nothing"
+  if walk.hit.blockedByModal {
+    text = "nothing, blocked by the modal {layerNameOf(stack: stack, id: walk.hit.layer)} layer"
+  } else if walk.hit.surfaceDraw >= 0 {
+    text = "the program's surface {walk.hit.surface} in {layerNameOf(
+      stack: stack
+      id: walk.hit.layer
+    )}"
+  } else if walk.hit.world is 0 {
+    text = "A's {nameIn(world: a, entityId: walk.hit.entityId)} in {layerNameOf(
+      stack: stack
+      id: walk.hit.layer
+    )}"
+  } else if walk.hit.world is 1 {
+    text = "B's {nameIn(world: b, entityId: walk.hit.entityId)} in {layerNameOf(
+      stack: stack
+      id: walk.hit.layer
+    )}"
+  }
+  var outside: String = ""
+  loop let layer: view Int in walk.outside {
+    outside = "{outside} {layerNameOf(stack: stack, id: layer)}"
+  }
+  if outside.length() > 0 {
+    text = "{text}; outside of:{outside}"
+  }
+  ret text
+}
+
+func refresh(
+  plan: mod LayerPaintPlan
+  contributions: mod List(LayerContribution)
+  stack: view LayerStack
+  a: view UiWorld
+  aSystems: view UiSystems
+  b: view UiWorld
+  bSystems: view UiSystems
+) {
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: a
+      uiSystems: aSystems
+    )
+  }
+  if let contribution: mod LayerContribution = contributions.modAt(index: 1) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: b
+      uiSystems: bSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+}
+
+func main() {
+  var a: UiWorld = createUiWorld()
+  var aSystems: UiSystems = createUiSystems()
+  a.layoutW = 400.0
+  a.layoutH = 400.0
+  createStandardLayers(world: a)
+  let popoverLayer: EntityId = createLayerEntity(world: a, id: "popover", order: 250)
+  let page: EntityId = mount(
+    world: a
+    uiSystems: aSystems
+    name: "Page"
+    x: 0
+    y: 0
+    w: 400
+    h: 400
+  )
+  let dialog: EntityId = mount(
+    world: a
+    uiSystems: aSystems
+    name: "Dialog"
+    x: 100
+    y: 100
+    w: 200
+    h: 200
+  )
+  let menu: EntityId = mount(
+    world: a
+    uiSystems: aSystems
+    name: "Menu"
+    x: 0
+    y: 300
+    w: 100
+    h: 100
+  )
+  setLayerById(world: a, entityId: dialog, id: "dialog")
+  setLayerById(world: a, entityId: menu, id: "popover")
+  componentSet(this: a.actives, entityId: menu, data: Active { value: false })
+  place(world: a, uiSystems: aSystems)
+
+  var b: UiWorld = createUiWorld()
+  var bSystems: UiSystems = createUiSystems()
+  b.layoutW = 400.0
+  b.layoutH = 400.0
+  let noticeLayer: EntityId = createLayerEntity(world: b, id: "notification", order: 800)
+  let notice: EntityId = mount(
+    world: b
+    uiSystems: bSystems
+    name: "Notice"
+    x: 0
+    y: 0
+    w: 100
+    h: 50
+  )
+  setLayerById(world: b, entityId: notice, id: "notification")
+  place(world: b, uiSystems: bSystems)
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  layerStackAddWorld(stack: stack, worldKey: 1)
+  let hudOver: Int = layerIdOf(stack: stack, name: "hudOver")
+  let map: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: hudOver
+      kind: LayerDrawKind.app
+      appKind: 7
+      modal: true
+      active: false
+    }
+  )
+  let corner: Int = addLayerDraw(
+    stack: stack
+    draw: LayerDraw {
+      layer: hudOver
+      kind: LayerDrawKind.app
+      appKind: 9
+      hit: true
+      areaX: 350.0
+      areaY: 350.0
+      areaW: 50.0
+      areaH: 50.0
+    }
+  )
+  var contributions: List(LayerContribution) = {
+    createLayerContribution(worldKey: 0)
+    createLayerContribution(worldKey: 1)
+  }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  refresh(
+    plan: plan
+    contributions: contributions
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+  )
+
+  log("the dialog open:")
+  log("  on its card: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 200.0
+    y: 200.0
+    skip: noEntity()
+  )}")
+  log("  outside it, on the page: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 50.0
+    y: 200.0
+    skip: noEntity()
+  )}")
+  log("  on the corner surface: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 360.0
+    y: 360.0
+    skip: noEntity()
+  )}")
+  log("  on B's notice (over the dialog): {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 10.0
+    y: 10.0
+    skip: noEntity()
+  )}")
+
+  componentSet(this: a.actives, entityId: dialog, data: Active { value: false })
+  componentSet(this: a.actives, entityId: menu, data: Active { value: true })
+  place(world: a, uiSystems: aSystems)
+  refresh(
+    plan: plan
+    contributions: contributions
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+  )
+  log("the dialog hidden (still mounted), the menu open:")
+  log("  on the page: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 200.0
+    y: 200.0
+    skip: noEntity()
+  )}")
+  log("  on the menu: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 50.0
+    y: 350.0
+    skip: noEntity()
+  )}")
+  log("  on the menu, the menu left out (a drop target): {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 50.0
+    y: 350.0
+    skip: menu
+  )}")
+  log("  on the corner surface: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 360.0
+    y: 360.0
+    skip: noEntity()
+  )}")
+
+  setLayerDrawActive(stack: stack, index: map, active: true)
+  refresh(
+    plan: plan
+    contributions: contributions
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+  )
+  log("the map open (a modal draw in hudOver, under the corner surface):")
+  log("  on the page: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 200.0
+    y: 200.0
+    skip: noEntity()
+  )}")
+  log("  on the corner surface: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 360.0
+    y: 360.0
+    skip: noEntity()
+  )}")
+  log("  on the menu: {press(
+    plan: plan
+    stack: stack
+    a: a
+    aSystems: aSystems
+    b: b
+    bSystems: bSystems
+    x: 50.0
+    y: 350.0
+    skip: noEntity()
+  )}")
+  let popover: Int = layerIdOf(stack: stack, name: "popover")
+  let one: UiHit = uiHitAt(
+    plan: plan
+    stack: stack
+    worldKey: 0
+    world: a
+    uiSystems: aSystems
+    x: 50.0
+    y: 350.0
+    targetSize: 0.0
+  )
+  log("one world's uiHitAt on the menu: in the popover layer {one.layer is popover}")
+}

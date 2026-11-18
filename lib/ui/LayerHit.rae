@@ -1,0 +1,277 @@
+# ui/LayerHit — input in the same order as paint (docs/ui-layers-design.md §7): one hit walk
+# down a layer paint plan (ui/UiLayers), from the top step to the bottom, over every UI world
+# in the window and every program draw.
+#
+# Rae has no function references and a program's worlds are its own, so the walk is a loop the
+# program drives: Rae handles the layers' edges, the draws (a surface takes the press; a modal
+# draw blocks what is under it) and the modal layers; each scene root comes back to the program,
+# which hit-tests it in its own world and reports the answer:
+#
+#   var walk: UiHitWalk = beginUiHitWalk(plan: plan, x: x, y: y, skip: noEntity())
+#   loop true {
+#     if let step: PaintStep = uiHitWalkNext(walk: walk, plan: plan, stack: stack) {
+#       ...the world of step.world: shown = sceneRootShown(...), hit = uiHitTestEntity(...)
+#       uiHitWalkRoot(walk: walk, step: step, shown: shown, hitEntityId: hit)
+#     } else {
+#       break
+#     }
+#   }
+#   walk.hit         # what took the press (UiHit), or nothing, or blockedByModal
+#   walk.outside     # the layers (dismissOnOutsideTap) the press landed outside of
+#
+# uiHitAt is that loop for a program with one world.
+import ui/Components
+open ecs/Entity
+open ecs/ComponentTable
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/UiLayers
+open ui/UiSystems
+
+# What took a press: a scene node (`entityId` in the world `world`), a program's surface (the
+# LayerDraw `surfaceDraw` with hit, its appKind `surface`), or nothing; `blockedByModal`: nothing
+# took it, but a modal layer or a modal draw above stopped it there
+type UiHit {
+  world: Int = -1
+  entityId: EntityId = noEntity()
+  surface: Int = -1
+  surfaceDraw: Int = -1
+  layer: Int = -1
+  blockedByModal: Bool = false
+}
+
+func uiHitIsNothing(hit: view UiHit) ret Bool {
+  ret isNone(this: hit.entityId) and hit.surfaceDraw < 0
+}
+
+type UiHitWalk {
+  x: Float
+  y: Float
+  # A root left out of the walk (a dragged node, so the drop finds what is under it)
+  skip: EntityId
+  # The next step to look at, going down
+  at: Int
+  hit: UiHit
+  done: Bool = false
+  # The layer being walked shows something (a shown root or an active draw)
+  layerShown: Bool = false
+  # The layers with dismissOnOutsideTap that showed something the press missed, top first
+  outside: List(Int)
+}
+
+func beginUiHitWalk(
+  plan: view LayerPaintPlan
+  x: view Float
+  y: view Float
+  skip: view EntityId
+) ret UiHitWalk {
+  ret UiHitWalk {
+    x: x
+    y: y
+    skip: skip
+    at: plan.steps.length - 1
+    hit: UiHit {}
+    outside: {}
+  }
+}
+
+# Is (x, y) in the draw's area (the whole layer when it has none)?
+func layerDrawContains(draw: view LayerDraw, x: view Float, y: view Float) ret Bool {
+  if draw.areaW <= 0.0 or draw.areaH <= 0.0 {
+    ret true
+  }
+  ret x >= draw.areaX and y >= draw.areaY and x < draw.areaX + draw.areaW and y < draw.areaY + draw.areaH
+}
+
+# The next scene root the program must hit-test in its world (the walk has handled every step
+# above it), or none when the walk is over
+func uiHitWalkNext(
+  walk: mod UiHitWalk
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+) ret opt PaintStep {
+  loop not walk.done and walk.at >= 0 {
+    let step: PaintStep = plan.steps.copyAtFallback(
+      index: walk.at
+      fallback: paintStepOf(kind: PaintStepKind.layerEnd, layer: -1)
+    )
+    walk.at = walk.at - 1
+    if step.kind is PaintStepKind.layerEnd {
+      # going down, a layer starts at its end
+      walk.layerShown = false
+    } else if step.kind is PaintStepKind.draw {
+      let draw: LayerDraw = stack.draws.copyAtFallback(
+        index: step.draw
+        fallback: LayerDraw { layer: -1, kind: LayerDrawKind.app, active: false }
+      )
+      if draw.active {
+        walk.layerShown = true
+        if draw.hit and layerDrawContains(draw: draw, x: walk.x, y: walk.y) {
+          walk.hit = UiHit { surface: draw.appKind, surfaceDraw: step.draw, layer: step.layer }
+          walk.done = true
+        } else if draw.modal {
+          walk.hit = UiHit { layer: step.layer, blockedByModal: true }
+          walk.done = true
+        }
+      }
+    } else if step.kind is PaintStepKind.layerBegin {
+      # the layer's bottom: it showed something and nothing in it took the press
+      if walk.layerShown {
+        let layer: UiLayer = layerOf(stack: stack, id: step.layer)
+        if layer.dismissOnOutsideTap {
+          walk.outside.add(value: layer.id)
+        }
+        if layer.modal {
+          walk.hit = UiHit { layer: layer.id, blockedByModal: true }
+          walk.done = true
+        }
+      }
+    } else if step.entityId is not walk.skip {
+      ret step
+    }
+  }
+  walk.done = true
+  ret none
+}
+
+# The program's answer for the scene root `step` asked for: whether the root shows anything
+# (sceneRootShown) and what in it the press hit (noEntity: nothing)
+func uiHitWalkRoot(
+  walk: mod UiHitWalk
+  step: view PaintStep
+  shown: view Bool
+  hitEntityId: view EntityId
+) {
+  if shown {
+    walk.layerShown = true
+  }
+  if isNone(this: hitEntityId) is false {
+    walk.hit = UiHit { world: step.world, entityId: hitEntityId, layer: step.layer }
+    walk.done = true
+  }
+}
+
+# Does the root (or raised node) show anything a press could land on? A layer entity does not, a
+# raised node of a hidden scene does not, and neither does a root that is inactive or hidden: a
+# mounted but hidden page keeps its layer from blocking input
+func sceneRootShown(world: view UiWorld, uiSystems: view UiSystems, root: view EntityId) ret Bool {
+  if componentHas(this: world.layerRoots, entityId: root) {
+    ret false
+  }
+  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
+    uiSystems: uiSystems
+    entityId: root
+  ) is false {
+    ret false
+  }
+  if componentHas(this: world.actives, entityId: root) and componentView(
+    this: world.actives
+    entityId: root
+  ).value is false {
+    ret false
+  }
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: root) {
+    ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: root).visible
+  }
+  ret true
+}
+
+# The walk for a program with one world (`worldKey`): what the press at (x, y) hits, top first,
+# leaving out the root `skip` (a dragged node; noEntity for none). The walk's `outside` list is
+# returned with it.
+func uiHitWalkAt(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+  skip: view EntityId
+) ret UiHitWalk {
+  var walk: UiHitWalk = beginUiHitWalk(
+    plan: plan
+    x: x
+    y: y
+    skip: skip
+  )
+  loop true {
+    if let step: PaintStep = uiHitWalkNext(walk: walk, plan: plan, stack: stack) {
+      var shown: Bool = false
+      var hit: EntityId = noEntity()
+      if step.world is worldKey {
+        shown = sceneRootShown(world: world, uiSystems: uiSystems, root: step.entityId)
+        if shown {
+          hit = uiHitTestEntity(
+            world: world
+            uiSystems: uiSystems
+            entityId: step.entityId
+            x: x
+            y: y
+            targetSize: targetSize
+          )
+        }
+      }
+      uiHitWalkRoot(
+        walk: walk
+        step: step
+        shown: shown
+        hitEntityId: hit
+      )
+    } else {
+      break
+    }
+  }
+  ret walk
+}
+
+# What the press at (x, y) hits in a one-world program's plan
+func uiHitAt(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret UiHit {
+  ret uiHitWalkAt(
+    plan: plan
+    stack: stack
+    worldKey: worldKey
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSize
+    skip: noEntity()
+  ).hit
+}
+
+# A drop target: what is under (x, y) with the dragged root `skip` left out
+func uiHitAtSkipping(
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  worldKey: view Int
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  targetSize: view Float
+  skip: view EntityId
+) ret UiHit {
+  ret uiHitWalkAt(
+    plan: plan
+    stack: stack
+    worldKey: worldKey
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    targetSize: targetSize
+    skip: skip
+  ).hit
+}

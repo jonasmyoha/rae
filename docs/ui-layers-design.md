@@ -501,6 +501,30 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
   clip and safe rectangle, the depth-sorted world layer, `app3d/HudOverlays` on the plan with
   `ui/HudOverlay` removed; the GPU check. Page transitions still paint through `gpu2dLayerRange`.
 
+**Built (step 3, the first part, 2026-11-18):** `lib/ui/LayerHit.rae`, case 1535.
+
+- The hit walk is a loop the program drives, because its worlds are its own and Rae has no
+  function references: `beginUiHitWalk(plan, x, y, skip)`, then `uiHitWalkNext` until it returns
+  none, answering each scene root it hands back with `uiHitWalkRoot(walk, step, shown, hit)`
+  (`sceneRootShown` and `uiHitTestEntity` in that root's world). The walk itself handles the
+  layer edges, the draws and the modal layers. `uiHitAt` and `uiHitAtSkipping` are the loop for a
+  program with one world.
+- A layer "shows something" when a root in it is shown (not a layer entity, not a raised node of
+  a hidden scene, not inactive, not hidden) or a draw in it is active. A modal layer that shows
+  something and took nothing stops the walk (`blockedByModal`). An active modal draw stops it at
+  the draw's place, so a surface above it in the same layer still takes a press.
+- A draw with `hit` is a surface over its area (the whole layer when it has none).
+- `walk.outside` lists, top first, the `dismissOnOutsideTap` layers that showed something and
+  missed the press; the walk goes on under a non-modal one. Turning it into a `LayerTappedOutside`
+  event is step 3b.
+- The skip leaves out a root (a dragged node raised as its own root); a node deeper in a root is
+  not skipped.
+- The plan includes only active draws, so a program rebuilds it after showing or hiding one, as it
+  does every frame.
+- Not yet (queued as 3b and 3c): captures, `PointerCanceled`, the claims, the event, hover, wheel
+  and drag by the walk; Rae's own input systems, dialogs, the camera rig, walker input and the
+  touch stick on it.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:
