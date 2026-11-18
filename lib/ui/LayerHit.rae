@@ -152,31 +152,6 @@ func uiHitWalkRoot(
   }
 }
 
-# Does the root (or raised node) show anything a press could land on? A layer entity does not, a
-# raised node of a hidden scene does not, and neither does a root that is inactive or hidden: a
-# mounted but hidden page keeps its layer from blocking input
-func sceneRootShown(world: view UiWorld, uiSystems: view UiSystems, root: view EntityId) ret Bool {
-  if componentHas(this: world.layerRoots, entityId: root) {
-    ret false
-  }
-  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
-    uiSystems: uiSystems
-    entityId: root
-  ) is false {
-    ret false
-  }
-  if componentHas(this: world.actives, entityId: root) and componentView(
-    this: world.actives
-    entityId: root
-  ).value is false {
-    ret false
-  }
-  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: root) {
-    ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: root).visible
-  }
-  ret true
-}
-
 # The walk for a program with one world (`worldKey`): what the press at (x, y) hits, top first,
 # leaving out the root `skip` (a dragged node; noEntity for none). The walk's `outside` list is
 # returned with it.

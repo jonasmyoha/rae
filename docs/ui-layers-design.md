@@ -547,6 +547,22 @@ A `LayerDraw` gets the same rectangle, so a compass placed by a program stays ou
 - Not yet (queued as 4b): the raised-node opacity and clip rules in code, `reparentKeepingPlace`,
   `LayerScope`, a scene's own `layers`.
 
+**Built (step 5, the first part, 2026-11-18):** in `lib/ui/UiLayers.rae`, case 1537.
+
+- Each contribution entry carries `shown`, set on every refresh with `sceneRootShown` (moved here
+  from `ui/LayerHit`), so a page shown or hidden needs no rebuild.
+- `hidesBelow`: when such a layer shows something (a shown root or an active draw) in the mode
+  being painted, `buildLayerPaintPlan` drops every step under it in place
+  (`dropStepsBefore`). The standard `cover` layer has it.
+- Layer motions live on the stack: `animateLayer(stack, id, property, to, seconds)` eases a
+  layer's `opacity`, `offsetX` or `offsetY` from where it is (a cubic ease-out, `layerMotionEase`),
+  replacing a running motion of the same property; `layerMotionStep(stack, deltaTime)` moves them
+  and says whether any still runs, so the program keeps drawing frames. They are not the node
+  animation system's tracks: a layer is not an entity.
+- A toast under an open dialog needs nothing new: the toast layer is under the dialog layer.
+- Not yet (queued as 5b): the blur per layer, isolated layers, page transitions on the plan, z at
+  a motion's keys through the tracks, and the GPU check frame.
+
 ## 15. The review (2026-11-18)
 
 The first version was checked against SUMU, the media editor, game proto4 (its scenes and its plans:

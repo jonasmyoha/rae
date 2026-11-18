@@ -113,10 +113,31 @@ type LayerStack {
   nextLayerId: Int = 1
   # Changes when a layer, a draw or a world is added: contributions rebuild
   generation: Int = 0
+  # Layers' opacity and offsets on their way to a value (animateLayer)
+  motions: List(LayerMotion)
+}
+
+# What of a layer a motion moves
+enum LayerMotionProperty { opacity, offsetX, offsetY }
+
+# A layer's property easing from `from` to `to` over `seconds` (layerMotionStep moves it)
+type LayerMotion {
+  layer: Int
+  property: LayerMotionProperty
+  from: Float
+  to: Float
+  seconds: Float
+  elapsed: Float = 0.0
 }
 
 func createLayerStack() ret LayerStack {
-  ret LayerStack { layers: {}, draws: {}, drawOrder: {}, worlds: {} }
+  ret LayerStack {
+    layers: {}
+    draws: {}
+    drawOrder: {}
+    worlds: {}
+    motions: {}
+  }
 }
 
 # Add `layer` (its id is given here) after every layer of an order not above its own;
@@ -345,6 +366,8 @@ type LayerEntry {
   # The order the world listed it in (its mount order)
   seq: Int
   entityId: EntityId
+  # It shows anything (sceneRootShown), as of the last refresh
+  shown: Bool = true
 }
 
 type LayerContribution {
@@ -470,6 +493,7 @@ func refreshLayerContribution(
     }
   }
   if same {
+    updateEntriesShown(contribution: contribution, world: world, uiSystems: uiSystems)
     ret
   }
   contribution.entries.clear()
@@ -503,6 +527,45 @@ func refreshLayerContribution(
   }
   contribution.stackGeneration = stack.generation
   contribution.rebuilds = contribution.rebuilds + 1
+  updateEntriesShown(contribution: contribution, world: world, uiSystems: uiSystems)
+}
+
+# Each entry's root shows anything now (every refresh: a page shown or hidden is no rebuild)
+func updateEntriesShown(
+  contribution: mod LayerContribution
+  world: view UiWorld
+  uiSystems: view UiSystems
+) {
+  loop var i: Int = 0, i < contribution.entries.length, ++i {
+    if let entry: mod LayerEntry = contribution.entries.modAt(index: i) {
+      entry.shown = sceneRootShown(world: world, uiSystems: uiSystems, root: entry.entityId)
+    }
+  }
+}
+
+# Does the root (or raised node) show anything a press could land on or a cover could hide
+# under? A layer entity does not, a raised node of a hidden scene does not, and neither does a
+# root that is inactive or hidden: a mounted but hidden page keeps its layer from blocking input
+func sceneRootShown(world: view UiWorld, uiSystems: view UiSystems, root: view EntityId) ret Bool {
+  if componentHas(this: world.layerRoots, entityId: root) {
+    ret false
+  }
+  if isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) and raisedNodeShown(
+    uiSystems: uiSystems
+    entityId: root
+  ) is false {
+    ret false
+  }
+  if componentHas(this: world.actives, entityId: root) and componentView(
+    this: world.actives
+    entityId: root
+  ).value is false {
+    ret false
+  }
+  if componentHas(this: uiSystems.transform2d.worldVisuals, entityId: root) {
+    ret componentView(this: uiSystems.transform2d.worldVisuals, entityId: root).visible
+  }
+  ret true
 }
 
 # Make the contribution again on its next refresh. Call it after a root already in the
@@ -564,6 +627,7 @@ func emptyLayerEntry() ret LayerEntry {
     z: 0
     seq: 0
     entityId: noEntity()
+    shown: false
   }
 }
 
@@ -649,6 +713,7 @@ func buildLayerPaintPlan(
     )
     let shown: Bool = layerShowsIn(layer: layer, editor: editor)
     let begin: Int = plan.steps.length
+    var layerShows: Bool = false
     plan.steps.add(value: paintStepOf(kind: PaintStepKind.layerBegin, layer: layer.id))
     var draw: Int = nextDrawIn(stack: stack, layer: layer.id, from: 0)
     # entries of a layer the stack no longer has (made before it changed) are passed over
@@ -685,6 +750,7 @@ func buildLayerPaintPlan(
       }
       let picked: LayerDraw = drawAtOrder(stack: stack, order: draw)
       if draw >= 0 and (best < 0 or picked.z <= bestEntry.z) {
+        layerShows = true
         if shown {
           var step: PaintStep = paintStepOf(kind: PaintStepKind.draw, layer: layer.id)
           step.draw = stack.drawOrder.copyAtFallback(index: draw, fallback: -1)
@@ -694,6 +760,9 @@ func buildLayerPaintPlan(
         }
         draw = nextDrawIn(stack: stack, layer: layer.id, from: draw + 1)
       } else if best >= 0 {
+        if bestEntry.shown {
+          layerShows = true
+        }
         if shown {
           var step: PaintStep = paintStepOf(kind: PaintStepKind.sceneRoot, layer: layer.id)
           step.world = bestWorld
@@ -713,6 +782,132 @@ func buildLayerPaintPlan(
       plan.steps.removeAt(index: begin)
     } else {
       plan.steps.add(value: paintStepOf(kind: PaintStepKind.layerEnd, layer: layer.id))
+      # a cover that shows something: nothing under it is painted (its steps moved to the front)
+      if layer.hidesBelow and shown and layerShows and begin > 0 {
+        dropStepsBefore(plan: plan, cut: begin)
+      }
     }
   }
+}
+
+# The steps from `cut` on moved to the front, the ones before dropped (in place)
+func dropStepsBefore(plan: mod LayerPaintPlan, cut: view Int) {
+  let kept: Int = plan.steps.length - cut
+  loop var i: Int = 0, i < kept, ++i {
+    plan.steps.swap(i: i, j: i + cut)
+  }
+  loop plan.steps.length > kept {
+    plan.steps.removeLast()
+  }
+}
+
+# ----- motion (docs/ui-layers-design.md §9) ----------------------------------------------
+func layerPropertyValue(layer: view UiLayer, property: view LayerMotionProperty) ret Float {
+  if property is LayerMotionProperty.opacity {
+    ret layer.opacity
+  }
+  if property is LayerMotionProperty.offsetX {
+    ret layer.offsetX
+  }
+  ret layer.offsetY
+}
+
+func setLayerProperty(
+  stack: mod LayerStack
+  id: view Int
+  property: view LayerMotionProperty
+  value: view Float
+) {
+  loop var i: Int = 0, i < stack.layers.length, ++i {
+    if let layer: mod UiLayer = stack.layers.modAt(index: i) {
+      if layer.id is id {
+        if property is LayerMotionProperty.opacity {
+          layer.opacity = value
+        } else if property is LayerMotionProperty.offsetX {
+          layer.offsetX = value
+        } else {
+          layer.offsetY = value
+        }
+      }
+    }
+  }
+}
+
+# Ease the layer `id`'s `property` from where it is to `to` over `seconds` (0: at once); a motion
+# of the same layer and property already running is replaced, from where it got to
+func animateLayer(
+  stack: mod LayerStack
+  id: view Int
+  property: view LayerMotionProperty
+  to: view Float
+  seconds: view Float
+) {
+  let from: Float = layerPropertyValue(layer: layerOf(stack: stack, id: id), property: property)
+  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
+    if let motion: view LayerMotion = stack.motions.viewAt(index: i) {
+      if motion.layer is id and motion.property is property {
+        stack.motions.removeAt(index: i)
+      }
+    }
+  }
+  if seconds <= 0.0 {
+    setLayerProperty(
+      stack: stack
+      id: id
+      property: property
+      value: to
+    )
+    ret
+  }
+  stack.motions.add(value: LayerMotion {
+    layer: id
+    property: property
+    from: from
+    to: to
+    seconds: seconds
+  })
+}
+
+# The share of a motion done at `progress` (0..1): a cubic ease-out, fast at first and settling
+func layerMotionEase(progress: view Float) ret Float {
+  var left: Float = 1.0 - progress
+  if left < 0.0 {
+    left = 0.0
+  }
+  if left > 1.0 {
+    left = 1.0
+  }
+  ret 1.0 - left * left * left
+}
+
+# Every layer motion moved on by `deltaTime` (s), the finished ones at their end and removed;
+# true while any is still running (the program keeps drawing frames)
+func layerMotionStep(stack: mod LayerStack, deltaTime: view Float) ret Bool {
+  loop var i: Int = stack.motions.length - 1, i >= 0, --i {
+    var finished: Bool = false
+    var id: Int = -1
+    var property: LayerMotionProperty = LayerMotionProperty.opacity
+    var value: Float = 0.0
+    if let motion: mod LayerMotion = stack.motions.modAt(index: i) {
+      motion.elapsed = motion.elapsed + deltaTime
+      let share: Float = layerMotionEase(progress: motion.elapsed / motion.seconds)
+      id = motion.layer
+      property = motion.property
+      value = motion.from + (motion.to - motion.from) * share
+      finished = motion.elapsed >= motion.seconds
+      if finished {
+        value = motion.to
+      }
+    }
+    setLayerProperty(
+      stack: stack
+      id: id
+      property: property
+      value: value
+    )
+    if finished {
+      stack.motions.removeAt(index: i)
+    }
+  }
+  ret stack.motions.length > 0
 }

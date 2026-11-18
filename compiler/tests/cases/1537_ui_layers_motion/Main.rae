@@ -1,0 +1,174 @@
+# Layer motion and covers (ui/UiLayers animateLayer, layerMotionStep, hidesBelow;
+# docs/ui-layers-design.md §8, §9), headless. A page, a toast (tagged for the toast layer), an
+# open dialog and a cover (a screensaver, hidden at first), each a scene with its LayerTag.
+#   1. the toast is under the open dialog in the paint plan;
+#   2. the toast layer slides in from 60 points below, eased over 0.3 s;
+#   3. the hud layer fades to half over 0.2 s while the toast still slides;
+#   4. the cover shown: only it is painted (hidesBelow); hidden again, everything is.
+import Math
+open ui/Ecs
+open ui/Layer
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+func taggedScene(name: view String, layer: view String) ret String {
+  if layer.length() is 0 {
+    ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}\}\}\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}\",\"nodes\":\{\"{name}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\},\"LayerTag\":\{\"id\":\"{layer}\"\}\}\}\}"
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Page", "Toast", "Dialog", "Cover" } {
+    if let index: Int = world.nodeIds.get(k: id) {
+      if nodeEntityId(world: world, index: index) is entityId {
+        ret id
+      }
+    }
+  }
+  ret "?"
+}
+
+func planText(plan: view LayerPaintPlan, stack: view LayerStack, world: view UiWorld) ret String {
+  var text: String = ""
+  loop let step: view PaintStep in plan.steps {
+    if step.kind is PaintStepKind.layerBegin {
+      text = "{text} {layerNameOf(stack: stack, id: step.layer)}["
+    } else if step.kind is PaintStepKind.layerEnd {
+      text = "{text}]"
+    } else if step.kind is PaintStepKind.sceneRoot {
+      text = "{text}{nameIn(world: world, entityId: step.entityId)}"
+    }
+  }
+  ret text
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  stack: view LayerStack
+  contributions: mod List(LayerContribution)
+  plan: mod LayerPaintPlan
+) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+}
+
+func tenths(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Page", layer: ""))
+  )
+  let toast: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Toast", layer: "toast"))
+  )
+  let dialog: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Dialog", layer: "dialog"))
+  )
+  let cover: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: taggedScene(name: "Cover", layer: "cover"))
+  )
+  componentSet(this: world.actives, entityId: cover, data: Active { value: false })
+
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var contributions: List(LayerContribution) = { createLayerContribution(worldKey: 0) }
+  var plan: LayerPaintPlan = createLayerPaintPlan()
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+  )
+  log("1. the plan:{planText(plan: plan, stack: stack, world: world)}")
+
+  let toastLayer: Int = layerIdOf(stack: stack, name: "toast")
+  let hudLayer: Int = layerIdOf(stack: stack, name: "hud")
+  animateLayer(
+    stack: stack
+    id: toastLayer
+    property: LayerMotionProperty.offsetY
+    to: 60.0
+    seconds: 0.0
+  )
+  animateLayer(
+    stack: stack
+    id: toastLayer
+    property: LayerMotionProperty.offsetY
+    to: 0.0
+    seconds: 0.3
+  )
+  var slide: String = ""
+  var running: Bool = true
+  loop var step: Int = 0, step < 4, ++step {
+    if step is 1 {
+      animateLayer(
+        stack: stack
+        id: hudLayer
+        property: LayerMotionProperty.opacity
+        to: 0.5
+        seconds: 0.2
+      )
+    }
+    running = layerMotionStep(stack: stack, deltaTime: 0.1)
+    slide = "{slide} [toast y {tenths(value: layerOf(stack: stack, id: toastLayer).offsetY)}, hud opacity {tenths(
+      value: layerOf(stack: stack, id: hudLayer).opacity
+    )}]"
+  }
+  log("2-3. every 0.1 s:{slide}; still moving: {running}")
+
+  componentSet(this: world.actives, entityId: cover, data: Active { value: true })
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+  )
+  log("4. the cover shown:{planText(plan: plan, stack: stack, world: world)}")
+  componentSet(this: world.actives, entityId: cover, data: Active { value: false })
+  frame(
+    world: world
+    uiSystems: uiSystems
+    stack: stack
+    contributions: contributions
+    plan: plan
+  )
+  log("   hidden again:{planText(plan: plan, stack: stack, world: world)}")
+}
