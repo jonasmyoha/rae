@@ -27,6 +27,7 @@ open ui/UiLayers
 open ui/LayerFrame
 open ui/LayerCapture
 open ui/LayerHit
+open ui/DebugLayers
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/Transform
@@ -226,6 +227,7 @@ func drawHudLayers(
           screenH: windowExtentH()
         )
       } else if draw.kind is LayerDrawKind.debugReadout {
+        feedDebugLayers(debugOverlay: dbg, stack: paint.stack, contributions: paint.contributions)
         drawDebugOverlay(
           debugOverlay: dbg
           canvas: canvas
@@ -434,6 +436,7 @@ func drawPanelLayers(
         fallback: LayerDraw { layer: -1, kind: LayerDrawKind.app }
       )
       if draw.kind is LayerDrawKind.debugReadout {
+        feedDebugLayers(debugOverlay: dbg, stack: paint.stack, contributions: paint.contributions)
         drawDebugOverlay(
           debugOverlay: dbg
           canvas: canvas

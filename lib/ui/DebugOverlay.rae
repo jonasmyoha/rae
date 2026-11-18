@@ -44,6 +44,11 @@
 # audio, memory and a save button. An app that has a Profiler passes it once a frame after
 # Profile.tick (debugOverlayPerf), which gives the HUD its threads, audio and saving.
 # `RAE_PERF_HUD=1` opens it at launch.
+#
+# LAYERS. The dialog's "Layers" row opens the Layers page in the same place: every layer of the
+# window's stack in paint order and what is in it (ui/LayerReport). The overlay does not own the
+# stack, so the program hands it the stack it paints by while the page is open (ui/DebugLayers
+# feedDebugLayers); the walkers hand their HudLayerPaint's. `RAE_DEBUG_LAYERS=1` opens it at launch.
 import Math
 import Sys
 import Gpu2d
@@ -118,6 +123,9 @@ type DebugOverlay {
   customLine: String
   # the perf HUD the dialog's "Performance" row opens
   perfHud: PerfHud
+  # the Layers page the dialog's "Layers" row opens, and its lines (ui/DebugLayers feedDebugLayers)
+  wantLayers: Bool = false
+  layerLines: List(String) = {}
 }
 
 # `heartbeat` is the "Update indicator": a square that steps across the top of
@@ -159,6 +167,7 @@ func createDebugOverlay(
     rssSampledAt: 0.0
     heartbeatX: 0.0
     perfHud: perfHudOpenedBy(open: Sys.getEnv(name: "RAE_PERF_HUD") is "1" and not hidden)
+    wantLayers: Sys.getEnv(name: "RAE_DEBUG_LAYERS") is "1" and not hidden
   }
 }
 
@@ -356,7 +365,7 @@ const debugDialogRowH: Float = 38.0
 const debugDialogTitleH: Float = 44.0
 
 # The dialog's rows: FPS, Memory, Update indicator, Performance
-const debugDialogRows: Int = 4
+const debugDialogRows: Int = 5
 
 func debugDialogWidth(debugOverlay: view DebugOverlay) ret Float {
   ret debugDialogW
@@ -481,6 +490,11 @@ func debugToggleRow(debugOverlay: mod DebugOverlay, index: view Int) {
     debugOverlay.wantHeartbeat = debugOverlay.wantHeartbeat is false
   } else if index is 3 {
     setPerfHudOpen(perfHud: debugOverlay.perfHud, open: not debugOverlay.perfHud.open)
+    debugOverlay.wantLayers = false
+  } else if index is 4 {
+    # one page at a time where the readouts were
+    debugOverlay.wantLayers = not debugOverlay.wantLayers
+    setPerfHudOpen(perfHud: debugOverlay.perfHud, open: false)
   }
 }
 
@@ -700,6 +714,68 @@ func drawDebugDialog(debugOverlay: view DebugOverlay, canvas: mod Gpu2dCanvas, f
     label: "Performance"
     on: debugOverlay.perfHud.open
   )
+  drawDebugToggleRow(
+    debugOverlay: debugOverlay
+    canvas: canvas
+    font: font
+    index: 4
+    label: "Layers"
+    on: debugOverlay.wantLayers
+  )
+}
+
+# The Layers page where the readouts were (as the perf HUD): its lines in a panel, as many as fit
+func drawDebugLayersPage(
+  debugOverlay: view DebugOverlay
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+) {
+  var width: Float = 460.0
+  if debugOverlay.screenW > 0.0 {
+    width = Math.min(a: width, b: debugOverlay.screenW - debugOverlay.margin * 2.0)
+  }
+  var x: Float = debugRight(debugOverlay: debugOverlay) - width
+  if debugOpensRight(debugOverlay: debugOverlay) {
+    x = debugButtonX(debugOverlay: debugOverlay)
+  }
+  x = debugClampX(debugOverlay: debugOverlay, x: x, width: width)
+  var y: Float = debugDialogY(debugOverlay: debugOverlay)
+  if debugOverlay.open {
+    y = y + debugDialogH(debugOverlay: debugOverlay) + 8.0
+  }
+  let lineH: Float = 15.0
+  var count: Int = debugOverlay.layerLines.length
+  if debugOverlay.screenH > 0.0 {
+    count = Math.min(
+      a: count
+      b: ((debugOverlay.screenH - debugOverlay.margin - y - 16.0) / lineH) as Int
+    )
+  }
+  if count < 1 {
+    ret
+  }
+  Gpu2d.drawBox(
+    canvas: canvas
+    x: x
+    y: y
+    w: width
+    h: count.toFloat() * lineH + 16.0
+    radius: 10.0
+    fill: debugPanelFill
+    borderWidth: 1.0
+    border: debugPanelBorder
+  )
+  loop var i: Int = 0, i < count, ++i {
+    Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: debugOverlay.layerLines.copyAtFallback(index: i, fallback: "")
+      x: x + 12.0
+      y: y + 8.0 + (i + 1).toFloat() * lineH - 3.5
+      sizePx: 12.0
+      color: debugAmber
+    )
+  }
 }
 
 # A square that steps across the top of the screen once per frame that did real
@@ -911,6 +987,8 @@ func drawDebugOverlay(
   perfHudPacer(perfHud: debugOverlay.perfHud, pacer: canvas.framePacer)
   if debugOverlay.perfHud.open {
     drawDebugPerfHud(debugOverlay: debugOverlay, canvas: canvas, font: font)
+  } else if debugOverlay.wantLayers {
+    drawDebugLayersPage(debugOverlay: debugOverlay, canvas: canvas, font: font)
   } else {
     drawDebugReadouts(debugOverlay: debugOverlay, canvas: canvas, font: font)
   }

@@ -1,0 +1,26 @@
+# ui/DebugLayers — the debug overlay's Layers page fed from a window's layer stack
+# (docs/ui-layers-design.md §12). While the page is open, the program hands the overlay the stack
+# it paints by and its worlds' contributions once a frame, before drawDebugOverlay:
+#
+#   feedDebugLayers(debugOverlay: dbg, stack: stack, contributions: contributions)
+#
+# The page shows layerReport's lines (ui/LayerReport); nothing is made while it is closed.
+open ui/DebugOverlay
+open ui/LayerReport
+open ui/UiLayers
+
+func feedDebugLayers(
+  debugOverlay: mod DebugOverlay
+  stack: view LayerStack
+  contributions: view List(LayerContribution)
+) {
+  if not debugOverlay.wantLayers {
+    ret
+  }
+  debugOverlay.layerLines = layerReport(stack: stack, contributions: contributions).split(sep: "\n")
+}
+
+# Is the Layers page open (a program that builds its report only then asks)?
+func debugLayersOpen(debugOverlay: view DebugOverlay) ret Bool {
+  ret debugOverlay.wantLayers
+}
