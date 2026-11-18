@@ -1,0 +1,93 @@
+# A voice started at or past its sound's end (a clip longer than its sound,
+# entered part-way) reads no frame outside the sound: a one-shot from frame 100
+# or 150 of a 100-frame sound is silence, the same on every render, and a
+# looping one from frame 150 wraps to frame 50. The mixer used to read one frame
+# past the samples there (whatever memory followed, or a fault).
+open audio/Audio
+open audio/AudioMixer
+open audio/Sound
+
+const rate: Int = 48000
+
+const soundFrames: Int = 100
+
+const renderFrames: Int = 256
+
+# A mono sound whose frame i is (i + 1) / 1000
+func rampSoundData() ret SoundData {
+  let samples: Buffer(Float) = createSampleBuffer(count: soundFrames)
+  loop var i: Int = 0, i < soundFrames, ++i {
+    setSampleAt(samples: samples, index: i, value: ((i + 1) as Float) / 1000.0)
+  }
+  ret SoundData {
+    samples: samples
+    frameCount: soundFrames
+    channels: 1
+    sampleRate: rate
+    error: ""
+  }
+}
+
+# The left channel of a render of the ramp played from `startFrame`
+func playedFrom(startFrame: view Int, looping: view Bool) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 128)
+  let ramp: Sound = audio.addSound(data: rampSoundData())
+  let voice: VoiceId = audio.playFromAt(
+    sound: ramp
+    bus: AudioBusKind.effects
+    gainDecibels: 0.0
+    pan: -1.0
+    looping: looping
+    startFrame: startFrame
+    atSample: 0
+  )
+  let rendered: List(Float) = audio.renderOffline(frames: renderFrames)
+  var left: List(Float) = {}
+  loop var i: Int = 0, i < renderFrames, ++i {
+    left.add(value: rendered.copyAtFallback(index: 2 * i, fallback: 0.0))
+  }
+  let stopped: Int = audio.stopAudio()
+  ret left
+}
+
+func isSilent(samples: view List(Float)) ret Bool {
+  loop let sample: Float in samples {
+    if sample is not 0.0 {
+      ret false
+    }
+  }
+  ret true
+}
+
+func isSame(a: view List(Float), b: view List(Float)) ret Bool {
+  if a.length is not b.length {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length, ++i {
+    if a.copyAtFallback(index: i, fallback: 0.0) is not b.copyAtFallback(index: i, fallback: 1.0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func main() ret Int {
+  loop let startFrame: Int in List(Int) { 100, 150 } {
+    let first: List(Float) = playedFrom(startFrame: startFrame, looping: false)
+    let second: List(Float) = playedFrom(startFrame: startFrame, looping: false)
+    log(
+      "a one-shot from frame {startFrame} of {soundFrames}: silent {isSilent(samples: first)}, the same twice {isSame(
+        a: first
+        b: second
+      )}"
+    )
+  }
+  let looped: List(Float) = playedFrom(startFrame: 150, looping: true)
+  log(
+    "a looping voice from frame 150: it plays frame 50 first (value {looped.copyAtFallback(
+      index: 0
+      fallback: -1.0
+    ) * 1000.0} / 1000), then frame 51 ({looped.copyAtFallback(index: 1, fallback: -1.0) * 1000.0} / 1000)"
+  )
+  ret 0
+}
