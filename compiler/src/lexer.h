@@ -88,6 +88,8 @@ typedef enum {
   TOK_PERCENT,
   TOK_INC,
   TOK_DEC,
+  TOK_PLUS_ASSIGN,   // +=
+  TOK_MINUS_ASSIGN,  // -=
   TOK_LESS,
   TOK_GREATER,
   TOK_LESS_EQUAL,

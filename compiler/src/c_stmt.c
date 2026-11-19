@@ -2168,7 +2168,16 @@ static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
     fprintf(out, "  for (; ");
     if (stmt->as.loop_stmt.condition) emit_expr(ctx, stmt->as.loop_stmt.condition, out, PREC_LOWEST, false, false);
     fprintf(out, "; ");
-    if (stmt->as.loop_stmt.increment) emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
+    if (stmt->as.loop_stmt.step_target && stmt->as.loop_stmt.increment) {
+        /* `i += n`: the loop variable takes its next value (sema keeps the target to the loop's
+         * own number variable, so a C assignment in the header is the whole step) */
+        emit_expr(ctx, stmt->as.loop_stmt.step_target, out, PREC_LOWEST, false, false);
+        fprintf(out, " = (");
+        emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
+    } else if (stmt->as.loop_stmt.increment) {
+        emit_expr(ctx, stmt->as.loop_stmt.increment, out, PREC_LOWEST, false, false);
+    }
     fprintf(out, ") {\n");
     // The declaration initializer belongs to the enclosing loop scope.
     // break/continue only drop locals introduced by the current body.

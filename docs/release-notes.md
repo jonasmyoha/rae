@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.28, 2026-11-20: `+=` and `-=`, and a loop that steps by more than one
+
+- `x += e` and `x -= e` are statements (`x = x + e`, `x = x - e`) on a name or a field, numbers and
+  Strings alike; a `let` cannot take them (docs/SYNTAX_RULES.md §4).
+- A counted loop's step is `++i`, `--i`, `i += n` or `i -= n` on the loop's own number variable:
+  `loop var degrees: Int = 0, degrees <= 90, degrees += 5 { }`. Anything else as the step is now an
+  error (a call there used to compile and do nothing, so the loop never ended).
+
 ## 0.4.27, 2026-11-20: the walkers' keys are the world's
 
 - The walkers' keys (WASD, arrows, Shift, jump, R, V, Page Up / Page Down) read through

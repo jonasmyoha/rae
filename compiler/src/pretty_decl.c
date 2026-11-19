@@ -443,7 +443,14 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
       if (!stmt->as.loop_stmt.init) pp_space(pp);
       pp_expr(pp, stmt->as.loop_stmt.condition);
     }
-    if (stmt->as.loop_stmt.increment) {
+    if (stmt->as.loop_stmt.step_target && stmt->as.loop_stmt.increment
+        && stmt->as.loop_stmt.increment->kind == AST_EXPR_BINARY) {
+      /* `i += n` / `i -= n`: the source form of the step */
+      pp_write(pp, ", ");
+      pp_expr(pp, stmt->as.loop_stmt.step_target);
+      pp_write(pp, stmt->as.loop_stmt.increment->as.binary.op == AST_BIN_ADD ? " += " : " -= ");
+      pp_expr(pp, stmt->as.loop_stmt.increment->as.binary.rhs);
+    } else if (stmt->as.loop_stmt.increment) {
       pp_write(pp, ", ");
       pp_expr(pp, stmt->as.loop_stmt.increment);
     }
@@ -458,8 +465,15 @@ static void pp_print_loop_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
 static void pp_print_assign_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   size_t lines_before = pp_stmt_prologue(pp, stmt->line);
   pp_expr(pp, stmt->as.assign_stmt.target);
-  pp_write(pp, stmt->as.assign_stmt.is_bind ? " => " : " = ");
-  pp_expr(pp, stmt->as.assign_stmt.value);
+  if (stmt->as.assign_stmt.compound && stmt->as.assign_stmt.value
+      && stmt->as.assign_stmt.value->kind == AST_EXPR_BINARY) {
+    /* `x += e`: the source form (the parser keeps it as `x = x + e`) */
+    pp_write(pp, stmt->as.assign_stmt.compound == '+' ? " += " : " -= ");
+    pp_expr(pp, stmt->as.assign_stmt.value->as.binary.rhs);
+  } else {
+    pp_write(pp, stmt->as.assign_stmt.is_bind ? " => " : " = ");
+    pp_expr(pp, stmt->as.assign_stmt.value);
+  }
   pp_stmt_epilogue(pp, stmt->line, lines_before);
 }
 

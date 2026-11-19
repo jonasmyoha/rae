@@ -5951,6 +5951,36 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  if (stmt->as.loop_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.condition, true);
              }
              if (stmt->as.loop_stmt.increment) sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.increment, true);
+             if (stmt->as.loop_stmt.step_target) {
+                 /* `i += n` / `i -= n` (docs/loop-step-options.md): it changes the loop's own
+                  * variable, a number, so the step is one C assignment in the loop's header */
+                 const AstExpr* target = stmt->as.loop_stmt.step_target;
+                 const AstStmt* init = stmt->as.loop_stmt.init;
+                 bool own = target->kind == AST_EXPR_IDENT && init && init->kind == AST_STMT_LET
+                     && str_eq(target->as.ident, init->as.let_stmt.name);
+                 bool number = false;
+                 if (own && init->as.let_stmt.type && init->as.let_stmt.type->parts
+                     && !init->as.let_stmt.type->parts->next) {
+                     Str type_name = init->as.let_stmt.type->parts->text;
+                     const char* numbers[] = {"Int", "Int8", "Int16", "Int32", "Int64", "UInt8",
+                                              "UInt16", "UInt32", "UInt64", "Float", "Float32",
+                                              "Float64"};
+                     for (size_t n = 0; n < sizeof(numbers) / sizeof(numbers[0]); n++) {
+                         if (str_eq_cstr(type_name, numbers[n])) number = true;
+                     }
+                 }
+                 if (!own) {
+                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                                "a loop's step changes the loop's own variable (i += n)");
+                     module->had_error = true;
+                 } else if (!number) {
+                     diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                                "a loop's step 'i += n' steps a number (Int, Float...); for anything else use 'loop cond { ... }'");
+                     module->had_error = true;
+                 } else {
+                     sema_analyze_expr(ctx, module, symbols, stmt->as.loop_stmt.step_target, true);
+                 }
+             }
              s_loop_depth++;
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;

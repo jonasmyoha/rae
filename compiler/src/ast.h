@@ -413,6 +413,10 @@ struct AstStmt {
       bool is_main_loop;    // `mainLoop state { }` (docs/web-frame-loop.md): the
                             // program's frame loop, body runs once per frame
       Str main_loop_state;  // ... over this owned local of `main`
+      // A counted loop whose step is `i += n` / `i -= n`: the variable it changes. `increment`
+      // then holds the new value `i + n` / `i - n` (so passes that read the step see an
+      // expression) and codegen emits `i = <increment>`; NULL for `++i` / `--i`.
+      AstExpr* step_target;
       AstQueryLoopBinding* query_bindings;  // non-NULL: this loop was a query-loop sugar form
       AstExpr* query_iterable;              // ... iterating this query call (the hoisted value)
     } loop_stmt;
@@ -433,6 +437,10 @@ struct AstStmt {
       AstExpr* target;
       AstExpr* value;
       bool is_bind;
+      // `x += e` / `x -= e`: '+' or '-' (0 for `=`). The parser stores it as `x = x + e`
+      // (value is that sum, its left side a copy of the target), so every pass sees a plain
+      // assignment; the formatter prints the compound form back.
+      char compound;
     } assign_stmt;
     struct {
       AstBlock* block;

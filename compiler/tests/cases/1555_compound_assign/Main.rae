@@ -1,0 +1,33 @@
+# `+=` and `-=` (docs/loop-step-options.md): a statement on a number, a field and a String, and a
+# counted loop's step by 5, by -2 going down (a `continue` still steps) and by 0.25
+type Player {
+  score: Int = 0
+}
+
+func main() {
+  var line: String = ""
+  loop var degrees: Int = 0, degrees <= 20, degrees += 5 {
+    line += "{degrees} "
+  }
+  log("by 5: {line}")
+  line = ""
+  loop var value: Int = 6, value >= 0, value -= 2 {
+    if value is 2 {
+      continue
+    }
+    line += "{value} "
+  }
+  log("by -2, skipping 2: {line}")
+  line = ""
+  loop var t: Float = 0.0, t <= 1.0, t += 0.25 {
+    line += "{t} "
+  }
+  log("by 0.25: {line}")
+  var player: Player = {}
+  player.score += 10
+  player.score -= 3
+  var total: Int = 1
+  total += 2
+  total -= 5
+  log("a field: {player.score}, a number: {total}")
+}

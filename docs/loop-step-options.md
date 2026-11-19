@@ -1,6 +1,8 @@
 # A loop that steps by more than one: the options
 
-Status: evaluation (2026-11-20), waiting for a decision. Nothing is implemented.
+Status: decided 2026-11-20: option (c), `+=` and `-=` (to match `++` and `--`), built in Rae
+0.4.28 (docs/SYNTAX_RULES.md §4). The evaluation below is kept as it was written; its
+recommendation was (b).
 
 ## What happens today
 

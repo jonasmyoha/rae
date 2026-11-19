@@ -95,3 +95,21 @@ A function declaration must follow this exact order:
 Rule: **Use parentheses `()` for generics, not square brackets `[]`.**
 *   `List(Int)` instead of `List[Int]`
 *   `func create(T)()` instead of `func create[T]()`
+
+## 4. Updating a number: `++`, `--`, `+=`, `-=`
+
+Rule: **`x += e` and `x -= e` are statements, the same as `x = x + e` and `x = x - e`** (Rae
+0.4.28, docs/loop-step-options.md). The target is a name or a field (`count += 1`,
+`player.score -= 2`); a `let` cannot take one, like any assignment. They are not expressions:
+`a = b += 1` does not parse. `+=` also appends to a String (`line += "x"`). Only `+=` and `-=`
+exist, to match `++` and `--`; there is no `*=` or `/=`.
+
+A counted loop's step is one of `++i`, `--i`, `i += n` or `i -= n`, on the loop's own variable,
+a number:
+
+*   `loop var degrees: Int = 0, degrees <= 90, degrees += 5 { }`
+*   `loop var value: Int = 10, value >= 0, value -= 2 { }`
+*   `loop var t: Float = 0.0, t <= 1.0, t += 0.25 { }`
+
+Anything else as the step is an error. To walk a chain, use the condition loop:
+`loop node >= 0 { ... node = nextNode(node: node) }`.

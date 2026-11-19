@@ -136,6 +136,8 @@ static const char* const TOKEN_KIND_NAMES[] = {
     [TOK_PERCENT] = "TOK_PERCENT",
     [TOK_INC] = "TOK_INC",
     [TOK_DEC] = "TOK_DEC",
+    [TOK_PLUS_ASSIGN] = "TOK_PLUS_ASSIGN",
+    [TOK_MINUS_ASSIGN] = "TOK_MINUS_ASSIGN",
     [TOK_LESS] = "TOK_LESS",
     [TOK_GREATER] = "TOK_GREATER",
     [TOK_LESS_EQUAL] = "TOK_LESS_EQUAL",
@@ -640,6 +642,9 @@ TokenList lexer_tokenize(Arena* arena,
                                  if (lexer_peek(&lexer) == '+') {
                                    lexer_advance(&lexer);
                                    emit_token(&lexer, &buffer, TOK_INC, start_index, token_line, token_column);
+                                 } else if (lexer_peek(&lexer) == '=') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_PLUS_ASSIGN, start_index, token_line, token_column);
                                  } else {
                                    emit_token(&lexer, &buffer, TOK_PLUS, start_index, token_line, token_column);
                                  }
@@ -648,6 +653,9 @@ TokenList lexer_tokenize(Arena* arena,
                                  if (lexer_peek(&lexer) == '-') {
                                    lexer_advance(&lexer);
                                    emit_token(&lexer, &buffer, TOK_DEC, start_index, token_line, token_column);
+                                 } else if (lexer_peek(&lexer) == '=') {
+                                   lexer_advance(&lexer);
+                                   emit_token(&lexer, &buffer, TOK_MINUS_ASSIGN, start_index, token_line, token_column);
                                  } else {
                                    emit_token(&lexer, &buffer, TOK_MINUS, start_index, token_line, token_column);
                                  }

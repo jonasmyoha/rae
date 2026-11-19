@@ -15,6 +15,9 @@ git init -q --bare "$WORK/remote.git"
 git init -q -b main "$WORK/repo"
 cd "$WORK/repo" || exit 1
 git config user.email t@t; git config user.name t; git config tag.gpgsign false
+# a plain push sends no tags here, whatever this machine's global push.followTags says: the
+# checks below push tags only where they mean to
+git config push.followTags false
 git remote add origin "$WORK/remote.git"
 mkdir -p compiler tools .git/hooks
 cp "$ROOT/tools/version-tags.sh" tools/

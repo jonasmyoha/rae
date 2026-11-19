@@ -2769,6 +2769,65 @@ static AstStmt* parse_query_loop(Parser* parser, AstStmt* stmt, bool has_let,
   return hoist;
 }
 
+/* A copy of an assignment's place (a name, or a chain of fields on one), for the `x` on the
+ * right of `x = x + e` that `x += e` stands for; NULL for anything else. */
+static AstExpr* copy_place_expr(Parser* parser, const AstExpr* place) {
+  if (!place) return NULL;
+  if (place->kind == AST_EXPR_IDENT) {
+    AstExpr* copy = new_expr(parser, AST_EXPR_IDENT, NULL);
+    *copy = *place;
+    return copy;
+  }
+  if (place->kind == AST_EXPR_MEMBER) {
+    AstExpr* object = copy_place_expr(parser, place->as.member.object);
+    if (!object) return NULL;
+    AstExpr* copy = new_expr(parser, AST_EXPR_MEMBER, NULL);
+    *copy = *place;
+    copy->as.member.object = object;
+    return copy;
+  }
+  return NULL;
+}
+
+/* `place + rhs` (`op` '+') or `place - rhs` ('-'), the place copied */
+static AstExpr* compound_value(Parser* parser, const AstExpr* place, char op, AstExpr* rhs,
+                               const Token* op_token) {
+  AstExpr* left = copy_place_expr(parser, place);
+  if (!left) {
+    parser_error(parser, op_token,
+                 "'+=' and '-=' change a name or a field (such as count += 1 or player.score -= 2)");
+    return rhs;
+  }
+  AstExpr* sum = new_expr(parser, AST_EXPR_BINARY, op_token);
+  sum->as.binary.lhs = left;
+  sum->as.binary.rhs = rhs;
+  sum->as.binary.op = op == '+' ? AST_BIN_ADD : AST_BIN_SUB;
+  return sum;
+}
+
+/* A counted loop's step: `++i`, `--i`, `i += n` or `i -= n` (docs/loop-step-options.md). */
+static void parse_loop_step(Parser* parser, AstStmt* stmt) {
+  const Token* start = parser_peek(parser);
+  AstExpr* step = parse_expression(parser);
+  if (parser_match(parser, TOK_PLUS_ASSIGN) || parser_match(parser, TOK_MINUS_ASSIGN)) {
+    const Token* op_token = parser_previous(parser);
+    char op = op_token->kind == TOK_PLUS_ASSIGN ? '+' : '-';
+    AstExpr* rhs = parse_expression(parser);
+    stmt->as.loop_stmt.step_target = step;
+    stmt->as.loop_stmt.increment = compound_value(parser, step, op, rhs, op_token);
+    return;
+  }
+  stmt->as.loop_stmt.increment = step;
+  bool counts = step && step->kind == AST_EXPR_UNARY
+                && (step->as.unary.op == AST_UNARY_PRE_INC || step->as.unary.op == AST_UNARY_PRE_DEC
+                    || step->as.unary.op == AST_UNARY_POST_INC
+                    || step->as.unary.op == AST_UNARY_POST_DEC);
+  if (step && !counts) {
+    parser_error(parser, start,
+                 "a loop's step is ++i, --i, i += n or i -= n");
+  }
+}
+
 static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
   AstStmt* stmt = new_stmt(parser, AST_STMT_LOOP, loop_token);
   stmt->as.loop_stmt.is_range = false;
@@ -2862,7 +2921,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
                      "expected ',' or newline after loop condition");
       }
     }
-    stmt->as.loop_stmt.increment = parse_expression(parser);
+    parse_loop_step(parser, stmt);
     stmt->as.loop_stmt.body = parse_block(parser);
     return stmt;
   }
@@ -2918,7 +2977,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       parser_consume(parser, TOK_COMMA, "expected ',' after loop initializer");
       stmt->as.loop_stmt.condition = parse_expression(parser);
       parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");
-      stmt->as.loop_stmt.increment = parse_expression(parser);
+      parse_loop_step(parser, stmt);
     }
   } else {
     const Token* expression_token = parser_peek(parser);
@@ -2952,7 +3011,7 @@ static AstStmt* parse_loop_statement(Parser* parser, const Token* loop_token) {
       stmt->as.loop_stmt.init = init;
       stmt->as.loop_stmt.condition = parse_expression(parser);
       parser_consume(parser, TOK_COMMA, "expected ',' after loop condition");
-      stmt->as.loop_stmt.increment = parse_expression(parser);
+      parse_loop_step(parser, stmt);
     } else {
       stmt->as.loop_stmt.init = NULL;
       stmt->as.loop_stmt.condition = expr;
@@ -3063,6 +3122,17 @@ static AstStmt* parse_statement(Parser* parser) {
     stmt->as.assign_stmt.target = expr;
     stmt->as.assign_stmt.value = parse_expression(parser);
     stmt->as.assign_stmt.is_bind = false;
+    return stmt;
+  }
+  if (parser_match(parser, TOK_PLUS_ASSIGN) || parser_match(parser, TOK_MINUS_ASSIGN)) {
+    /* `x += e` is `x = x + e` (`-=` likewise): one assignment for every later pass */
+    const Token* op_token = parser_previous(parser);
+    char op = op_token->kind == TOK_PLUS_ASSIGN ? '+' : '-';
+    AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, op_token);
+    stmt->as.assign_stmt.target = expr;
+    stmt->as.assign_stmt.value = compound_value(parser, expr, op, parse_expression(parser), op_token);
+    stmt->as.assign_stmt.is_bind = false;
+    stmt->as.assign_stmt.compound = op;
     return stmt;
   }
   if (parser_match(parser, TOK_ARROW)) {
