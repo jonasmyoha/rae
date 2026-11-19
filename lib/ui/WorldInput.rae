@@ -1,0 +1,60 @@
+# ui/WorldInput — the world layer's input read from the device, after the UI took its own
+# (ui/LayerCapture, docs/ui-layers-design.md §7). A program that keeps a UiCaptures calls
+# feedWorldInput once a frame, after the frame's presses went through the layer walk
+# (capturePress / captureRelease), and its game code reads only:
+#
+#   worldPointer(captures: captures, pointerId: -1)   # the mouse: down, pressed, released, x, y
+#   worldKeyDown(captures: captures, key: Keys.keyW)   # false while the UI holds the keys
+#
+# never Sdl3 or Gpu2d's pointer and keys, so a click meant for a button never reaches the game.
+import Gpu2d
+import Sdl3
+open ui/LayerCapture
+
+# This frame's mouse and fingers for the world
+func feedWorldInput(captures: mod UiCaptures) {
+  worldPointerStep(
+    captures: captures
+    pointerId: -1
+    x: Gpu2d.pointerX()
+    y: Gpu2d.pointerY()
+    deviceDown: Gpu2d.pointerDown()
+  )
+  loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+    worldPointerStep(
+      captures: captures
+      pointerId: Gpu2d.touchId(index: i)
+      x: Gpu2d.touchX(index: i)
+      y: Gpu2d.touchY(index: i)
+      deviceDown: true
+    )
+  }
+  # fingers lifted since the last frame
+  loop var w: Int = captures.worldPointers.length - 1, w >= 0, --w {
+    let pointerId: Int = captures.worldPointers.copyAtFallback(
+      index: w
+      fallback: WorldPointer { pointerId: -1 }
+    ).pointerId
+    if pointerId >= 0 {
+      var held: Bool = false
+      loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
+        if Gpu2d.touchId(index: i) is pointerId {
+          held = true
+        }
+      }
+      if not held {
+        worldPointerGone(captures: captures, pointerId: pointerId)
+      }
+    }
+  }
+}
+
+# Is `key` held, for the world (false while a text field has focus or a modal shows)?
+func worldKeyDown(captures: view UiCaptures, key: view Int) ret Bool {
+  ret worldKeys(captures: captures) and Sdl3.isKeyDown(key: key)
+}
+
+# Was `key` pressed this frame, for the world?
+func worldKeyPressed(captures: view UiCaptures, key: view Int) ret Bool {
+  ret worldKeys(captures: captures) and Sdl3.isKeyPressed(key: key)
+}

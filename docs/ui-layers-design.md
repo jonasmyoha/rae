@@ -330,6 +330,25 @@ type UiHit {
   layers cannot block a read they never see. Such code moves to a surface (`LayerDraw` with `hit`)
   and `uiHitAt`. Game proto2's map is the known one.
 
+**The world's input (built, Rae 0.4.26).** A game reads the world's input from the captures, never
+the device (`Sdl3.isMouseButtonDown`, `Sdl3.isKeyDown`, `Gpu2d.pointerPressed`): what is left for
+the world layer, the bottom of the plan, after the layers above it took theirs. Each frame, after
+the layer walk took the presses (`capturePress` / `captureRelease`), `ui/WorldInput`
+`feedWorldInput(captures)` gives each pointer's place and device state to `worldPointerStep`
+(app3d/HudOverlays `hudCapturesStep` does it for the walkers), and the game reads:
+
+- `worldPointer(captures, id)` (the mouse -1, a finger its id): `down`, `pressed`, `released`, its
+  place, and `canceled` when a modal opened over its press. A press counts for the world only when
+  it began on the world: one on a button, or under a modal, never reaches it, even dragged onto
+  open ground.
+- `worldKeys(captures)`: whether the keys reach the world (no text field has focus, no modal
+  shows); `worldKeyDown(captures, key)` and `worldKeyPressed` read a key through it.
+
+A downstream app drops its own "did the UI take this" checks by reading these. `CameraRig`
+`updateCameraRigFor` takes the pointer and the keys apart (`app3d/HudOverlays`
+`cameraRigInputFrom`): a held UI button no longer stops the keys turning the view, and a focused
+text field stops them. Case `compiler/tests/cases/1554_ui_world_input`.
+
 ## 8. Transparency and effects
 
 - **Alpha blending in order** comes from the order: premultiplied alpha, as the canvas does now.

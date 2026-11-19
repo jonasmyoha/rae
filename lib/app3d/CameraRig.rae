@@ -561,6 +561,33 @@ func updateCameraRig(
   wheel: view Float
   deltaTime: view Float
 ) ret Bool {
+  ret updateCameraRigFor(
+    rig: rig
+    camera: camera
+    input: CameraRigInput { pointer: allowInput, keys: allowInput }
+    wheel: wheel
+    deltaTime: deltaTime
+  )
+}
+
+# What of this frame's input is the camera's: the pointer (a drag, the wheel) and the keys apart.
+# From a UiCaptures, app3d/HudOverlays cameraRigInputFrom gives the world's
+# (docs/ui-layers-design.md §7): the
+# pointer unless the UI holds it, the keys unless a text field or a modal holds them.
+type CameraRigInput {
+  pointer: Bool
+  keys: Bool
+}
+
+# updateCameraRig with the pointer and the keys allowed apart: holding a UI button does not stop
+# the keys moving the view, and typing in a text field does not steer it
+func updateCameraRigFor(
+  rig: mod CameraRig
+  camera: mod Camera3d
+  input: view CameraRigInput
+  wheel: view Float
+  deltaTime: view Float
+) ret Bool {
   let yaw0: Float = rig.yaw
   let orbitPitch0: Float = rig.orbitPitch
   let freePitch0: Float = rig.freePitch
@@ -588,7 +615,7 @@ func updateCameraRig(
   resolveCameraPointer(rig: rig)
   let px: Float = rig.camPointerX
   let py: Float = rig.camPointerY
-  if allowInput and rig.camPointerDown {
+  if input.pointer and rig.camPointerDown {
     # Only orbit once a drag is ESTABLISHED. On the press frame there is
     # no previous position to difference against, and using the stale one
     # snaps the view by the distance the pointer traveled while up.
@@ -605,9 +632,11 @@ func updateCameraRig(
   rig.lastX = px
   rig.lastY = py
 
-  if allowInput {
+  if input.pointer {
     # The wheel is a pointer device, so it rides the mouse toggle.
     mouseDist = 0.0 - wheel * rig.wheelSpeed
+  }
+  if input.keys {
     let boost: Float = speedScale()
     if rig.mode is CameraRigMode.orbit {
       if Sdl3.isKeyDown(key: Keys.keyW) {

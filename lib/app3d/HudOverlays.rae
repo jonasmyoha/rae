@@ -27,6 +27,7 @@ open ui/UiLayers
 open ui/LayerFrame
 open ui/LayerCapture
 open ui/LayerHit
+open ui/WorldInput
 open ui/DebugLayers
 open ecs/Entity
 open ecs/ComponentTable
@@ -359,6 +360,8 @@ func hudCapturesStep(
       )
     }
   }
+  # what is left for the world this frame (ui/WorldInput): a game reads worldPointer / worldKeyDown
+  feedWorldInput(captures: captures)
 }
 
 # One press of `pointerId` at (x, y) through the plan on screen, captured by what it hits
@@ -386,6 +389,16 @@ func hudCapturePress(
       skip: noEntity()
     )
   )
+}
+
+# The camera's share of this frame's input (CameraRig updateCameraRigFor): the pointer unless the
+# UI holds it (a press on its buttons, a drag that began there, a modal), the keys unless a text
+# field or a modal holds them (ui/LayerCapture worldKeys)
+func cameraRigInputFrom(captures: view UiCaptures, ui: view UiInput) ret CameraRigInput {
+  ret CameraRigInput {
+    pointer: uiPointerCaptured(input: ui) is false and not uiClaimsPointer(captures: captures)
+    keys: worldKeys(captures: captures)
+  }
 }
 
 # The fingers the UI holds this frame do not start a camera drag (after setCameraTouch)

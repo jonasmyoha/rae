@@ -16,6 +16,15 @@
 # press landed outside of (dismissOnOutsideTap) are sent as LayerTappedOutside: under a modal layer
 # the press stopped there, under a popover it went on to what is under it (the walk's hit).
 # Hover and the wheel are the same walk at the pointer's place each frame (uiHitWalkAt).
+#
+# The world's input is what is left for the world layer (the bottom of the plan) after the layers
+# above it took theirs (docs/ui-layers-design.md §7): after the frame's presses and releases, the
+# program gives each pointer's place and whether the device holds it down (worldPointerStep;
+# ui/WorldInput feedWorldInput reads the device for it), and a game reads worldPointer(captures,
+# id) and worldKeys(captures), never the device. A press counts for the world only when it began
+# on the world: one on a button, or under a modal, never reaches it, even dragged onto the world;
+# one on open ground stays the world's until it is let go, or until a modal opens over it (then
+# it ends, `canceled`).
 open ecs/Entity
 open ui/LayerHit
 open ui/UiLayers
@@ -42,8 +51,26 @@ type LayerTappedOutside {
   pointerId: Int
 }
 
+# A pointer as the world layer sees it this frame (the mouse -1, a finger its touch id)
+type WorldPointer {
+  pointerId: Int
+  # Its place (window points)
+  x: Float = 0.0
+  y: Float = 0.0
+  # Held, pressed this frame and let go this frame, by the world (a press that began on it)
+  down: Bool = false
+  pressed: Bool = false
+  released: Bool = false
+  # Its press ended because a modal opened over it (`released` is true too)
+  canceled: Bool = false
+  # The device's own state last frame (to tell a new press)
+  deviceDown: Bool = false
+}
+
 type UiCaptures {
   captures: List(PointerCapture)
+  # The world's view of each pointer seen (worldPointerStep)
+  worldPointers: List(WorldPointer) = {}
   # this frame's events
   canceled: List(PointerCanceled)
   tappedOutside: List(LayerTappedOutside)
@@ -209,4 +236,90 @@ func claimedPointerIds(captures: view UiCaptures) ret List(Int) {
     }
   }
   ret ids
+}
+
+# This frame's pointer `pointerId` for the world, after the frame's capturePress / captureRelease:
+# its place and whether the device holds it down
+func worldPointerStep(
+  captures: mod UiCaptures
+  pointerId: view Int
+  x: view Float
+  y: view Float
+  deviceDown: view Bool
+) {
+  var index: Int = -1
+  loop var i: Int = 0, i < captures.worldPointers.length, ++i {
+    if let pointer: view WorldPointer = captures.worldPointers.viewAt(index: i) {
+      if pointer.pointerId is pointerId {
+        index = i
+      }
+    }
+  }
+  if index < 0 {
+    captures.worldPointers.add(value: WorldPointer { pointerId: pointerId })
+    index = captures.worldPointers.length - 1
+  }
+  # the press now: the world's when the walk found nothing of the UI's under it
+  var mine: Bool = false
+  if let capture: PointerCapture = captureOf(captures: captures, pointerId: pointerId) {
+    mine = not capture.claimed
+  }
+  if let pointer: mod WorldPointer = captures.worldPointers.modAt(index: index) {
+    let pressedNow: Bool = deviceDown and not pointer.deviceDown
+    pointer.pressed = false
+    pointer.released = false
+    pointer.canceled = false
+    if pressedNow {
+      pointer.down = mine
+      pointer.pressed = mine
+    } else if pointer.down and not deviceDown {
+      pointer.down = false
+      pointer.released = true
+    } else if pointer.down and not mine {
+      # a modal opened over it: the capture was canceled
+      pointer.down = false
+      pointer.released = true
+      pointer.canceled = true
+    }
+    pointer.x = x
+    pointer.y = y
+    pointer.deviceDown = deviceDown
+  }
+}
+
+# A finger that is gone: the world lets go of it (this frame's `released` when it held it)
+func worldPointerGone(captures: mod UiCaptures, pointerId: view Int) {
+  loop var i: Int = captures.worldPointers.length - 1, i >= 0, --i {
+    var drop: Bool = false
+    if let pointer: mod WorldPointer = captures.worldPointers.modAt(index: i) {
+      if pointer.pointerId is pointerId {
+        if pointer.deviceDown or pointer.down or pointer.released {
+          pointer.released = pointer.down
+          pointer.pressed = false
+          pointer.down = false
+          pointer.deviceDown = false
+        } else {
+          drop = true
+        }
+      }
+    }
+    if drop {
+      captures.worldPointers.removeAt(index: i)
+    }
+  }
+}
+
+# The pointer `pointerId` as the world sees it this frame (up and nowhere when never seen)
+func worldPointer(captures: view UiCaptures, pointerId: view Int) ret WorldPointer {
+  loop let pointer: view WorldPointer in captures.worldPointers {
+    if pointer.pointerId is pointerId {
+      ret pointer
+    }
+  }
+  ret WorldPointer { pointerId: pointerId }
+}
+
+# Do the keys reach the world this frame (no text field has focus, no modal shows)?
+func worldKeys(captures: view UiCaptures) ret Bool {
+  ret not uiClaimsKeys(captures: captures)
 }

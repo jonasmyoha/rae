@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.26, 2026-11-20: the world's input after the UI's
+
+- `ui/LayerCapture`: `worldPointerStep`, `worldPointer(captures, id)` (down, pressed, released,
+  place, canceled) and `worldKeys(captures)`: what the world layer gets after the layers above
+  took theirs. A press on a button, or under a modal, never reaches the world, even dragged onto
+  it; a modal opening over a world press ends it.
+- `ui/WorldInput`: `feedWorldInput` (the device into the captures, after the layer walk),
+  `worldKeyDown`, `worldKeyPressed`. The walkers feed it in `hudCapturesStep`.
+- `CameraRig.updateCameraRigFor` with a `CameraRigInput` (the pointer and the keys apart;
+  `updateCameraRig` stays): the walker camera's keys work while a UI button is held and stop while
+  a text field has focus (app3d/HudOverlays `cameraRigInputFrom`).
+
 ## 0.4.25, 2026-11-19: reading the frame at a layer's end
 
 - `gpu/FrameRegionReader` `frameRegionCopyNow`: copy a rectangle of the frame in the middle of

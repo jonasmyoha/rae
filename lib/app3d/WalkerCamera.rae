@@ -215,12 +215,11 @@ func cameraUpdate(
   # the fingers the UI holds (on its buttons, under a modal) do not turn the camera
   blockClaimedCameraFingers(rig: cameraSystem.rig, captures: inputSystem.captures)
   let joyActive: Bool = inputSystem.touchStick.active
-  var cameraMoved: Bool = updateCameraRig(
+  # the world's input: a held UI button does not stop the keys, a focused text field does
+  var cameraMoved: Bool = updateCameraRigFor(
     rig: cameraSystem.rig
     camera: cameraSystem.camera
-    allowInput: uiPointerCaptured(input: inputSystem.ui) is false and not uiClaimsPointer(
-      captures: inputSystem.captures
-    )
+    input: cameraRigInputFrom(captures: inputSystem.captures, ui: inputSystem.ui)
     wheel: uiWheelUnclaimed(input: inputSystem.ui)
     deltaTime: deltaTime
   )

@@ -1,0 +1,405 @@
+# The world's input after the UI took its own (ui/LayerCapture worldPointer / worldKeys;
+# docs/ui-layers-design.md §7), headless. A page with a button (0..200 x 0..200) over open ground,
+# and a dialog (modal) hidden at first. Each frame: the layer walk takes the presses, then the
+# world gets what is left (worldPointerStep, as ui/WorldInput feedWorldInput does from the device).
+#   1. a press on the button is not the world's, and dragged onto open ground it stays the button's
+#   2. a press on open ground is the world's: pressed, held, released
+#   3. a press on open ground, then the dialog opens over it: the world's press ends (canceled)
+#   4. under the open dialog a press on open ground reaches nothing of the world; keys are the UI's
+#   5. a finger on open ground is the world's like the mouse, and its lifting lets it go
+import ui/Components
+open ui/Ecs
+open ui/LayerCapture
+open ui/LayerHit
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/Transform
+open ui/UiLayers
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# A window-sized root `<name>Root` (no press of its own) holding the box `name`, on `layer`
+func boxScene(
+  name: view String
+  layer: view String
+  x: view Int
+  y: view Int
+  w: view Int
+  h: view Int
+) ret String {
+  var tag: String = ""
+  if layer.length() > 0 {
+    tag = ",\"LayerTag\":\{\"id\":\"{layer}\"\}"
+  }
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"{name}Root\",\"nodes\":\{\"{name}Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":400\}{tag},\"Children\":[\"{name}\"]\},\"{name}\":\{\"Rect\":\{\"x\":{x},\"y\":{y},\"w\":{w},\"h\":{h}\},\"OnClick\":\{\"actionId\":\"{name}\",\"label\":\"{name}\"\}\}\}\}"
+}
+
+func mount(world: mod UiWorld, uiSystems: mod UiSystems, source: view String) ret EntityId {
+  ret loadScene(world: world, uiSystems: uiSystems, scene: parseScene(source: source))
+}
+
+func nameIn(world: view UiWorld, entityId: view EntityId) ret String {
+  loop let id: view String in List(String) { "Button", "Toast", "Dialog", "Menu" } {
+    if let index: Int = world.nodeIds.get(k: id) {
+      if nodeEntityId(world: world, index: index) is entityId {
+        ret id
+      }
+    }
+  }
+  ret "nothing"
+}
+
+func frame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  stack: view LayerStack
+  contributions: mod List(LayerContribution)
+  plan: mod LayerPaintPlan
+  captures: mod UiCaptures
+) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  if let contribution: mod LayerContribution = contributions.modAt(index: 0) {
+    refreshLayerContribution(
+      contribution: contribution
+      stack: stack
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  buildLayerPaintPlan(
+    plan: plan
+    stack: stack
+    contributions: contributions
+    editor: false
+  )
+  capturesFrameBegin(
+    captures: captures
+    plan: plan
+    stack: stack
+    contributions: contributions
+  )
+}
+
+func press(
+  captures: mod UiCaptures
+  plan: view LayerPaintPlan
+  stack: view LayerStack
+  world: view UiWorld
+  uiSystems: view UiSystems
+  pointerId: view Int
+  x: view Float
+  y: view Float
+) ret String {
+  let hit: UiHit = capturePress(
+    captures: captures
+    pointerId: pointerId
+    walk: uiHitWalkAt(
+      plan: plan
+      stack: stack
+      worldKey: 0
+      world: world
+      uiSystems: uiSystems
+      x: x
+      y: y
+      targetSize: 0.0
+      skip: noEntity()
+    )
+  )
+  var text: String = nameIn(world: world, entityId: hit.entityId)
+  if hit.blockedByModal {
+    text = "nothing (blocked by the modal {layerNameOf(stack: stack, id: hit.layer)} layer)"
+  }
+  loop let outside: view LayerTappedOutside in captures.tappedOutside {
+    if outside.pointerId is pointerId {
+      text = "{text}; the {layerNameOf(stack: stack, id: outside.layer)} layer hears a tap outside"
+    }
+  }
+  ret text
+}
+
+func show(world: mod UiWorld, root: view EntityId, shown: view Bool) {
+  componentSet(this: world.actives, entityId: root, data: Active { value: shown })
+}
+
+func worldText(captures: view UiCaptures, pointerId: view Int) ret String {
+  let pointer: WorldPointer = worldPointer(captures: captures, pointerId: pointerId)
+  var text: String = ""
+  if pointer.pressed {
+    text = "{text} pressed"
+  }
+  if pointer.down {
+    text = "{text} held"
+  }
+  if pointer.released {
+    text = "{text} released"
+  }
+  if pointer.canceled {
+    text = "{text} canceled"
+  }
+  if text.length() is 0 {
+    ret " nothing"
+  }
+  ret text
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  stack: LayerStack
+  contributions: List(LayerContribution)
+  plan: LayerPaintPlan
+  captures: UiCaptures
+  # the mouse's device state
+  down: Bool = false
+}
+
+# One frame with the mouse at (x, y), held down or not: the walk's press or release, then the
+# world's step; what the world got
+func mouseFrame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+) ret String {
+  frame(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    stack: rig.stack
+    contributions: rig.contributions
+    plan: rig.plan
+    captures: rig.captures
+  )
+  if rig.down and not down {
+    captureRelease(captures: rig.captures, pointerId: -1)
+  }
+  if down and not rig.down {
+    let unusedHit: String = press(
+      captures: rig.captures
+      plan: rig.plan
+      stack: rig.stack
+      world: rig.world
+      uiSystems: rig.uiSystems
+      pointerId: -1
+      x: x
+      y: y
+    )
+  }
+  rig.down = down
+  worldPointerStep(
+    captures: rig.captures
+    pointerId: -1
+    x: x
+    y: y
+    deviceDown: down
+  )
+  ret worldText(captures: rig.captures, pointerId: -1)
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 400.0
+  let page: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Button"
+      layer: ""
+      x: 0
+      y: 0
+      w: 200
+      h: 200
+    )
+  )
+  let dialog: EntityId = mount(
+    world: world
+    uiSystems: uiSystems
+    source: boxScene(
+      name: "Dialog"
+      layer: "dialog"
+      x: 250
+      y: 250
+      w: 100
+      h: 100
+    )
+  )
+  show(world: world, root: dialog, shown: false)
+  var stack: LayerStack = createStandardLayerStack()
+  layerStackAddWorld(stack: stack, worldKey: 0)
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    stack: own stack
+    contributions: { createLayerContribution(worldKey: 0) }
+    plan: createLayerPaintPlan()
+    captures: createUiCaptures()
+  }
+  # 1.
+  var line: String = ""
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 100.0
+    y: 100.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: false
+  )}"
+  log("1. on the button, dragged onto open ground, let go:{line}")
+  check(
+    label: "a button's press never reaches the world"
+    ok: line is " | nothing | nothing | nothing"
+  )
+  # 2.
+  line = ""
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 310.0
+    y: 120.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 310.0
+    y: 120.0
+    down: false
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 310.0
+    y: 120.0
+    down: false
+  )}"
+  log("2. on open ground, held, let go:{line}")
+  check(
+    label: "an open-ground press is the world's"
+    ok: line is " | pressed held | held | released | nothing"
+  )
+  let place: WorldPointer = worldPointer(captures: rig.captures, pointerId: -1)
+  check(label: "the world knows its place", ok: place.x is 310.0 and place.y is 120.0)
+  # 3.
+  line = ""
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: true
+  )}"
+  show(world: rig.world, root: dialog, shown: true)
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 300.0
+    y: 100.0
+    down: false
+  )}"
+  log("3. on open ground, the dialog opens while held:{line}")
+  check(
+    label: "a modal ends the world's press"
+    ok: line is " | pressed held | released canceled | nothing | nothing"
+  )
+  # 4.
+  line = ""
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 50.0
+    y: 300.0
+    down: true
+  )}"
+  line = "{line} |{mouseFrame(
+    rig: rig
+    x: 50.0
+    y: 300.0
+    down: false
+  )}"
+  log(
+    "4. under the open dialog, on open ground:{line}; keys reach the world: {worldKeys(
+      captures: rig.captures
+    )}"
+  )
+  check(
+    label: "nothing reaches the world under a modal"
+    ok: line is " | nothing | nothing" and not worldKeys(captures: rig.captures)
+  )
+  show(world: rig.world, root: dialog, shown: false)
+  let unusedFrame: String = mouseFrame(
+    rig: rig
+    x: 50.0
+    y: 300.0
+    down: false
+  )
+  check(label: "the dialog closed: keys reach the world", ok: worldKeys(captures: rig.captures))
+  # 5. a finger (id 7) on open ground, then lifted
+  frame(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    stack: rig.stack
+    contributions: rig.contributions
+    plan: rig.plan
+    captures: rig.captures
+  )
+  let unusedFinger: String = press(
+    captures: rig.captures
+    plan: rig.plan
+    stack: rig.stack
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointerId: 7
+    x: 300.0
+    y: 300.0
+  )
+  worldPointerStep(
+    captures: rig.captures
+    pointerId: 7
+    x: 300.0
+    y: 300.0
+    deviceDown: true
+  )
+  let touched: String = worldText(captures: rig.captures, pointerId: 7)
+  captureRelease(captures: rig.captures, pointerId: 7)
+  worldPointerGone(captures: rig.captures, pointerId: 7)
+  let lifted: String = worldText(captures: rig.captures, pointerId: 7)
+  log("5. a finger on open ground:{touched}; lifted:{lifted}")
+  check(
+    label: "a finger is the world's, and lifting lets it go"
+    ok: touched is " pressed held" and lifted is " released"
+  )
+}
+
+func check(label: view String, ok: view Bool) {
+  if ok {
+    log("ok   {label}")
+  } else {
+    log("FAIL {label}")
+  }
+}
