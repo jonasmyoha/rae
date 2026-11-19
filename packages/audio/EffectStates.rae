@@ -354,7 +354,7 @@ func createReverbState(settings: view EffectSettings, sampleRate: view Int) ret 
     lines: createSampleBuffer(count: total)
     starts: intList(values: starts)
     lengths: intList(values: lengths)
-    positions: zeroInts(count: lineCount)
+    positions: zeroIntBuffer(count: lineCount)
     stores: createSampleBuffer(count: 2 * reverbCombs)
     lineCount: lineCount
     feedback: 0.0
@@ -370,7 +370,7 @@ func createReverbState(settings: view EffectSettings, sampleRate: view Int) ret 
 }
 
 func intList(values: view List(Int)) ret Buffer(Int) {
-  let buffer: Buffer(Int) = zeroInts(count: values.length())
+  let buffer: Buffer(Int) = zeroIntBuffer(count: values.length())
   unsafe {
     var target: Buffer(Int) = buffer
     loop var i: Int = 0, i < values.length(), ++i {
@@ -384,7 +384,9 @@ func intList(values: view List(Int)) ret Buffer(Int) {
   ret buffer
 }
 
-func zeroInts(count: view Int) ret Buffer(Int) {
+# A render-thread buffer of `count` zeros (at least one): a Buffer(Int), not net/Wire's List(Int)
+# zeroInts
+func zeroIntBuffer(count: view Int) ret Buffer(Int) {
   unsafe {
     let buffer: Buffer(Int) = rae_ext_rae_buf_alloc(
       size: Math.max(a: 1, b: count)
