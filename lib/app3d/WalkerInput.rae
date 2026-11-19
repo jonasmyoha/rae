@@ -7,10 +7,10 @@
 # mover input
 # (WalkerPhysics driveCharacters), so a remote player's intent can arrive from
 # app3d/NetSeam instead of a device.
-import Sdl3
 import Keys
 open ecs/Entity
 open ui/LayerCapture
+open ui/WorldInput
 open ui/Ecs
 open ui/InputSystem
 open ui/RenderSystem
@@ -60,25 +60,28 @@ type WalkerPersist {
   lastSettingsSave: Float64 = 0.0
 }
 
-# Space, or F under the WASD hand (Space alone is awkward to reach), pressed
-# this frame
-func jumpPressed(allowKeys: view Bool) ret Bool {
-  if allowKeys is false {
-    ret false
-  }
-  ret Sdl3.isKeyPressed(key: Keys.keySpace) or Sdl3.isKeyPressed(key: Keys.keyF)
+# Space, or F under the WASD hand (Space alone is awkward to reach), pressed this frame, as the
+# world gets it (ui/WorldInput: not while a text field has focus or a modal shows)
+func jumpPressed(captures: view UiCaptures) ret Bool {
+  ret worldKeyPressed(captures: captures, key: Keys.keySpace) or worldKeyPressed(
+    captures: captures
+    key: Keys.keyF
+  )
 }
 
 # The scene's Jump button (shown by its touch frame), pressed this frame by
 # any finger or a click
 const jumpActionId: String = "touch.jump"
 
+# The walker's intent this frame: the touch stick, or WASD / the arrows (Shift walks) and the jump,
+# read as the world's keys (ui/WorldInput worldKeyDown); `playing` false keeps the keys out
 func inputUpdate(
   stick: view TouchStickState
-  allowKeys: view Bool
+  captures: view UiCaptures
+  playing: view Bool
   jumpButton: view Bool
 ) ret InputIntent {
-  let jump: Bool = jumpPressed(allowKeys: allowKeys) or jumpButton
+  let jump: Bool = (playing and jumpPressed(captures: captures)) or jumpButton
   if stick.active {
     ret InputIntent {
       moveX: stick.valueX
@@ -91,20 +94,32 @@ func inputUpdate(
   var moveX: Float = 0.0
   var moveY: Float = 0.0
   var walking: Bool = false
-  if allowKeys {
-    if Sdl3.isKeyDown(key: Keys.keyD) or Sdl3.isKeyDown(key: Keys.keyRight) {
+  if playing {
+    if worldKeyDown(captures: captures, key: Keys.keyD) or worldKeyDown(
+      captures: captures
+      key: Keys.keyRight
+    ) {
       moveX = moveX + 1.0
     }
-    if Sdl3.isKeyDown(key: Keys.keyA) or Sdl3.isKeyDown(key: Keys.keyLeft) {
+    if worldKeyDown(captures: captures, key: Keys.keyA) or worldKeyDown(
+      captures: captures
+      key: Keys.keyLeft
+    ) {
       moveX = moveX - 1.0
     }
-    if Sdl3.isKeyDown(key: Keys.keyW) or Sdl3.isKeyDown(key: Keys.keyUp) {
+    if worldKeyDown(captures: captures, key: Keys.keyW) or worldKeyDown(
+      captures: captures
+      key: Keys.keyUp
+    ) {
       moveY = moveY + 1.0
     }
-    if Sdl3.isKeyDown(key: Keys.keyS) or Sdl3.isKeyDown(key: Keys.keyDown) {
+    if worldKeyDown(captures: captures, key: Keys.keyS) or worldKeyDown(
+      captures: captures
+      key: Keys.keyDown
+    ) {
       moveY = moveY - 1.0
     }
-    walking = Sdl3.isKeyDown(key: Keys.keyLShift)
+    walking = worldKeyDown(captures: captures, key: Keys.keyLShift)
   }
   ret InputIntent {
     moveX: moveX
@@ -115,22 +130,19 @@ func inputUpdate(
   }
 }
 
-# R: the walker back as it started (app3d/WalkerReset), as the "..." menu's
-# Reset
-func walkerResetKeyPressed() ret Bool {
-  ret Sdl3.isKeyPressed(key: Keys.keyR)
+# R: the walker back as it started (app3d/WalkerReset), as the "..." menu's Reset
+func walkerResetKeyPressed(captures: view UiCaptures) ret Bool {
+  ret worldKeyPressed(captures: captures, key: Keys.keyR)
 }
 
 # V: the character in front of the WASD camera and Character control, or
 # back to the WASD camera (app3d/WalkerSpawnHere)
-func walkerSpawnHereKeyPressed() ret Bool {
-  ret Sdl3.isKeyPressed(key: Keys.keyV)
+func walkerSpawnHereKeyPressed(captures: view UiCaptures) ret Bool {
+  ret worldKeyPressed(captures: captures, key: Keys.keyV)
 }
 
-# The walker's keys (WASD, R, V) act: the UI has neither the pointer (hovered or pressed) nor the
-# keys (an open modal: a dialog or the "..." menu, ui/LayerCapture)
+# The walker's keys (WASD, R, V) act: they reach the world (no text field has focus, no modal
+# shows; ui/LayerCapture worldKeys). Hovering the UI with the pointer does not stop them.
 func walkerKeysFree(inputSystem: view WalkerInput) ret Bool {
-  ret uiPointerCaptured(input: inputSystem.ui) is false and not uiClaimsKeys(
-    captures: inputSystem.captures
-  )
+  ret worldKeys(captures: inputSystem.captures)
 }

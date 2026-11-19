@@ -22,6 +22,7 @@ open WeatherWind
 open Wind
 open GeoPlace
 open ui/LayerCapture
+open ui/WorldInput
 open app3d/SettingsClouds
 open app3d/SeasonImpostors
 open app3d/GroundPalette
@@ -509,7 +510,11 @@ func updateWalkerApp(app: mod WalkerApp) {
   # controls. On a switch, snap the orbit camera behind the new character.
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     var switched: Bool = false
-    if Sdl3.isKeyPressed(key: Keys.keyPageDown) or Sdl3.isKeyPressed(key: keyNextChar) {
+    let captures: view UiCaptures = app.inputSystem.captures
+    if worldKeyPressed(captures: captures, key: Keys.keyPageDown) or worldKeyPressed(
+      captures: captures
+      key: keyNextChar
+    ) {
       walkerSwitchControl(
         players: app.players
         world: app.world
@@ -518,7 +523,10 @@ func updateWalkerApp(app: mod WalkerApp) {
       )
       switched = true
     }
-    if Sdl3.isKeyPressed(key: Keys.keyPageUp) or Sdl3.isKeyPressed(key: keyPrevChar) {
+    if worldKeyPressed(captures: captures, key: Keys.keyPageUp) or worldKeyPressed(
+      captures: captures
+      key: keyPrevChar
+    ) {
       walkerSwitchControl(
         players: app.players
         world: app.world
@@ -555,7 +563,8 @@ func updateWalkerApp(app: mod WalkerApp) {
   if app.cameraSystem.rig.mode is CameraRigMode.character {
     intent = inputUpdate(
       stick: app.inputSystem.touchStick
-      allowKeys: walkerKeysFree(inputSystem: app.inputSystem) and app.characterSystem.playing
+      captures: app.inputSystem.captures
+      playing: app.characterSystem.playing
       jumpButton: uiActionFired(world: app.inputSystem.world, actionId: jumpActionId)
     )
   }
@@ -568,7 +577,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   )
   app.frame.savedFrame = autoWalkSaveFrame(frame: app.frame.savedFrame, seconds: app.frame.time)
   # R, or the "..." menu's Reset: everything back as it started
-  let resetKey: Bool = walkerResetKeyPressed() and walkerKeysFree(inputSystem: app.inputSystem)
+  let resetKey: Bool = walkerResetKeyPressed(captures: app.inputSystem.captures)
   if takeModeMenuReset(menu: app.inputSystem.uiModes.modeMenu) or resetKey {
     resetWalkerToStart(
       walkerReset: app.walkerReset
@@ -583,7 +592,7 @@ func updateWalkerApp(app: mod WalkerApp) {
   }
   # V: the character in front of the WASD camera, in Character control; or
   # back to the WASD camera (app3d/WalkerSpawnHere)
-  if walkerSpawnHereKeyPressed() and walkerKeysFree(inputSystem: app.inputSystem) {
+  if walkerSpawnHereKeyPressed(captures: app.inputSystem.captures) {
     toggleWalkerSpawnHere(
       rig: app.cameraSystem.rig
       camera: app.cameraSystem.camera

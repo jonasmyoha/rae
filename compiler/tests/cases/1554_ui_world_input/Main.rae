@@ -7,6 +7,7 @@
 #   3. a press on open ground, then the dialog opens over it: the world's press ends (canceled)
 #   4. under the open dialog a press on open ground reaches nothing of the world; keys are the UI's
 #   5. a finger on open ground is the world's like the mouse, and its lifting lets it go
+#   6. a text field with focus keeps the keys from the world (the walker's WASD, its camera)
 import ui/Components
 open ui/Ecs
 open ui/LayerCapture
@@ -393,6 +394,19 @@ func main() {
   check(
     label: "a finger is the world's, and lifting lets it go"
     ok: touched is " pressed held" and lifted is " released"
+  )
+  # 6.
+  setUiTextFocus(captures: rig.captures, focused: true)
+  let typing: Bool = worldKeys(captures: rig.captures)
+  setUiTextFocus(captures: rig.captures, focused: false)
+  log(
+    "6. keys reach the world while a text field has focus: {typing}; after: {worldKeys(
+      captures: rig.captures
+    )}"
+  )
+  check(
+    label: "a focused text field keeps the keys"
+    ok: not typing and worldKeys(captures: rig.captures)
   )
 }
 

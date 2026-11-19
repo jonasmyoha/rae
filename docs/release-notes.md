@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.27, 2026-11-20: the walkers' keys are the world's
+
+- The walkers' keys (WASD, arrows, Shift, jump, R, V, Page Up / Page Down) read through
+  `ui/WorldInput` `worldKeyDown` / `worldKeyPressed`: they stop while a text field has focus or a
+  modal shows, and no longer while the pointer only hovers the UI. `inputUpdate`, `jumpPressed`,
+  `walkerResetKeyPressed` and `walkerSpawnHereKeyPressed` take the captures (breaking for a
+  program that called them).
+- `compiler/tools/world-input-gate.sh`: a pre-suite gate against device mouse and key reads in
+  lib/app3d and packages outside its allowlist.
+
 ## 0.4.26, 2026-11-20: the world's input after the UI's
 
 - `ui/LayerCapture`: `worldPointerStep`, `worldPointer(captures, id)` (down, pressed, released,

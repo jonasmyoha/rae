@@ -94,6 +94,14 @@ if [ -f tools/ui-model-gate.sh ]; then
   stage_time "tools/ui-model-gate.sh" "$stage_start"
   echo
 fi
+# A game reads the world's input, never the device (tools/world-input-gate.sh).
+WORLD_INPUT_CHECK=1
+if [ -f tools/world-input-gate.sh ]; then
+  stage_start=$(date +%s)
+  if bash tools/world-input-gate.sh; then WORLD_INPUT_CHECK=0; fi
+  stage_time "tools/world-input-gate.sh" "$stage_start"
+  echo
+fi
 # The tools that work per file also work per module folder
 # (tools/module-folder-tools-check.sh, docs/module-model-options.md).
 MODULE_TOOLS_CHECK=1
@@ -230,6 +238,7 @@ if [ "$TERMS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)
 if [ "$COPY_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$MODULE_TOOLS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$UI_MODEL_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$WORLD_INPUT_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

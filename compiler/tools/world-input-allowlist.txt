@@ -1,0 +1,8 @@
+# Files that may read the mouse and the keys from the device (compiler/tools/world-input-gate.sh).
+# A game reads the world's input instead (ui/LayerCapture worldPointer / worldKeys, ui/WorldInput
+# worldKeyDown; docs/ui-layers-design.md section 7). One file a line: its path, then why.
+lib/app3d/HudOverlays.rae        the feed itself: the frame's presses into the layer walk (capturePress), then feedWorldInput
+lib/app3d/CameraRig.rae          reads its keys and look button behind CameraRigInput, which its caller makes from the world's input (cameraRigInputFrom)
+lib/app3d/CharacterController.rae updateThirdPersonController reads WASD behind the allowInput its caller gives
+packages/physicsScenes/PlaygroundApp.rae a physics demo app with no layer plan of its own; moves when the package is next released
+packages/physicsScenes/VehicleApp.rae    a physics demo app with no layer plan of its own; moves when the package is next released

@@ -349,6 +349,14 @@ A downstream app drops its own "did the UI take this" checks by reading these. `
 `cameraRigInputFrom`): a held UI button no longer stops the keys turning the view, and a focused
 text field stops them. Case `compiler/tests/cases/1554_ui_world_input`.
 
+The walkers read their keys there too (0.4.27): WASD and the arrows, Shift, the jump (Space, F),
+Reset (R), Spawn here (V) and the character switch (Page Up / Page Down) are `worldKeyDown` /
+`worldKeyPressed`, so they stop while a text field has focus or a modal shows, and no longer while
+the pointer only hovers the UI. `compiler/tools/world-input-gate.sh` (one pre-suite case, `make -C
+compiler world-input-gate`) fails on a device mouse or key read in lib/app3d or packages outside
+`compiler/tools/world-input-allowlist.txt`, where each file says why (the capture feed itself,
+CameraRig behind its CameraRigInput, the physics demo apps).
+
 ## 8. Transparency and effects
 
 - **Alpha blending in order** comes from the order: premultiplied alpha, as the canvas does now.
