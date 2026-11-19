@@ -9,7 +9,10 @@
 #   RAE_QR_TEST_FRAME=1 holds the box still at a fixed angle (screenshots);
 #   RAE_QR_YAW / RAE_QR_DISTANCE look at a face straight on;
 #   RAE_QR_SCAN=1 reads the middle of the rendered frame every 10 frames
-#   (qr/qrScanSystem) and logs what it reads
+#   (qr/qrScanSystem) and logs what it reads; RAE_QR_SCAN_LAYER=world reads
+#   it at the world layer's end instead (the 3D frame, none of the UI over it);
+#   RAE_QR_HUD_CODE=1 shows a QR code in the HUD over the middle, and
+#   RAE_QR_COVER=1 a dialog panel over the middle
 import Gpu2d
 import Math
 import Sys
@@ -23,6 +26,8 @@ open RendererImages
 open Rendergraph
 open Scene3d
 open ui/Ecs
+open ecs/Entity
+open ecs/ComponentTable
 open ui/Registry
 open ui/RenderSystem
 open ui/UiLayers
@@ -110,6 +115,14 @@ func addMachine(
   }
 }
 
+# Show or hide the scene node `nodeId`
+func showNode(world: mod UiWorld, nodeId: view String, shown: view Bool) {
+  let entityId: EntityId = nodeEntityFor(world: world, nodeId: nodeId)
+  if not isNone(this: entityId) {
+    componentSet(this: world.actives, entityId: entityId, data: Active { value: shown })
+  }
+}
+
 func main() ret Int {
   Gpu2d.initWindow(width: 1280, height: 800, title: "147: QR codes in 3D and UI")
   var renderer: DeferredRenderer = createDeferredRendererWithUi()
@@ -185,6 +198,9 @@ func main() ret Int {
   let testFrame: Bool = Sys.getEnv(name: "RAE_QR_TEST_FRAME").length() > 0
   var scanner: QrScanner = createQrScanner(intervalFrames: 10, regionSide: 512)
   scanner.enabled = Sys.getEnv(name: "RAE_QR_SCAN").length() > 0
+  scanner.afterLayer = Sys.getEnv(name: "RAE_QR_SCAN_LAYER")
+  showNode(world: world, nodeId: "HudCode", shown: Sys.getEnv(name: "RAE_QR_HUD_CODE") is "1")
+  showNode(world: world, nodeId: "Cover", shown: Sys.getEnv(name: "RAE_QR_COVER") is "1")
   let startTime: Float64 = Gpu2d.nowSeconds()
   var yaw: Float = -0.45
   var pitch: Float = 0.28
@@ -263,6 +279,13 @@ func main() ret Int {
             editor: false
           )
           loop let step: view PaintStep in paintPlan.steps {
+            # the scan's copy before the first step above its layer (RAE_QR_SCAN_LAYER)
+            let unusedCopied: Bool = qrScanBeforeStep(
+              scanner: scanner
+              canvas: renderer.canvas
+              stack: layerStack
+              step: step
+            )
             if not paintPlanStepRaeG(
               step: step
               stack: layerStack

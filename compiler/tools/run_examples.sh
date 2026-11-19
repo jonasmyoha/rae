@@ -172,6 +172,32 @@ for EXAMPLE_FILE in $EXAMPLE_FILES; do
             cat "$TMP_OUT/render.log" "$TMP_OUT/screenshot.log" 2>/dev/null | sed 's/^/  /'
             ((FAILED++))
           fi
+        elif [ "$EXAMPLE_NAME" = "147_qr_codes" ]; then
+          # QR codes read from the rendered frame (qr qrScanSystem): a code painted in the HUD over
+          # the middle is read from the whole frame and not at the world layer's end, and a dialog
+          # over the middle hides the cube's code from the whole frame but not from the world layer
+          # (RAE_QR_SCAN_LAYER=world: the copy before the plan's first step above the world).
+          QR_OK=1
+          for QR_CASE in "RAE_QR_HUD_CODE=1|qr/hud|" "RAE_QR_HUD_CODE=1 RAE_QR_SCAN_LAYER=world|qr/box|qr/hud" \
+                         "RAE_QR_COVER=1 RAE_QR_SCAN_LAYER=world|qr/box|"; do
+            QR_ENV="${QR_CASE%%|*}"; QR_REST="${QR_CASE#*|}"; QR_WANT="${QR_REST%%|*}"; QR_NOT="${QR_REST#*|}"
+            (cd .. && env $QR_ENV RAE_QR_SCAN=1 RAE_QR_TEST_FRAME=1 RAE_QR_YAW=0 RAE_QR_DISTANCE=8 \
+               RAE_SDL_HEADLESS_MS=2500 perl -e 'alarm shift; exec @ARGV' 40 "$TMP_OUT/app") \
+               > "$TMP_OUT/render.log" 2>&1
+            if ! grep -q "\[qr\] scan [0-9]*: \".*$QR_WANT\"" "$TMP_OUT/render.log" \
+               || { [ -n "$QR_NOT" ] && grep -q "\[qr\] scan [0-9]*: \".*$QR_NOT\"" "$TMP_OUT/render.log"; }; then
+              QR_OK=0
+              echo "  $QR_ENV: wanted $QR_WANT${QR_NOT:+, not $QR_NOT}"
+              grep '\[qr\]' "$TMP_OUT/render.log" | sort | uniq -c | head -5 | sed 's/^/    /'
+            fi
+          done
+          if [ "$QR_OK" = 1 ]; then
+            echo "PASS: $EXAMPLE_NAME (the HUD code read only from the whole frame; the world's under a dialog at the world layer's end)"
+            ((PASSED++))
+          else
+            echo "FAIL: $EXAMPLE_NAME (QR scan at a layer's end)"
+            ((FAILED++))
+          fi
         elif [ "$EXAMPLE_NAME" = "132_gpu3d_pbr" ]; then
           # 132 (109 until 2026-10-15) was migrated from the forward renderer to the DEFERRED path
           # (#514). The forward draw-limit guard (RAE_GPU3D_DRAW_LIMIT, via

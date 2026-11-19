@@ -176,6 +176,24 @@ frame is read back, turned to gray and decoded; `scanner.latest` holds the
 last code read. The app calls `qrScanFrame(scanner:, canvas:)` after each
 present. Example 147 does it with `RAE_QR_SCAN=1` (every 10 frames, logged).
 
+**Which layers the picture holds.** Read after present, the picture is the
+composed frame with every 2D layer: a code the program paints on its own HUD is
+read too, and a dialog over the middle hides the world's codes. A scanner whose
+`afterLayer` names a layer of the window's stack (`"world"`) reads in the middle
+of the frame instead (qr 1.3.0, Rae 0.4.25): the program calls
+`qrScanBeforeStep(scanner:, canvas:, stack:, step:)` before each step of its
+layer plan, and before the first step above that layer the 2D drawn so far is
+flushed, the canvas's pass ends, the square is copied into the frame's own
+recording (`frameRegionCopyNow`) and the pass starts again. So the picture is
+the 3D frame and the layers up to the named one, nothing over it, at the cost of
+one more pass that frame; the pixels still arrive a frame or two later and
+nothing waits. A frame whose plan painted nothing above the layer is read whole
+after present (the same picture). A program with no plan calls `qrScanNow`
+right after its 3D frame, before any 2D, for the 3D frame alone. Example 147:
+`RAE_QR_HUD_CODE=1` puts a code in the HUD over the middle and `RAE_QR_COVER=1`
+a dialog; with `RAE_QR_SCAN_LAYER=world` it reads the cube's code under both,
+and its example gate checks that.
+
 In a game on the walker kit that uses this package and holds a `WalkerQrScan`
 (`qr/WalkerQrScan`: `createWalkerQrScan` in `walkerGameStart`, `walkerQrUpdate`
 in `walkerGameUpdate`, `walkerQrRelease` in `walkerGameEnd`; example 148),

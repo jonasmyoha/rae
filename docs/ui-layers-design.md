@@ -189,7 +189,9 @@ type PaintStep {
 opacity, offset and clip on the canvas (`canvasPushLayer` / `canvasPopLayer`). A step carries the
 layer's rectangle, its safe area included, so a draw knows where it may go. A program that captures the
 frame (game proto2 scans QR codes from it) does it at a `layerEnd`, so it chooses which layers the
-picture includes.
+picture includes. Built (Rae 0.4.25): `gpu/FrameRegionReader` `frameRegionCopyNow` copies in the
+middle of the frame, and the qr package's scanner calls it before the plan's first step above its
+`afterLayer` (`qrScanBeforeStep`; docs/qr.md).
 
 The program's frame then reads:
 

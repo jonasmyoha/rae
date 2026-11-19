@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.25, 2026-11-19: reading the frame at a layer's end
+
+- `gpu/FrameRegionReader` `frameRegionCopyNow`: copy a rectangle of the frame in the middle of
+  it (the 2D flushed so far, the canvas's pass ended and started again), with the frame's own
+  submission: the picture holds only what was painted before that point.
+- qr 1.3.0: a `QrScanner` with `afterLayer` (`"world"`) reads at that layer's end through the
+  plan (`qrScanBeforeStep`), so a code on the HUD is not read and a dialog over the middle does
+  not hide the world's codes; `qrScanNow` for a program with no plan (docs/qr.md).
+
 ## 0.4.24, 2026-11-19: entities owned by peers, handed over at run time
 
 - `net/Ownership`: an owner per shared entity that changes while the game runs. The host asks the
