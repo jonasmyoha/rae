@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.29, 2026-11-20: WASM builds get a real stack
+
+- `compiler/tools/wasm_build.sh` links an 8 MB stack (`RAE_WASM_STACK_BYTES`), for wasip1 and the
+  threads target; a WASM module from `rae build` gets 1 MB; lib/wasm's `wasmDefaultLimits` gives an
+  instance 1 MB of WAMR stack (was 64 KB). wasi-sdk's 64 KB stopped programs whose calls went a
+  little deeper with "memory access out of bounds" (docs/wasm-modules.md, "The stack").
+- `compiler/tools/wasm-stack-check.sh`: a pre-suite check that a recursion of about 400 KB of stack
+  runs under Node.
+
 ## 0.4.28, 2026-11-20: `+=` and `-=`, and a loop that steps by more than one
 
 - `x += e` and `x -= e` are statements (`x = x + e`, `x = x - e`) on a name or a field, numbers and

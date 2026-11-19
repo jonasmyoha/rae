@@ -37,6 +37,11 @@ trap 'rm -rf "$TMP"' EXIT
 EXTRA_C="$(ls "$PROJ"/*.c 2>/dev/null | grep -v 'rae_runtime.c' || true)"
 
 mkdir -p "$(dirname "$OUT")"
+# The C stack in linear memory: 8 MB (RAE_WASM_STACK_BYTES), as a native main thread on the Mac and
+# the browser build (-sSTACK_SIZE). wasi-sdk's default is 64 KB, and a program whose calls go a
+# little deeper wrote past it and stopped with "memory access out of bounds" in some other
+# function (docs/wasm-modules.md, "The stack").
+STACK_BYTES="${RAE_WASM_STACK_BYTES:-8388608}"
 # Upstream Box3D's C library (lib/box3d, docs/physics-two-implementations.md
 # §4): a program whose C includes its header links the wasm32 build
 # tools/box3d/build.sh installed ($RAE_BOX3D, default ~/.cache/rae/box3d/install).
@@ -62,13 +67,14 @@ if [ "${WASM_THREADS:-0}" = "1" ]; then
     -DRAE_WASM_THREADS \
     -Wl,--allow-undefined \
     -Wl,--import-memory,--export-memory,--shared-memory,--max-memory=1073741824 \
+    -Wl,-z,stack-size="$STACK_BYTES" \
     -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C $BOX3D_FLAGS -I"$TMP"
 else
   # -msimd128: enable WASM SIMD (clang auto-vectorizes hot float loops); supported
   # by Node and all modern browsers. -Wl,--allow-undefined lets examples import
   # functions the host supplies from JS (e.g. fbPixel) as env imports.
   "$CC" --target=wasm32-wasip1 --sysroot="$SYS" -O2 -ffp-contract=off -msimd128 \
-    -Wl,--allow-undefined \
+    -Wl,--allow-undefined -Wl,-z,stack-size="$STACK_BYTES" \
     -o "$OUT" "$TMP/out.c" "$TMP/rae_runtime.c" $EXTRA_C $BOX3D_FLAGS -I"$TMP"
 fi
 

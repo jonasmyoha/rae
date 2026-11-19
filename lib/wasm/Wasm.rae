@@ -278,7 +278,9 @@ type WasmLimits {
 }
 
 func wasmDefaultLimits() ret WasmLimits {
-  ret WasmLimits { stackBytes: 65536, heapBytes: 0, maxMemoryPages: 256 }
+  # 1 MB of WAMR's own stack (its interpreter's frames), as the module's C stack (rae build
+  # links a module with 1 MB): 64 KB stopped a recursion a native build takes in its stride
+  ret WasmLimits { stackBytes: 1048576, heapBytes: 0, maxMemoryPages: 256 }
 }
 
 type WasmInstance {

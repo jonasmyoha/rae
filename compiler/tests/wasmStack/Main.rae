@@ -1,0 +1,77 @@
+# A recursion far deeper than wasi-sdk's default 64 KB stack (compiler/tools/wasm-stack-check.sh):
+# 2,000 calls, each with a 16-number record on its frame that the next call reads by `view` (so
+# it sits in the linear memory's stack, not in registers), about 400 KB in all. Under the 8 MB stack
+# wasm_build.sh gives a program it ends and prints its sum; under 64 KB it stops with "memory
+# access out of bounds".
+type Wide {
+  a: Int
+  b: Int
+  c: Int
+  d: Int
+  e: Int
+  f: Int
+  g: Int
+  h: Int
+  i: Int
+  j: Int
+  k: Int
+  l: Int
+  m: Int
+  n: Int
+  o: Int
+  p: Int
+}
+
+func sumOf(wide: view Wide) ret Int {
+  ret wide.a + wide.b + wide.c + wide.d + wide.e + wide.f + wide.g + wide.h + wide.i + wide.j + wide.k + wide.l + wide.m + wide.n + wide.o + wide.p
+}
+
+# Each frame's record goes on to the next call (its address escapes into the recursion), so every
+# frame keeps it in memory
+func depth(level: view Int, parent: view Wide) ret Int {
+  if level is 0 {
+    ret sumOf(wide: parent)
+  }
+  let wide: Wide = {
+    a: level
+    b: 1
+    c: 1
+    d: 1
+    e: 1
+    f: 1
+    g: 1
+    h: 1
+    i: 1
+    j: 1
+    k: 1
+    l: 1
+    m: 1
+    n: 1
+    o: 1
+    p: 1
+  }
+  let below: Int = depth(level: level - 1, parent: wide)
+  ret below + sumOf(wide: parent)
+}
+
+func main() {
+  let root: Wide = {
+    a: 0
+    b: 0
+    c: 0
+    d: 0
+    e: 0
+    f: 0
+    g: 0
+    h: 0
+    i: 0
+    j: 0
+    k: 0
+    l: 0
+    m: 0
+    n: 0
+    o: 0
+    p: 0
+  }
+  log("deep stack: {depth(level: 2000, parent: root)}")
+}

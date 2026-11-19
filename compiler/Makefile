@@ -126,7 +126,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: ui-model-gate world-input-gate module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: ui-model-gate world-input-gate wasm-stack-check module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -261,6 +261,9 @@ ui-model-gate:
 
 world-input-gate:
 	bash tools/world-input-gate.sh
+
+wasm-stack-check:
+	bash tools/wasm-stack-check.sh
 
 c-warnings-gate: build
 	@bash tools/c-warnings-gate.sh

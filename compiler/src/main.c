@@ -3381,7 +3381,10 @@ static bool wasi_link_module(const char* c_path, const char* out_path, int profi
   if (!ensure_parent_directory(out_path)) return false;
   char cmd[PATH_MAX * 6];
   snprintf(cmd, sizeof cmd,
-           "\"%s\" --target=wasm32-wasip1 --sysroot=\"%s/share/wasi-sysroot\" -mexec-model=reactor %s "
+           "\"%s\" --target=wasm32-wasip1 --sysroot=\"%s/share/wasi-sysroot\" -mexec-model=reactor "
+           /* the module's C stack in its linear memory: 1 MB, not wasi-sdk's 64 KB (a host caps
+            * a module's memory, docs/wasm-modules.md "The stack") */
+           "-Wl,-z,stack-size=1048576 %s "
            "-ffp-contract=off -w \"%s\" \"%s/rae_runtime.c\" -I\"%s\" -o \"%s\"",
            clang, sdk, profile == BUILD_PROFILE_DEV ? "-O0 -g" : "-O2", c_path, RAE_RUNTIME_SOURCE_DIR, RAE_RUNTIME_SOURCE_DIR,
            out_path);

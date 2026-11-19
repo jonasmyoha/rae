@@ -109,3 +109,24 @@ wasi-sdk or Node.
 
 `compiler/tools/wasm_build.sh` still builds whole WASI programs (a `_start`
 that runs `main`).
+
+## The stack
+
+A C program in WASM keeps its stack in its linear memory, and wasi-sdk links a 64 KB one by
+default: a program whose calls went a little deeper (a frame grew by a few fields) wrote past it
+and stopped with "RuntimeError: memory access out of bounds" in some function that had nothing
+to do with it. Since Rae 0.4.29 every WASM build gets a stack of a native build's order:
+
+| build | stack | where |
+|---|---|---|
+| a program, `compiler/tools/wasm_build.sh` (wasip1, and the threads target with `WASM_THREADS=1`) | 8 MB, `RAE_WASM_STACK_BYTES` to change it | `-Wl,-z,stack-size` |
+| the browser, `rae build --target wasm` (Emscripten) | 8 MB | `-sSTACK_SIZE`, as before |
+| a module, `rae build` of a WASM module (reactor) | 1 MB | `-Wl,-z,stack-size`; a host caps a module's memory |
+| WAMR's own stack for an instance (lib/wasm `wasmDefaultLimits`) | 1 MB | `WasmLimits.stackBytes` (was 64 KB) |
+
+The main thread of a native build has 8 MB on the Mac and 1 MB or more on an iPhone's threads.
+With the threads target, a spawned thread's stack is the pthread default, not this one.
+`compiler/tools/wasm-stack-check.sh` (one pre-suite case, `make -C compiler wasm-stack-check`)
+builds `compiler/tests/wasmStack` (about 400 KB of stack in 2,000 calls), runs it under Node, and
+checks that the same program with a 64 KB stack still runs out, so the check stays meaningful.
+

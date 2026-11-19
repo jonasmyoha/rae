@@ -87,6 +87,13 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/ui-model-gate.sh" ]; then
   if ! bash tools/ui-model-gate.sh; then UI_MODEL_FAILED=1; fi
   echo
 fi
+# A WASM build's stack is of a native build's order (tools/wasm-stack-check.sh; SKIP without
+# wasi-sdk or node).
+WASM_STACK_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/wasm-stack-check.sh" ]; then
+  if ! bash tools/wasm-stack-check.sh; then WASM_STACK_FAILED=1; fi
+  echo
+fi
 # A game reads the world's input, never the device (tools/world-input-gate.sh).
 WORLD_INPUT_FAILED=0
 if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/world-input-gate.sh" ]; then
@@ -712,6 +719,7 @@ if [ "$COPY_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$MODULE_TOOLS_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$UI_MODEL_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$WORLD_INPUT_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$WASM_STACK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
