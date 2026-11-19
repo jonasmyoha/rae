@@ -6,11 +6,21 @@
 # read, `scanner.lastRead` whether the last scan read one.
 #
 # The app calls `qrScanFrame` after each present, on the frame's canvas.
+#
+# By default it reads the whole composed frame: every 2D layer is in it, so a code on the
+# program's own HUD is read too, and a dialog over the middle hides the world's codes. With
+# `afterLayer` set (the name of a layer of the window's stack, such as "world"), the picture is
+# copied in the middle of the frame, before the first step of the paint plan above that layer:
+# the 3D frame and the layers up to it, nothing over them. The program calls
+# `qrScanBeforeStep` before each step of its plan (docs/ui-layers-design.md §4.4). A program with
+# no plan calls `qrScanNow` right after its 3D frame, before any 2D, for the 3D frame alone.
+# Copying mid-frame ends the canvas's 2D pass and starts it again (one more pass that frame).
 import Math
 open gpu/FrameRegionReader
 open Gpu2dCanvas
 open qr/GrayImage
 open qr/QrReader
+open ui/UiLayers
 
 type QrScanner {
   enabled: Bool
@@ -28,6 +38,12 @@ type QrScanner {
   # The last scan's decode time, and how many frames its pixels took
   lastDecodeNs: Int
   lastLatencyFrames: Int
+  # The layer whose end the picture is copied at ("": the whole frame after present)
+  afterLayer: String = ""
+  # A copy was made in this frame (qrScanNow), and the plan painted a step above `afterLayer`;
+  # qrScanFrame clears both
+  copiedThisFrame: Bool = false
+  aboveSeen: Bool = false
 }
 
 func createQrScanner(intervalFrames: view Int, regionSide: view Int) ret QrScanner {
@@ -85,8 +101,16 @@ func qrScanFrame(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) ret Bool {
     scanner.scans = scanner.scans + 1
     finished = true
   }
-  if frameRegionIsIdle(reader: scanner.reader) {
-    if scanner.framesUntilScan <= 0 {
+  let copiedThisFrame: Bool = scanner.copiedThisFrame
+  let aboveSeen: Bool = scanner.aboveSeen
+  scanner.copiedThisFrame = false
+  scanner.aboveSeen = false
+  if frameRegionIsIdle(reader: scanner.reader) and not copiedThisFrame {
+    if scanner.framesUntilScan > 0 {
+      scanner.framesUntilScan = scanner.framesUntilScan - 1
+    } else if not aboveSeen {
+      # the whole frame after present; with `afterLayer`, only when the plan painted nothing
+      # above it this frame (the same picture), never a frame with something over it
       let side: Int = Math.min(
         a: scanner.regionSide
         b: Math.min(a: canvas.offscreenWidth, b: canvas.offscreenHeight)
@@ -100,8 +124,6 @@ func qrScanFrame(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) ret Bool {
         height: side
       )
       scanner.framesUntilScan = scanner.intervalFrames
-    } else {
-      scanner.framesUntilScan = scanner.framesUntilScan - 1
     }
   }
   ret finished
@@ -109,4 +131,57 @@ func qrScanFrame(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) ret Bool {
 
 func qrScanRelease(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) {
   frameRegionRelease(reader: scanner.reader, canvas: canvas)
+}
+
+# The centered square of what the frame holds now, copied mid-frame when a scan is due: call it
+# between the canvas's frame begin and end (true when it copied)
+func qrScanNow(scanner: mod QrScanner, canvas: mod Gpu2dCanvas) ret Bool {
+  if not scanner.enabled or scanner.copiedThisFrame or scanner.framesUntilScan > 0 or not frameRegionIsIdle(
+    reader: scanner.reader
+  ) {
+    ret false
+  }
+  let side: Int = Math.min(
+    a: scanner.regionSide
+    b: Math.min(a: canvas.offscreenWidth, b: canvas.offscreenHeight)
+  )
+  if not frameRegionCopyNow(
+    reader: scanner.reader
+    canvas: canvas
+    x: (canvas.offscreenWidth - side) / 2
+    y: (canvas.offscreenHeight - side) / 2
+    width: side
+    height: side
+  ) {
+    ret false
+  }
+  scanner.copiedThisFrame = true
+  scanner.framesUntilScan = scanner.intervalFrames
+  ret true
+}
+
+# Before painting the plan's step `step`: with `afterLayer` set, the copy is made before the first
+# step above that layer (true when it copied)
+func qrScanBeforeStep(
+  scanner: mod QrScanner
+  canvas: mod Gpu2dCanvas
+  stack: view LayerStack
+  step: view PaintStep
+) ret Bool {
+  if scanner.afterLayer.length() is 0 or scanner.copiedThisFrame or scanner.aboveSeen {
+    ret false
+  }
+  let target: Int = layerIdOf(stack: stack, name: scanner.afterLayer)
+  if target < 0 {
+    ret false
+  }
+  if layerPosition(stack: stack, id: step.layer) <= layerPosition(stack: stack, id: target) {
+    ret false
+  }
+  let first: Bool = not scanner.aboveSeen
+  scanner.aboveSeen = true
+  if not first {
+    ret false
+  }
+  ret qrScanNow(scanner: scanner, canvas: canvas)
 }

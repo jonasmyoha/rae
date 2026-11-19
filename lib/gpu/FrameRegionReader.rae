@@ -9,6 +9,12 @@
 #   frameRegionUpdate(reader:, canvas:)      advance; true when pixels arrived
 #   frameRegionStart(reader:, canvas:, ...)  ask for a rectangle (when idle)
 #
+# Or in the middle of a frame (frameRegionCopyNow): the 2D drawn so far is flushed, the frame's
+# pass ends, the copy is recorded into the frame's own recording and the pass goes on, so the
+# picture holds only what was painted before that point (the 3D frame and the layers under a
+# chosen one: docs/ui-layers-design.md §4.4). The copy goes with the frame's submission, so
+# there is no submission of its own: after present the buffer is mapped as usual.
+#
 # While a reader is in use the frame renders into the offscreen target (not
 # straight into the drawable), so there is something to copy: one more
 # full-frame copy per frame (`frameRegionKeepOffscreen`).
@@ -18,10 +24,13 @@ open gpu/GpuIds
 open gpu/GpuReadback
 open gpu/GpuRenderTransfer
 open webgpu/Webgpu
+open webgpu/Context
 open Gpu2dCanvas
+open Gpu2dCanvasFrame
+open gpu/GpuRenderPass
 import Math
 
-enum FrameRegionState { idle, copying, mapping }
+enum FrameRegionState { idle, copying, mapping, inFrame }
 
 type FrameRegionReader {
   state: FrameRegionState
@@ -132,6 +141,116 @@ func frameRegionStart(
   ret false
 }
 
+# Room for a `bytesPerRow` x `height` copy in the reader's staging buffer
+func ensureRegionBuffer(
+  reader: mod FrameRegionReader
+  resources: mod GpuResources
+  bytesPerRow: view Int
+  height: view Int
+) ret Bool {
+  if reader.bufferBytes >= bytesPerRow * height and isValidBuffer(
+    resources: resources
+    id: reader.buffer
+  ) {
+    ret true
+  }
+  if isValidBuffer(resources: resources, id: reader.buffer) {
+    let retired: Bool = retireBuffer(resources: resources, id: reader.buffer)
+  }
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: bytesPerRow * height
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    reader.buffer = buffer
+    reader.bufferBytes = bytesPerRow * height
+    ret true
+  }
+  ret false
+}
+
+# Copy the rectangle of what the frame being drawn holds NOW (physical pixels): call it in the
+# middle of the frame, between the canvas's frame begin and its end. False when a read is
+# still going, no frame is being drawn, or the frame does not render into the offscreen target
+# (frameRegionKeepOffscreen from an earlier frame).
+func frameRegionCopyNow(
+  reader: mod FrameRegionReader
+  canvas: mod Gpu2dCanvas
+  x: view Int
+  y: view Int
+  width: view Int
+  height: view Int
+) ret Bool {
+  if reader.state is not FrameRegionState.idle or canvas.frameTarget.directAllowed {
+    ret false
+  }
+  let left: Int = Math.clamp(val: x, low: 0, high: canvas.offscreenWidth - 1)
+  let top: Int = Math.clamp(val: y, low: 0, high: canvas.offscreenHeight - 1)
+  let regionWidth: Int = Math.clamp(val: width, low: 1, high: canvas.offscreenWidth - left)
+  let regionHeight: Int = Math.clamp(val: height, low: 1, high: canvas.offscreenHeight - top)
+  let bytesPerRow: Int = (regionWidth * 4 + 255) / 256 * 256
+  canvasFlush(canvas: canvas)
+  var copied: Bool = false
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if not isValidTexture(resources: resources, id: canvas.offscreenTexture) {
+      ret false
+    }
+    if not ensureRegionBuffer(
+      reader: reader
+      resources: resources
+      bytesPerRow: bytesPerRow
+      height: regionHeight
+    ) {
+      ret false
+    }
+    if let recording: mod Recording = canvas.recording {
+      unsafe {
+        if canvas.framePass is webgpuNull() {
+          ret false
+        }
+        endRenderPass(pass: canvas.framePass)
+        canvas.framePass = webgpuNull()
+      }
+      copied = recordCopyTextureRegionToBuffer(
+        recording: recording
+        resources: resources
+        texture: canvas.offscreenTexture
+        x: left
+        y: top
+        width: regionWidth
+        height: regionHeight
+        buffer: reader.buffer
+        bytesPerRow: bytesPerRow
+      )
+      # the frame's pass again, keeping what it holds
+      unsafe {
+        canvas.framePass = beginRenderPassWrites(
+          recording: recording
+          resources: resources
+          target: renderTarget(
+            colorView: canvasFrameTargetRef(canvas: canvas, loads: true)
+            clear: false
+            r: 0.0
+            g: 0.0
+            b: 0.0
+            a: 0.0
+          )
+          timestampWrites: webgpuNull()
+        )
+      }
+    }
+  }
+  if not copied {
+    ret false
+  }
+  reader.bytesPerRow = bytesPerRow
+  reader.width = regionWidth
+  reader.height = regionHeight
+  reader.framesWaited = 0
+  reader.state = FrameRegionState.inFrame
+  ret true
+}
+
 # One frame of a read: true when the pixels arrived (in `reader.bytes`;
 # `frameRegionGray` turns them to gray)
 func frameRegionUpdate(reader: mod FrameRegionReader, canvas: mod Gpu2dCanvas) ret Bool {
@@ -140,6 +259,21 @@ func frameRegionUpdate(reader: mod FrameRegionReader, canvas: mod Gpu2dCanvas) r
   }
   reader.framesWaited = reader.framesWaited + 1
   if let resources: mod GpuResources = canvas.gpuResources {
+    if reader.state is FrameRegionState.inFrame {
+      # the copy went with the frame's submission: map the buffer (it maps once the GPU is done)
+      if let readback: ReadbackId = startReadback(
+        resources: resources
+        buffer: reader.buffer
+        offset: 0
+        size: reader.bytesPerRow * reader.height
+      ) {
+        reader.readback = readback
+        reader.state = FrameRegionState.mapping
+      } else {
+        reader.state = FrameRegionState.idle
+      }
+      ret false
+    }
     if reader.state is FrameRegionState.copying {
       let status: Int = pollSubmission(resources: resources, id: reader.submission)
       if status is 0 {
