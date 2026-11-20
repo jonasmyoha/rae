@@ -1,0 +1,329 @@
+# An insert with a tail taken out of a compiled ECS mix (audio/GraphCompile keepTails): the removed
+# reverb is kept to ring out, joined through a sum in front of the node it fed (a one-input fader,
+# a compressor's main input), so the next compile succeeds. A track with EQ, compressor and reverb
+# inserts, rendered by the engine while sounds play, in blocks of 128 and of 37:
+#   A. the reverb (wet 0) taken out mid-sine: the compile succeeds, and from then on the track is
+#      the EQ and compressor alone bit for bit (their state carried, the kept reverb adds zeros)
+#   B. the reverb (wet 0.5) taken out as the sound ends: its tail is heard after the change
+#   C. every insert taken out later, while another sound plays: from then on the render is the
+#      dry track's bit for bit
+import Math
+open Realtime
+open audio/Audio
+open audio/AudioComponents
+open audio/AudioGraph
+open audio/AudioMixer
+open audio/EcsMix
+open audio/EffectStates
+open audio/GraphRender
+open audio/Sound
+open audio/graphSystem/GraphSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/World
+
+const sampleRate: Int = 48000
+
+const maxFrames: Int = 128
+
+const total: Int = 48000
+
+# the first sound plays from 0 to this frame, the second from secondAt to the end
+const firstFrames: Int = 12000
+
+const secondAt: Int = 30000
+
+func sineSound(audio: mod AudioEngine, frames: view Int, frequency: view Float) ret Sound {
+  let samples: Buffer(Float) = createSampleBuffer(count: frames * 2)
+  loop var i: Int = 0, i < frames, ++i {
+    let value: Float = Math.sin(
+      x: 6.283185307179586 * frequency * (i as Float) / (sampleRate as Float)
+    ) * 0.7
+    setSampleAt(samples: samples, index: i * 2, value: value)
+    setSampleAt(samples: samples, index: i * 2 + 1, value: value)
+  }
+  ret audio.addSound(data: SoundData {
+    samples: samples
+    frameCount: frames
+    channels: 2
+    sampleRate: sampleRate
+    error: ""
+  })
+}
+
+func testInsert(
+  kind: view NodeKind
+  decibels: view Float
+  effect: view EffectSettings
+) ret AudioInsert {
+  ret AudioInsert {
+    kind: kind
+    decibels: decibels
+    delayFrames: 0
+    ceilingDecibels: 0.0
+    reportsLatency: false
+    effect: effect
+    customKind: 0
+    customSettings: {}
+  }
+}
+
+func testEq() ret AudioInsert {
+  var settings: EffectSettings = defaultEffectSettings()
+  settings.filter = FilterShape.peak
+  settings.frequency = 900.0
+  settings.quality = 1.0
+  ret testInsert(kind: NodeKind.eq, decibels: 6.0, effect: settings)
+}
+
+func testCompressor() ret AudioInsert {
+  var settings: EffectSettings = defaultEffectSettings()
+  settings.thresholdDecibels = -24.0
+  settings.ratio = 6.0
+  settings.attackSeconds = 0.005
+  settings.releaseSeconds = 0.3
+  ret testInsert(kind: NodeKind.compressor, decibels: 0.0, effect: settings)
+}
+
+func testReverb(wet: view Float) ret AudioInsert {
+  var settings: EffectSettings = defaultEffectSettings()
+  settings.roomSize = 0.5
+  settings.damping = 0.5
+  settings.wet = wet
+  settings.dry = 1.0
+  settings.width = 1.0
+  ret testInsert(kind: NodeKind.reverb, decibels: 0.0, effect: settings)
+}
+
+# The inserts by a short name: "ecr" EQ, compressor, reverb (wet `wet`); "ec"; "" none
+func insertsOf(names: view String, wet: view Float) ret AudioInserts {
+  var inserts: List(AudioInsert) = {}
+  if names.contains(sub: "e") {
+    inserts.add(value: testEq())
+  }
+  if names.contains(sub: "c") {
+    inserts.add(value: testCompressor())
+  }
+  if names.contains(sub: "r") {
+    inserts.add(value: testReverb(wet: wet))
+  }
+  ret AudioInserts { inserts: own inserts }
+}
+
+type Run {
+  left: List(Float)
+  error: String
+  compiles: Int
+  # the frames each change took effect at (the start of the block it was made before)
+  firstChange: Int
+  secondChange: Int
+}
+
+# The track with `start` inserts, changed to `first` before the block holding frame `firstAt`
+# and to `second` before the block holding `secondAt2` (-1: no change), rendered in blocks of
+# `block`; its left channel
+func render(
+  block: view Int
+  start: view String
+  first: view String
+  firstAt: view Int
+  second: view String
+  secondAtFrame: view Int
+  wet: view Float
+) ret Run {
+  var audio: AudioEngine = audioStartOffline(
+    sampleRate: sampleRate
+    channels: 2
+    blockFrames: maxFrames
+  )
+  var allocator: EntityAllocator = createEntityAllocator()
+  var entities: AudioEntities = createAudioEntities()
+  let master: EntityId = allocator.allocEntity()
+  let track: EntityId = allocator.allocEntity()
+  entities.tracks.componentSet(
+    entityId: master
+    data: AudioTrack { kind: AudioTrackKind.master, sourceSlot: 0 }
+  )
+  entities.tracks.componentSet(
+    entityId: track
+    data: AudioTrack { kind: AudioTrackKind.audio, sourceSlot: 0 }
+  )
+  if start.length() > 0 {
+    entities.inserts.componentSet(entityId: track, data: insertsOf(names: start, wet: wet))
+  }
+  var state: AudioGraphState = createAudioGraphStateFor(audio: audio)
+  audioGraphSystem(entities: entities, state: state)
+  audio.useEcsMix(on: true)
+  let soundA: Sound = sineSound(audio: audio, frames: firstFrames, frequency: 440.0)
+  let soundB: Sound = sineSound(audio: audio, frames: total - secondAt, frequency: 660.0)
+  let unusedA: VoiceId = audio.playIntoSlotFromAt(
+    sound: soundA
+    slot: 0
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: 0
+    atSample: 0
+  )
+  let unusedB: VoiceId = audio.playIntoSlotFromAt(
+    sound: soundB
+    slot: 0
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: false
+    startFrame: 0
+    atSample: secondAt
+  )
+  var run: Run = {
+    left: {}
+    error: ""
+    compiles: 1
+    firstChange: -1
+    secondChange: -1
+  }
+  var done: Int = 0
+  loop done < total {
+    let frames: Int = min(a: block, b: total - done)
+    if firstAt >= 0 and run.firstChange < 0 and done + frames > firstAt {
+      setInserts(
+        entities: entities
+        track: track
+        names: first
+        wet: wet
+      )
+      run.firstChange = done
+    }
+    if secondAtFrame >= 0 and run.secondChange < 0 and done + frames > secondAtFrame {
+      setInserts(
+        entities: entities
+        track: track
+        names: second
+        wet: wet
+      )
+      run.secondChange = done
+    }
+    let hadPlan: Int = state.plan.serial
+    audioGraphSystem(entities: entities, state: state)
+    if state.plan.serial is not hadPlan {
+      run.compiles = run.compiles + 1
+    }
+    if state.error.length() > 0 {
+      run.error = state.error
+    }
+    let rendered: List(Float) = audio.renderOffline(frames: frames)
+    loop var i: Int = 0, i * 2 < rendered.length(), ++i {
+      run.left.add(value: rendered.copyAtFallback(index: i * 2, fallback: 0.0))
+    }
+    done = done + frames
+  }
+  state.freeAudioGraphState()
+  let unusedBlocks: Int = stopAudio(this: audio)
+  ret run
+}
+
+func setInserts(
+  entities: mod AudioEntities
+  track: view EntityId
+  names: view String
+  wet: view Float
+) {
+  if names.length() is 0 {
+    entities.inserts.componentRemove(entityId: track)
+  } else {
+    entities.inserts.componentSet(entityId: track, data: insertsOf(names: names, wet: wet))
+  }
+}
+
+# Do `a` and `b` agree bit for bit from frame `from` to the end?
+func sameFrom(a: view List(Float), b: view List(Float), from: view Int) ret Bool {
+  if a.length() is not b.length() {
+    ret false
+  }
+  loop var i: Int = from, i < a.length(), ++i {
+    if a.copyAtFallback(index: i, fallback: 0.0) is not b.copyAtFallback(index: i, fallback: 1.0) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func energy(samples: view List(Float), from: view Int, count: view Int) ret Float64 {
+  var sum: Float64 = 0.0
+  loop var i: Int = from, i < from + count, ++i {
+    let value: Float64 = samples.copyAtFallback(index: i, fallback: 0.0) as Float64
+    sum = sum + value * value
+  }
+  ret sum
+}
+
+func checkBlock(block: view Int) {
+  # A. the wet-0 reverb taken out mid-sine, against the EQ and compressor alone all along
+  let withReverb: Run = render(
+    block: block
+    start: "ecr"
+    first: "ec"
+    firstAt: 6000
+    second: ""
+    secondAtFrame: -1
+    wet: 0.0
+  )
+  let plain: Run = render(
+    block: block
+    start: "ec"
+    first: ""
+    firstAt: -1
+    second: ""
+    secondAtFrame: -1
+    wet: 0.0
+  )
+  log(
+    "{block}: A. the reverb taken out at frame {withReverb.firstChange}: error '{withReverb.error}', plans {withReverb.compiles}; from then on the EQ and compressor alone bit for bit {sameFrom(
+      a: withReverb.left
+      b: plain.left
+      from: withReverb.firstChange
+    )}"
+  )
+  # B. and C. the reverb (wet 0.5) taken out as the first sound ends, every insert later
+  let tail: Run = render(
+    block: block
+    start: "ecr"
+    first: "ec"
+    firstAt: firstFrames
+    second: ""
+    secondAtFrame: 36000
+    wet: 0.5
+  )
+  let window: Int = 2400
+  # after the sound's last frame: the tail alone (the track with no reverb is silent there)
+  let heard: Float64 = energy(samples: tail.left, from: firstFrames, count: window)
+  let later: Float64 = energy(
+    samples: tail.left
+    from: tail.firstChange + 8 * window
+    count: window
+  )
+  let without: Float64 = energy(samples: plain.left, from: firstFrames, count: window)
+  log(
+    "   B. the reverb taken out as the sound ends (frame {tail.firstChange}): error '{tail.error}'; its tail heard after the change {heard > without * 100.0 and heard > 0.001}, and dying away {later < heard}"
+  )
+  let dry: Run = render(
+    block: block
+    start: ""
+    first: ""
+    firstAt: -1
+    second: ""
+    secondAtFrame: -1
+    wet: 0.5
+  )
+  log(
+    "   C. every insert taken out at frame {tail.secondChange}: plans {tail.compiles}, error '{tail.error}'; from then on the dry track bit for bit {sameFrom(
+      a: tail.left
+      b: dry.left
+      from: tail.secondChange
+    )}"
+  )
+}
+
+func main() {
+  checkBlock(block: maxFrames)
+  checkBlock(block: 37)
+}
