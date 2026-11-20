@@ -224,9 +224,48 @@ func keepTails(working: mod AudioGraph, previousGraph: view AudioGraph) {
         kept = working.addNode(node: node)
         working.connect(from: silence, to: kept)
       }
-      working.connect(from: kept, to: target)
+      joinTail(working: working, kept: kept, target: target)
     }
   }
+}
+
+# Join the kept tail `kept` to `target` where it can be summed: straight in when the target is a
+# sum; else through a sum node put in front of the target's (first, main) input, which takes that
+# input and the tail. A one-input node (the next insert, a fader) and a compressor (whose second
+# input is its sidechain) keep one main input, and the tail rings out into it and ends as tails do.
+func joinTail(working: mod AudioGraph, kept: view Int, target: view Int) {
+  let targetNode: GraphNode = working.nodes.copyAtFallback(index: target, fallback: outputNode())
+  if targetNode.kind is NodeKind.sum {
+    working.connect(from: kept, to: target)
+    ret
+  }
+  var main: Int = -1
+  loop var e: Int = 0, e < working.edges.length, ++e {
+    if main < 0 and working.edges.copyAtFallback(index: e, fallback: GraphEdge { from: -1, to: -1 }).to is target {
+      main = e
+    }
+  }
+  if main < 0 {
+    # nothing feeds it now: the tail is its one input
+    working.connect(from: kept, to: target)
+    ret
+  }
+  let input: GraphEdge = working.edges.copyAtFallback(
+    index: main
+    fallback: GraphEdge { from: -1, to: -1 }
+  )
+  let inputNode: GraphNode = working.nodes.copyAtFallback(index: input.from, fallback: outputNode())
+  if inputNode.kind is NodeKind.sum and inputNode.entityId is -1 {
+    # a sum put there for another tail: this one joins it too
+    working.connect(from: kept, to: input.from)
+    ret
+  }
+  let sum: Int = working.addNode(node: sumNode())
+  # the target's main input becomes the sum, in the same place among its edges (a compressor's
+  # first edge is its input, the second its sidechain)
+  working.edges.set(index: main, value: GraphEdge { from: sum, to: target })
+  working.connect(from: input.from, to: sum)
+  working.connect(from: kept, to: sum)
 }
 
 func nodeOfKind(graph: view AudioGraph, kind: view NodeKind) ret Int {
