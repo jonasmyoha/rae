@@ -1205,6 +1205,22 @@ void rae_ext_Gpu2d_setWindowSize(int64_t w, int64_t h) {
     if (w <= 0 || h <= 0) return;
     SDL_SetWindowSize(g_sdl_win, (int)w, (int)h);
 }
+/* Fullscreen: SDL3's borderless desktop fullscreen (no fullscreen mode set), which on macOS is
+ * the native fullscreen Space. SDL keeps the windowed size and place and gives them back on the
+ * way out; the size change arrives as the usual resize event, so the canvas follows through
+ * rae_g2d_configure like any resize. A headless window (hidden on purpose) only keeps the flag,
+ * so a check can read it without a window going fullscreen under the suite. */
+static int g_g2d_fullscreen = 0;
+void rae_ext_Gpu2d_setWindowFullscreen(rae_Bool on) {
+    g_g2d_fullscreen = on ? 1 : 0;
+    if (!g_sdl_win || rae_g2d_headless_requested()) return;
+    SDL_SetWindowFullscreen(g_sdl_win, on ? true : false);
+    SDL_SyncWindow(g_sdl_win);
+}
+rae_Bool rae_ext_Gpu2d_isWindowFullscreen(void) {
+    if (!g_sdl_win || rae_g2d_headless_requested()) return (rae_Bool)g_g2d_fullscreen;
+    return (SDL_GetWindowFlags(g_sdl_win) & SDL_WINDOW_FULLSCREEN) ? 1 : 0;
+}
 int64_t rae_ext_Gpu2d_windowPositionX(void) {
     int x = 0, y = 0;
     if (g_sdl_win) SDL_GetWindowPosition(g_sdl_win, &x, &y);

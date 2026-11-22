@@ -84,6 +84,32 @@ func setWindowSize(w: copy Int, h: copy Int) {
   }
 }
 
+# Real fullscreen on and off (a video editor's or player's F key): SDL3's borderless desktop
+# fullscreen, on macOS the window's own fullscreen Space. isWindowFullscreen() changes at once;
+# the size comes with the usual resize once the OS has moved the window (on macOS about 0.8 s
+# later, after the Space animation): windowResized() is true once then, and the canvas follows.
+# Leaving gives the window back the size and place it had. Headless it only keeps a flag.
+func nativeSetWindowFullscreen(
+  on: Bool
+) mainThread unsafe extern("rae_ext_Gpu2d_setWindowFullscreen")
+
+func setWindowFullscreen(on: copy Bool) {
+  unsafe {
+    nativeSetWindowFullscreen(on: on)
+  }
+}
+
+# True while the window is fullscreen, also when the user entered or left it by the OS's own
+# controls (the green button, Ctrl-Cmd-F).
+func nativeIsWindowFullscreen() mainThread unsafe extern("rae_ext_Gpu2d_isWindowFullscreen") ret
+  Bool
+
+func isWindowFullscreen() ret Bool {
+  unsafe {
+    ret nativeIsWindowFullscreen()
+  }
+}
+
 func nativeWindowPositionX() mainThread unsafe extern("rae_ext_Gpu2d_windowPositionX") ret Int
 
 func windowPositionX() ret Int {

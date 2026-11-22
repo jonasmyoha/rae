@@ -1,0 +1,14 @@
+# A window going fullscreen and back (Gpu2d setWindowFullscreen / isWindowFullscreen), headless:
+# a headless window is hidden on purpose and does not go fullscreen under the suite, so the call
+# only keeps the flag, and the window keeps its size.
+import Gpu2d
+
+func main() {
+  Gpu2d.initWindow(width: 320, height: 200, title: "fullscreen")
+  log("start: fullscreen={Gpu2d.isWindowFullscreen()}")
+  Gpu2d.setWindowFullscreen(on: true)
+  log("on: fullscreen={Gpu2d.isWindowFullscreen()}")
+  Gpu2d.setWindowFullscreen(on: false)
+  log("off: fullscreen={Gpu2d.isWindowFullscreen()}")
+  Gpu2d.closeWindow()
+}

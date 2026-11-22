@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.30, 2026-11-23: a window goes fullscreen and back
+
+- `Gpu2d.setWindowFullscreen(on:)` and `Gpu2d.isWindowFullscreen()`: SDL3's borderless desktop
+  fullscreen, on macOS the window's own fullscreen Space (for a video editor's or player's F key).
+  The flag changes at once; the new size comes with the usual `windowResized()` once the OS has
+  moved the window (about 0.8 s on macOS), and leaving gives back the size and place the window
+  had. A headless window only keeps the flag (case 1559).
+
 ## 0.4.29, 2026-11-20: WASM builds get a real stack
 
 - `compiler/tools/wasm_build.sh` links an 8 MB stack (`RAE_WASM_STACK_BYTES`), for wasip1 and the
