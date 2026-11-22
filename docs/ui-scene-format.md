@@ -676,8 +676,9 @@ until it is. It returns true when a root moved (the frame must draw).
 
 A node with `SafeArea` lays its content out inside the screen's safe area:
 the notch, the status bar and the home indicator are added to its padding.
-`apply` says which sides take part (1 a side, 0 not; all four by default)
-and `extra` adds a fixed inset of its own:
+`apply` says which sides take part (1 a side, 0 not; all four by default;
+a side written as `true` / `false` is a `wrongValueKind` diagnostic and
+counts as 0, so write numbers) and `extra` adds a fixed inset of its own:
 
 ```json
 "Screen": { "SafeArea": {}, "Layout": { "type": "Vertical" }, "Children": [...] }

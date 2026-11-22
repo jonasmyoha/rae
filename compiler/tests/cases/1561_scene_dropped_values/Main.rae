@@ -1,0 +1,70 @@
+# A scene value the decoder cannot use says so, and a written bound clamps (ui/Registry,
+# ui/RegistryOpt):
+#   1. SafeArea.apply written with booleans (the older scene format's spelling): each true or
+#      false edge is a wrongValueKind diagnostic and keeps its default, never a silent 0; a
+#      list or an object in a number field is one too, and null stays silent (the default).
+#   2. Constraints: `"maxW": 430` alone clamps (hasMaxW comes from the bound being written),
+#      `"minH"` alone too; an explicit `"hasMaxW": false` still keeps a written bound off, and
+#      an explicit `"hasMinW": true` with its bound works as before.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ScenePolicy
+open ui/UiSystems
+open ui/LayoutSystem
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func showRect(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) {
+  let rect: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: nodeOf(world: world, nodeId: nodeId)
+  )
+  let constraints: view Constraints = componentView(
+    this: world.constraints
+    entityId: nodeOf(world: world, nodeId: nodeId)
+  )
+  log(
+    "{nodeId}: {rect.size.x}x{rect.size.y}; hasMinW {constraints.hasMinW} hasMaxW {constraints.hasMaxW} hasMinH {constraints.hasMinH} hasMaxH {constraints.hasMaxH}"
+  )
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 800.0
+  world.layoutH = 600.0
+  let screen: EntityId = loadScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Screen\",\"nodes\":\{\"Screen\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":600\},\"Children\":[\"Top\",\"Odd\",\"Wide\",\"Short\",\"Off\",\"Both\"]\},\"Top\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"SafeArea\":\{\"apply\":\{\"t\":true,\"b\":false\}\}\},\"Odd\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":10,\"h\":10\},\"SafeArea\":\{\"apply\":\{\"l\":[1],\"r\":\{\"x\":1\},\"t\":null,\"b\":1\}\}\},\"Wide\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":20\},\"Constraints\":\{\"maxW\":430\}\},\"Short\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":20\},\"Constraints\":\{\"minH\":44\}\},\"Off\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":800,\"h\":20\},\"Constraints\":\{\"maxW\":430,\"hasMaxW\":false\}\},\"Both\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":50,\"h\":20\},\"Constraints\":\{\"minW\":120,\"hasMinW\":true\}\}\}\}"
+    )
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  log("--- 1. SafeArea.apply")
+  loop let nodeId: String in List(String) { "Top", "Odd" } {
+    let safeArea: view SafeArea = componentView(
+      this: world.safeAreas
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    )
+    log(
+      "{nodeId}: apply l {safeArea.apply.l} t {safeArea.apply.t} r {safeArea.apply.r} b {safeArea.apply.b}"
+    )
+  }
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("{diagnostic.nodeId} {diagnostic.kind} {diagnostic.name}: {diagnostic.message}")
+  }
+  log("--- 2. Constraints")
+  loop let nodeId: String in List(String) { "Wide", "Short", "Off", "Both" } {
+    showRect(world: world, uiSystems: uiSystems, nodeId: nodeId)
+  }
+}

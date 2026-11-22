@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.32, 2026-11-23: a scene value the decoder drops says so
+
+- A number field of a scene written as `true` / `false`, a list or an object is a
+  `wrongValueKind` scene diagnostic naming the key and the value used, where it was silently 0
+  (`SafeArea`'s `"apply": {"t": true}`, the older format's spelling, applied no safe inset). A
+  `null` stays the default with no diagnostic.
+- `Constraints` clamps by a bound when the scene writes it: `"maxW": 430` alone sets
+  `hasMaxW`. A written `has*` key still decides (`"hasMaxW": false` keeps the bound off).
+  Case 1561.
+
 ## 0.4.31, 2026-11-23: tabs
 
 - `Tab` and `TabPage` (`ui/tabSystem`, docs/ui-scene-format.md section 45): a group of tabs shows

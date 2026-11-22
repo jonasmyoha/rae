@@ -652,6 +652,24 @@ func applyAuthoredFixups(
     offset.delta = deserVec2(doc: doc, val: val)
     ret
   }
+  if name is "Constraints" {
+    # A bound clamps when it is written: `"maxW": 430` alone sets hasMaxW. An explicit `has*`
+    # key still decides (false keeps a written bound off).
+    let constraints: mod Constraints = componentMod(this: world.constraints, entityId: entityId)
+    if Json.field(doc: doc, this: val, key: "hasMinW") < 0 {
+      constraints.hasMinW = Json.field(doc: doc, this: val, key: "minW") >= 0
+    }
+    if Json.field(doc: doc, this: val, key: "hasMaxW") < 0 {
+      constraints.hasMaxW = Json.field(doc: doc, this: val, key: "maxW") >= 0
+    }
+    if Json.field(doc: doc, this: val, key: "hasMinH") < 0 {
+      constraints.hasMinH = Json.field(doc: doc, this: val, key: "minH") >= 0
+    }
+    if Json.field(doc: doc, this: val, key: "hasMaxH") < 0 {
+      constraints.hasMaxH = Json.field(doc: doc, this: val, key: "maxH") >= 0
+    }
+    ret
+  }
   if name is "Align" {
     # Presence flags: an axis the author did not name stays "unset".
     let align: mod Align = componentMod(this: world.aligns, entityId: entityId)

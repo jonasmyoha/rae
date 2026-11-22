@@ -31,6 +31,37 @@ func optFloat(
 # `"gap": "spaceM"` instead of remembering the pixel value. A numeric
 # JSON value still works unchanged — the string branch is the
 # extension, not a replacement.
+# A Float field written as true / false, a list or an object keeps its fallback, and says so (an
+# older scene format wrote SafeArea's edge weights as booleans; dropping them silently cost a
+# layout bug). A null stays silent: it means "the default".
+func reportNotANumber(
+  value: view JsonValue
+  key: view String
+  fallback: view Float
+  diagnostics: mod List(SceneDiagnostic)
+  sceneId: view String
+  nodeId: view String
+) {
+  var written: String = ""
+  if value.kind is JsonKind.bool {
+    written = "{Json.jsonBool(this: value, fallback: false)}"
+  } else if value.kind is JsonKind.array {
+    written = "a list"
+  } else if value.kind is JsonKind.object {
+    written = "an object"
+  } else {
+    ret
+  }
+  reportSceneDiagnostic(
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+    kind: SceneDiagnosticKind.wrongValueKind
+    name: key
+    message: "\"{key}\" is {written}, not a number; using {fallback}"
+  )
+}
+
 func optFloatOrToken(
   doc: view JsonDoc
   theme: view UiTheme
@@ -68,6 +99,14 @@ func optFloatOrToken(
     )
     ret fallback
   }
+  reportNotANumber(
+    value: v
+    key: key
+    fallback: fallback
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+  )
   ret Json.jsonFloat(this: v, fallback: fallback)
 }
 
@@ -107,6 +146,14 @@ func optRadiusOrToken(
     )
     ret fallback
   }
+  reportNotANumber(
+    value: v
+    key: key
+    fallback: fallback
+    diagnostics: diagnostics
+    sceneId: sceneId
+    nodeId: nodeId
+  )
   ret Json.jsonFloat(this: v, fallback: fallback)
 }
 
