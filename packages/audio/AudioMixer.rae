@@ -598,7 +598,11 @@ func applyCommand(mixer: mod AudioMixer, command: view AudioCommand) {
           } else if command.kind is AudioCommandKind.setVoicePan {
             rampTo(ramp: voice.pan, target: command.value, frames: changeFrames)
           } else if command.kind is AudioCommandKind.setVoiceRate {
-            let rate: Float = clamp(val: command.value, low: 0.125, high: 8.0)
+            # held to 0.125 .. 8 either way; below zero the voice plays backwards (a shuttle)
+            var rate: Float = clamp(val: command.value, low: 0.125, high: 8.0)
+            if command.value < 0.0 {
+              rate = clamp(val: command.value, low: -8.0, high: -0.125)
+            }
             # `other` below zero: at once (a voice just started at its rate)
             if command.other < 0.0 {
               voice.rate = steadyRamp(value: rate)
@@ -756,6 +760,13 @@ func renderVoice(
       if voice.position >= (voice.frameCount as Float64) {
         if voice.looping and voice.frameCount > 0 {
           voice.position = voice.position - (voice.frameCount as Float64)
+        } else {
+          voice.active = false
+        }
+      } else if voice.position < 0.0 {
+        # played backwards past the sound's first frame
+        if voice.looping and voice.frameCount > 0 {
+          voice.position = voice.position + (voice.frameCount as Float64)
         } else {
           voice.active = false
         }

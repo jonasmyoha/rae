@@ -36,6 +36,58 @@ func sendVoiceCommandAt(
   let sent: Bool = this.sendCommand(command: command)
 }
 
+# The voice's playback rate from `atSample` (1 its own pitch, 2 an octave up and twice as fast,
+# -1 backwards; held to 0.125 .. 8 either way): at once when `seconds` is below zero, else moved
+# there over `seconds` (never quicker than 5 ms). Sound voices only: a stream keeps its own rate.
+func setVoiceRateAt(
+  this: view AudioEngine
+  voiceId: view VoiceId
+  rate: view Float
+  seconds: view Float
+  atSample: view Int
+) {
+  var command: AudioCommand = emptyCommand(kind: AudioCommandKind.setVoiceRate)
+  command.voiceId = mixerVoiceIdOf(streams: this.streams, voiceId: voiceId.value)
+  command.value = rate
+  command.other = seconds
+  command.atSample = atSample
+  let sent: Bool = this.sendCommand(command: command)
+}
+
+# A shuttle's voice (a video editor's J K L): `sound` from its frame `startFrame` at `rate` from
+# its first sample, so 2 plays twice as fast an octave up and -1 plays the sound backwards from
+# there (it ends at the sound's first frame). The editor stops the timeline's voices, plays one
+# of these per clip under the playhead, and moves their rate with setVoiceRateAt as the shuttle
+# changes speed. `startFrame` is in the sound's frames; backwards, start at most at its last
+# frame (frameCount - 1).
+func playShuttleAt(
+  this: mod AudioEngine
+  sound: view Sound
+  bus: view AudioBusKind
+  gainDecibels: view Float
+  startFrame: view Int
+  rate: view Float
+  atSample: view Int
+) ret VoiceId {
+  let voiceId: VoiceId = this.playFromAt(
+    sound: sound
+    bus: bus
+    gainDecibels: gainDecibels
+    pan: 0.0
+    looping: false
+    startFrame: startFrame
+    atSample: atSample
+  )
+  # after the play at the same sample (events at one time keep their order)
+  this.setVoiceRateAt(
+    voiceId: voiceId
+    rate: rate
+    seconds: -1.0
+    atSample: atSample
+  )
+  ret voiceId
+}
+
 # Stop with the 5 ms fade starting at `atSample`
 func stopVoiceAt(this: view AudioEngine, voiceId: view VoiceId, atSample: view Int) {
   this.sendVoiceCommandAt(

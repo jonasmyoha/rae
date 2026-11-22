@@ -1029,7 +1029,8 @@ the listener at a distance its slider sets.
 Three things a game does with its sounds beyond play and stop (`audio/VoiceControls`):
 
 - **The playback rate of a voice**, set while it plays: `setVoiceRate(voiceId:, rate:,
-  seconds:)`, 1 its own pitch, 2 an octave up, held to 0.125 .. 8, and moved there over
+  seconds:)`, 1 its own pitch, 2 an octave up, held to 0.125 .. 8 (below zero backwards,
+  §10.5.1), and moved there over
   `seconds` (never quicker than the 5 ms smoothing), so a car's engine loop rises with its speed
   without a step. The voice reads its sound with linear interpolation; at the end of a loop it
   reads the first frame again, so the seam stays seamless at any rate. `semitonesToRate` turns a
@@ -1065,6 +1066,41 @@ engines with one seed rendering the same samples. Fixture 1453: a cap of 3 keepi
 three (the faded one still fading 100 frames on, gone 600 on), a cap of 2 by gain, and 70
 voices on 64 places taking the fading one and then the quietest, none dropped. All three run
 with `RAE_REALTIME_CHECK=1`. The audio playground has a Game sounds section.
+
+### 10.5.1 A shuttle: playing at a rate and backwards (a video editor's J K L)
+
+A video editor's shuttle moves the playhead at -8, -4, -2, -1, 1, 2, 4 or 8 times, and the
+editors people know (Premiere, Resolve) play the sound along: faster and higher, or backwards.
+Two ways were weighed:
+
+- **A rate on MusicalTime's Transport**, every voice of the timeline reading at it. The timeline
+  schedules by ticks turned into sample times (§6.3): clips, fades, automation, notes and the
+  loop all assume one tick a fixed number of samples. A rate there changes every one of them,
+  and notes from a synth (§10.2) would need their own pitch shift. Too much, for a mode in which
+  nobody edits.
+- **Shuttle voices the editor starts** (chosen). While the shuttle moves, the editor stops the
+  timeline's transport (its voices end as at a stop) and plays one voice per clip under the
+  playhead, from the playhead's frame, at the shuttle's rate. When the speed changes, it sets
+  the voices' rate; when the shuttle stops, it stops them and plays the timeline again from the
+  playhead. The timeline is untouched, and the voices are ordinary ones: real-time safe, mixed
+  with the clip's bus and gain.
+
+`audio/AudioSchedule`: `playShuttleAt(sound:, bus:, gainDecibels:, startFrame:, rate:,
+atSample:)` plays a sound from one of its frames at a rate from its first sample (the rate
+command right after the play, at the same sample), and `setVoiceRateAt(voiceId:, rate:,
+seconds:, atSample:)` changes it at a sample, at once (`seconds` below zero) or moved over
+`seconds`. A rate below zero plays the sound backwards: the voice's place goes down, it reads
+the same interpolated frames, and it ends at the sound's first frame (a looping one wraps to
+its end). The range is 0.125 .. 8 either way. The rate is the voice's own pitch too (2 an
+octave up), which is what the editors do. Sounds in memory only: a stream plays at its own
+rate, so a clip played from disk needs its sound decoded (or a part of it round the playhead)
+for the shuttle.
+
+**Landed (2026-11-23, `packages/audio` 0.28.0):** fixture 1560 (with `RAE_REALTIME_CHECK=1`): a
+500 Hz sine at rate 1 is the plain play bit for bit; at 2 it is 1000 Hz, its frame k the plain
+frame 2k bit for bit, and ends after half the frames; at -1 from the last frame it is the plain
+play reversed bit for bit; at 2 set back to 1 at frame 1000 it goes on as the plain play from
+frame 2000, bit for bit.
 
 ### 10.6 Step events: a game's footsteps from data
 
