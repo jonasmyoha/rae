@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.31, 2026-11-23: tabs
+
+- `Tab` and `TabPage` (`ui/tabSystem`, docs/ui-scene-format.md section 45): a group of tabs shows
+  one page at a time. A tap on a tab selects it, the group's page of its id is active and the others
+  are not, and the tab's fill takes its `selectedFill` slot; a group opens on its first tab.
+  `tabSystem(world:, actions:)` each frame after input; `selectTab` and `selectedTab` for the app.
+  Case 1560. Asked by the media editor's side panel.
+
 ## 0.4.30, 2026-11-23: a window goes fullscreen and back
 
 - `Gpu2d.setWindowFullscreen(on:)` and `Gpu2d.isWindowFullscreen()`: SDL3's borderless desktop
