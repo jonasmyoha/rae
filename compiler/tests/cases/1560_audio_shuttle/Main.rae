@@ -1,0 +1,205 @@
+# A shuttle heard (audio/AudioSchedule playShuttleAt and setVoiceRateAt, docs/audio-design.md
+# §10.5 "A shuttle"), rendered offline with RAE_REALTIME_CHECK=1 (config.env). The sound is a
+# 500 Hz sine of 4800 frames (0.1 s) at the engine's rate; the reference is a plain play of it.
+# 1. At rate 1 a shuttle voice is the plain play, bit for bit.
+# 2. At rate 2 it is twice the frequency and half the time: its frame k is the plain play's frame
+#    2k, bit for bit, and it ends after 2400 frames.
+# 3. At rate -1 from the last frame it is the plain play reversed, bit for bit, and ends at the
+#    sound's first frame (4799 sounding frames: the last is the sine's first, which is 0).
+# 4. A shuttle at 2 set back to 1 at once at frame 1000 goes on as the plain play from its frame
+#    2000, bit for bit.
+import Math
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSchedule
+open audio/Sound
+
+const rate: Int = 48000
+
+const soundFrames: Int = 4800
+
+const renderFrames: Int = 6000
+
+# The engine's output for one voice of the sine: a plain play (rate 0), or a shuttle at
+# `shuttleRate` from `startFrame`, set to `laterRate` at once at frame `changeAt` (when not -1)
+func renderVoice(
+  shuttleRate: view Float
+  startFrame: view Int
+  changeAt: view Int
+  laterRate: view Float
+) ret List(Float) {
+  var audio: AudioEngine = audioStartOffline(sampleRate: rate, channels: 2, blockFrames: 256)
+  let tone: Sound = audio.addSound(data: sineSoundData(
+    frequency: 500.0
+    amplitude: 0.5
+    frameCount: soundFrames
+    channels: 1
+    sampleRate: rate
+  ))
+  if shuttleRate is 0.0 {
+    let voiceId: VoiceId = audio.playFromAt(
+      sound: tone
+      bus: AudioBusKind.effects
+      gainDecibels: 0.0
+      pan: 0.0
+      looping: false
+      startFrame: startFrame
+      atSample: 0
+    )
+  } else {
+    let voiceId: VoiceId = audio.playShuttleAt(
+      sound: tone
+      bus: AudioBusKind.effects
+      gainDecibels: 0.0
+      startFrame: startFrame
+      rate: shuttleRate
+      atSample: 0
+    )
+    if changeAt >= 0 {
+      audio.setVoiceRateAt(
+        voiceId: voiceId
+        rate: laterRate
+        seconds: -1.0
+        atSample: changeAt
+      )
+    }
+  }
+  let rendered: List(Float) = audio.renderOffline(frames: renderFrames)
+  let blocks: Int = audio.stopAudio()
+  ret rendered
+}
+
+# Frames `count` of `a` from `aFrom` against those of `b` from `bFrom`, one frame step `bStep`
+# (both channels), bit for bit
+func sameFrames(
+  a: view List(Float)
+  aFrom: view Int
+  b: view List(Float)
+  bFrom: view Int
+  bStep: view Int
+  count: view Int
+) ret Bool {
+  loop var k: Int = 0, k < count, ++k {
+    loop var channel: Int = 0, channel < 2, ++channel {
+      let left: Float = a.copyAtFallback(index: (aFrom + k) * 2 + channel, fallback: 9.0)
+      let right: Float = b.copyAtFallback(index: (bFrom + k * bStep) * 2 + channel, fallback: 7.0)
+      if left is not right {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+# The first frame from which every later one is silent
+func soundingFrames(samples: view List(Float)) ret Int {
+  var end: Int = 0
+  loop var frame: Int = 0, frame < samples.length / 2, ++frame {
+    if samples.copyAtFallback(index: frame * 2, fallback: 0.0) is not 0.0 {
+      end = frame + 1
+    }
+  }
+  ret end
+}
+
+# The pitch of the left channel over frames 0..to: the cycles between its first and its last
+# upward zero crossing, to the nearest 10 Hz
+func pitchOf(samples: view List(Float), to: view Int) ret Int {
+  var crossings: Int = 0
+  var first: Int = -1
+  var last: Int = -1
+  var previous: Float = samples.copyAtFallback(index: 0, fallback: 0.0)
+  loop var frame: Int = 1, frame < to, ++frame {
+    let value: Float = samples.copyAtFallback(index: frame * 2, fallback: 0.0)
+    if previous < 0.0 and value >= 0.0 {
+      crossings += 1
+      if first < 0 {
+        first = frame
+      }
+      last = frame
+    }
+    previous = value
+  }
+  if crossings < 2 {
+    ret 0
+  }
+  let hertz: Float = ((crossings - 1) as Float) * (rate as Float) / ((last - first) as Float)
+  ret Math.round(x: hertz / 10.0).toInt() * 10
+}
+
+func main() {
+  let plain: List(Float) = renderVoice(
+    shuttleRate: 0.0
+    startFrame: 0
+    changeAt: -1
+    laterRate: 0.0
+  )
+  log("plain: {soundingFrames(samples: plain)} frames at {pitchOf(samples: plain, to: 4800)} Hz")
+  # 1
+  let once: List(Float) = renderVoice(
+    shuttleRate: 1.0
+    startFrame: 0
+    changeAt: -1
+    laterRate: 0.0
+  )
+  log("rate 1: the plain play bit for bit {sameFrames(
+    a: once
+    aFrom: 0
+    b: plain
+    bFrom: 0
+    bStep: 1
+    count: renderFrames
+  )}")
+  # 2
+  let twice: List(Float) = renderVoice(
+    shuttleRate: 2.0
+    startFrame: 0
+    changeAt: -1
+    laterRate: 0.0
+  )
+  log("rate 2: {soundingFrames(samples: twice)} frames at {pitchOf(samples: twice, to: 2400)} Hz, frame k is the plain frame 2k {sameFrames(
+    a: twice
+    aFrom: 0
+    b: plain
+    bFrom: 0
+    bStep: 2
+    count: 2400
+  )}")
+  # 3
+  let backwards: List(Float) = renderVoice(
+    shuttleRate: -1.0
+    startFrame: soundFrames - 1
+    changeAt: -1
+    laterRate: 0.0
+  )
+  log("rate -1: {soundingFrames(samples: backwards)} frames, the plain play reversed {sameFrames(
+    a: backwards
+    aFrom: 0
+    b: plain
+    bFrom: soundFrames - 1
+    bStep: -1
+    count: soundFrames
+  )}")
+  # 4
+  let changed: List(Float) = renderVoice(
+    shuttleRate: 2.0
+    startFrame: 0
+    changeAt: 1000
+    laterRate: 1.0
+  )
+  log("rate 2 then 1 at frame 1000: before it the plain frame 2k {sameFrames(
+    a: changed
+    aFrom: 0
+    b: plain
+    bFrom: 0
+    bStep: 2
+    count: 1000
+  )}, after it the plain play from 2000 {sameFrames(
+    a: changed
+    aFrom: 1000
+    b: plain
+    bFrom: 2000
+    bStep: 1
+    count: 2800
+  )}, {soundingFrames(samples: changed)} frames")
+}
