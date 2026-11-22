@@ -1,0 +1,132 @@
+# TabSystem — the tabs of a scene (ui/BindingComponents Tab and TabPage,
+# docs/ui-scene-format.md §45). A group of tabs shows one page at a time.
+#
+# - A tap on a tab (a UiAction this frame whose entity carries a Tab) selects it and leaves the
+#   group's other tabs. The action itself goes on to the app as any tap's does: its OnClick's
+#   `actionId` tells the app which tab was chosen, and `selectedTab` reads the group's choice.
+# - Each frame the group's TabPage of the selected id is active and its others are not (through
+#   setActiveAnimated, so a page's authored Appear or Disappear plays), and each tab's Shape takes
+#   its fill slot. A group with no tab selected selects its first (in load order), so a scene
+#   opens on its first page without saying so.
+# - `tabSystem` answers true when it changed anything: feed it into the frame loop's "changed".
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/AnimationSystem
+
+# The id of `group`'s selected tab ("" when the group has none selected, or no tabs)
+func selectedTab(world: view UiWorld, group: view String) ret String {
+  loop var i: Int = 0, i < componentCount(this: world.tabs), ++i {
+    let tab: view Tab = componentView(
+      this: world.tabs
+      entityId: componentEntityAt(this: world.tabs, i: i)
+    )
+    if tab.group is group and tab.selected {
+      ret "{tab.id}"
+    }
+  }
+  ret ""
+}
+
+# Select `group`'s tab `id` (its page shows at the next tabSystem); false when the group has no
+# tab of that id
+func selectTab(world: mod UiWorld, group: view String, id: view String) ret Bool {
+  var found: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.tabs), ++i {
+    let tab: view Tab = componentView(
+      this: world.tabs
+      entityId: componentEntityAt(this: world.tabs, i: i)
+    )
+    if tab.group is group and tab.id is id {
+      found = true
+    }
+  }
+  if not found {
+    ret false
+  }
+  loop var i: Int = 0, i < componentCount(this: world.tabs), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.tabs, i: i)
+    let tab: view Tab = componentView(this: world.tabs, entityId: entityId)
+    if tab.group is group and tab.selected is not (tab.id is id) {
+      componentMod(this: world.tabs, entityId: entityId).selected = tab.id is id
+    }
+  }
+  ret true
+}
+
+# Each group with no tab selected: its first selected
+func selectFirstTabs(world: mod UiWorld) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.tabs), ++i {
+    let source: view Tab = componentView(
+      this: world.tabs
+      entityId: componentEntityAt(this: world.tabs, i: i)
+    )
+    let group: String = "{source.group}"
+    let id: String = "{source.id}"
+    if selectedTab(world: world, group: group) is "" {
+      let unusedFound: Bool = selectTab(world: world, group: group, id: id)
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# Each tab's fill and each page's Active, as the tabs are now; true when one changed
+func showTabs(world: mod UiWorld) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.tabs), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.tabs, i: i)
+    let tab: view Tab = componentView(this: world.tabs, entityId: entityId)
+    var slot: String = "{tab.fill}"
+    if tab.selected {
+      slot = "{tab.selectedFill}"
+    }
+    if componentHas(this: world.shapes, entityId: entityId) and componentView(
+      this: world.shapes
+      entityId: entityId
+    ).fillSlot is not slot {
+      componentMod(this: world.shapes, entityId: entityId).fillSlot = slot
+      changed = true
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: world.tabPages), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.tabPages, i: i)
+    let page: view TabPage = componentView(this: world.tabPages, entityId: entityId)
+    let shown: Bool = selectedTab(world: world, group: page.group) is page.id
+    let active: Bool = componentHas(this: world.actives, entityId: entityId) is false or componentView(
+      this: world.actives
+      entityId: entityId
+    ).value
+    if active is not shown {
+      setActiveAnimated(world: world, entityId: entityId, active: shown)
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# Select what this frame's taps select, then show the tabs. True when anything changed. Call it
+# after the input system, before layout.
+func tabSystem(world: mod UiWorld, actions: view EventQueue(UiAction)) ret Bool {
+  var changed: Bool = selectFirstTabs(world: world)
+  loop var i: Int = 0, i < eventCount(this: actions), ++i {
+    let action: UiAction = eventAt(this: actions, i: i)
+    if isNone(this: action.entityId) is false and componentHas(
+      this: world.tabs
+      entityId: action.entityId
+    ) {
+      let source: view Tab = componentView(this: world.tabs, entityId: action.entityId)
+      let group: String = "{source.group}"
+      let id: String = "{source.id}"
+      if not source.selected {
+        let unusedFound: Bool = selectTab(world: world, group: group, id: id)
+        changed = true
+      }
+    }
+  }
+  ret showTabs(world: world) or changed
+}

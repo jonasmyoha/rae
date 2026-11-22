@@ -1500,3 +1500,45 @@ child and a cross-fade.
 A camera's zoom eases and coasts with `CanvasControls.zoomEaseSeconds` and
 `pinchCoasts` (§41); example 152 uses both.
 
+
+## 45. `Tab` and `TabPage`: tabs
+
+```json
+"ClipTab": {
+  "bundles": ["pressable"],
+  "Shape": { "kind": "RoundedRect", "fill": "buttonQuiet", "radius": "radiusPill" },
+  "OnClick": { "actionId": "side.clip", "label": "Clip tab" },
+  "Tab": { "group": "side", "id": "clip", "fill": "buttonQuiet", "selectedFill": "accent" },
+  "Children": ["ClipTabLabel"]
+},
+"ClipPage": { "TabPage": { "group": "side", "id": "clip" }, "Children": ["..."] }
+```
+
+A group of tabs shows one page at a time. The tab bar and the pages are ordinary nodes anywhere in
+the scene: a tab names its group and its id, and a page the group and the id of the tab that shows
+it. `Tab` has these fields:
+
+| field | default | what it is |
+|---|---|---|
+| `group` | `""` | the tabs that choose among one set of pages |
+| `id` | `""` | this tab, and the pages it shows |
+| `selected` | `false` | whether it is the group's chosen tab |
+| `fill` | `"surfaceAlt"` | the theme slot of its `Shape`'s fill |
+| `selectedFill` | `"accent"` | the slot while it is selected |
+
+`TabPage` has `group` and `id`.
+
+- A tap on a tab selects it and leaves the group's others. A tab needs an `OnClick` for a tap to
+  reach it; its action goes on to the app like any tap's, so the app hears which tab was chosen.
+- The group's pages of the selected id are active and its others are not: not laid out, painted or
+  hit (`Active`, through `setActiveAnimated`, so a page's authored `Appear` or `Disappear` plays).
+- A group with no tab selected selects its first, in load order, so a scene opens on its first page
+  without saying so; a tab authored `"selected": true` opens selected instead.
+- The app calls `tabSystem(world:, actions:)` (`ui/tabSystem/TabSystem`) each frame, after the input
+  system and before layout. It answers true when it changed anything.
+- `selectedTab(world:, group:)` reads a group's chosen id and `selectTab(world:, group:, id:)` sets
+  it (false when the group has no such tab); the page shows at the next `tabSystem`.
+
+Case 1560 checks it: the first frame, a tap's action, `selectTab`, two groups apart, and real taps
+through the input path hitting the shown page's node and never the hidden one's. The media editor's
+side panel is a group of them.

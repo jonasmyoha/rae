@@ -72,6 +72,25 @@ type Switch {
   knobColor: String = "textPrimary"
 }
 
+# A tab (ui/tabSystem): one of its group's tabs, `id` naming it. A tap on the node (it needs an
+# OnClick for a tap to reach it) selects it and leaves the group's others; the group's TabPage of
+# the same id shows, its others hide. Its Shape's fill is the theme slot `fill`, or
+# `selectedFill` while selected. With none selected, a group's first tab is.
+type Tab {
+  group: String = ""
+  id: String = ""
+  selected: Bool = false
+  fill: String = "surfaceAlt"
+  selectedFill: String = "accent"
+}
+
+# A tab's page (ui/tabSystem): active while its group's selected tab is `id`, inactive (not laid
+# out, painted or hit) otherwise
+type TabPage {
+  group: String = ""
+  id: String = ""
+}
+
 # Where a switch's knob is: 0 off to 1 on, moving between them (runtime, ui/switchSystem)
 type SwitchMotion {
   position: Float

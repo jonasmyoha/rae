@@ -1,0 +1,274 @@
+# Tabs (ui/tabSystem, docs/ui-scene-format.md §45): a group of Tab nodes shows one TabPage at a
+# time. A scene opens on its group's first tab (or the one it marks selected); a tap on a tab
+# selects it, its page shows (laid out, painted, hit) and the others hide; selectTab and
+# selectedTab do the same from the app. Two groups are independent.
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/InputComponents
+open ui/Registry
+open ui/Scene
+open ui/SceneLoader
+open ui/SceneInstance
+open ui/ScenePolicy
+open ui/InputKind
+open ui/Transform
+open ui/LayoutSystem
+open ui/InputSystem
+open ui/UiSystems
+open ui/tabSystem/TabSystem
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+
+func fixed(w: view Int, h: view Int) ret String {
+  ret "\"Rect\":\{\"x\":0,\"y\":0,\"w\":{w},\"h\":{h}\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}"
+}
+
+func tab(
+  name: view String
+  group: view String
+  id: view String
+  extra: view String
+) ret String {
+  ret "\"{name}\":\{{fixed(w: 100, h: 30)},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"surfaceAlt\"\},\"OnClick\":\{\"actionId\":\"{group}.{id}\",\"label\":\"{id}\"\},\"Tab\":\{\"group\":\"{group}\",\"id\":\"{id}\"{extra}\}\},"
+}
+
+func page(
+  name: view String
+  group: view String
+  id: view String
+  child: view String
+) ret String {
+  ret "\"{name}\":\{{fixed(w: 300, h: 100)},\"TabPage\":\{\"group\":\"{group}\",\"id\":\"{id}\"\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"{child}\"]\},"
+}
+
+func sceneText() ret String {
+  var s: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Page\",\"nodes\":\{"
+  s = s.concat(
+    other: "\"Page\":\{{fixed(w: 300, h: 400)},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Bar\",\"TracksPage\",\"ClipPage\",\"OtherBar\",\"LeftPage\",\"RightPage\"]\},"
+  )
+  s = s.concat(
+    other: "\"Bar\":\{{fixed(w: 300, h: 30)},\"Layout\":\{\"type\":\"Horizontal\"\},\"Children\":[\"TracksTab\",\"ClipTab\"]\},"
+  )
+  s = s.concat(other: tab(
+    name: "TracksTab"
+    group: "side"
+    id: "tracks"
+    extra: ""
+  ))
+  s = s.concat(other: tab(
+    name: "ClipTab"
+    group: "side"
+    id: "clip"
+    extra: ""
+  ))
+  s = s.concat(other: page(
+    name: "TracksPage"
+    group: "side"
+    id: "tracks"
+    child: "TracksButton"
+  ))
+  s = s.concat(other: page(
+    name: "ClipPage"
+    group: "side"
+    id: "clip"
+    child: "ClipButton"
+  ))
+  s = s.concat(
+    other: "\"TracksButton\":\{{fixed(w: 300, h: 100)},\"OnClick\":\{\"actionId\":\"tracks.button\",\"label\":\"Tracks\"\}\},"
+  )
+  s = s.concat(
+    other: "\"ClipButton\":\{{fixed(w: 300, h: 100)},\"OnClick\":\{\"actionId\":\"clip.button\",\"label\":\"Clip\"\}\},"
+  )
+  s = s.concat(
+    other: "\"OtherBar\":\{{fixed(w: 300, h: 30)},\"Layout\":\{\"type\":\"Horizontal\"\},\"Children\":[\"LeftTab\",\"RightTab\"]\},"
+  )
+  s = s.concat(other: tab(
+    name: "LeftTab"
+    group: "other"
+    id: "left"
+    extra: ""
+  ))
+  s = s.concat(other: tab(
+    name: "RightTab"
+    group: "other"
+    id: "right"
+    extra: ",\"selected\":true"
+  ))
+  s = s.concat(other: page(
+    name: "LeftPage"
+    group: "other"
+    id: "left"
+    child: "LeftText"
+  ))
+  s = s.concat(other: page(
+    name: "RightPage"
+    group: "other"
+    id: "right"
+    child: "RightText"
+  ))
+  s = s.concat(other: "\"LeftText\":\{\"Text\":\{\"text\":\"Left\"\}\},")
+  s = s.concat(other: "\"RightText\":\{\"Text\":\{\"text\":\"Right\"\}\}")
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let found: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: found)
+  }
+  ret noEntity()
+}
+
+func isActive(world: view UiWorld, nodeId: view String) ret Bool {
+  let entityId: EntityId = entityOf(world: world, nodeId: nodeId)
+  ret componentHas(this: world.actives, entityId: entityId) is false or componentView(
+    this: world.actives
+    entityId: entityId
+  ).value
+}
+
+func fill(world: view UiWorld, nodeId: view String) ret String {
+  ret componentView(this: world.shapes, entityId: entityOf(world: world, nodeId: nodeId)).fillSlot
+}
+
+func show(world: view UiWorld) {
+  log(
+    "  side: {selectedTab(world: world, group: "side")} (Tracks page {isActive(
+      world: world
+      nodeId: "TracksPage"
+    )}, Clip page {isActive(world: world, nodeId: "ClipPage")}; tabs {fill(
+      world: world
+      nodeId: "TracksTab"
+    )} {fill(world: world, nodeId: "ClipTab")})"
+  )
+  log(
+    "  other: {selectedTab(world: world, group: "other")} (Left page {isActive(
+      world: world
+      nodeId: "LeftPage"
+    )}, Right page {isActive(world: world, nodeId: "RightPage")})"
+  )
+}
+
+# One frame of a scripted finger at (x, y), down or up; the frame's action ids
+func fingerFrame(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  x: view Float
+  y: view Float
+  down: view Bool
+) ret String {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  var fired: String = ""
+  loop var i: Int = 0, i < eventCount(this: world.uiActions), ++i {
+    fired = fired.concat(other: " {eventAt(this: world.uiActions, i: i).actionId}")
+  }
+  let changed: Bool = tabSystem(world: world, actions: world.uiActions)
+  ret fired
+}
+
+# A press and a release at (x, y): what the tap fired
+func tap(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  x: view Float
+  y: view Float
+) ret String {
+  var fired: String = ""
+  let downs: List(Bool) = { true, false, false }
+  loop let down: Bool in downs {
+    fired = fired.concat(other: fingerFrame(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      x: x
+      y: y
+      down: down
+    ))
+  }
+  ret fired
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  var scene: Scene = parseScene(source: sceneText())
+  scene.sceneId = "tabs"
+  let rootEntityId: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  log(
+    "mounted {rootEntityId.index >= 0}: {componentCount(this: world.tabs)} tabs, {componentCount(
+      this: world.tabPages
+    )} pages, {world.sceneDiagnostics.length} diagnostics"
+  )
+  loop let diagnostic: view SceneDiagnostic in world.sceneDiagnostics {
+    log("  {formatSceneDiagnostic(diagnostic: diagnostic)}")
+  }
+  log("the first frame: each group on its first tab, or the one the scene selects")
+  var actions: EventQueue(UiAction) = createEventQueue(UiAction)
+  log("changed: {tabSystem(world: world, actions: actions)}")
+  show(world: world)
+  log("the next frame changes nothing: {tabSystem(world: world, actions: actions)}")
+
+  log("a tap on the Clip tab's node selects it")
+  eventSend(
+    this: actions
+    value: UiAction { entityId: entityOf(world: world, nodeId: "ClipTab"), actionId: "side.clip" }
+  )
+  log(
+    "changed: {tabSystem(world: world, actions: actions)}, the action still there: {eventCount(
+      this: actions
+    )}"
+  )
+  eventClear(this: actions)
+  show(world: world)
+
+  log("from the app: selectTab, and a tab the group does not have")
+  log("tracks: {selectTab(world: world, group: "side", id: "tracks")}")
+  log("missing: {selectTab(world: world, group: "side", id: "missing")}")
+  log("changed: {tabSystem(world: world, actions: actions)}")
+  show(world: world)
+
+  log("real taps through the input path: the Tracks page's button is hit where it lies")
+  var input: UiInput = createUiInput()
+  log("  below the bar:{tap(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    x: 150.0
+    y: 60.0
+  )}")
+  log("  the Clip tab:{tap(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    x: 150.0
+    y: 15.0
+  )}")
+  show(world: world)
+  log("  the same place below the bar now hits the Clip page's button, not the hidden one's")
+  log("  below the bar:{tap(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    x: 150.0
+    y: 60.0
+  )}")
+}
