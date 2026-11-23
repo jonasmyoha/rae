@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.41, 2026-11-23: a Sprite's hue rotation and brightness
+
+- `Sprite.hueRotate` (degrees) and `Sprite.brightness` (1 unchanged), scene keys of the same
+  names: the art's color is turned about the gray axis and scaled before the tint, as Pixi's
+  ColorMatrixFilter hue and brightness do, so one blue piece of art draws red (120) or green
+  (-65); a tint only multiplies and cannot. In the image shader (`gpu2d_image.wgsl` imageColor,
+  the image uniform's two spare floats); `canvasSetImageColor` / `canvasClearImageColor` for
+  images drawn directly, `imageColorOf` the same color in Rae. Case 1569, check spriteHueRotate.
+
 ## 0.4.40, 2026-11-23: an audio render budget holds under a busy test run
 
 - `perfAudioBudget` (perf/PerfBudget) judges the slowest block once the slowest tenth of the

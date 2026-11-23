@@ -251,6 +251,51 @@ func queueImage(
   )
 }
 
+# The images queued from here on have their color turned by `hueDegrees` about the gray axis (as
+# Pixi's ColorMatrixFilter.hue and the sprite's `hueRotate`: blue art turned 120 is red-ish, -65
+# green-ish) and then scaled by `brightness` (1 unchanged), before the tint. One piece of art then
+# serves every color. Until canvasClearImageColor, and cleared at every frame start.
+func canvasSetImageColor(canvas: mod Gpu2dCanvas, hueDegrees: copy Float, brightness: copy Float) {
+  canvas.imageHueRadians = hueDegrees * 3.14159265 / 180.0
+  canvas.imageBrightness = brightness
+}
+
+func canvasClearImageColor(canvas: mod Gpu2dCanvas) {
+  canvas.imageHueRadians = 0.0
+  canvas.imageBrightness = 1.0
+}
+
+# A straight color as the image shader changes it (gpu2d_image.wgsl imageColor): turned by
+# `hueDegrees` about the gray axis (Pixi's hue matrix: the rotation that keeps gray gray, with
+# its 1/3 weights), scaled by `brightness`, held to 0..1. Channels 0..1.
+type ImageColor {
+  r: Float
+  g: Float
+  b: Float
+}
+
+func imageColorOf(
+  r: view Float
+  g: view Float
+  b: view Float
+  hueDegrees: view Float
+  brightness: view Float
+) ret ImageColor {
+  let angle: Float = hueDegrees * 3.14159265 / 180.0
+  let cosA: Float = Math.cos(x: angle)
+  let sinA: Float = Math.sin(x: angle)
+  let third: Float = 1.0 / 3.0
+  let rootThird: Float = Math.sqrt(x: third)
+  let same: Float = cosA + (1.0 - cosA) * third
+  let ahead: Float = third * (1.0 - cosA) - rootThird * sinA
+  let behind: Float = third * (1.0 - cosA) + rootThird * sinA
+  ret ImageColor {
+    r: Math.clamp(val: (r * same + g * ahead + b * behind) * brightness, low: 0.0, high: 1.0)
+    g: Math.clamp(val: (r * behind + g * same + b * ahead) * brightness, low: 0.0, high: 1.0)
+    b: Math.clamp(val: (r * ahead + g * behind + b * same) * brightness, low: 0.0, high: 1.0)
+  }
+}
+
 func queueImageEx(
   canvas: mod Gpu2dCanvas
   x: copy Float
@@ -319,8 +364,10 @@ func queueImageEx(
       canvas.imageCommands.add(value: 0.0)
     }
   }
-  canvas.imageCommands.add(value: 0.0)
-  canvas.imageCommands.add(value: 0.0)
+  # the color change (canvasSetImageColor): the hue turn in radians and the brightness less 1, so
+  # an image queued with none is 0, 0 as before
+  canvas.imageCommands.add(value: canvas.imageHueRadians)
+  canvas.imageCommands.add(value: canvas.imageBrightness - 1.0)
   canvas.imageCommandHandles.add(value: handle)
   canvas.imageCommandClips.add(value: clip)
 }

@@ -1,0 +1,123 @@
+# A Sprite's `hueRotate` (degrees) and `brightness` (ui Sprite; Gpu2dCanvasImage
+# canvasSetImageColor, gpu2d_image.wgsl imageColor): one blue piece of art drawn as several
+# colors, as Pixi's ColorMatrixFilter.hue and brightness do.
+#   1. the color as the image shader turns it (imageColorOf): the art's blue at 0 degrees stays
+#      blue, at 120 reads red, at -65 green, and brightness 1.3 makes it lighter;
+#   2. a scene with four Sprites of one image (0, 120, -65, and 120 at brightness 1.3) queues each
+#      draw with its turn (radians) and brightness less 1 in the image uniform's last two floats,
+#      and a sprite with neither queues 0, 0 as before; the scene keys are `hueRotate` and
+#      `brightness`.
+import SdfText
+import Gpu2d
+import Math
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open Gpu2dCanvasImage
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+# The strongest channel of a color
+func reads(color: view ImageColor) ret String {
+  if color.r >= color.g and color.r >= color.b {
+    ret "red"
+  }
+  if color.g >= color.b {
+    ret "green"
+  }
+  ret "blue"
+}
+
+func showColor(hueDegrees: view Float, brightness: view Float) {
+  # the tab art's blue
+  let color: ImageColor = imageColorOf(
+    r: 0.15
+    g: 0.35
+    b: 0.85
+    hueDegrees: hueDegrees
+    brightness: brightness
+  )
+  log(
+    "turned {hueDegrees} at brightness {brightness}: {rounded(value: color.r)} {rounded(
+      value: color.g
+    )} {rounded(value: color.b)}, reads {reads(color: color)}"
+  )
+}
+
+func sceneText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"tabs\",\"root\":\"Shelf\",\"nodes\":\{\"Shelf\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":100\},\"Children\":[\"Blue\",\"Red\",\"Green\",\"Gold\"]\},\"Blue\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":80,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\"\}\},\"Red\":\{\"Rect\":\{\"x\":100,\"y\":0,\"w\":80,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\",\"hueRotate\":120\}\},\"Green\":\{\"Rect\":\{\"x\":200,\"y\":0,\"w\":80,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\",\"hueRotate\":-65\}\},\"Gold\":\{\"Rect\":\{\"x\":300,\"y\":0,\"w\":80,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\",\"hueRotate\":120,\"brightness\":1.3\}\}\}\}"
+}
+
+func main() {
+  showColor(hueDegrees: 0.0, brightness: 1.0)
+  showColor(hueDegrees: 120.0, brightness: 1.0)
+  showColor(hueDegrees: -65.0, brightness: 1.0)
+  showColor(hueDegrees: 120.0, brightness: 1.3)
+
+  let scene: Scene = parseScene(source: sceneText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  # the paint walk culls against the design canvas, which has no size without a window
+  Gpu2d.setDesignResolution(width: 400.0, height: 100.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 400.0
+  world.layoutH = 100.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  # as a frame starts
+  clipReset(canvas: canvas)
+  # the art under the key "pill": its size is all a queued draw needs (no GPU here)
+  canvas.images.add(value: Gpu2dImage { width: 64, height: 32 })
+  canvas.imageKeys.add(value: "pill")
+  canvas.imageKeyHandles.add(value: 1)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let draws: Int = canvas.imageCommands.length / imageUniformFloats
+  loop var i: Int = 0, i < draws, ++i {
+    let x: Float = canvas.imageCommands.copyAtDefault(index: i * imageUniformFloats)
+    let turn: Float = canvas.imageCommands.copyAtDefault(index: i * imageUniformFloats + 22)
+    let brightnessLess1: Float = canvas.imageCommands.copyAtDefault(
+      index: i * imageUniformFloats + 23
+    )
+    log(
+      "the draw at x {x}: turn {rounded(value: turn)} rad ({rounded(
+        value: turn * 180.0 / 3.14159265
+      )} degrees), brightness less 1 {rounded(value: brightnessLess1)}"
+    )
+  }
+  log(
+    "after the sprites the canvas turns no color: {canvas.imageHueRadians is 0.0 and canvas.imageBrightness is 1.0}"
+  )
+}

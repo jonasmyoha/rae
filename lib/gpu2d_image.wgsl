@@ -4,7 +4,9 @@
 // params (radius, rotation about the quad center in radians, tile flag, premultiplied source),
 // uv (origin + size), clip rect (design units), clip (radius, enabled) —
 // the last two are the rounded clip the box pass has always had (#1003),
-// written per draw from the clip active when the image was queued.
+// written per draw from the clip active when the image was queued; the clip's
+// vec4 ends with the color change (hue turn in radians, brightness less 1;
+// 0, 0 none: Gpu2dCanvasImage canvasSetImageColor).
 @group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;
 @group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 6>;
 @group(0) @binding(2) var tex: texture_2d<f32>;
@@ -46,13 +48,33 @@ fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + vec2<f32>(r, r);
   return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;
 }
+// The color turned about the gray axis by `angle` (Pixi's ColorMatrixFilter.hue) and scaled by
+// `brightness`, held to 0..1; the same as Gpu2dCanvasImage imageColorOf. Linear in rgb, so it
+// applies to a premultiplied color as well.
+fn imageColor(rgb: vec3<f32>, angle: f32, brightness: f32) -> vec3<f32> {
+  let c = cos(angle);
+  let s = sin(angle);
+  let third = 1.0 / 3.0;
+  let rootThird = sqrt(third);
+  let same = c + (1.0 - c) * third;
+  let ahead = third * (1.0 - c) - rootThird * s;
+  let behind = third * (1.0 - c) + rootThird * s;
+  let turned = vec3<f32>(
+    rgb.r * same + rgb.g * ahead + rgb.b * behind,
+    rgb.r * behind + rgb.g * same + rgb.b * ahead,
+    rgb.r * ahead + rgb.g * behind + rgb.b * same);
+  return clamp(turned * brightness, vec3<f32>(0.0), vec3<f32>(1.0));
+}
 @fragment
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
   // A tiled draw (params.z) repeats the source: uv beyond 1 wraps, which the
   // clamp sampler alone would not do (no mips, so the derivative seam is moot).
   var uv = in.uv;
   if (uImg[2].z > 0.5) { uv = fract(uv); }
-  let texel = textureSample(tex, samp, uv);
+  var texel = textureSample(tex, samp, uv);
+  if (uImg[5].z != 0.0 || uImg[5].w != 0.0) {
+    texel = vec4<f32>(imageColor(texel.rgb, uImg[5].z, 1.0 + uImg[5].w), texel.a);
+  }
   let tint = uImg[1];
   let half = uImg[0].zw * 0.5;
   let rad = uImg[2].x;
