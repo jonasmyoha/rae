@@ -1,0 +1,135 @@
+# A menu of ui/MenuSystem, painted: icons, shortcuts, a separator, a disabled item, and its submenu
+# open with a row focused.
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/menu.bmp \
+#     compiler/bin/rae run checks/uiMenu/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1578_ui_menu. Exit 0 when it drew.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/Schedule
+open Gpu2dCanvas
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func fileItems() ret List(MenuItem) {
+  ret List(MenuItem) {
+    MenuItem { id: "open", text: "Open", icon: "mat:folder_open", shortcut: "Cmd O" }
+    MenuItem { id: "with", text: "Open with", icon: "mat:apps" }
+    MenuItem { id: "editor", text: "Text editor", parent: "with" }
+    MenuItem { id: "viewer", text: "Picture viewer", parent: "with" }
+    MenuItem { separator: true, parent: "with" }
+    MenuItem { id: "other", text: "Other...", parent: "with" }
+    MenuItem { separator: true }
+    MenuItem { id: "rename", text: "Rename", icon: "mat:edit" }
+    MenuItem { id: "duplicate", text: "Duplicate", shortcut: "Cmd D" }
+    MenuItem { id: "paste", text: "Paste", shortcut: "Cmd V", enabled: false }
+    MenuItem { separator: true }
+    MenuItem { id: "trash", text: "Move to Trash", icon: "mat:delete", shortcut: "Cmd Backspace" }
+  }
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI menu check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiMenu/page.raescene")
+  if scene.ok is false {
+    log("UI MENU FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  openMenu(
+    world: world
+    uiSystems: uiSystems
+    request: MenuRequest { id: "file", items: fileItems(), x: 120.0, y: 90.0 }
+  )
+  let script: List(MenuKeys) = {
+    MenuKeys {}
+    MenuKeys { down: true }
+    MenuKeys { down: true }
+    MenuKeys { right: true }
+    MenuKeys { down: true }
+  }
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    input.nowSeconds = frames.toFloat() as Float64
+    updateUiInputWith(
+      input: input
+      world: world
+      uiSystems: uiSystems
+      pointer: uiPointerScriptFrame(
+        previous: input.pointer
+        x: 120.0
+        y: 90.0
+        down: false
+        kind: InputKind.mouse
+      )
+      wheel: 0.0
+    )
+    menuSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      keys: script.copyAtFallback(index: frames, fallback: MenuKeys {})
+    )
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    releaseDeadEntities(world: world, uiSystems: uiSystems)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let levels: Int = world.menu.levels.length
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if levels is not 2 {
+    log("UI MENU FAILED: {levels} panels open")
+    ret 1
+  }
+  log("UI MENU OK")
+  ret 0
+}

@@ -3,7 +3,8 @@
 # feedWorldInput once a frame, after the frame's presses went through the layer walk
 # (capturePress / captureRelease), and its game code reads only:
 #
-#   worldPointer(captures: captures, pointerId: -1)   # the mouse: down, pressed, released, x, y
+#   worldPointer(captures: captures, pointerId: pointerIdMouse)   # down, pressed, released, x, y
+#   worldPointer(captures: captures, pointerId: pointerIdSecondary)   # the right button, the same
 #   worldKeyDown(captures: captures, key: Keys.keyW)   # false while the UI holds the keys
 #
 # never Sdl3 or Gpu2d's pointer and keys, so a click meant for a button never reaches the game.
@@ -19,6 +20,20 @@ func feedWorldInput(captures: mod UiCaptures) {
     x: Gpu2d.pointerX()
     y: Gpu2d.pointerY()
     deviceDown: Gpu2d.pointerDown()
+  )
+  worldPointerStep(
+    captures: captures
+    pointerId: pointerIdMiddle
+    x: Gpu2d.pointerX()
+    y: Gpu2d.pointerY()
+    deviceDown: Gpu2d.buttonDown(button: Gpu2d.PointerButton.middle)
+  )
+  worldPointerStep(
+    captures: captures
+    pointerId: pointerIdSecondary
+    x: Gpu2d.pointerX()
+    y: Gpu2d.pointerY()
+    deviceDown: Gpu2d.buttonDown(button: Gpu2d.PointerButton.secondary)
   )
   loop var i: Int = 0, i < Gpu2d.touchCount(), ++i {
     worldPointerStep(

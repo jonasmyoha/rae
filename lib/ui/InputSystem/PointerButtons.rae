@@ -1,0 +1,228 @@
+# The buttons beyond the primary one, and what counts as a click of them:
+#   - UiPointerState.middle / .secondary: held, the edges of this frame, the click count.
+#   - On macOS a primary press with Control held is a secondary one until it is let go.
+#   - A finger held still for longPressSeconds is a secondary click where a node takes one, and
+#     its release then clicks nothing.
+# A secondary press sends the action of the nearest OnSecondaryClick on the path to the topmost
+# painted node under the pointer, as it goes down (so a menu is there while the button is held).
+open ui/Ecs
+open ui/Components
+open ui/UiSystems
+open ui/InputKind
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+import Gpu2d
+import Keys
+import Sdl3
+
+# One button of the pointer this frame
+type UiButtonState {
+  down: Bool = false
+  pressed: Bool = false
+  released: Bool = false
+  clicks: Int = 0
+}
+
+enum UiLongPressPhase { idle, watching, fired }
+
+# A finger that may become a long press
+type UiLongPress {
+  phase: UiLongPressPhase = UiLongPressPhase.idle
+  x: Float = 0.0
+  y: Float = 0.0
+  startSeconds: Float64 = 0.0
+}
+
+# How long a finger is held still before it is a secondary click, and how far it may move
+const longPressSeconds: Float64 = 0.5
+
+const longPressPoints: Float = 10.0
+
+# Control-click is a secondary click here
+const hasControlClick: Bool = Target.os is Os.macos
+
+func deviceButton(button: copy Gpu2d.PointerButton) ret UiButtonState {
+  ret UiButtonState {
+    down: Gpu2d.buttonDown(button: button)
+    pressed: Gpu2d.buttonPressed(button: button)
+    released: Gpu2d.buttonReleased(button: button)
+    clicks: Gpu2d.buttonClicks(button: button)
+  }
+}
+
+# The device's pointer this frame, with Control-click turned into the secondary button
+func devicePointer(input: mod UiInput) ret UiPointerState {
+  let pointer: UiPointerState = {
+    x: Gpu2d.pointerX()
+    y: Gpu2d.pointerY()
+    down: Gpu2d.pointerDown()
+    pressed: Gpu2d.pointerPressed()
+    released: Gpu2d.pointerReleased()
+    kind: lastPointerKind()
+    clicks: Gpu2d.buttonClicks(button: Gpu2d.PointerButton.primary)
+    middle: deviceButton(button: Gpu2d.PointerButton.middle)
+    secondary: deviceButton(button: Gpu2d.PointerButton.secondary)
+  }
+  when hasControlClick {
+    let control: Bool = Sdl3.isKeyDown(key: Keys.keyLCtrl) or Sdl3.isKeyDown(key: Keys.keyRCtrl)
+    ret pointerWithControl(input: input, pointer: pointer, control: control)
+  } else {
+    ret pointer
+  }
+}
+
+# `pointer` with a primary press made while Control is held as the secondary button, until it is
+# let go
+func pointerWithControl(
+  input: mod UiInput
+  pointer: view UiPointerState
+  control: view Bool
+) ret UiPointerState {
+  if pointer.pressed and control and pointer.kind is InputKind.mouse {
+    input.controlClick = true
+  }
+  if input.controlClick is false {
+    ret pointer
+  }
+  var changed: UiPointerState = pointer
+  changed.secondary = UiButtonState {
+    down: pointer.down or pointer.secondary.down
+    pressed: pointer.pressed or pointer.secondary.pressed
+    released: pointer.released or pointer.secondary.released
+    clicks: pointer.clicks
+  }
+  changed.down = false
+  changed.pressed = false
+  changed.released = false
+  if pointer.down is false {
+    input.controlClick = false
+  }
+  ret changed
+}
+
+# A press of the primary button: how many clicks it is on the node under it. The system counts
+# clicks by time and place; a press on another node than the one before starts at 1 again.
+func uiCountPress(input: mod UiInput, clicks: view Int) {
+  var count: Int = clicks
+  if count < 1 {
+    count = 1
+  }
+  if count is 1 or input.hoveredEntityId is not input.clickEntityId {
+    input.clickBase = count - 1
+  }
+  input.clickEntityId = input.hoveredEntityId
+  input.pressClicks = count - input.clickBase
+  if input.pressClicks < 1 {
+    input.clickBase = count - 1
+    input.pressClicks = 1
+  }
+}
+
+# The action a click of `clicks` clicks sends: the double or triple click's where the node has one
+func uiClickActionId(click: view OnClick, clicks: view Int) ret String {
+  if clicks is 2 and click.actionIdDouble.length() > 0 {
+    ret "{click.actionIdDouble}"
+  }
+  if clicks > 2 and click.actionIdTriple.length() > 0 {
+    ret "{click.actionIdTriple}"
+  }
+  ret "{click.actionId}"
+}
+
+# The node that takes a secondary click at (x, y), or noEntity
+func uiSecondaryTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret EntityId {
+  if componentCount(this: world.onSecondaryClicks) is 0 {
+    ret noEntity()
+  }
+  let route: UiWheelRoute = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    want: UiRouteWant.secondaryClick
+  )
+  if isNone(this: route.target) {
+    ret noEntity()
+  }
+  ret dialogLayerHolds(world: world, uiSystems: uiSystems, hit: route.target)
+}
+
+# Send the secondary click's action of the node at (x, y); whether there was one
+func sendSecondaryClick(
+  input: view UiInput
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  clicks: view Int
+) ret Bool {
+  let target: EntityId = uiSecondaryTarget(
+    world: world
+    uiSystems: uiSystems
+    x: input.pointer.x
+    y: input.pointer.y
+  )
+  if isNone(this: target) {
+    ret false
+  }
+  let actionId: String = "{componentView(this: world.onSecondaryClicks, entityId: target).actionId}"
+  eventSend(
+    this: world.uiActions
+    value: UiAction { entityId: target, actionId: actionId, clicks: clicks }
+  )
+  ret true
+}
+
+# The secondary button, and a finger held still, this frame
+func uiSecondaryStep(input: mod UiInput, world: mod UiWorld, uiSystems: view UiSystems) {
+  if input.pointer.secondary.pressed {
+    var clicks: Int = input.pointer.secondary.clicks
+    if clicks < 1 {
+      clicks = 1
+    }
+    let unusedSent: Bool = sendSecondaryClick(
+      input: input
+      world: world
+      uiSystems: uiSystems
+      clicks: clicks
+    )
+  }
+  if input.pointer.pressed and input.pointer.kind is InputKind.touch {
+    input.longPress = UiLongPress {
+      phase: UiLongPressPhase.watching
+      x: input.pointer.x
+      y: input.pointer.y
+      startSeconds: input.nowSeconds
+    }
+    ret
+  }
+  if input.pointer.down is false {
+    input.longPress.phase = UiLongPressPhase.idle
+    ret
+  }
+  if input.longPress.phase is not UiLongPressPhase.watching {
+    ret
+  }
+  let deltaX: Float = input.pointer.x - input.longPress.x
+  let deltaY: Float = input.pointer.y - input.longPress.y
+  let reach: Float = uiUnitsFromPoints(input: input, points: longPressPoints)
+  if deltaX * deltaX + deltaY * deltaY > reach * reach or uiPressClaimed(input: input, world: world) {
+    input.longPress.phase = UiLongPressPhase.idle
+    ret
+  }
+  if input.nowSeconds - input.longPress.startSeconds >= longPressSeconds {
+    input.longPress.phase = UiLongPressPhase.fired
+    if sendSecondaryClick(
+      input: input
+      world: world
+      uiSystems: uiSystems
+      clicks: 1
+    ) {
+      input.pressedEntityId = noEntity()
+    }
+  }
+}

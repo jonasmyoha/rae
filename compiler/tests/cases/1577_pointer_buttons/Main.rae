@@ -1,0 +1,404 @@
+# Pointer buttons (ui/InputSystem, Gpu2d): the click count and the double and triple click's own
+# actions, a press on another node starting the count again; the secondary button's action from the
+# nearest OnSecondaryClick; the middle button; Control-click; a finger held still, and one that
+# moves; the world's view of the secondary button.
+import Gpu2d
+import Gpu2dSimulatedInput
+open ui/Components
+open ui/ClickTargets
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/LayerCapture
+open ui/LayerHit
+open ui/LayoutSystem
+open ui/Scene
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+open ui/WorldInput
+open ecs/Entity
+open ecs/Event
+
+func report(step: view String, input: view UiInput, world: view UiWorld) {
+  var actions: String = ""
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    actions = actions.concat(other: " {action.actionId} x{action.clicks}")
+  }
+  log("{step}:{actions}")
+}
+
+func deviceFrame(
+  step: view String
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) {
+  let closed: Bool = Gpu2d.pollClose()
+  updateUiInput(input: input, world: world, uiSystems: uiSystems)
+  report(step: step, input: input, world: world)
+}
+
+func button(
+  kind: copy Int
+  button: copy Int
+  x: copy Float
+  clicks: copy Int
+) {
+  Gpu2dSimulatedInput.simulateMouseButton(
+    kind: kind
+    button: button
+    x: x / Gpu2d.designWidth()
+    y: 0.5
+    clicks: clicks
+  )
+}
+
+# A press and a release in frames of their own
+func click(
+  number: copy Int
+  x: copy Float
+  clicks: copy Int
+  step: view String
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) {
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    button: number
+    x: x
+    clicks: clicks
+  )
+  deviceFrame(
+    step: "{step}, down"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchUp
+    button: number
+    x: x
+    clicks: clicks
+  )
+  deviceFrame(
+    step: "{step}, up"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+}
+
+func fingerFrame(
+  step: view String
+  input: mod UiInput
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  x: view Float
+  down: view Bool
+  seconds: copy Float64
+) {
+  input.nowSeconds = seconds
+  updateUiInputWith(
+    input: input
+    world: world
+    uiSystems: uiSystems
+    pointer: uiPointerScriptFrame(
+      previous: input.pointer
+      x: x
+      y: 100.0
+      down: down
+      kind: InputKind.touch
+    )
+    wheel: 0.0
+  )
+  report(step: step, input: input, world: world)
+}
+
+# One frame of a mouse press with Control held or not, as devicePointer makes it on macOS
+func controlFrame(
+  step: view String
+  input: mod UiInput
+  previous: mod UiPointerState
+  down: view Bool
+  control: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: previous
+    x: 50.0
+    y: 100.0
+    down: down
+    kind: InputKind.mouse
+  )
+  previous = pointer
+  let seen: UiPointerState = pointerWithControl(input: input, pointer: pointer, control: control)
+  log(
+    "{step}: primary {seen.down} {seen.pressed} {seen.released}, secondary {seen.secondary.down} {seen.secondary.pressed} {seen.secondary.released}"
+  )
+}
+
+func main() {
+  Gpu2d.initWindow(width: 400, height: 200, title: "buttons")
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 200.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  log("diagnostics {world.sceneDiagnostics.length}")
+  loop let target: view ClickTarget in clickTargets(world: world, uiSystems: uiSystems) {
+    log("target {target.nodeId} {target.actionId}: {target.label}")
+  }
+  var input: UiInput = createUiInput()
+  loop var clicks: Int = 1, clicks <= 4, ++clicks {
+    click(
+      number: 1
+      x: 40.0
+      clicks: clicks
+      step: "left click {clicks}"
+      input: input
+      world: world
+      uiSystems: uiSystems
+    )
+  }
+  click(
+    number: 1
+    x: 150.0
+    clicks: 2
+    step: "a second click on the other node"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  click(
+    number: 1
+    x: 150.0
+    clicks: 3
+    step: "a third click there"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  click(
+    number: 3
+    x: 40.0
+    clicks: 1
+    step: "secondary on the left"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  click(
+    number: 3
+    x: 350.0
+    clicks: 1
+    step: "secondary on the list"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  click(
+    number: 3
+    x: 250.0
+    clicks: 2
+    step: "secondary twice on a part with none of its own"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    button: 2
+    x: 40.0
+    clicks: 1
+  )
+  deviceFrame(
+    step: "middle down"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  log(
+    "middle {input.pointer.middle.down} {input.pointer.middle.pressed}, primary {input.pointer.down}"
+  )
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchUp
+    button: 2
+    x: 40.0
+    clicks: 1
+  )
+  deviceFrame(
+    step: "middle up"
+    input: input
+    world: world
+    uiSystems: uiSystems
+  )
+  log("middle {input.pointer.middle.down} released {input.pointer.middle.released}")
+
+  # the world's view: a press on the UI is not its own, one on open ground is
+  var captures: UiCaptures = createUiCaptures()
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchDown
+    button: 3
+    x: 350.0
+    clicks: 1
+  )
+  let closedDown: Bool = Gpu2d.pollClose()
+  let nothing: UiHit = capturePress(
+    captures: captures
+    pointerId: pointerIdSecondary
+    walk: UiHitWalk {
+      x: 0.0
+      y: 0.0
+      skip: noEntity()
+      at: -1
+      hit: {}
+      outside: {}
+    }
+  )
+  feedWorldInput(captures: captures)
+  let held: WorldPointer = worldPointer(captures: captures, pointerId: pointerIdSecondary)
+  log(
+    "world secondary {held.down} {held.pressed}, primary {worldPointer(
+      captures: captures
+      pointerId: pointerIdMouse
+    ).down}, claimed {uiClaimsTouch(captures: captures, touchId: pointerIdSecondary)}"
+  )
+  button(
+    kind: Gpu2dSimulatedInput.simulatedTouchUp
+    button: 3
+    x: 350.0
+    clicks: 1
+  )
+  let closedUp: Bool = Gpu2d.pollClose()
+  captureRelease(captures: captures, pointerId: pointerIdSecondary)
+  feedWorldInput(captures: captures)
+  log(
+    "world secondary let go {worldPointer(captures: captures, pointerId: pointerIdSecondary).released}"
+  )
+
+  var previous: UiPointerState = createUiInput().pointer
+  controlFrame(
+    step: "control press"
+    input: input
+    previous: previous
+    down: true
+    control: true
+  )
+  controlFrame(
+    step: "control let go first"
+    input: input
+    previous: previous
+    down: true
+    control: false
+  )
+  controlFrame(
+    step: "then the button"
+    input: input
+    previous: previous
+    down: false
+    control: false
+  )
+  controlFrame(
+    step: "a plain press"
+    input: input
+    previous: previous
+    down: true
+    control: false
+  )
+  controlFrame(
+    step: "control pressed while it is held"
+    input: input
+    previous: previous
+    down: true
+    control: true
+  )
+
+  fingerFrame(
+    step: "finger up"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    down: false
+    seconds: 9.0
+  )
+  let stepSeconds: List(Float64) = { 10.0, 10.3, 10.55, 10.8 }
+  loop let seconds: copy Float64 in stepSeconds {
+    fingerFrame(
+      step: "finger held {seconds}"
+      input: input
+      world: world
+      uiSystems: uiSystems
+      x: 50.0
+      down: true
+      seconds: seconds
+    )
+  }
+  fingerFrame(
+    step: "finger lifted"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    down: false
+    seconds: 11.0
+  )
+  fingerFrame(
+    step: "a tap"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    down: true
+    seconds: 12.0
+  )
+  fingerFrame(
+    step: "a tap, up"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    down: false
+    seconds: 12.1
+  )
+  fingerFrame(
+    step: "a finger that moves"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 50.0
+    down: true
+    seconds: 13.0
+  )
+  fingerFrame(
+    step: "moved"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 65.0
+    down: true
+    seconds: 13.2
+  )
+  fingerFrame(
+    step: "and held"
+    input: input
+    world: world
+    uiSystems: uiSystems
+    x: 65.0
+    down: true
+    seconds: 14.0
+  )
+  log("escape quits {Gpu2d.escapeQuits()}")
+  Gpu2d.setEscapeQuits(on: false)
+  log("escape quits {Gpu2d.escapeQuits()}")
+}

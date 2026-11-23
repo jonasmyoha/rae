@@ -4,6 +4,21 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.46, 2026-11-24: pointer buttons, double clicks and menus
+
+- `Gpu2d.buttonDown/Pressed/Released/Clicks(button:)` for the primary, middle and secondary button;
+  `UiPointerState` has `clicks`, `middle` and `secondary`; `UiAction.clicks`.
+- An `OnClick`'s `actionIdDouble` and `actionIdTriple` are sent now (nothing sent them before), by the
+  system's double-click interval; the first click's `actionId` is sent at once. `maxDelayMs` is not
+  read. `OnSecondaryClick`: the right button, Control-click on macOS, a finger held still for 0.5 s.
+  In `ui/InputSystem` a Control-click on macOS is no longer a primary press.
+- `ui/LayerCapture` and `ui/WorldInput` follow the middle and the secondary button as pointers of
+  their own (`pointerIdMiddle`, `pointerIdSecondary`).
+- `ui/MenuSystem`: menus of any program (docs/ui-scene-format.md section 47). Cases 1577 and 1578,
+  check `uiMenu`.
+- `Gpu2d.setEscapeQuits(on: false)`: Escape does not close the window. A held Escape's repeats never
+  do.
+
 ## 0.4.45, 2026-11-24: operations on files
 
 - `lib/Files`: new folder, rename, duplicate, copy, move (also across disks), trash and delete, as an

@@ -1,0 +1,529 @@
+# ui/MenuSystem with scripted input: a context menu at the pointer, hover and its submenu's delay,
+# a click, a press dragged and let go, disabled rows and separators, the keys and typing, a press
+# outside, the owner's end, the place at the window's edges, a button's menu, a panel taller than
+# the window, the layer over a dialog, and Escape not quitting while it is open.
+import Gpu2d
+import Math
+import SdfText
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/Layer
+open ui/LayerCapture
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Theme
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/UiSystems
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  owner: EntityId
+}
+
+func pageText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"page\",\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Layout\":\{\"type\":\"Stack\"\},\"Children\":[\"Row\"]\},\"Row\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":300\},\"Shape\":\{\"kind\":\"Rect\",\"radius\":0\},\"OnClick\":\{\"actionId\":\"row.select\",\"label\":\"Select\"\},\"OnSecondaryClick\":\{\"actionId\":\"row.menu\",\"label\":\"Show the menu\"\}\}\}\}"
+}
+
+func items() ret List(MenuItem) {
+  ret List(MenuItem) {
+    MenuItem { id: "open", text: "Open", icon: "mat:folder", shortcut: "Cmd O" }
+    MenuItem { id: "with", text: "Open with" }
+    MenuItem { id: "editor", text: "Editor", parent: "with" }
+    MenuItem { id: "viewer", text: "Viewer", parent: "with", enabled: false }
+    MenuItem { id: "other", text: "Other...", parent: "with" }
+    MenuItem { separator: true }
+    MenuItem { id: "rename", text: "Rename", enabled: false }
+    MenuItem { id: "duplicate", text: "Duplicate" }
+    MenuItem { id: "eject", text: "Éjecter" }
+    MenuItem { id: "delete", text: "Delete", shortcut: "Cmd Backspace" }
+  }
+}
+
+func show(app: view App, step: view String) {
+  var text: String = ""
+  if app.world.menu.open is false {
+    text = " closed"
+  }
+  loop var l: Int = 0, l < app.world.menu.levels.length, ++l {
+    if let level: view MenuLevel = app.world.menu.levels.viewAt(index: l) {
+      var focused: String = "none"
+      if let item: view MenuItem = app.world.menu.request.items.viewAt(
+        index: menuItemIndex(world: app.world, level: l, row: level.focus)
+      ) {
+        focused = "{item.id}"
+      }
+      var shapes: Int = 0
+      loop let row: view EntityId in level.rows {
+        if componentHas(this: app.world.shapes, entityId: row) {
+          shapes = shapes + 1
+        }
+      }
+      text = text.concat(other: " [{level.rows.length} rows, focus {focused}, drawn {shapes}]")
+    }
+  }
+  loop var i: Int = 0, i < eventCount(MenuEvent, this: app.world.menuEvents), ++i {
+    let event: MenuEvent = eventAt(MenuEvent, this: app.world.menuEvents, i: i)
+    if event.kind is MenuEventKind.chosen {
+      text = text.concat(
+        other: " chosen {event.menuId}/{event.itemId} owner {event.owner is app.owner}"
+      )
+    } else {
+      text = text.concat(other: " event closed")
+    }
+  }
+  loop var i: Int = 0, i < eventCount(UiAction, this: app.world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: app.world.uiActions, i: i)
+    text = text.concat(other: " action {action.actionId}")
+  }
+  log("{step}:{text}")
+}
+
+func place(app: view App, index: view Int) ret String {
+  if let level: view MenuLevel = app.world.menu.levels.viewAt(index: index) {
+    ret "{Math.round(x: level.x)},{Math.round(x: level.y)} {Math.round(x: level.w)}x{Math.round(
+      x: level.h
+    )}"
+  }
+  ret "none"
+}
+
+func frame(
+  app: mod App
+  pointer: view UiPointerState
+  keys: view MenuKeys
+  wheel: copy Float
+) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.016
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: wheel
+  )
+  menuSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: keys
+  )
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func at(
+  app: view App
+  x: view Float
+  y: view Float
+  down: view Bool
+) ret UiPointerState {
+  ret uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.mouse
+  )
+}
+
+func move(app: mod App, x: view Float, y: view Float) {
+  frame(
+    app: app
+    pointer: at(
+      app: app
+      x: x
+      y: y
+      down: false
+    )
+    keys: MenuKeys {}
+    wheel: 0.0
+  )
+}
+
+func press(
+  app: mod App
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  frame(
+    app: app
+    pointer: at(
+      app: app
+      x: x
+      y: y
+      down: down
+    )
+    keys: MenuKeys {}
+    wheel: 0.0
+  )
+}
+
+func secondary(
+  app: mod App
+  x: view Float
+  y: view Float
+  pressed: view Bool
+  released: view Bool
+) {
+  var pointer: UiPointerState = at(
+    app: app
+    x: x
+    y: y
+    down: false
+  )
+  pointer.secondary = UiButtonState {
+    down: pressed
+    pressed: pressed
+    released: released
+    clicks: 1
+  }
+  frame(
+    app: app
+    pointer: pointer
+    keys: MenuKeys {}
+    wheel: 0.0
+  )
+}
+
+func key(app: mod App, keys: view MenuKeys) {
+  frame(
+    app: app
+    pointer: at(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: false
+    )
+    keys: keys
+    wheel: 0.0
+  )
+}
+
+func open(app: mod App, x: view Float, y: view Float) {
+  openMenu(
+    world: app.world
+    uiSystems: app.uiSystems
+    request: MenuRequest {
+      id: "row"
+      owner: app.owner
+      items: items()
+      x: x
+      y: y
+    }
+  )
+  move(app: app, x: x, y: y)
+}
+
+# The middle of row `row` of `level`
+func rowX(app: view App, level: view Int) ret Float {
+  if let found: view MenuLevel = app.world.menu.levels.viewAt(index: level) {
+    ret found.x + found.w * 0.5
+  }
+  ret 0.0
+}
+
+func rowY(app: view App, level: view Int, row: view Int) ret Float {
+  if let found: view MenuLevel = app.world.menu.levels.viewAt(index: level) {
+    let entityId: EntityId = found.rows.copyAtFallback(index: row, fallback: noEntity())
+    if componentHas(this: app.uiSystems.layout.computedRects, entityId: entityId) {
+      let box: view ComputedRect = componentView(
+        this: app.uiSystems.layout.computedRects
+        entityId: entityId
+      )
+      ret found.y + box.position.y + box.size.y * 0.5
+    }
+  }
+  ret 0.0
+}
+
+func hover(app: mod App, level: view Int, row: view Int) {
+  let x: Float = rowX(app: app, level: level)
+  let y: Float = rowY(app: app, level: level, row: row)
+  move(app: app, x: x, y: y)
+}
+
+func clickRow(app: mod App, level: view Int, row: view Int) {
+  let x: Float = rowX(app: app, level: level)
+  let y: Float = rowY(app: app, level: level, row: row)
+  press(
+    app: app
+    x: x
+    y: y
+    down: true
+  )
+  press(
+    app: app
+    x: x
+    y: y
+    down: false
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: pageText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    owner: noEntity()
+  }
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 300.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Row") {
+    app.owner = nodeEntityId(world: app.world, index: raw)
+  }
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+
+  # a secondary press: the program opens the menu for its action, and the press being let go where
+  # it was chooses nothing
+  secondary(
+    app: app
+    x: 50.0
+    y: 40.0
+    pressed: true
+    released: false
+  )
+  show(app: app, step: "secondary press")
+  openMenu(
+    world: app.world
+    uiSystems: app.uiSystems
+    request: MenuRequest {
+      id: "row"
+      owner: app.owner
+      items: items()
+      x: 50.0
+      y: 40.0
+    }
+  )
+  log("escape quits {Gpu2d.escapeQuits()}")
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  secondary(
+    app: app
+    x: 50.0
+    y: 40.0
+    pressed: false
+    released: true
+  )
+  show(app: app, step: "let go")
+  log("placed {place(app: app, index: 0)}")
+  hover(app: app, level: 0, row: 0)
+  show(app: app, step: "over Open")
+  hover(app: app, level: 0, row: 2)
+  show(app: app, step: "over Rename, disabled")
+  clickRow(app: app, level: 0, row: 2)
+  show(app: app, step: "a click on it")
+  hover(app: app, level: 0, row: 1)
+  show(app: app, step: "over Open with")
+  log("waiting {menuWaiting(world: app.world)}")
+  app.input.nowSeconds = app.input.nowSeconds + 0.3
+  hover(app: app, level: 0, row: 1)
+  show(app: app, step: "rested there")
+  log("submenu {place(app: app, index: 1)}")
+  hover(app: app, level: 1, row: 2)
+  show(app: app, step: "over Other in the submenu")
+  hover(app: app, level: 0, row: 0)
+  show(app: app, step: "back over Open")
+  app.input.nowSeconds = app.input.nowSeconds + 0.3
+  hover(app: app, level: 0, row: 0)
+  show(app: app, step: "rested there")
+  clickRow(app: app, level: 0, row: 1)
+  show(app: app, step: "a click on Open with")
+  clickRow(app: app, level: 1, row: 1)
+  show(app: app, step: "a click on Viewer, disabled")
+  clickRow(app: app, level: 1, row: 0)
+  show(app: app, step: "a click on Editor")
+  log("escape quits {Gpu2d.escapeQuits()}")
+  move(app: app, x: 10.0, y: 10.0)
+  show(app: app, step: "the frame after")
+
+  # a press dragged to a row and let go
+  open(app: app, x: 50.0, y: 40.0)
+  secondary(
+    app: app
+    x: rowX(app: app, level: 0)
+    y: rowY(app: app, level: 0, row: 5)
+    pressed: false
+    released: true
+  )
+  show(app: app, step: "let go over Delete")
+
+  # keys
+  open(app: app, x: 50.0, y: 40.0)
+  var captures: UiCaptures = createUiCaptures()
+  feedUiTextFocus(captures: captures, world: app.world)
+  log("keys are the UI's {uiClaimsKeys(captures: captures)}")
+  key(app: app, keys: MenuKeys { down: true })
+  key(app: app, keys: MenuKeys { down: true })
+  show(app: app, step: "down twice")
+  key(app: app, keys: MenuKeys { right: true })
+  show(app: app, step: "right")
+  key(app: app, keys: MenuKeys { down: true })
+  show(app: app, step: "down past Viewer")
+  key(app: app, keys: MenuKeys { left: true })
+  show(app: app, step: "left")
+  key(app: app, keys: MenuKeys { down: true })
+  show(app: app, step: "down past Rename")
+  key(app: app, keys: MenuKeys { end: true })
+  show(app: app, step: "End")
+  key(app: app, keys: MenuKeys { down: true })
+  show(app: app, step: "down, around")
+  key(app: app, keys: MenuKeys { up: true })
+  show(app: app, step: "up, around")
+  key(app: app, keys: MenuKeys { home: true })
+  show(app: app, step: "Home")
+  key(app: app, keys: MenuKeys { text: "e" })
+  show(app: app, step: "typed e, an accent does not count")
+  key(app: app, keys: MenuKeys { text: "d" })
+  show(app: app, step: "typed ed, found nowhere")
+  app.input.nowSeconds = app.input.nowSeconds + 1.5
+  key(app: app, keys: MenuKeys { text: "D" })
+  show(app: app, step: "typed D after a pause")
+  key(app: app, keys: MenuKeys { text: "u" })
+  show(app: app, step: "typed Du")
+  key(app: app, keys: MenuKeys { home: true })
+  key(app: app, keys: MenuKeys { down: true })
+  key(app: app, keys: MenuKeys { choose: true })
+  show(app: app, step: "Return on Open with")
+  key(app: app, keys: MenuKeys { escape: true })
+  show(app: app, step: "Escape")
+  key(app: app, keys: MenuKeys { escape: true })
+  show(app: app, step: "Escape again")
+
+  # a press outside: it only closes the menu
+  open(app: app, x: 50.0, y: 40.0)
+  press(
+    app: app
+    x: 390.0
+    y: 290.0
+    down: true
+  )
+  show(app: app, step: "a press outside")
+  press(
+    app: app
+    x: 390.0
+    y: 290.0
+    down: false
+  )
+  show(app: app, step: "let go there")
+  open(app: app, x: 50.0, y: 40.0)
+  secondary(
+    app: app
+    x: 390.0
+    y: 290.0
+    pressed: true
+    released: false
+  )
+  show(app: app, step: "a secondary press outside")
+
+  # the place: at the far corner it opens up and to the left
+  open(app: app, x: 380.0, y: 280.0)
+  log("at the corner {place(app: app, index: 0)}")
+  key(app: app, keys: MenuKeys { down: true })
+  key(app: app, keys: MenuKeys { down: true })
+  key(app: app, keys: MenuKeys { right: true })
+  log("its submenu {place(app: app, index: 1)}")
+  openMenu(
+    world: app.world
+    uiSystems: app.uiSystems
+    request: MenuRequest {
+      id: "button"
+      items: items()
+      x: 20.0
+      y: 10.0
+      w: 80.0
+      h: 24.0
+      touch: true
+    }
+  )
+  move(app: app, x: 30.0, y: 20.0)
+  show(app: app, step: "a button's menu instead, for a finger")
+  log("under the button {place(app: app, index: 0)}")
+
+  # taller than the window: it slides to the focused row, and by the wheel
+  var many: List(MenuItem) = {}
+  loop var i: Int = 0, i < 20, ++i {
+    many.add(value: MenuItem { id: "item{i}", text: "Item {i}" })
+  }
+  openMenu(
+    world: app.world
+    uiSystems: app.uiSystems
+    request: MenuRequest { id: "tall", items: own many, x: 100.0, y: 100.0 }
+  )
+  move(app: app, x: 100.0, y: 100.0)
+  log("tall {place(app: app, index: 0)}")
+  key(app: app, keys: MenuKeys { end: true })
+  move(app: app, x: 100.0, y: 100.0)
+  log("tall at its end {place(app: app, index: 0)}")
+  frame(
+    app: app
+    pointer: at(
+      app: app
+      x: 100.0
+      y: 100.0
+      down: false
+    )
+    keys: MenuKeys {}
+    wheel: 1.0
+  )
+  log("tall after the wheel {place(app: app, index: 0)}")
+
+  # on its owner's layer when that is above popovers
+  open(app: app, x: 50.0, y: 40.0)
+  if let level: view MenuLevel = app.world.menu.levels.viewAt(index: 0) {
+    log("layer {componentView(this: app.world.layerTags, entityId: level.panel).id}")
+  }
+  setLayerById(world: app.world, entityId: root, id: "dialog")
+  open(app: app, x: 50.0, y: 40.0)
+  if let level: view MenuLevel = app.world.menu.levels.viewAt(index: 0) {
+    log("layer {componentView(this: app.world.layerTags, entityId: level.panel).id}")
+  }
+  clickRow(app: app, level: 0, row: 0)
+  show(app: app, step: "a click on Open over the dialog")
+
+  # the owner's end
+  open(app: app, x: 50.0, y: 40.0)
+  let owner: EntityId = app.owner
+  destroyEntitySubtree(world: app.world, uiSystems: app.uiSystems, root: owner)
+  move(app: app, x: 60.0, y: 40.0)
+  show(app: app, step: "the owner gone")
+  var rows: Int = componentCount(this: app.world.menuRows)
+  log("rows left {rows}, escape quits {Gpu2d.escapeQuits()}")
+}

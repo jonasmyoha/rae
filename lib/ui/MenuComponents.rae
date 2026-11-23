@@ -1,0 +1,102 @@
+# The data of a menu (ui/MenuSystem): its items, the runtime component of its rows, and the one
+# open menu of a UiWorld, a resource on it.
+open ecs/Entity
+open ui/Components
+
+# One line of a menu. `parent` is the id of the item whose submenu it is in ("" for the menu
+# itself; one level only). A separator has no id. `icon` is a Sprite's texture key ("mat:delete",
+# or a picture's), `shortcut` the text at the line's end (the menu does not read the keys).
+type MenuItem {
+  id: String = ""
+  text: String = ""
+  icon: String = ""
+  shortcut: String = ""
+  enabled: Bool = true
+  separator: Bool = false
+  parent: String = ""
+}
+
+# What openMenu is told. The menu goes below and to the right of the anchor rectangle (x, y, w, h
+# in layout units; w and h 0 for a point, such as the pointer), or above and to the left where it
+# would not fit. `owner` is the node it was opened for (a row, a button), given back in its events;
+# the menu closes when that node is destroyed, and is on its layer when that is above popovers (a
+# dialog). `touch` makes the rows tall enough for a finger.
+type MenuRequest {
+  id: String = ""
+  owner: EntityId = noEntity()
+  items: List(MenuItem) = {}
+  x: Float = 0.0
+  y: Float = 0.0
+  w: Float = 0.0
+  h: Float = 0.0
+  touch: Bool = false
+}
+
+enum MenuEventKind { chosen, closed }
+
+# An item was chosen, or the menu closed (after a choice too)
+type MenuEvent {
+  kind: MenuEventKind
+  menuId: String
+  itemId: String = ""
+  owner: EntityId
+}
+
+# Runtime: a row of the open menu
+type MenuRow {
+  # 0 the menu, 1 its submenu
+  level: Int = 0
+  # Its place in the level's rows, and its item's in the menu's items
+  row: Int = 0
+  item: Int = 0
+  # The shape its bundle gives it, drawn while it is focused only
+  focusShape: Shape
+  # Its icons' own color slots, in the order of its children
+  tints: List(String) = {}
+}
+
+# The menu's panel or its submenu's
+type MenuLevel {
+  panel: EntityId
+  # The row of level 0 this submenu belongs to (-1 for the menu itself)
+  parentRow: Int = -1
+  # The rows, without the separators
+  rows: List(EntityId) = {}
+  # The focused row (-1 none)
+  focus: Int = -1
+  # The width is set from the rows, then the place from the width (menuPlaceSystem)
+  sized: Bool = false
+  # Where it is, in layout units
+  x: Float = 0.0
+  y: Float = 0.0
+  w: Float = 0.0
+  h: Float = 0.0
+  # A panel taller than the window: how far it is slid up
+  slide: Float = 0.0
+}
+
+# The open menu of a world
+type UiMenu {
+  open: Bool = false
+  # Opened since the last menuSystem: this frame's press is the one that opened it
+  justOpened: Bool = false
+  request: MenuRequest = {}
+  levels: List(MenuLevel) = {}
+  # Where the pointer was when it opened and at the last step, and whether it moved away since
+  openX: Float = 0.0
+  openY: Float = 0.0
+  pointerX: Float = 0.0
+  pointerY: Float = 0.0
+  moved: Bool = false
+  # Since when the pointer is on the row it is on (the submenu's delay)
+  hoverSeconds: Float64 = 0.0
+  hoverRow: Int = -1
+  waiting: Bool = false
+  # What was typed to find a row, and when
+  typed: String = ""
+  typedSeconds: Float64 = 0.0
+  # Whether Escape quit the program before the menu took the key
+  escapeQuit: Bool = false
+  # Events made since the last menuSystem (it sends them)
+  pending: List(MenuEvent) = {}
+}

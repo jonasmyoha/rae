@@ -80,6 +80,7 @@ func isRuntimeTable(name: view String) ret Bool {
     "StyleOverride"
     "BundleRefs"
     "SceneSource"
+    "MenuRow"
   ]
   var i: Int = 0
   loop i < runtime.length() {
@@ -268,7 +269,9 @@ func applyComponentByName(
       table
     ) is not "ListViewData" and typeName(table) is not "ListViewRowKey" and typeName(table) is not "ListChange" and typeName(
       table
-    ) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(table) is not "SceneSource" {
+    ) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(table) is not "SceneSource" and typeName(
+      table
+    ) is not "MenuRow" {
       # `OverflowPolicy` is accepted as well as the authored `Overflow`
       if name is authoredNameOf(typeName: typeName(table)) or name is typeName(table) {
         decodeComponent(
@@ -546,6 +549,15 @@ func applyAuthoredFixups(
     reportUnknownMotion(
       world: world
       name: motion
+      sceneId: sceneId
+      nodeId: nodeId
+    )
+    ret
+  }
+  if name is "OnSecondaryClick" {
+    reportMissingSecondaryLabel(
+      world: world
+      entityId: entityId
       sceneId: sceneId
       nodeId: nodeId
     )

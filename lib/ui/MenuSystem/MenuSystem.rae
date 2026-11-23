@@ -1,0 +1,746 @@
+# ui/MenuSystem — a menu of any program: a context menu, a button's menu
+# (docs/ui-scene-format.md "Menus").
+#
+#   openMenu(world: world, uiSystems: uiSystems, request: MenuRequest {
+#     id: "row"
+#     owner: rowEntityId
+#     items: {
+#       MenuItem { id: "open", text: "Open", icon: "mat:folder", shortcut: "Cmd O" }
+#       MenuItem { separator: true }
+#       MenuItem { id: "delete", text: "Delete", enabled: false }
+#     }
+#     x: input.pointer.x
+#     y: input.pointer.y
+#   })
+#
+# Once a frame, after updateUiInput and before the program reads its actions:
+#
+#   menuSystem(world: world, uiSystems: uiSystems, input: input, keys: menuKeysFromDevice())
+#   loop var i: Int = 0, i < eventCount(MenuEvent, this: world.menuEvents), ++i { ... }
+#
+# menuPlaceSystem runs after the layout (app3d/UiShell's two pipelines call it). A UiWorld has one
+# menu open at a time; opening another closes it. While one is open, Escape does not quit the
+# program, the keys are the UI's (ui/LayerCapture), and a program does not act on keys itself
+# (world.menu.open). It closes by a choice, Escape, a press outside it (a primary press does
+# nothing else; another button's goes on to what is under it), its owner's end, or closeMenu.
+#
+# A press of the button that opened it, dragged onto a row and let go there, chooses the row.
+# The items are nodes: their look is the bundles menuPanel, menuRow, menuIcon, menuText,
+# menuShortcut, menuSeparator and menuLine (ui/BuiltInBundles), which a theme can define itself.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open text/NameOrder
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/Layer
+open ui/MenuComponents
+open ui/Scene
+open ui/SceneInstance
+open ui/UiSystems
+
+# A row's height, for a pointer and for a finger
+const menuRowHeight: Float = 28.0
+
+const menuTouchRowHeight: Float = 44.0
+
+# How long the pointer rests on a row before its submenu opens, or another row's closes
+const submenuDelaySeconds: Float64 = 0.2
+
+# How far the pointer moves from where the menu opened before letting the button go chooses
+const menuDragPoints: Float = 5.0
+
+# The pause after which typing starts a new search
+const menuTypeSeconds: Float64 = 1.0
+
+# The action a row's OnClick sends (menuSystem answers it; a voice layer may send it too)
+const menuItemActionId: String = "menu.item"
+
+# Does the item at `index` have a submenu?
+func menuItemHasSubmenu(items: view List(MenuItem), index: view Int) ret Bool {
+  if let item: view MenuItem = items.viewAt(index: index) {
+    if item.separator or item.id.length() is 0 or item.parent.length() > 0 {
+      ret false
+    }
+    loop let other: view MenuItem in items {
+      if other.parent is item.id {
+        ret true
+      }
+    }
+  }
+  ret false
+}
+
+# Open the menu `request`. Coordinates are layout units (UiInput's pointer).
+func openMenu(world: mod UiWorld, uiSystems: mod UiSystems, request: own MenuRequest) {
+  closeMenu(world: world, uiSystems: uiSystems)
+  let pending: List(MenuEvent) = world.menu.pending
+  world.menu = UiMenu {
+    open: true
+    justOpened: true
+    openX: request.x
+    openY: request.y
+    pointerX: request.x
+    pointerY: request.y
+    request: own request
+    escapeQuit: Gpu2d.escapeQuits()
+    pending: pending
+  }
+  Gpu2d.setEscapeQuits(on: false)
+  openMenuLevel(
+    world: world
+    uiSystems: uiSystems
+    parentRow: -1
+    parentItem: ""
+  )
+}
+
+# Close the open menu, if there is one; its event is sent by the next menuSystem
+func closeMenu(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.menu.open is false {
+    ret
+  }
+  world.menu.open = false
+  loop var i: Int = world.menu.levels.length - 1, i >= 0, --i {
+    var panel: EntityId = noEntity()
+    if let level: view MenuLevel = world.menu.levels.viewAt(index: i) {
+      panel = level.panel
+    }
+    if isAlive(world: world, entityId: panel) {
+      destroyEntitySubtree(world: world, uiSystems: uiSystems, root: panel)
+    }
+  }
+  world.menu.levels.clear()
+  Gpu2d.setEscapeQuits(on: world.menu.escapeQuit)
+  sendMenuEvent(world: world, kind: MenuEventKind.closed, itemId: "")
+}
+
+func sendMenuEvent(world: mod UiWorld, kind: copy MenuEventKind, itemId: view String) {
+  let event: MenuEvent = {
+    kind: kind
+    menuId: "{world.menu.request.id}"
+    itemId: "{itemId}"
+    owner: world.menu.request.owner
+  }
+  world.menu.pending.add(value: event)
+}
+
+# The layer the menu goes on: popovers, or its owner's own layer when that is above them
+func menuLayerId(world: view UiWorld, uiSystems: view UiSystems) ret String {
+  let owner: EntityId = world.menu.request.owner
+  if isNone(this: owner) is false and isAlive(world: world, entityId: owner) {
+    let root: EntityId = hitRootOf(world: world, uiSystems: uiSystems, entityId: owner)
+    if tagNamesLayer(world: world, entityId: root) {
+      let id: String = "{componentView(this: world.layerTags, entityId: root).id}"
+      if tagLayerOrderOf(name: id) > tagLayerOrderOf(name: "popover") {
+        ret id
+      }
+    }
+  }
+  ret "popover"
+}
+
+# The panel of the menu (parentRow -1) or of the submenu of the row `parentRow`, whose item is
+# `parentItem`, with its rows
+func openMenuLevel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  parentRow: view Int
+  parentItem: view String
+) {
+  let panel: EntityId = mountSubScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"menuPanel\",\"root\":\"MenuPanel\",\"nodes\":\{\"MenuPanel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":0\},\"bundles\":[\"menuPanel\"]\}\}\}"
+    )
+    overrides: emptyOverrides()
+  )
+  if isNone(this: panel) {
+    ret
+  }
+  let layerId: String = menuLayerId(world: world, uiSystems: uiSystems)
+  let depth: Int = world.menu.levels.length
+  componentSet(
+    this: world.layerTags
+    entityId: panel
+    data: LayerTag { id: layerId, z: 1000 + depth }
+  )
+  var level: MenuLevel = { panel: panel, parentRow: parentRow }
+  let items: List(MenuItem) = world.menu.request.items
+  var icons: Bool = false
+  loop let item: view MenuItem in items {
+    if item.parent is parentItem and item.icon.length() > 0 {
+      icons = true
+    }
+  }
+  loop var i: Int = 0, i < items.length, ++i {
+    if let item: view MenuItem = items.viewAt(index: i) {
+      if item.parent is parentItem {
+        let node: EntityId = mountMenuItem(
+          world: world
+          uiSystems: uiSystems
+          item: item
+          icons: icons
+          submenu: menuItemHasSubmenu(items: items, index: i)
+        )
+        if isNone(this: node) is false {
+          setParent(
+            parents: uiSystems.hierarchy.parents
+            childrens: world.childrens
+            child: node
+            parent: panel
+          )
+          if item.separator is false {
+            let tints: List(String) = menuRowTints(world: world, rowEntityId: node)
+            var focusShape: Shape = Shape.default()
+            if componentHas(this: world.shapes, entityId: node) {
+              if let drawn: Shape = componentCopy(this: world.shapes, entityId: node) {
+                focusShape = drawn
+              }
+              componentRemove(this: world.shapes, entityId: node)
+            }
+            componentSet(
+              this: world.menuRows
+              entityId: node
+              data: MenuRow {
+                level: depth
+                row: level.rows.length
+                item: i
+                focusShape: focusShape
+                tints: tints
+              }
+            )
+            level.rows.add(value: node)
+          }
+        }
+      }
+    }
+  }
+  world.menu.levels.add(value: own level)
+}
+
+# The node of one item, not yet in its panel
+func mountMenuItem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  item: view MenuItem
+  icons: view Bool
+  submenu: view Bool
+) ret EntityId {
+  let head: String = "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"menuItem\",\"root\":\"MenuItem\",\"nodes\":\{"
+  var overrides: List(SceneOverride) = emptyOverrides()
+  if item.separator {
+    ret mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: parseScene(
+        source: "{head}\"MenuItem\":\{\"bundles\":[\"menuSeparator\"],\"Children\":[\"MenuLine\"]\},\"MenuLine\":\{\"bundles\":[\"menuLine\"]\}\}\}"
+      )
+      overrides: overrides
+    )
+  }
+  var children: String = "\"MenuText\",\"MenuGap\""
+  var nodes: String = ",\"MenuText\":\{\"bundles\":[\"menuText\"]\},\"MenuGap\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":16,\"h\":1\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\}"
+  addTextOverride(list: overrides, nodeId: "MenuText", value: "{item.text}")
+  if icons {
+    children = "\"MenuIcon\",{children}"
+    nodes = "{nodes},\"MenuIcon\":\{\"bundles\":[\"menuIcon\"]\}"
+    addSpriteOverride(list: overrides, nodeId: "MenuIcon", value: "{item.icon}")
+  }
+  if item.shortcut.length() > 0 {
+    children = "{children},\"MenuShortcut\""
+    nodes = "{nodes},\"MenuShortcut\":\{\"bundles\":[\"menuShortcut\"]\}"
+    addTextOverride(list: overrides, nodeId: "MenuShortcut", value: "{item.shortcut}")
+  }
+  if submenu {
+    children = "{children},\"MenuArrow\""
+    nodes = "{nodes},\"MenuArrow\":\{\"bundles\":[\"menuIcon\"]\}"
+    addSpriteOverride(list: overrides, nodeId: "MenuArrow", value: "mat:chevron_right")
+  }
+  var height: Float = menuRowHeight
+  if world.menu.request.touch {
+    height = menuTouchRowHeight
+  }
+  var opacity: String = "1"
+  if item.enabled is false {
+    opacity = "0.4"
+  }
+  addOverride(
+    list: overrides
+    nodeId: "MenuItem"
+    componentName: "OnClick"
+    fieldName: "label"
+    value: "{item.text}"
+  )
+  ret mountSubScene(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(
+      source: "{head}\"MenuItem\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":{height}\},\"bundles\":[\"menuRow\"],\"Opacity\":\{\"value\":{opacity}\},\"OnClick\":\{\"actionId\":\"{menuItemActionId}\",\"label\":\"Menu item\"\},\"Children\":[{children}]\}{nodes}\}\}"
+    )
+    overrides: overrides
+  )
+}
+
+# Close the submenu, if one is open
+func closeSubmenu(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.menu.levels.length < 2 {
+    ret
+  }
+  var panel: EntityId = noEntity()
+  if let level: view MenuLevel = world.menu.levels.viewAt(index: 1) {
+    panel = level.panel
+  }
+  world.menu.levels.removeAt(index: 1)
+  destroyEntitySubtree(world: world, uiSystems: uiSystems, root: panel)
+}
+
+func menuFocusOf(world: view UiWorld, level: view Int) ret Int {
+  if let found: view MenuLevel = world.menu.levels.viewAt(index: level) {
+    ret found.focus
+  }
+  ret -1
+}
+
+# The index of the item of row `row` of `level` (-1 none)
+func menuItemIndex(world: view UiWorld, level: view Int, row: view Int) ret Int {
+  if let found: view MenuLevel = world.menu.levels.viewAt(index: level) {
+    if row >= 0 and row < found.rows.length {
+      let entityId: EntityId = found.rows.copyAtFallback(index: row, fallback: noEntity())
+      if componentHas(this: world.menuRows, entityId: entityId) {
+        ret componentView(this: world.menuRows, entityId: entityId).item
+      }
+    }
+  }
+  ret -1
+}
+
+func menuRowEnabled(world: view UiWorld, level: view Int, row: view Int) ret Bool {
+  if let item: view MenuItem = world.menu.request.items.viewAt(
+    index: menuItemIndex(world: world, level: level, row: row)
+  ) {
+    ret item.enabled
+  }
+  ret false
+}
+
+# Focus row `row` of `level` (-1 none): its shape is drawn, the one before has none
+func focusMenuRow(world: mod UiWorld, level: view Int, row: view Int) {
+  let before: Int = menuFocusOf(world: world, level: level)
+  if before is row {
+    ret
+  }
+  var rows: List(EntityId) = {}
+  if let found: mod MenuLevel = world.menu.levels.modAt(index: level) {
+    found.focus = row
+    rows = found.rows
+  }
+  let old: EntityId = rows.copyAtFallback(index: before, fallback: noEntity())
+  if before >= 0 and isNone(this: old) is false {
+    componentRemove(this: world.shapes, entityId: old)
+    colorMenuRow(world: world, rowEntityId: old, focused: false)
+  }
+  let new: EntityId = rows.copyAtFallback(index: row, fallback: noEntity())
+  if row >= 0 and componentHas(this: world.menuRows, entityId: new) {
+    let shape: Shape = componentView(this: world.menuRows, entityId: new).focusShape
+    componentSet(this: world.shapes, entityId: new, data: shape)
+    colorMenuRow(world: world, rowEntityId: new, focused: true)
+  }
+}
+
+func menuRowChildren(world: view UiWorld, rowEntityId: view EntityId) ret List(EntityId) {
+  if let children: Children = componentCopy(this: world.childrens, entityId: rowEntityId) {
+    ret children.ids
+  }
+  ret List(EntityId) {}
+}
+
+# The color slots of a new row's icons, "" for its other parts; an item with no icon where others
+# have one keeps the space and draws none
+func menuRowTints(world: mod UiWorld, rowEntityId: view EntityId) ret List(String) {
+  var tints: List(String) = {}
+  let children: List(EntityId) = menuRowChildren(world: world, rowEntityId: rowEntityId)
+  loop let child: view EntityId in children {
+    var slot: String = ""
+    var empty: Bool = false
+    if componentHas(this: world.sprites, entityId: child) {
+      let sprite: view Sprite = componentView(this: world.sprites, entityId: child)
+      slot = "{sprite.tintSlot}"
+      empty = sprite.textureKey.length() is 0
+    }
+    if empty {
+      componentRemove(this: world.sprites, entityId: child)
+    }
+    tints.add(value: slot)
+  }
+  ret tints
+}
+
+# The colors of a row's text and icons: accentText while it is focused, else their own
+func colorMenuRow(world: mod UiWorld, rowEntityId: view EntityId, focused: view Bool) {
+  let children: List(EntityId) = menuRowChildren(world: world, rowEntityId: rowEntityId)
+  var tints: List(String) = {}
+  if let row: MenuRow = componentCopy(this: world.menuRows, entityId: rowEntityId) {
+    tints = row.tints
+  }
+  loop var i: Int = 0, i < children.length, ++i {
+    let child: EntityId = children.copyAtFallback(index: i, fallback: noEntity())
+    if componentHas(this: world.texts, entityId: child) and componentHas(
+      this: world.styleOverrides
+      entityId: child
+    ) {
+      let style: mod StyleOverride = componentMod(this: world.styleOverrides, entityId: child)
+      style.hasColor = focused
+      style.colorSlot = ""
+      if focused {
+        style.colorSlot = "accentText"
+      }
+    }
+    if componentHas(this: world.sprites, entityId: child) {
+      let sprite: mod Sprite = componentMod(this: world.sprites, entityId: child)
+      sprite.tintSlot = tints.copyAtFallback(index: i, fallback: "")
+      if focused {
+        sprite.tintSlot = "accentText"
+      }
+    }
+  }
+}
+
+# Open the submenu of row `row` of the menu, with its first row focused when `focusFirst`
+func openSubmenu(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  row: view Int
+  focusFirst: view Bool
+) {
+  let item: Int = menuItemIndex(world: world, level: 0, row: row)
+  if menuItemHasSubmenu(items: world.menu.request.items, index: item) is false or menuRowEnabled(
+    world: world
+    level: 0
+    row: row
+  ) is false {
+    ret
+  }
+  if submenuRow(world: world) is not row {
+    closeSubmenu(world: world, uiSystems: uiSystems)
+    var parentItem: String = ""
+    if let found: view MenuItem = world.menu.request.items.viewAt(index: item) {
+      parentItem = "{found.id}"
+    }
+    focusMenuRow(world: world, level: 0, row: row)
+    openMenuLevel(
+      world: world
+      uiSystems: uiSystems
+      parentRow: row
+      parentItem: parentItem
+    )
+  }
+  if focusFirst {
+    focusMenuRow(
+      world: world
+      level: 1
+      row: nextMenuRow(
+        world: world
+        level: 1
+        from: -1
+        step: 1
+      )
+    )
+  }
+}
+
+# The row of the menu whose submenu is open (-1 none)
+func submenuRow(world: view UiWorld) ret Int {
+  if let level: view MenuLevel = world.menu.levels.viewAt(index: 1) {
+    ret level.parentRow
+  }
+  ret -1
+}
+
+# The next enabled row of `level` from `from` in the direction `step`, around the ends (-1 when
+# there is none)
+func nextMenuRow(
+  world: view UiWorld
+  level: view Int
+  from: view Int
+  step: view Int
+) ret Int {
+  var count: Int = 0
+  if let found: view MenuLevel = world.menu.levels.viewAt(index: level) {
+    count = found.rows.length
+  }
+  var at: Int = from
+  if from < 0 and step < 0 {
+    at = count
+  }
+  loop var tried: Int = 0, tried < count, ++tried {
+    at = at + step
+    if at >= count {
+      at = 0
+    }
+    if at < 0 {
+      at = count - 1
+    }
+    if menuRowEnabled(world: world, level: level, row: at) {
+      ret at
+    }
+  }
+  ret -1
+}
+
+# Choose a row: its submenu opens, or its event is sent and the menu closes. A disabled row does
+# nothing.
+func chooseMenuRow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  level: view Int
+  row: view Int
+  byKey: view Bool
+) {
+  if menuRowEnabled(world: world, level: level, row: row) is false {
+    ret
+  }
+  let index: Int = menuItemIndex(world: world, level: level, row: row)
+  if level is 0 and menuItemHasSubmenu(items: world.menu.request.items, index: index) {
+    openSubmenu(
+      world: world
+      uiSystems: uiSystems
+      row: row
+      focusFirst: byKey
+    )
+    ret
+  }
+  var itemId: String = ""
+  if let item: view MenuItem = world.menu.request.items.viewAt(index: index) {
+    itemId = "{item.id}"
+  }
+  sendMenuEvent(world: world, kind: MenuEventKind.chosen, itemId: itemId)
+  closeMenu(world: world, uiSystems: uiSystems)
+}
+
+# One frame of the open menu (and the events of it, or of one closed since the last frame)
+func menuSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  keys: view MenuKeys
+) {
+  frameAdvance(this: world.menuEvents)
+  if world.menu.open {
+    stepMenu(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      keys: keys
+    )
+  }
+  loop let event: view MenuEvent in world.menu.pending {
+    let sent: MenuEvent = event
+    eventSend(this: world.menuEvents, value: own sent)
+  }
+  world.menu.pending.clear()
+}
+
+func stepMenu(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  keys: view MenuKeys
+) {
+  let owner: EntityId = world.menu.request.owner
+  if isNone(this: owner) is false and isAlive(world: world, entityId: owner) is false {
+    closeMenu(world: world, uiSystems: uiSystems)
+    ret
+  }
+  let justOpened: Bool = world.menu.justOpened
+  world.menu.justOpened = false
+  stepMenuPointer(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    justOpened: justOpened
+  )
+  if world.menu.open and justOpened is false {
+    stepMenuKeys(
+      world: world
+      uiSystems: uiSystems
+      keys: keys
+      now: input.nowSeconds
+    )
+  }
+}
+
+func stepMenuPointer(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  justOpened: view Bool
+) {
+  let x: Float = input.pointer.x
+  let y: Float = input.pointer.y
+  # a click on a row, by the pointer, another finger or a voice layer
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if componentHas(this: world.menuRows, entityId: action.entityId) {
+      let source: view MenuRow = componentView(this: world.menuRows, entityId: action.entityId)
+      let clicked: MenuRow = source
+      chooseMenuRow(
+        world: world
+        uiSystems: uiSystems
+        level: clicked.level
+        row: clicked.row
+        byKey: false
+      )
+      ret
+    }
+  }
+  let anyPress: Bool = input.pointer.pressed or input.pointer.middle.pressed or input.pointer.secondary.pressed
+  if anyPress and justOpened is false and menuContains(world: world, x: x, y: y) is false {
+    closeMenu(world: world, uiSystems: uiSystems)
+    if input.pointer.pressed {
+      suppressUiPress(input: input, world: world)
+      input.pointer.pressed = false
+    }
+    ret
+  }
+  let openedX: Float = x - world.menu.openX
+  let openedY: Float = y - world.menu.openY
+  let reach: Float = uiUnitsFromPoints(input: input, points: menuDragPoints)
+  if openedX * openedX + openedY * openedY > reach * reach {
+    world.menu.moved = true
+  }
+  if input.wheel is not 0.0 and menuContains(world: world, x: x, y: y) {
+    slideMenu(
+      world: world
+      x: x
+      y: y
+      by: uiUnitsFromPoints(input: input, points: menuRowHeight) * input.wheel
+    )
+  }
+  # the row under the pointer
+  var level: Int = -1
+  var row: Int = -1
+  if componentHas(this: world.menuRows, entityId: input.hoveredEntityId) {
+    let hovered: view MenuRow = componentView(this: world.menuRows, entityId: input.hoveredEntityId)
+    level = hovered.level
+    row = hovered.row
+  }
+  if input.pointer.secondary.released and world.menu.moved and row >= 0 {
+    chooseMenuRow(
+      world: world
+      uiSystems: uiSystems
+      level: level
+      row: row
+      byKey: false
+    )
+    ret
+  }
+  let movedNow: Bool = x is not world.menu.pointerX or y is not world.menu.pointerY
+  world.menu.pointerX = x
+  world.menu.pointerY = y
+  if movedNow {
+    stepMenuHover(
+      world: world
+      uiSystems: uiSystems
+      level: level
+      row: row
+      now: input.nowSeconds
+    )
+  }
+  # the pointer has rested long enough: the row's submenu, or none
+  if world.menu.waiting and input.nowSeconds - world.menu.hoverSeconds >= submenuDelaySeconds {
+    world.menu.waiting = false
+    if world.menu.hoverRow is not submenuRow(world: world) {
+      closeSubmenu(world: world, uiSystems: uiSystems)
+    }
+    openSubmenu(
+      world: world
+      uiSystems: uiSystems
+      row: world.menu.hoverRow
+      focusFirst: false
+    )
+  }
+}
+
+# The wheel over a panel taller than the window slides it (menuPlaceSystem keeps it in bounds); its
+# focus goes, so that the slide does not follow it
+func slideMenu(
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+  by: view Float
+) {
+  loop var i: Int = 0, i < world.menu.levels.length, ++i {
+    var here: Bool = false
+    if let level: mod MenuLevel = world.menu.levels.modAt(index: i) {
+      here = x >= level.x and y >= level.y and x < level.x + level.w and y < level.y + level.h
+      if here {
+        level.slide = level.slide - by
+      }
+    }
+    if here {
+      focusMenuRow(world: world, level: i, row: -1)
+    }
+  }
+}
+
+# The pointer moved: the row under it is focused (a disabled one is not), the submenu it has waits
+func stepMenuHover(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  level: view Int
+  row: view Int
+  now: view Float64
+) {
+  if level is 1 {
+    # in the submenu: the row it belongs to stays focused
+    world.menu.waiting = false
+    world.menu.hoverRow = submenuRow(world: world)
+    focusMenuRow(world: world, level: 0, row: submenuRow(world: world))
+    if menuRowEnabled(world: world, level: 1, row: row) {
+      focusMenuRow(world: world, level: 1, row: row)
+    } else {
+      focusMenuRow(world: world, level: 1, row: -1)
+    }
+    ret
+  }
+  if world.menu.levels.length > 1 {
+    focusMenuRow(world: world, level: 1, row: -1)
+  }
+  if level is 0 {
+    if menuRowEnabled(world: world, level: 0, row: row) {
+      focusMenuRow(world: world, level: 0, row: row)
+    } else {
+      focusMenuRow(world: world, level: 0, row: -1)
+    }
+    if row is not world.menu.hoverRow {
+      world.menu.hoverRow = row
+      world.menu.hoverSeconds = now
+      world.menu.waiting = true
+    }
+    ret
+  }
+  # on no row: the pointer's focus goes, an open submenu's row keeps it
+  world.menu.waiting = false
+  world.menu.hoverRow = -1
+  focusMenuRow(world: world, level: 0, row: submenuRow(world: world))
+}
+
+# Is (x, y) on the menu or its submenu?
+func menuContains(world: view UiWorld, x: view Float, y: view Float) ret Bool {
+  loop let level: view MenuLevel in world.menu.levels {
+    if x >= level.x and y >= level.y and x < level.x + level.w and y < level.y + level.h {
+      ret true
+    }
+  }
+  ret false
+}
+
+# A row waits for its submenu to open: a program that sleeps between frames wakes for it
+func menuWaiting(world: view UiWorld) ret Bool {
+  ret world.menu.open and world.menu.waiting
+}

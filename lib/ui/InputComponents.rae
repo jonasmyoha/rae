@@ -12,3 +12,14 @@
 #     "Canvas": { "WheelTarget": {} }
 type WheelTarget {
 }
+
+# What a secondary click on a node sends (the right button, Control-click on macOS, a finger held
+# still): a UiAction with `actionId`, as the button goes down, from the nearest node that has one
+# on the path to the topmost painted node under the pointer. A list's row has it for its own menu,
+# the list for the empty space below the rows. `label` says what it does, as OnClick's does.
+#
+#     "Row": { "OnSecondaryClick": { "actionId": "row.menu", "label": "Show the row's menu" } }
+type OnSecondaryClick {
+  actionId: String = ""
+  label: String = ""
+}

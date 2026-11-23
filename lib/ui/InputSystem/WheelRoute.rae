@@ -1,0 +1,267 @@
+# Who takes the wheel, or a secondary click, under the pointer: the nearest node that takes it on
+# the path to the topmost painted node there (InputSystem.rae has the rules and the frame).
+open ui/Ecs
+open ui/Components
+open ui/Layer
+open ui/UiLayers
+open ui/UiSystems
+open ui/ZOrder
+open ui/Transform
+open ecs/Entity
+open ecs/ComponentTable
+
+# What is looked for under the pointer: what takes the wheel, or what takes a secondary click
+enum UiRouteWant { wheel, secondaryClick }
+
+# One subtree's answer to "who takes the wheel here?". `blocked`: the pointer
+# landed on something painted or interactive in this subtree, so nodes painted
+# BELOW it (earlier siblings, lower roots) must not see the wheel. `target`: the
+# consumer on the path to that node, or none.
+type UiWheelRoute {
+  blocked: Bool
+  target: EntityId
+}
+
+func uiRouteConsumerAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  want: view UiRouteWant
+) ret Bool {
+  if want is UiRouteWant.secondaryClick {
+    ret componentHas(this: world.onSecondaryClicks, entityId: entityId) and uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+  }
+  if componentHas(this: world.wheelTargets, entityId: entityId) {
+    ret uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+  }
+  if componentHas(this: world.scrollRoots, entityId: entityId) {
+    ret uiPointInScrollWindow(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+  }
+  ret false
+}
+
+# The window a ScrollRoot scrolls inside: its parent's box when it has a laid-out
+# parent (the clipped viewport around a Hug content), else its own. The root
+# itself is the node that MOVES, so the pointer can be in the window below a
+# short list, or above a list scrolled past the top, without being in the root.
+func uiPointInScrollWindow(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
+      ret uiPointInEntity(
+        world: world
+        uiSystems: uiSystems
+        entityId: parent
+        x: x
+        y: y
+      )
+    }
+  }
+  ret uiPointInEntity(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: x
+    y: y
+  )
+}
+
+func uiRouteEntity(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  want: view UiRouteWant
+) ret UiWheelRoute {
+  unsafe {
+    if uiEntityActive(world: world, entityId: entityId) is false {
+      ret UiWheelRoute { blocked: false, target: noEntity() }
+    }
+    let inside: Bool = uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+    # A clipping node hides whatever of its subtree lies outside it: rows
+    # scrolled out of a panel must not catch the wheel over the panel above.
+    if inside is false and componentHas(this: world.overflows, entityId: entityId) {
+      if componentView(this: world.overflows, entityId: entityId).mode is OverflowMode.clip {
+        ret UiWheelRoute { blocked: false, target: noEntity() }
+      }
+    }
+    var route: UiWheelRoute = { blocked: false, target: noEntity() }
+    if componentHas(this: world.childrens, entityId: entityId) {
+      let children: view Children = componentView(this: world.childrens, entityId: entityId)
+      var i: Int = children.ids.length - 1
+      loop i >= 0 and route.blocked is false and isNone(this: route.target) {
+        let child: EntityId = orderedChildAt(
+          world: world
+          parentEntityId: entityId
+          children: children
+          i: i
+        )
+        if isRaisedNode(world: world, uiSystems: uiSystems, entityId: child) is false {
+          route = uiRouteEntity(
+            world: world
+            uiSystems: uiSystems
+            entityId: child
+            x: x
+            y: y
+            want: want
+          )
+        }
+        i = i - 1
+      }
+    }
+    if isNone(this: route.target) {
+      if uiRouteConsumerAt(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        x: x
+        y: y
+        want: want
+      ) {
+        ret UiWheelRoute { blocked: true, target: entityId }
+      }
+    }
+    if route.blocked is false and inside {
+      if componentHas(this: world.shapes, entityId: entityId) or componentHas(
+        this: world.onClicks
+        entityId: entityId
+      ) {
+        route.blocked = true
+      }
+    }
+    ret route
+  }
+}
+
+# The wheel consumer under (x, y)
+func uiWheelRoute(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret UiWheelRoute {
+  ret uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    want: UiRouteWant.wheel
+  )
+}
+
+# The consumer under (x, y): walk the roots in reverse paint order and
+# stop at the first subtree that has one or that paints over the point. A route
+# that is blocked with no target is UI that swallows the notch.
+func uiRouteAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+  want: view UiRouteWant
+) ret UiWheelRoute {
+  unsafe {
+    let roots: List(EntityId) = rootsInPaintOrder(world: world, uiSystems: uiSystems)
+    var i: Int = roots.length - 1
+    loop i >= 0 {
+      let root: EntityId = rae_ext_rae_buf_get(buf: roots.data, index: i)
+      let shown: Bool = isRaisedNode(world: world, uiSystems: uiSystems, entityId: root) is false or raisedNodeShown(
+        uiSystems: uiSystems
+        entityId: root
+      )
+      if shown {
+        let route: UiWheelRoute = uiRouteEntity(
+          world: world
+          uiSystems: uiSystems
+          entityId: root
+          x: x
+          y: y
+          want: want
+        )
+        if route.blocked or isNone(this: route.target) is false {
+          ret route
+        }
+      }
+      i = i - 1
+    }
+    ret UiWheelRoute { blocked: false, target: noEntity() }
+  }
+}
+
+# Hand this frame's `wheel` delta to the consumer under `input.pointer`. Called
+# by `updateUiInput` with the device's delta; a headless driver calls it with a
+# scripted one, so a test goes through the same routing as a real notch.
+func routeUiWheel(
+  input: mod UiInput
+  world: view UiWorld
+  uiSystems: view UiSystems
+  wheel: view Float
+) {
+  input.wheel = wheel
+  input.wheelTarget = noEntity()
+  input.wheelBlocked = false
+  if wheel is not 0.0 or input.wheelX is not 0.0 or input.pinch is not 1.0 {
+    let route: UiWheelRoute = uiWheelRoute(
+      world: world
+      uiSystems: uiSystems
+      x: input.pointer.x
+      y: input.pointer.y
+    )
+    input.wheelTarget = route.target
+    input.wheelBlocked = route.blocked and isNone(this: route.target)
+  }
+}
+
+# This frame's wheel delta if it was routed to `entityId`, else 0. The one way a
+# system reads the wheel: a canvas zooms by `uiWheelFor(input, canvas)`, a list
+# scrolls by `uiWheelFor(input, list)`, and at most one of them is non-zero.
+func uiWheelFor(input: view UiInput, entityId: view EntityId) ret Float {
+  if isNone(this: entityId) or input.wheelTarget is not entityId {
+    ret 0.0
+  }
+  ret input.wheel
+}
+
+# This frame's wheel delta if NO UI took it: nothing consumed the notch and the
+# pointer is not over UI that paints or takes clicks. The fallback consumer's
+# share — a world camera behind the UI zooms by `uiWheelUnclaimed(input)`, so a
+# notch over a scrolling panel (or a panel's plain background) never also
+# zooms the scene. At most one of this and every `uiWheelFor` is non-zero.
+func uiWheelUnclaimed(input: view UiInput) ret Float {
+  if isNone(this: input.wheelTarget) is false or input.wheelBlocked {
+    ret 0.0
+  }
+  ret input.wheel
+}

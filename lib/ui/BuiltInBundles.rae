@@ -44,6 +44,23 @@ const builtInDialogMotion: String = "\{\"Appear\":\{\"motion\":\"lively\",\"y\":
 
 const builtInGlideOnChange: String = "\{\"AnimateLayout\":\{\"motion\":\"smooth\"\}\}"
 
+# A menu's parts (ui/MenuSystem): its panel, a row (its Shape is drawn while the row is focused), a
+# row's icon, text and shortcut, and a separator with its line. Their colors are theme slots; a
+# focused row's text and icons are accentText, on its accent.
+const builtInMenuPanel: String = "\{\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\},\"Padding\":\{\"l\":5,\"t\":5,\"r\":5,\"b\":5\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"surfaceAlt\",\"stroke\":\"outline\",\"strokeWidth\":1,\"radius\":8\},\"Shadow\":\{\"blur\":24,\"opacity\":0.5\}\}"
+
+const builtInMenuRow: String = "\{\"Layout\":\{\"type\":\"Horizontal\",\"gap\":8,\"alignCross\":\"Center\"\},\"Padding\":\{\"l\":8,\"t\":0,\"r\":8,\"b\":0\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"accent\",\"radius\":5\}\}"
+
+const builtInMenuIcon: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":18,\"h\":18\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Sprite\":\{\"textureKey\":\"\",\"tint\":\"textPrimary\"\}\}"
+
+const builtInMenuText: String = "\{\"Offset\":\{\"x\":0,\"y\":-2\},\"Size\":\{\"w\":\{\"mode\":\"Hug\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Text\":\{\"text\":\"\",\"styleId\":\"primary\",\"styleOverride\":\{\"size\":15\}\}\}"
+
+const builtInMenuShortcut: String = "\{\"Offset\":\{\"x\":0,\"y\":-2\},\"Size\":\{\"w\":\{\"mode\":\"Hug\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Text\":\{\"text\":\"\",\"styleId\":\"muted\",\"styleOverride\":\{\"size\":14\}\}\}"
+
+const builtInMenuSeparator: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":9\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Padding\":\{\"l\":8,\"t\":4,\"r\":8,\"b\":4\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":0\}\}"
+
+const builtInMenuLine: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":1\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"outline\",\"radius\":0\}\}"
+
 # The built-in bundle `name`'s JSON object, or "" when lib/ui has none
 func builtInBundleJson(name: view String) ret String {
   if name is "appearFade" {
@@ -84,6 +101,27 @@ func builtInBundleJson(name: view String) ret String {
   }
   if name is "switch" {
     ret builtInSwitch
+  }
+  if name is "menuPanel" {
+    ret builtInMenuPanel
+  }
+  if name is "menuRow" {
+    ret builtInMenuRow
+  }
+  if name is "menuIcon" {
+    ret builtInMenuIcon
+  }
+  if name is "menuText" {
+    ret builtInMenuText
+  }
+  if name is "menuShortcut" {
+    ret builtInMenuShortcut
+  }
+  if name is "menuSeparator" {
+    ret builtInMenuSeparator
+  }
+  if name is "menuLine" {
+    ret builtInMenuLine
   }
   ret ""
 }

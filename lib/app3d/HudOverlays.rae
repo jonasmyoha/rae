@@ -329,6 +329,22 @@ func hudCapturesStep(
       y: Gpu2d.pointerY()
     )
   }
+  hudCaptureButton(
+    paint: paint
+    captures: captures
+    world: world
+    uiSystems: uiSystems
+    button: Gpu2d.PointerButton.middle
+    pointerId: pointerIdMiddle
+  )
+  hudCaptureButton(
+    paint: paint
+    captures: captures
+    world: world
+    uiSystems: uiSystems
+    button: Gpu2d.PointerButton.secondary
+    pointerId: pointerIdSecondary
+  )
   # fingers that are gone let go of their captures
   loop var c: Int = captures.captures.length - 1, c >= 0, --c {
     let pointerId: Int = captures.captures.copyAtFallback(
@@ -362,6 +378,31 @@ func hudCapturesStep(
   }
   # what is left for the world this frame (ui/WorldInput): a game reads worldPointer / worldKeyDown
   feedWorldInput(captures: captures)
+}
+
+# The press and the release of a mouse button beyond the primary one
+func hudCaptureButton(
+  paint: view HudLayerPaint
+  captures: mod UiCaptures
+  world: view UiWorld
+  uiSystems: view UiSystems
+  button: copy Gpu2d.PointerButton
+  pointerId: view Int
+) {
+  if Gpu2d.buttonReleased(button: button) {
+    captureRelease(captures: captures, pointerId: pointerId)
+  }
+  if Gpu2d.buttonPressed(button: button) {
+    hudCapturePress(
+      paint: paint
+      captures: captures
+      world: world
+      uiSystems: uiSystems
+      pointerId: pointerId
+      x: Gpu2d.pointerX()
+      y: Gpu2d.pointerY()
+    )
+  }
 }
 
 # One press of `pointerId` at (x, y) through the plan on screen, captured by what it hits

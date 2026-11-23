@@ -24,11 +24,19 @@ int64_t rae_ext_Gpu2d_touchId(int64_t i) { (void)i; return -1; }
 rae_Bool rae_ext_Gpu2d_touchPressed(int64_t i) { (void)i; return 0; }
 void rae_ext_Gpu2d_simulateTouch(int64_t kind, int64_t id, float x, float y) { (void)kind; (void)id; (void)x; (void)y; }
 void rae_ext_Gpu2d_simulateFingerPointer(int64_t kind, float x, float y) { (void)kind; (void)x; (void)y; }
+void rae_ext_Gpu2d_simulateMouseButton(int64_t kind, int64_t button, float x, float y, int64_t clicks) { (void)kind; (void)button; (void)x; (void)y; (void)clicks; }
 void rae_ext_Gpu2d_simulateEnterBackground(void) {}
 float rae_ext_Gpu2d_safeTop(void){ return 0.0; }
 float rae_ext_Gpu2d_safeBottom(void){ return 0.0; }
 float rae_ext_Gpu2d_safeLeft(void){ return 0.0; }
 float rae_ext_Gpu2d_safeRight(void){ return 0.0; }
+rae_Bool rae_ext_Gpu2d_buttonDown(int64_t button) { (void)button; return 0; }
+rae_Bool rae_ext_Gpu2d_buttonPressed(int64_t button) { (void)button; return 0; }
+rae_Bool rae_ext_Gpu2d_buttonReleased(int64_t button) { (void)button; return 0; }
+int64_t rae_ext_Gpu2d_buttonClicks(int64_t button) { (void)button; return 0; }
+static int g_g2d_escape_quits = 1;
+void rae_ext_Gpu2d_setEscapeQuits(rae_Bool on) { g_g2d_escape_quits = on ? 1 : 0; }
+rae_Bool rae_ext_Gpu2d_escapeQuits(void) { return g_g2d_escape_quits != 0; }
 rae_Bool rae_ext_Gpu2d_pointerDown(void) { return 0; }
 int64_t rae_ext_Gpu2d_pointerKind(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_pointerPressed(void) { return 0; }

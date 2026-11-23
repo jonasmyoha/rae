@@ -391,8 +391,8 @@ None of these is about files; each is its own module with its own cases.
 | **several scroll roots** | `findScrollRoot` answers one per page | `updateScrollRoots`: every shown root is stepped; those at rest and not under the pointer cost a comparison |
 | **key focus** | text fields only | `KeyFocus`, a resource naming the entity that has the keys; a press on a node marked `TakesKeys` moves it; a text field has it while focused and gives it back |
 | **list selection** | none | `ListSelection` and `listSelectionSystem` (§1.2), keyed by `itemKeyField` |
-| **pointer buttons, double click** | `Gpu2d` has the left button; `Sdl3.isMouseButtonDown` says another is held | press, release and click count per button through `UiInput` and captures; Control+click and a long press as the second button |
-| **menus** | app code over the `popover` layer (`ModeMenu`) | `menuSystem` with items as data, keys, one submenu level, kept in the window |
+| **pointer buttons, double click** | built (docs/ui-scene-format.md section 46) | press, release and click count per button through `UiInput` and captures; Control+click and a long press as the second button |
+| **menus** | built: `ui/MenuSystem` (section 47) | `menuSystem` with items as data, keys, one submenu level, kept in the window |
 | **dividers, scrollbars** | none | `Divider` and `ScrollBar` components with a system each |
 | **text editing** | `TextField`'s caret is at its end; copy takes it all | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
 | **drags** | per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |

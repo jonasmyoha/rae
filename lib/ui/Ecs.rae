@@ -30,6 +30,7 @@ open ecs/hierarchySystem/HierarchySystem
 import ui/MsdfState
 open ui/BindingComponents
 open ui/InputComponents
+open ui/MenuComponents
 open ui/AnimationComponents
 open ui/BackdropComponents
 open collections/StringMap
@@ -43,6 +44,8 @@ open ui/NodeBinding
 type UiAction {
   entityId: EntityId
   actionId: String
+  # 2 for a double click, 3 a triple one (ui/InputSystem)
+  clicks: Int = 1
 }
 
 # ----- UiWorld -----
@@ -98,6 +101,8 @@ type UiWorld {
   pointerEvents: ComponentTable(PointerEvents)
   hitAreas: ComponentTable(HitArea)
   onClicks: ComponentTable(OnClick)
+  onSecondaryClicks: ComponentTable(OnSecondaryClick)
+  menuRows: ComponentTable(MenuRow)
   buttons: ComponentTable(Button)
   actives: ComponentTable(Active)
   editorVisibles: ComponentTable(EditorVisible)
@@ -301,6 +306,10 @@ type UiWorld {
   # updateUiInput recycles it. A TRANSIENT runtime resource (an EventQueue, not a
   # ComponentTable), so the serialize / clear / destroy field loops skip it.
   uiActions: EventQueue(UiAction)
+  # The open menu and its events (ui/MenuSystem), runtime only
+  # resource: one menu is open at a time.
+  menu: UiMenu
+  menuEvents: EventQueue(MenuEvent)
 
   # #996: what the loader does with a scene it cannot fully apply (ui/ScenePolicy)
   # and what it could not apply. Both RUNTIME resources: not per-entity, never
@@ -352,6 +361,8 @@ func createUiWorld() ret UiWorld {
     pointerEvents: ComponentTable.create(PointerEvents)
     hitAreas: ComponentTable.create(HitArea)
     onClicks: ComponentTable.create(OnClick)
+    onSecondaryClicks: ComponentTable.create(OnSecondaryClick)
+    menuRows: ComponentTable.create(MenuRow)
     buttons: ComponentTable.create(Button)
     actives: ComponentTable.create(Active)
     editorVisibles: ComponentTable.create(EditorVisible)
@@ -467,6 +478,8 @@ func createUiWorld() ret UiWorld {
     hierarchyOrder: createHierarchyOrder()
     theme: createUiTheme()
     uiActions: createEventQueue(UiAction)
+    menu: UiMenu {}
+    menuEvents: createEventQueue(MenuEvent)
     scenePolicy: createScenePolicy()
     sceneDiagnostics: createSceneDiagnostics()
     pendingComponents: createPendingComponents()

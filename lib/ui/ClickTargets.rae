@@ -19,7 +19,7 @@ open ecs/Query
 open ecs/Hierarchy
 
 # Which tap an action is fired by
-enum ClickGesture { single, double, triple }
+enum ClickGesture { single, double, triple, secondary }
 
 # One action a clickable node fires: the node (its entity and authored id),
 # the action id, the gesture, and its label ("" when the scene has none)
@@ -106,6 +106,26 @@ func clickTargets(world: view UiWorld, uiSystems: view UiSystems) ret List(Click
       })
     }
   }
+  loop var i: Int = 0, i < componentCount(this: world.onSecondaryClicks), ++i {
+    let entityId: EntityId = queryEntityAt(table: world.onSecondaryClicks, denseIndex: i)
+    let click: view OnSecondaryClick = componentView(
+      this: world.onSecondaryClicks
+      entityId: entityId
+    )
+    if click.actionId.length() > 0 and clickTargetShown(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+    ) {
+      targets.add(value: {
+        entityId: entityId
+        nodeId: clickTargetNodeId(world: world, entityId: entityId)
+        actionId: "{click.actionId}"
+        gesture: ClickGesture.secondary
+        label: "{click.label}"
+      })
+    }
+  }
   ret targets
 }
 
@@ -140,6 +160,31 @@ func reportMissingClickLabels(
       name: "OnClick"
       message: "OnClick has no {what}: a voice command and a screen reader need one"
     )
+  }
+}
+
+# The same for an OnSecondaryClick
+func reportMissingSecondaryLabel(
+  world: mod UiWorld
+  entityId: view EntityId
+  sceneId: view String
+  nodeId: view String
+) {
+  if componentHas(this: world.onSecondaryClicks, entityId: entityId) {
+    let secondary: view OnSecondaryClick = componentView(
+      this: world.onSecondaryClicks
+      entityId: entityId
+    )
+    if secondary.actionId.length() > 0 and secondary.label.length() is 0 {
+      reportSceneDiagnostic(
+        diagnostics: world.sceneDiagnostics
+        sceneId: sceneId
+        nodeId: nodeId
+        kind: SceneDiagnosticKind.missingLabel
+        name: "OnSecondaryClick"
+        message: "OnSecondaryClick has no label for {secondary.actionId}: a voice command and a screen reader need one"
+      )
+    }
   }
 }
 

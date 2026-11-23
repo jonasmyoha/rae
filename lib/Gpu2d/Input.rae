@@ -109,6 +109,83 @@ func safeRight() ret Float {
   }
 }
 
+# A mouse button. A finger and a pen's tip are the primary one.
+enum PointerButton { primary, middle, secondary }
+
+# The button as SDL numbers it
+func pointerButtonNumber(button: copy PointerButton) ret Int {
+  match button {
+    case PointerButton.primary {
+      ret 1
+    }
+    case PointerButton.middle {
+      ret 2
+    }
+    case PointerButton.secondary {
+      ret 3
+    }
+  }
+}
+
+func nativeButtonDown(button: Int) mainThread unsafe extern("rae_ext_Gpu2d_buttonDown") ret Bool
+
+# `button` is held
+func buttonDown(button: copy PointerButton) ret Bool {
+  unsafe {
+    ret nativeButtonDown(button: pointerButtonNumber(button: button))
+  }
+}
+
+func nativeButtonPressed(
+  button: Int
+) mainThread unsafe extern("rae_ext_Gpu2d_buttonPressed") ret Bool
+
+# `button` went down this frame
+func buttonPressed(button: copy PointerButton) ret Bool {
+  unsafe {
+    ret nativeButtonPressed(button: pointerButtonNumber(button: button))
+  }
+}
+
+func nativeButtonReleased(
+  button: Int
+) mainThread unsafe extern("rae_ext_Gpu2d_buttonReleased") ret Bool
+
+# `button` came up this frame
+func buttonReleased(button: copy PointerButton) ret Bool {
+  unsafe {
+    ret nativeButtonReleased(button: pointerButtonNumber(button: button))
+  }
+}
+
+func nativeButtonClicks(button: Int) mainThread unsafe extern("rae_ext_Gpu2d_buttonClicks") ret Int
+
+# Which click of a series the last press of `button` was: 1 a click, 2 a double click, 3 a triple
+# one (by the system's own interval); 0 before the first press
+func buttonClicks(button: copy PointerButton) ret Int {
+  unsafe {
+    ret nativeButtonClicks(button: pointerButtonNumber(button: button))
+  }
+}
+
+func nativeSetEscapeQuits(on: Bool) mainThread unsafe extern("rae_ext_Gpu2d_setEscapeQuits")
+
+# Whether Escape closes the window (pollClose answers true), as it does unless told not to. A
+# program where Escape means something else (a menu, a dialog) turns it off.
+func setEscapeQuits(on: copy Bool) {
+  unsafe {
+    nativeSetEscapeQuits(on: on)
+  }
+}
+
+func nativeEscapeQuits() mainThread unsafe extern("rae_ext_Gpu2d_escapeQuits") ret Bool
+
+func escapeQuits() ret Bool {
+  unsafe {
+    ret nativeEscapeQuits()
+  }
+}
+
 # Left mouse button held this frame.
 func nativePointerDown() mainThread unsafe extern("rae_ext_Gpu2d_pointerDown") ret Bool
 

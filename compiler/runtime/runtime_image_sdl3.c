@@ -262,6 +262,7 @@ static unsigned char g_sdl_keydown[SDL_SCANCODE_COUNT]; /* held state, from key 
 static unsigned char g_sdl_mouse[8];                    /* held state, by SDL button index (1=L,2=M,3=R) */
 static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame edges */
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
+static unsigned char g_sdl_mouse_clicks[8];             /* click count of the last press (the system's double click) */
 static bool g_sdl_mouse_captured = false;
 
 /* isKeyDown/isKeyPressed take a raw SDL_Scancode (see lib/keys.rae). No translation — the

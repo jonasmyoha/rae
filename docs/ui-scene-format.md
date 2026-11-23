@@ -366,6 +366,7 @@ with a theme's look by coming after it in the list:
 | bundle | what it is |
 |---|---|
 | `circleButton` | a round button for an icon: a 44-point square box (`Size` fixed; a node's own `Rect` sets another size, keep it square), a `Circle` shape (fill and stroke from the bundles before it or the node) and its child centered. `"bundles": ["secondaryButton", "circleButton"]` is the theme's button drawn as a true circle. A tap anywhere in the square counts. |
+| `menuPanel`, `menuRow`, `menuIcon`, `menuText`, `menuShortcut`, `menuSeparator`, `menuLine` | the parts of a menu (section 47) |
 | `switch` | an on/off switch: a 52 by 32 point box (`Size` fixed; a node's own `Rect` sets another size), a `Switch` and an `OnClick`, so a tap reaches it (§18) |
 
 ## 10. `OnClick` labels: what a tap does, in words
@@ -387,6 +388,8 @@ Every action an `OnClick` fires carries a human label: `label` for
 }
 ```
 
+- **When they are sent** is section 46: `actionId` at the first click, the others at the second and
+  third of a series.
 - **Who reads it.** A voice command and a screen reader say and match the
   label. A voice system (SUMU) derives every command from the labels; it
   never keeps its own phrase table. lib/ui has no voice code: the one query
@@ -1543,3 +1546,76 @@ it. `Tab` has these fields:
 Case 1560 checks it: the first frame, a tap's action, `selectTab`, two groups apart, and real taps
 through the input path hitting the shown page's node and never the hidden one's. The media editor's
 side panel is a group of them.
+
+## 46. `OnSecondaryClick`, double clicks and the other buttons
+
+```jsonc
+"Row": {
+  "OnClick": {"actionId": "row.select", "label": "Select", "actionIdDouble": "row.open", "labelDouble": "Open"},
+  "OnSecondaryClick": {"actionId": "row.menu", "label": "Show the row's menu"}
+}
+```
+
+- **Double and triple clicks.** A click sends `OnClick.actionId` at once. The second click of a
+  double click sends `actionIdDouble`, the third and later ones of a series `actionIdTriple`, each
+  where the node has it, else `actionId` again. The system's own double-click interval decides. A
+  click on another node starts the count again, so a list must keep a row's node between two clicks.
+  The action's event says which click it is: `UiAction.clicks`. (`maxDelayMs` is not read.)
+- **The secondary click** is the right button, Control-click on macOS, or a finger held still (0.5 s,
+  within 10 points, not a scroll). It sends the `OnSecondaryClick.actionId` of the nearest node that
+  has one, going up from the topmost painted node under the pointer, as the button goes down. So a
+  row has its own, and the list behind it one for the empty space. A finger's release then clicks
+  nothing. A panel that paints over the node, or a dialog over it, keeps it from the click.
+- **Labels** are required as `OnClick`'s are (`missingLabel`), and `clickTargets` lists the action with
+  the gesture `secondary`.
+- **The buttons themselves**: `UiInput.pointer.middle` and `.secondary` (held, pressed, released,
+  clicks); in a game's world `worldPointer(captures:, pointerId: pointerIdSecondary)`.
+
+Case 1577 checks it with simulated mouse events and scripted fingers.
+
+## 47. Menus
+
+A menu is opened by code (`ui/MenuSystem`); its items are data.
+
+```rae
+openMenu(world: world, uiSystems: uiSystems, request: MenuRequest {
+  id: "row"
+  owner: rowEntityId
+  items: {
+    MenuItem { id: "open", text: "Open", icon: "mat:folder_open", shortcut: "Cmd O" }
+    MenuItem { id: "with", text: "Open with" }
+    MenuItem { id: "editor", text: "Text editor", parent: "with" }
+    MenuItem { separator: true }
+    MenuItem { id: "paste", text: "Paste", enabled: false }
+  }
+  x: input.pointer.x
+  y: input.pointer.y
+})
+```
+
+Each frame: `updateUiInput`, then `menuSystem(world:, uiSystems:, input:, keys: menuKeysFromDevice())`,
+then the program reads `world.menuEvents` (`MenuEvent`: `chosen` with the item's id, and `closed`,
+which also follows a choice) and its actions. `menuPlaceSystem` runs after the layout; the pipelines
+of `app3d/UiShell` call it. A world has one menu open at a time.
+
+- **Items**: an id, a text, an `icon` (a `Sprite`'s texture key), the `shortcut`'s text (the menu does
+  not read the keys), `enabled`, `separator`, and `parent`: the id of the item whose submenu it is in.
+  Submenus have one level.
+- **Place**: below and to the right of the anchor (`x`, `y`; with `w` and `h` a button's rectangle),
+  above or to the left where it would not fit, always inside the window and its safe area. A menu
+  taller than the window slides to its focused row and by the wheel. It is on the `popover` layer, or
+  on its owner's layer when that is above (a dialog's). Rows are 28 points tall, 44 with `touch`.
+- **Pointer**: the row under it is focused, a submenu opens after 0.2 s or at a click; a press of the
+  secondary button dragged onto a row and let go there chooses it. A primary press outside closes the
+  menu and does nothing else; another button's press goes on to what is under it.
+- **Keys**: the arrows (disabled rows are skipped), Home, End, Return, Escape (first the submenu),
+  right and left for the submenu, and typing the start of a row's text, case and accents aside. While
+  a menu is open Escape does not quit the program and the keys are the UI's (`uiClaimsKeys`); a program
+  that reads keys itself leaves them while `world.menu.open`.
+- **Look**: the bundles `menuPanel`, `menuRow` (its `Shape` is drawn while the row is focused),
+  `menuIcon`, `menuText`, `menuShortcut`, `menuSeparator` and `menuLine`. A theme that declares one of
+  them replaces it. A focused row's text and icons are the slot `accentText`.
+- It closes when its owner is destroyed. A program that sleeps between frames wakes while
+  `menuWaiting(world:)`.
+
+Case 1578 checks it with scripted input, `checks/uiMenu` is its picture.

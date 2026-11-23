@@ -32,6 +32,7 @@ open ecs/Schedule
 open ui/Components
 open ui/Registry
 open ui/InputSystem
+open ui/MenuSystem
 open ui/LayoutSystem
 open ui/RenderSystem
 open ui/AnimationSystem
@@ -561,6 +562,7 @@ func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dU
   layoutSystem(world: world, uiSystems: uiSystems)
   # ScaleToFit stages, Aspect and Overflow scaleToFitY, on the layout's rects
   fitSystem(world: world, uiSystems: uiSystems)
+  menuPlaceSystem(world: world, uiSystems: uiSystems)
   animationRun(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
   visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
@@ -605,6 +607,7 @@ func runScheduledUiSystems(
     fitSystem(world: world, uiSystems: uiSystems)
     systemDone(schedule: schedule, index: uiSystemFit)
   }
+  menuPlaceSystem(world: world, uiSystems: uiSystems)
   animationRun(world: world, uiSystems: uiSystems)
   if uiShouldRun(
     schedule: schedule

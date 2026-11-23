@@ -1,0 +1,257 @@
+# Where a menu goes: menuPlaceSystem, between the layout and the transforms. A panel is as wide as
+# its widest row, stays inside the window and its safe area, opens the other way where it would
+# not fit, and, taller than the window, slides so that its focused row is seen.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/LayoutSystem
+open ui/MenuComponents
+open ui/safeAreaSystem/SafeAreaSystem
+open ui/UiSystems
+
+# The space kept to the window's edges, and between a button and its menu
+const menuMargin: Float = 8.0
+
+const menuGap: Float = 4.0
+
+const menuMinWidth: Float = 160.0
+
+# The part of the window a menu may use
+type MenuRegion {
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+}
+
+func menuRegion(world: view UiWorld) ret MenuRegion {
+  var insets: Insets = osSafeInsets()
+  if world.safeInsetsSimulated {
+    insets = world.simulatedSafeInsets
+  }
+  ret MenuRegion {
+    left: insets.l + world.reservedInsets.l + menuMargin
+    top: insets.t + world.reservedInsets.t + menuMargin
+    right: world.layoutW - insets.r - world.reservedInsets.r - menuMargin
+    bottom: world.layoutH - insets.b - world.reservedInsets.b - menuMargin
+  }
+}
+
+# A panel of `size` after the span from..to of the anchor along one axis, or before it where it
+# would go past `high`; inside low..high in any case
+func menuAxisPlace(
+  from: view Float
+  to: view Float
+  size: view Float
+  low: view Float
+  high: view Float
+) ret Float {
+  var at: Float = to
+  if at + size > high and from - size >= low {
+    at = from - size
+  }
+  ret menuAxisInside(
+    at: at
+    size: size
+    low: low
+    high: high
+  )
+}
+
+func menuAxisInside(
+  at: view Float
+  size: view Float
+  low: view Float
+  high: view Float
+) ret Float {
+  var inside: Float = at
+  if inside + size > high {
+    inside = high - size
+  }
+  if inside < low {
+    inside = low
+  }
+  ret inside
+}
+
+func menuPlaceSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.menu.open is false {
+    ret
+  }
+  if sizeMenuPanels(world: world, uiSystems: uiSystems) {
+    layoutSystem(world: world, uiSystems: uiSystems)
+  }
+  let region: MenuRegion = menuRegion(world: world)
+  loop var i: Int = 0, i < world.menu.levels.length, ++i {
+    let level: MenuLevel = world.menu.levels.copyAtFallback(
+      index: i
+      fallback: MenuLevel { panel: noEntity() }
+    )
+    if componentHas(this: uiSystems.layout.computedRects, entityId: level.panel) {
+      placeMenuPanel(
+        world: world
+        uiSystems: uiSystems
+        index: i
+        level: level
+        region: region
+      )
+    }
+  }
+}
+
+# A new panel's width, from its measured rows; true when one was set
+func sizeMenuPanels(world: mod UiWorld, uiSystems: view UiSystems) ret Bool {
+  var sized: Bool = false
+  loop var i: Int = 0, i < world.menu.levels.length, ++i {
+    let level: MenuLevel = world.menu.levels.copyAtFallback(
+      index: i
+      fallback: MenuLevel { panel: noEntity() }
+    )
+    if level.sized is false and componentHas(
+      this: uiSystems.layout.computedRects
+      entityId: level.panel
+    ) and componentHas(this: world.rects, entityId: level.panel) {
+      var width: Float = 0.0
+      loop let row: view EntityId in level.rows {
+        if componentHas(this: uiSystems.layout.measuredSizes, entityId: row) {
+          let measured: Float = componentView(this: uiSystems.layout.measuredSizes, entityId: row).w
+          if measured > width {
+            width = measured
+          }
+        }
+      }
+      let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: level.panel)
+      width = width + padding.l + padding.r
+      if width < menuMinWidth {
+        width = menuMinWidth
+      }
+      let region: MenuRegion = menuRegion(world: world)
+      if width > region.right - region.left {
+        width = region.right - region.left
+      }
+      componentMod(this: world.rects, entityId: level.panel).size.x = width
+      if let mine: mod MenuLevel = world.menu.levels.modAt(index: i) {
+        mine.sized = true
+      }
+      sized = true
+    }
+  }
+  ret sized
+}
+
+func placeMenuPanel(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  index: view Int
+  level: view MenuLevel
+  region: view MenuRegion
+) {
+  let size: Vec2 = componentView(this: uiSystems.layout.computedRects, entityId: level.panel).size
+  var x: Float = 0.0
+  var y: Float = 0.0
+  if level.parentRow < 0 {
+    let request: view MenuRequest = world.menu.request
+    x = menuAxisPlace(
+      from: request.x + request.w
+      to: request.x
+      size: size.x
+      low: region.left
+      high: region.right
+    )
+    var gap: Float = 0.0
+    if request.h > 0.0 {
+      gap = menuGap
+    }
+    y = menuAxisPlace(
+      from: request.y - gap
+      to: request.y + request.h + gap
+      size: size.y
+      low: region.top
+      high: region.bottom
+    )
+  } else {
+    let parent: MenuLevel = world.menu.levels.copyAtFallback(
+      index: 0
+      fallback: MenuLevel { panel: noEntity() }
+    )
+    let row: EntityId = parent.rows.copyAtFallback(index: level.parentRow, fallback: noEntity())
+    var rowY: Float = 0.0
+    if componentHas(this: uiSystems.layout.computedRects, entityId: row) {
+      rowY = componentView(this: uiSystems.layout.computedRects, entityId: row).position.y
+    }
+    let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: level.panel)
+    x = menuAxisPlace(
+      from: parent.x + menuGap
+      to: parent.x + parent.w - menuGap
+      size: size.x
+      low: region.left
+      high: region.right
+    )
+    y = menuAxisInside(
+      at: parent.y + rowY - padding.t
+      size: size.y
+      low: region.top
+      high: region.bottom
+    )
+  }
+  let slide: Float = menuSlide(
+    uiSystems: uiSystems
+    level: level
+    panelHeight: size.y
+    region: region
+  )
+  y = y - slide
+  if let mine: mod MenuLevel = world.menu.levels.modAt(index: index) {
+    mine.x = x
+    mine.y = y
+    mine.w = size.x
+    mine.h = size.y
+    mine.slide = slide
+  }
+  if componentHas(this: uiSystems.transform2d.runtimeOffsets, entityId: level.panel) {
+    let delta: Vec2 = componentView(
+      this: uiSystems.transform2d.runtimeOffsets
+      entityId: level.panel
+    ).delta
+    if delta.x is x and delta.y is y {
+      ret
+    }
+  }
+  componentSet(
+    this: uiSystems.transform2d.runtimeOffsets
+    entityId: level.panel
+    data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
+  )
+}
+
+# How far a panel taller than the region is slid up, so that its focused row is in the region
+func menuSlide(
+  uiSystems: view UiSystems
+  level: view MenuLevel
+  panelHeight: view Float
+  region: view MenuRegion
+) ret Float {
+  let most: Float = panelHeight - (region.bottom - region.top)
+  if most <= 0.0 {
+    ret 0.0
+  }
+  var slide: Float = level.slide
+  let row: EntityId = level.rows.copyAtFallback(index: level.focus, fallback: noEntity())
+  if level.focus >= 0 and componentHas(this: uiSystems.layout.computedRects, entityId: row) {
+    let box: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: row)
+    if box.position.y - slide < 0.0 {
+      slide = box.position.y
+    }
+    if box.position.y + box.size.y - slide > region.bottom - region.top {
+      slide = box.position.y + box.size.y - (region.bottom - region.top)
+    }
+  }
+  if slide > most {
+    slide = most
+  }
+  if slide < 0.0 {
+    slide = 0.0
+  }
+  ret slide
+}

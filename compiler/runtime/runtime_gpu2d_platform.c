@@ -160,6 +160,7 @@ static int rae_g2d_kind_of_mouse(SDL_MouseID which) {
     if (which == SDL_PEN_MOUSEID) return 2;
     return 0;
 }
+static int    g_g2d_escape_quits = 1;
 static int    g_g2d_cursor_kind = -1;
 static SDL_Cursor* g_g2d_cursors[7] = {0};
 /* Last endFrame surface-present result. Rendering always targets the offscreen
@@ -605,7 +606,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 g_g2d_win_moved = 1;   /* consumed once by gpu2d.windowMoved() */
                 break;
             case SDL_EVENT_KEY_DOWN:
-                if (e.key.key == SDLK_ESCAPE) quit = 1;
+                if (e.key.key == SDLK_ESCAPE && g_g2d_escape_quits && !e.key.repeat) quit = 1;
                 if (e.key.scancode < SDL_SCANCODE_COUNT) {
                     g_sdl_keydown[e.key.scancode] = 1;
                     if (!e.key.repeat) g_sdl_pressed[e.key.scancode] = 1;  /* edge */
@@ -671,6 +672,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 if (e.button.button < 8) {
                     g_sdl_mouse[e.button.button] = 1;
                     g_sdl_mouse_pressed[e.button.button] = 1;
+                    g_sdl_mouse_clicks[e.button.button] = e.button.clicks;
                 }
                 if (!g_sdl_mouse_captured) { SDL_CaptureMouse(true); g_sdl_mouse_captured = true; }
                 break;
@@ -839,6 +841,23 @@ void rae_ext_Gpu2d_simulateFingerPointer(int64_t kind, float x, float y){
     ev.button.clicks = 1;
     ev.button.x = x * (float)lw;
     ev.button.y = y * (float)lh;
+    if (g_sdl_win) ev.button.windowID = SDL_GetWindowID(g_sdl_win);
+    SDL_PushEvent(&ev);
+}
+
+/* A mouse button's event (kind 0 down, 1 motion, 2 up; button as SDL numbers
+ * it; x, y 0..1 of the window) with its click count, as SDL sends it. */
+void rae_ext_Gpu2d_simulateMouseButton(int64_t kind, int64_t button, float x, float y, int64_t clicks){
+    g_g2d_sim_pointer = 1;
+    g_g2d_sim_pointer_nx = x;
+    g_g2d_sim_pointer_ny = y;
+    if (kind == 1) return;
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = (kind == 0) ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+    ev.button.button = (Uint8)button;
+    ev.button.down = (kind == 0);
+    ev.button.clicks = (Uint8)clicks;
     if (g_sdl_win) ev.button.windowID = SDL_GetWindowID(g_sdl_win);
     SDL_PushEvent(&ev);
 }
@@ -1109,6 +1128,15 @@ float rae_ext_Gpu2d_safeTop(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t
 float rae_ext_Gpu2d_safeBottom(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)b; }
 float rae_ext_Gpu2d_safeLeft(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)l; }
 float rae_ext_Gpu2d_safeRight(void){ double t,b,l,r; rae_g2d_safe_insets_design(&t,&b,&l,&r); return (float)r; }
+/* A mouse button (SDL's index: 1 left, 2 middle, 3 right): held, its edges
+ * this frame, and the click count of its last press. */
+rae_Bool rae_ext_Gpu2d_buttonDown(int64_t button) { return button > 0 && button < 8 && g_sdl_mouse[button] != 0; }
+rae_Bool rae_ext_Gpu2d_buttonPressed(int64_t button) { return button > 0 && button < 8 && g_sdl_mouse_pressed[button] != 0; }
+rae_Bool rae_ext_Gpu2d_buttonReleased(int64_t button) { return button > 0 && button < 8 && g_sdl_mouse_released[button] != 0; }
+int64_t rae_ext_Gpu2d_buttonClicks(int64_t button) { return button > 0 && button < 8 ? g_sdl_mouse_clicks[button] : 0; }
+/* Whether the Escape key closes the window (it does unless told not to). */
+void rae_ext_Gpu2d_setEscapeQuits(rae_Bool on) { g_g2d_escape_quits = on ? 1 : 0; }
+rae_Bool rae_ext_Gpu2d_escapeQuits(void) { return g_g2d_escape_quits != 0; }
 /* Left mouse button held this frame (button index 1 in SDL). */
 rae_Bool rae_ext_Gpu2d_pointerDown(void) { return g_sdl_mouse[SDL_BUTTON_LEFT] != 0; }
 int64_t rae_ext_Gpu2d_pointerKind(void) { return g_g2d_pointer_kind; }

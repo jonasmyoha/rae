@@ -31,7 +31,16 @@ open ui/UiLayers
 open ui/Ecs
 open ecs/ComponentTable
 
-# A held press: its pointer (-1 the mouse, else a touch id), what the walk found, and whether the
+# The mouse's pointer ids: its primary button (and the finger that is the pointer), its middle and
+# its secondary button. Each button's press is a capture of its own; a finger's id is 0 or more.
+const pointerIdMouse: Int = -1
+
+const pointerIdMiddle: Int = -2
+
+const pointerIdSecondary: Int = -3
+
+# A held press: its pointer (a pointerId* above, else a touch id), what the walk found, and whether
+# the
 # UI took it (a node, a surface, or blocked under a modal), so nothing else may act on it
 type PointerCapture {
   pointerId: Int
@@ -51,7 +60,7 @@ type LayerTappedOutside {
   pointerId: Int
 }
 
-# A pointer as the world layer sees it this frame (the mouse -1, a finger its touch id)
+# A pointer as the world layer sees it this frame (a pointerId* above, a finger its touch id)
 type WorldPointer {
   pointerId: Int
   # Its place (window points)
@@ -213,7 +222,8 @@ func setUiTextFocus(captures: mod UiCaptures, focused: view Bool) {
   captures.textFocus = focused
 }
 
-# The keys are the UI's while a text field has focus: read from the world's fields each frame
+# The keys are the UI's while a text field has focus or a menu is open: read from the world each
+# frame
 func feedUiTextFocus(captures: mod UiCaptures, world: view UiWorld) {
   var focused: Bool = false
   loop var i: Int = 0, i < componentCount(this: world.textFields), ++i {
@@ -224,7 +234,7 @@ func feedUiTextFocus(captures: mod UiCaptures, world: view UiWorld) {
       focused = true
     }
   }
-  captures.textFocus = focused
+  captures.textFocus = focused or world.menu.open
 }
 
 # The fingers (and -1 the mouse) the UI holds this frame
