@@ -421,12 +421,14 @@ int64_t rae_ext_rae_sys_rss_kb(void) {
 #endif
 }
 
-/* A directory read one entry per call (lib/Files.rae listDir): opendir, one
+/* A directory read one entry per call (lib/Files listDir): opendir, one
  * readdir (the entry's name, empty after the last), closedir. A NULL
- * directory (one that could not be opened) reads as empty. */
+ * directory (one that could not be opened, its errno kept) reads as empty. */
 void* rae_ext_rae_sys_dir_open(rae_String folder) {
-  if (!folder.data) return NULL;
-  return opendir((const char*)folder.data);
+  if (!folder.data) { rae_file_errno_set(EINVAL); return NULL; }
+  DIR* dir = opendir((const char*)folder.data);
+  rae_file_errno_set(dir ? 0 : errno);
+  return dir;
 }
 
 rae_String rae_ext_rae_sys_dir_next(void* dir) {

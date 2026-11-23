@@ -1,0 +1,140 @@
+# text/NameOrder: names in the order people read them. Digits as numbers (leading zeros aside), case
+# and accents aside (composed and decomposed alike, the plain name first), Greek and Cyrillic, a
+# name that is not UTF-8, and the folding used to find a part of a name. 100,000 names keyed and
+# ordered within a stated time.
+open text/NameOrder
+open collections/MergeSort
+
+func ordered(fold: view NameFold, names: own List(String)) ret List(String) {
+  var keys: List(String) = {}
+  loop let name: view String in names {
+    keys.add(value: nameKey(fold: fold, name: name))
+  }
+  var order: List(Int) = indexOrder(count: names.length)
+  sortOrderByText(order: order, keys: names, descending: false)
+  sortOrderByText(order: order, keys: keys, descending: false)
+  applyOrder(items: names, order: order)
+  ret names
+}
+
+func show(label: view String, names: view List(String)) {
+  var text: String = ""
+  loop let name: view String in names {
+    text = "{text} [{name}]"
+  }
+  log("{label}:{text}")
+}
+
+func main() {
+  let fold: NameFold = createNameFold()
+  show(
+    label: "numbers"
+    names: ordered(
+      fold: fold
+      names: {
+        "file10"
+        "file9"
+        "file1"
+        "file 2"
+        "file02"
+        "file2"
+        "file2a"
+        "file"
+        "file100000000000000000000"
+        "10"
+        "9"
+        "2b"
+      }
+    )
+  )
+  show(
+    label: "case"
+    names: ordered(
+      fold: fold
+      names: {
+        "banana"
+        "Apple"
+        "apple"
+        "Banana"
+        "APPLE pie"
+        "cherry"
+      }
+    )
+  )
+  # a composed é (U+00E9), then e and a combining accent (U+0301)
+  let composed: String = "résumé"
+  let decomposed: String = "résumé"
+  show(
+    label: "accents"
+    names: ordered(
+      fold: fold
+      names: {
+        "resumf"
+        "résumé"
+        "resume"
+        "Åland"
+        "Azores"
+        "Ärmel"
+        "Zoo"
+        "École"
+        "ecology"
+      }
+    )
+  )
+  log(
+    "composed and decomposed: {composed.length()} and {decomposed.length()} bytes, one key {nameKey(
+      fold: fold
+      name: composed
+    ) is nameKey(fold: fold, name: decomposed)}"
+  )
+  show(
+    label: "Greek, Cyrillic"
+    names: ordered(
+      fold: fold
+      names: {
+        "Ωmega"
+        "άλφα"
+        "Αλφα"
+        "Ёлка"
+        "елка"
+        "Йод"
+        "зима"
+        "日本"
+        "🍎 pie"
+      }
+    )
+  )
+  log("folded: {foldedText(fold: fold, text: "Crème BRÛLÉE Ǻ Ñandú 7")}")
+  log(
+    "contains: {foldedText(fold: fold, text: "Crème Brûlée").contains(
+      sub: foldedText(fold: fold, text: "brulee")
+    )}"
+  )
+  log(
+    "compared: {compareNames(fold: fold, a: "a2", b: "a10") < 0} {compareNames(
+      fold: fold
+      a: "B"
+      b: "a"
+    ) > 0} {compareNames(fold: fold, a: "x", b: "x")}"
+  )
+  # a Latin-1 é alone is not UTF-8: it is ordered as a byte and never read past the end
+  var bytes: List(UInt8) = {}
+  bytes.add(value: 97)
+  bytes.add(value: 233)
+  let broken: String = String.fromBytes(bytes: bytes, start: 0, count: 2)
+  log("not UTF-8: after ab {compareNames(fold: fold, a: broken, b: "ab") > 0}")
+  var many: List(String) = {}
+  loop var i: Int = 0, i < 100000, ++i {
+    many.add(value: "Film {(i * 7919) % 100000} é.mov")
+  }
+  let start: Int = nowNs()
+  let sorted: List(String) = ordered(fold: fold, names: own many)
+  let took: Int = nowNs() - start
+  var right: Int = 0
+  loop var i: Int = 0, i < sorted.length, ++i {
+    if sorted.copyAtDefault(index: i) is "Film {i} é.mov" {
+      right = right + 1
+    }
+  }
+  log("100000 names: {right} in their place, under 5 s {took < 5000000000}")
+}

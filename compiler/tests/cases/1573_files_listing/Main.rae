@@ -1,0 +1,236 @@
+# lib/Files' folder listing (docs/file-browser-design.md §3) over a tree made in a temporary folder:
+# every kind (file, folder, symlink to each, a broken one, a loop, a pipe), hidden files, names with
+# spaces, emoji and accents, sizes and dates, the orders, the filters, the errors (missing, not a
+# folder, no permission, empty), and 3,000 files (more than detailsAtOnce: names first). The tree is
+# removed at the end.
+import Files
+import Sys
+open text/NameOrder
+
+func makeLink(target: Ptr, path: Ptr) unsafe extern ret Int
+
+func makePipe(path: Ptr) unsafe extern ret Int
+
+func hide(path: Ptr) unsafe extern ret Int
+
+func link(target: view String, path: view String) {
+  unsafe {
+    let made: Int = makeLink(target: target.toCStr(), path: path.toCStr())
+  }
+}
+
+# Delete everything in `folder`, never following a link, then the folder
+func removeTree(folder: view String) {
+  let listing: FolderListing = Files.readFolder(folder: folder)
+  loop let entry: view FileEntry in listing.entries {
+    let path: String = Files.joinPath(folder: folder, name: entry.name)
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: path)
+    } else {
+      let gone: Bool = Sys.delete(path: path)
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func names(listing: view FolderListing) ret String {
+  var text: String = ""
+  loop let entry: view FileEntry in listing.entries {
+    text = "{text}[{entry.name}] "
+  }
+  ret text.trim()
+}
+
+func listed(
+  fold: view NameFold
+  folder: view String
+  order: view EntryOrder
+  filter: view EntryFilter
+) ret String {
+  let listing: FolderListing = Files.listFolder(
+    fold: fold
+    folder: folder
+    order: order
+    filter: filter
+  )
+  ret names(listing: listing)
+}
+
+func main() {
+  let fold: NameFold = createNameFold()
+  var base: String = Sys.getEnv(name: "TMPDIR")
+  if base.length() is 0 {
+    base = "/tmp"
+  }
+  let root: String = "{base}/rae-files-listing-{nowNs()}"
+  let tree: String = "{root}/tree"
+  let made: Bool = Sys.makeDir(path: root) and Sys.makeDir(path: tree)
+  let written: Bool = Sys.writeFile(path: "{tree}/file 10.txt", content: "1234567890") and Sys.writeFile(
+    path: "{tree}/file 2.txt"
+    content: "12"
+  ) and Sys.writeFile(path: "{tree}/File 1.TXT", content: "1") and Sys.writeFile(
+    path: "{tree}/Éclair.md"
+    content: "123"
+  ) and Sys.writeFile(path: "{tree}/éclat.md", content: "1234") and Sys.writeFile(
+    path: "{tree}/👩‍🚀 crew.png"
+    content: "12345"
+  ) and Sys.writeFile(path: "{tree}/.dot", content: "") and Sys.writeFile(
+    path: "{tree}/flagged.txt"
+    content: ""
+  )
+  let folders: Bool = Sys.makeDir(path: "{tree}/Zoo") and Sys.makeDir(path: "{tree}/sub folder") and Sys.writeFile(
+    path: "{tree}/sub folder/inside.txt"
+    content: "x"
+  )
+  link(target: "file 10.txt", path: "{tree}/link to file")
+  link(target: "sub folder", path: "{tree}/link to folder")
+  link(target: "missing", path: "{tree}/link to nothing")
+  link(target: "loop b", path: "{tree}/loop a")
+  link(target: "loop a", path: "{tree}/loop b")
+  var flagHidden: Bool = false
+  unsafe {
+    let pipe: Int = makePipe(path: "{tree}/pipe".toCStr())
+    flagHidden = hide(path: "{tree}/flagged.txt".toCStr()) is 0
+  }
+  log("made {made} {written} {folders}")
+
+  let everything: EntryFilter = { showHidden: true, namePart: "", extensions: {} }
+  let shown: EntryFilter = { namePart: "", extensions: {} }
+  let byName: EntryOrder = {}
+  let all: FolderListing = Files.listFolder(
+    fold: fold
+    folder: tree
+    order: byName
+    filter: everything
+  )
+  log("--- kinds and details ({all.error}, detailed {all.detailed})")
+  loop let entry: view FileEntry in all.entries {
+    var line: String = "{entry.name}: {entry.kind}"
+    if entry.kind is EntryKind.symlink {
+      line = "{line} to {entry.targetKind}"
+    }
+    if entry.kind is EntryKind.file {
+      line = "{line} {entry.size} bytes"
+    }
+    if entry.hidden and entry.name is not "flagged.txt" {
+      line = "{line}, hidden"
+    }
+    log(
+      "{line}, dated {entry.modifiedSeconds > 1500000000.0}, a folder {Files.isFolder(entry: entry)}"
+    )
+  }
+  let quick: FolderListing = Files.readFolder(folder: tree)
+  var unread: Bool = true
+  loop let entry: view FileEntry in quick.entries {
+    unread = unread and entry.size is -1
+  }
+  log("the quick pass reads no sizes: {quick.entries.length} entries, {unread}")
+  let afterFlag: String = listed(
+    fold: fold
+    folder: tree
+    order: byName
+    filter: shown
+  )
+  log(
+    "hidden left out: dot {not afterFlag.contains(sub: ".dot")}, the OS's flag {afterFlag.contains(
+      sub: "flagged"
+    ) is not flagHidden}"
+  )
+
+  log("--- orders")
+  log(listed(
+    fold: fold
+    folder: "{tree}"
+    order: byName
+    filter: { namePart: "file", extensions: {} }
+  ))
+  log(listed(
+    fold: fold
+    folder: tree
+    order: EntryOrder { descending: true, foldersFirst: false }
+    filter: EntryFilter { namePart: "file", extensions: {} }
+  ))
+  log(listed(
+    fold: fold
+    folder: tree
+    order: EntryOrder { by: EntryOrderBy.size, descending: true, foldersFirst: true }
+    filter: EntryFilter { namePart: "", extensions: { "md", "png" } }
+  ))
+  log(listed(
+    fold: fold
+    folder: tree
+    order: EntryOrder { by: EntryOrderBy.kind }
+    filter: EntryFilter { namePart: "", extensions: { "md", "png", "txt" } }
+  ).replace(old: "[flagged.txt] ", new: "").replace(old: " [flagged.txt]", new: ""))
+  log("--- filters")
+  log(listed(
+    fold: fold
+    folder: tree
+    order: byName
+    filter: EntryFilter { namePart: "ÉCLA", extensions: {} }
+  ))
+  log(listed(
+    fold: fold
+    folder: tree
+    order: byName
+    filter: EntryFilter { namePart: "ew", extensions: { "png" } }
+  ))
+
+  log("--- errors")
+  let closed: String = "{root}/closed"
+  let empty: String = "{root}/empty"
+  let more: Bool = Sys.makeDir(path: closed) and Sys.makeDir(path: empty)
+  let shut: Bool = Sys.setFileMode(path: closed, mode: 0)
+  log("no permission: {Files.readFolder(folder: closed).error}")
+  let opened: Bool = Sys.setFileMode(path: closed, mode: 448)
+  log(
+    "empty: {Files.readFolder(folder: empty).error} {Files.readFolder(folder: empty).entries.length}"
+  )
+  log("missing: {Files.readFolder(folder: "{root}/nowhere").error}")
+  log("a file: {Files.readFolder(folder: "{tree}/file 2.txt").error}")
+  log("a loop of links: {Files.readFolder(folder: "{tree}/loop a").error}")
+  log("through a link: {names(listing: Files.readFolder(folder: "{tree}/link to folder"))}")
+
+  log("--- many")
+  let many: String = "{root}/many"
+  let manyMade: Bool = Sys.makeDir(path: many)
+  loop var i: Int = 0, i < 3000, ++i {
+    let one: Bool = Sys.writeFile(path: "{many}/{i}.txt", content: "")
+  }
+  var big: FolderListing = Files.listFolder(
+    fold: fold
+    folder: many
+    order: byName
+    filter: shown
+  )
+  var inPlace: Int = 0
+  loop var i: Int = 0, i < big.entries.length, ++i {
+    if let entry: view FileEntry = big.entries.viewAt(index: i) {
+      if entry.name is "{i}.txt" and entry.size is -1 {
+        inPlace = inPlace + 1
+      }
+    }
+  }
+  log("{big.entries.length} files, {inPlace} in place by number, detailed {big.detailed}")
+  if let last: mod FileEntry = big.entries.modAt(index: 2999) {
+    Files.readEntryDetails(folder: many, entry: last)
+    log(
+      "the last one's details after: {last.size} bytes, dated {last.modifiedSeconds > 1500000000.0}"
+    )
+  }
+  let bySize: FolderListing = Files.listFolder(
+    fold: fold
+    folder: many
+    order: EntryOrder { by: EntryOrderBy.size }
+    filter: shown
+  )
+  log("by size it reads them: {bySize.detailed}")
+  let volumes: List(Volume) = Files.mountedVolumes()
+  var rootVolume: Bool = not Files.hasVolumes
+  if let first: view Volume = volumes.viewAt(index: 0) {
+    rootVolume = first.path is "/" and first.name.length() > 0 and first.freeBytes > 0
+  }
+  log("the system's volume first: {rootVolume}")
+  removeTree(folder: root)
+  log("removed: {not Sys.exists(path: root)}")
+}

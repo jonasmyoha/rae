@@ -1,0 +1,143 @@
+# collections/MergeSort.rae — a stable sort of any number of things, O(n log n). (List.sort, in the
+# prelude, is an insertion sort of numbers: right for a few dozen.)
+#
+# It sorts an ORDER (a list of indexes) by a list of keys, not the things themselves, as Rae has no
+# function values to compare them with. Being stable, it sorts by several keys one after the other,
+# the least important first:
+#
+#     var order: List(Int) = indexOrder(count: files.length)
+#     sortOrderByText(order: order, keys: names, descending: false)
+#     sortOrder(order: order, keys: sizes, descending: true)     # the same size: by name
+#     applyOrder(items: files, order: order)
+import String
+
+# 0, 1, 2, ... count - 1
+func indexOrder(count: view Int) ret List(Int) {
+  var order: List(Int) = List.create(Int, cap: count)
+  loop var i: Int = 0, i < count, ++i {
+    order.add(value: i)
+  }
+  ret order
+}
+
+# Sort `order` by `keys` (numbers: anything `<` compares), keeping the order of equal ones
+func sortOrder(
+  T: type
+  order: mod List(Int)
+  keys: view List(T)
+  descending: view Bool
+) {
+  let count: Int = order.length
+  var from: List(Int) = order
+  var to: List(Int) = order
+  var width: Int = 1
+  loop width < count {
+    var start: Int = 0
+    loop start < count {
+      let middle: Int = smaller(a: start + width, b: count)
+      let end: Int = smaller(a: start + 2 * width, b: count)
+      var left: Int = start
+      var right: Int = middle
+      loop var out: Int = start, out < end, ++out {
+        var takeLeft: Bool = right >= end
+        if left < middle and right < end {
+          let a: T = keys.copyAtDefault(index: from.copyAtDefault(index: left))
+          let b: T = keys.copyAtDefault(index: from.copyAtDefault(index: right))
+          if descending {
+            takeLeft = not (a < b)
+          } else {
+            takeLeft = not (b < a)
+          }
+        }
+        if takeLeft {
+          to.set(index: out, value: from.copyAtDefault(index: left))
+          left = left + 1
+        } else {
+          to.set(index: out, value: from.copyAtDefault(index: right))
+          right = right + 1
+        }
+      }
+      start = end
+    }
+    let sorted: List(Int) = own to
+    to = own from
+    from = own sorted
+    width = width * 2
+  }
+  order = own from
+}
+
+# Sort `order` by the bytes of `keys` (String.compare), keeping the order of equal ones
+func sortOrderByText(order: mod List(Int), keys: view List(String), descending: view Bool) {
+  let count: Int = order.length
+  var from: List(Int) = order
+  var to: List(Int) = order
+  var width: Int = 1
+  loop width < count {
+    var start: Int = 0
+    loop start < count {
+      let middle: Int = smaller(a: start + width, b: count)
+      let end: Int = smaller(a: start + 2 * width, b: count)
+      var left: Int = start
+      var right: Int = middle
+      loop var out: Int = start, out < end, ++out {
+        var takeLeft: Bool = right >= end
+        if left < middle and right < end {
+          var byKey: Int = compareAt(
+            keys: keys
+            a: from.copyAtDefault(index: left)
+            b: from.copyAtDefault(index: right)
+          )
+          if descending {
+            byKey = -byKey
+          }
+          takeLeft = byKey <= 0
+        }
+        if takeLeft {
+          to.set(index: out, value: from.copyAtDefault(index: left))
+          left = left + 1
+        } else {
+          to.set(index: out, value: from.copyAtDefault(index: right))
+          right = right + 1
+        }
+      }
+      start = end
+    }
+    let sorted: List(Int) = own to
+    to = own from
+    from = own sorted
+    width = width * 2
+  }
+  order = own from
+}
+
+func smaller(a: view Int, b: view Int) ret Int {
+  if a < b {
+    ret a
+  }
+  ret b
+}
+
+func compareAt(keys: view List(String), a: view Int, b: view Int) ret Int {
+  if let left: view String = keys.viewAt(index: a) {
+    if let right: view String = keys.viewAt(index: b) {
+      ret left.compare(other: right)
+    }
+  }
+  ret 0
+}
+
+# Put `items` in `order` (item order[i] goes to place i), in place: nothing is copied. `order` holds
+# each index once.
+func applyOrder(T: type, items: mod List(T), order: view List(Int)) {
+  loop var place: Int = 0, place < items.length, ++place {
+    var at: Int = order.copyAtDefault(index: place)
+    # an item already passed was swapped onwards; follow where it went
+    loop at < place {
+      at = order.copyAtDefault(index: at)
+    }
+    if at is not place {
+      items.swap(i: place, j: at)
+    }
+  }
+}

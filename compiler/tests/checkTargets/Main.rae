@@ -22,6 +22,7 @@ import net/Udp
 import webSocket/WebSocketBrowser
 import webSocket/WebSocketClient
 import FileNotify
+import Files
 import ReduceMotion
 import Realtime
 import app3d/RenderScale
@@ -41,6 +42,7 @@ func main() {
     "kqueue {NetSystem.hasKqueue}, notifications {FileNotify.fileNotifyActive(fileNotify: watcher)}"
   )
   FileNotify.closeFileNotify(fileNotify: watcher)
+  log("volumes {Files.mountedVolumes().length}, here {Files.hasVolumes}")
   log("pointer {Device.primaryPointer()}, scale {Display.scale()}")
   log("direct present allowed {Surface.createFrameTarget().directAllowed}")
   log(

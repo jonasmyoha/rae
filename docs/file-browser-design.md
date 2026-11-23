@@ -1,6 +1,7 @@
 # The file browser: design
 
-Status: design, 2026-11-23. Nothing is built. The steps are the `[file browser ...]` tasks in
+Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
+collections/MergeSort). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -142,9 +143,12 @@ enum ListError { none, notFound, noPermission, notFolder, other }
 - **Hidden**: a leading dot, or the platform's flag (macOS `UF_HIDDEN`).
 - **A folder shown as a file**: on macOS a bundle (`.app`, `.photoslibrary`) is a folder on disk. A
   kind table (§9) says which extensions are opened as files; the model itself says folder.
-- **Two passes.** Measured on 100,000 files: names with their kind 98 ms, names with `lstat` 520 ms.
-  So a listing first reads names and kinds (`readdir`'s `d_type`; `lstat` only where it says
-  unknown) and is shown; sizes and dates follow, at once only when the order needs them.
+- **Two passes.** Names and kinds come first (`readdir`'s `d_type`; `lstat` only where it says
+  unknown): `readFolder`. Sizes, dates and the OS's hidden flag follow per entry:
+  `readEntryDetails`. `listFolder` reads them at once when the order needs them, and for a folder of
+  at most 2,000 entries, so that a folder the OS's flag hides (macOS's `~/Library`) does not show
+  and go. Measured on 100,000 files in a release build: names and kinds 55 ms, ordering 70 ms, all
+  of it by size 375 ms.
 - **Order.** By name (natural: `file2` before `file10`; case ignored; accents after their base
   letter), size, date, kind; ascending or not; folders first or mixed. Ties go by name, then bytes,
   so an order is total and stable. `NameOrder` compares a key made once per name. It folds case and
@@ -154,7 +158,9 @@ enum ListError { none, notFound, noPermission, notFolder, other }
   merge sort, written in `lib/collections` over an index list and a key list.
 - **Filter.** A name part (folded as above), extensions, kinds; folders always pass an extension
   filter, so a filtered tree can still be walked.
-- **Volumes**: name, mount folder, removable, read-only, free space.
+- **Volumes** (`mountedVolumes`): name, mount folder, removable, read-only, free space; the system's
+  first; not the images macOS marks as not for browsing. Reading them asks each disk: off the main
+  thread too.
 
 `docs/filesystem-and-paths.md` planned `isDir`, `size` and `list` in `Filesystem`; they are these.
 
@@ -193,8 +199,8 @@ type ListUpdate {
 
 A thread in a `readdir` that never returns cannot be stopped, and a `Task` is joined when dropped,
 which would hang the app's quit. So the job list keeps such a task apart (no result for 5 s), counts
-it against the four, and an app that quits with one left ends with `Sys.exit`. Step 2 proves this
-with a simulated stall and says in `lib/Files` what an app must do.
+it against the four, and an app that quits with one left ends with `Sys.exit`, which joins nothing.
+Case 1572 proves it with a thread that never returns: the other listings go on and the program quits.
 
 ## 4. The ECS model
 

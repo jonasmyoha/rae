@@ -232,7 +232,7 @@ static bool extern_is_pool_safe(const WaitGraph* graph, const AstDecl* decl) {
   const char* path = short_lib_path(decl->origin_file);
   static const char* const safe[] = { "lib/core/", "lib/Math.rae", "lib/Parallel.rae", "lib/Time.rae",
                                       "lib/Channel.rae", "lib/String.rae", "lib/net/NetSystem.rae", "lib/net/ByteBuffer.rae",
-                                      "lib/Sys.rae", "lib/Io.rae", "lib/Files.rae", "lib/Filesystem.rae",
+                                      "lib/Sys.rae", "lib/Io.rae", "lib/Files/", "lib/Filesystem.rae",
                                       "lib/Image.rae" };
   for (size_t i = 0; i < sizeof safe / sizeof safe[0]; i++) {
     if (strncmp(path, safe[i], strlen(safe[i])) == 0) return true;

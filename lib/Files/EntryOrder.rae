@@ -1,0 +1,153 @@
+# Files: the order and the filter of a folder's entries, and a listing with both
+# (docs/file-browser-design.md §3).
+open text/NameOrder
+open collections/MergeSort
+
+enum EntryOrderBy { name, size, modified, kind }
+
+type EntryOrder {
+  by: EntryOrderBy = EntryOrderBy.name
+  descending: Bool = false
+  foldersFirst: Bool = true
+}
+
+# What a listing keeps. Folders pass the extensions, so a filtered tree can be walked.
+type EntryFilter {
+  showHidden: Bool = false
+  # a part of the name, case and accents aside; "" for any
+  namePart: String
+  # lowercase, without dots; none for any
+  extensions: List(String)
+}
+
+# A folder of at most this many entries has its details read at once, so nothing changes after it
+# is shown (a hidden folder such as ~/Library would show and go)
+const detailsAtOnce: Int = 2000
+
+func needsDetails(order: view EntryOrder) ret Bool {
+  ret order.by is EntryOrderBy.size or order.by is EntryOrderBy.modified
+}
+
+# `foldedPart` is the filter's namePart folded (foldedText), made once for a list
+func passesFilter(
+  fold: view NameFold
+  filter: view EntryFilter
+  foldedPart: view String
+  entry: view FileEntry
+) ret Bool {
+  if entry.hidden and not filter.showHidden {
+    ret false
+  }
+  if filter.extensions.length > 0 and not isFolder(entry: entry) {
+    let extension: String = extensionOf(name: entry.name)
+    var listed: Bool = false
+    loop let wanted: view String in filter.extensions {
+      if wanted is extension {
+        listed = true
+      }
+    }
+    if not listed {
+      ret false
+    }
+  }
+  if foldedPart.length() > 0 {
+    ret foldedText(fold: fold, text: entry.name).contains(sub: foldedPart)
+  }
+  ret true
+}
+
+# Keep the entries that pass, in their order
+func filterEntries(fold: view NameFold, filter: view EntryFilter, entries: mod List(FileEntry)) {
+  let foldedPart: String = foldedText(fold: fold, text: filter.namePart)
+  var kept: Int = 0
+  loop var i: Int = 0, i < entries.length, ++i {
+    var passes: Bool = false
+    if let entry: view FileEntry = entries.viewAt(index: i) {
+      passes = passesFilter(
+        fold: fold
+        filter: filter
+        foldedPart: foldedPart
+        entry: entry
+      )
+    }
+    if passes {
+      if i is not kept {
+        entries.swap(i: kept, j: i)
+      }
+      kept = kept + 1
+    }
+  }
+  entries.truncate(len: kept)
+}
+
+# Put the entries in order. Equal ones go by name, and names that differ only in case or accents by
+# their bytes, so one folder has one order.
+func orderEntries(fold: view NameFold, order: view EntryOrder, entries: mod List(FileEntry)) {
+  let count: Int = entries.length
+  var names: List(String) = List.create(String, cap: count)
+  var keys: List(String) = List.create(String, cap: count)
+  var kinds: List(String) = {}
+  var numbers: List(Float64) = {}
+  var ranks: List(Int) = {}
+  loop let entry: view FileEntry in entries {
+    names.add(value: "{entry.name}")
+    keys.add(value: nameKey(fold: fold, name: entry.name))
+    if order.by is EntryOrderBy.size {
+      numbers.add(value: entry.size as Float64)
+    } else if order.by is EntryOrderBy.modified {
+      numbers.add(value: entry.modifiedSeconds)
+    } else if order.by is EntryOrderBy.kind {
+      kinds.add(value: kindKey(entry: entry))
+    }
+    if order.foldersFirst {
+      if isFolder(entry: entry) {
+        ranks.add(value: 0)
+      } else {
+        ranks.add(value: 1)
+      }
+    }
+  }
+  let nameDescending: Bool = order.descending and order.by is EntryOrderBy.name
+  var places: List(Int) = indexOrder(count: count)
+  sortOrderByText(order: places, keys: names, descending: nameDescending)
+  sortOrderByText(order: places, keys: keys, descending: nameDescending)
+  if numbers.length > 0 {
+    sortOrder(order: places, keys: numbers, descending: order.descending)
+  }
+  if kinds.length > 0 {
+    sortOrderByText(order: places, keys: kinds, descending: order.descending)
+  }
+  if ranks.length > 0 {
+    sortOrder(order: places, keys: ranks, descending: false)
+  }
+  applyOrder(items: entries, order: places)
+}
+
+# Folders together, then files by extension
+func kindKey(entry: view FileEntry) ret String {
+  if isFolder(entry: entry) {
+    ret ""
+  }
+  ret ".{extensionOf(name: entry.name)}"
+}
+
+# `folder` read, filtered and ordered. The details are read too when the order needs them or the
+# folder is small (`detailed`); otherwise the caller reads them after (readEntryDetails), and drops
+# the entries the OS's hidden flag hides.
+func listFolder(
+  fold: view NameFold
+  folder: view String
+  order: view EntryOrder
+  filter: view EntryFilter
+) ret FolderListing {
+  var listing: FolderListing = readFolder(folder: folder)
+  if needsDetails(order: order) or listing.entries.length <= detailsAtOnce {
+    loop let entry: mod FileEntry in listing.entries {
+      readEntryDetails(folder: folder, entry: entry)
+    }
+    listing.detailed = true
+  }
+  filterEntries(fold: fold, filter: filter, entries: listing.entries)
+  orderEntries(fold: fold, order: order, entries: listing.entries)
+  ret listing
+}

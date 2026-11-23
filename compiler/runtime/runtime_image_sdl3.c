@@ -816,6 +816,9 @@ rae_String rae_ext_Filesystem_userFolder(int64_t kind) {
     if (kind == 1) f = SDL_FOLDER_PICTURES;
     else if (kind == 2) f = SDL_FOLDER_DOCUMENTS;
     else if (kind == 3) f = SDL_FOLDER_HOME;
+    else if (kind == 4) f = SDL_FOLDER_VIDEOS;
+    else if (kind == 5) f = SDL_FOLDER_MUSIC;
+    else if (kind == 6) f = SDL_FOLDER_DOWNLOADS;
     const char* p = SDL_GetUserFolder(f);
     return rae_str_from_cstr_impl(p ? p : "", RAE_SITE_READ_FILE);
 }

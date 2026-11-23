@@ -1,0 +1,89 @@
+# Files: the mounted volumes (docs/file-browser-design.md §3): the disk the system runs from and
+# the ones mounted where this OS puts them. Reading them asks each disk, so call it as a listing is
+# called: from a thread, when the program must not wait.
+import Sys
+
+type Volume {
+  name: String
+  # where it is mounted
+  path: String
+  readOnly: Bool
+  removable: Bool
+  freeBytes: Int
+}
+
+# Where this OS mounts disks, with a name in it per disk (Linux also a user's name before it)
+const hasVolumes: Bool = Target.os is Os.macos or Target.os is Os.linux
+
+func nativeVolumeFlags(path: String) unsafe extern("rae_ext_Files_volumeFlags") ret Int
+
+func volumeFlags(path: view String) ret Int {
+  var flags: Int = 0
+  unsafe {
+    flags = nativeVolumeFlags(path: path)
+  }
+  if flags < 0 {
+    ret 0
+  }
+  ret flags
+}
+
+func volumeAt(name: view String, path: view String, flags: view Int) ret Volume {
+  ret Volume {
+    name: name
+    path: path
+    readOnly: flags % 2 is 1
+    removable: flags / 2 % 2 is 1
+    freeBytes: Sys.freeSpace(path: path)
+  }
+}
+
+# The folders directly in `parent` that are another disk than `parent` is on
+func addMountsIn(volumes: mod List(Volume), parent: view String) {
+  let parentDevice: Int = pathStatus(path: parent, follow: true).device
+  let listing: FolderListing = readFolder(folder: parent)
+  loop let entry: view FileEntry in listing.entries {
+    if entry.kind is EntryKind.folder {
+      let path: String = joinPath(folder: parent, name: entry.name)
+      let status: PathStatus = pathStatus(path: path, follow: false)
+      if status.found and status.device is not parentDevice {
+        let flags: Int = volumeFlags(path: path)
+        # an image a program mounted for itself is not for people (macOS says so)
+        if flags / 4 % 2 is 0 {
+          volumes.add(value: volumeAt(name: entry.name, path: path, flags: flags))
+        }
+      }
+    }
+  }
+}
+
+# The system's disk first; empty where a program sees no volumes (a phone, a browser)
+func mountedVolumes() ret List(Volume) {
+  var volumes: List(Volume) = {}
+  when Target.os is Os.macos {
+    # the system disk's name is the link to "/" in /Volumes
+    var name: String = "/"
+    let listing: FolderListing = readFolder(folder: "/Volumes")
+    loop let entry: view FileEntry in listing.entries {
+      if entry.kind is EntryKind.symlink {
+        name = "{entry.name}"
+      }
+    }
+    volumes.add(value: volumeAt(name: name, path: "/", flags: volumeFlags(path: "/")))
+    addMountsIn(volumes: volumes, parent: "/Volumes")
+  } else when Target.os is Os.linux {
+    volumes.add(value: volumeAt(name: "/", path: "/", flags: volumeFlags(path: "/")))
+    addMountsIn(volumes: volumes, parent: "/mnt")
+    addMountsIn(volumes: volumes, parent: "/media")
+    let users: List(String) = { "/media", "/run/media" }
+    loop let parent: view String in users {
+      let listing: FolderListing = readFolder(folder: parent)
+      loop let entry: view FileEntry in listing.entries {
+        if entry.kind is EntryKind.folder {
+          addMountsIn(volumes: volumes, parent: joinPath(folder: parent, name: entry.name))
+        }
+      }
+    }
+  }
+  ret volumes
+}

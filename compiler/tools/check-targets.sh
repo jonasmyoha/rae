@@ -13,6 +13,8 @@ missing=""
 for file in $(find ../lib -name '*.rae' -type f | xargs grep -lE '^[[:space:]]*when [^#]* \{[[:space:]]*$' 2>/dev/null | sort); do
   module="${file#../lib/}"
   module="${module%.rae}"
+  # a file of a module folder (the deepest PascalCase folder of its path) is that module
+  module="$(printf '%s' "$module" | sed -E 's#^(.*/)?([A-Z][^/]*)/.*$#\1\2#')"
   if ! grep -qE "^(import|open) ${module}\$" "$ENTRY"; then
     missing="$missing $module"
   fi

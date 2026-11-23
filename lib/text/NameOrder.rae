@@ -1,0 +1,237 @@
+# NameOrder — the order of names as people read them (docs/file-browser-design.md §3).
+#
+#     let fold: NameFold = createNameFold()
+#     let key: String = nameKey(fold: fold, name: "File 10.txt")
+#
+# Two names are compared by the bytes of their keys (String.compare), made once per name:
+#   - case does not count, and neither do accents: a letter is its base letter, whether the accent
+#     is part of it (é) or a mark after it (e and U+0301; macOS stores either). Names that differ
+#     only so have one key: put the plain one first by comparing the names' own bytes next.
+#   - a run of digits is a number: "file2" comes before "file10", and "file02" has file2's key.
+#
+# Letters are folded in Latin, Greek and Cyrillic (U+00C0..024F, 0370..052F, 1E00..1FFF, from the
+# Unicode canonical decompositions); everything else goes by its code point. No language's own
+# rules (Swedish å after z) are applied. A name that is not UTF-8 (Linux allows it) is ordered by
+# its bytes.
+
+# The folded letter of each code point of the three blocks, 0 for a mark that is dropped
+type NameFold {
+  latin: List(Int)
+  greekCyrillic: List(Int)
+  extended: List(Int)
+}
+
+const latinStart: Int = 192
+
+const greekStart: Int = 880
+
+const extendedStart: Int = 7680
+
+# The combining marks U+0300..036F
+const marksStart: Int = 768
+
+# One character per code point from a block's start, 64 a line; "." is the letter itself
+func latinFolds() ret List(String) {
+  ret List(String) {
+    "aaaaaaæceeeeiiiiðnooooo.øuuuuyþ.aaaaaa.ceeeeiiii.nooooo..uuuuy.y"
+    "aaaaaaccccccccddđ.eeeeeeeeeegggggggghhħ.iiiiiiiii.ĳ.jjkk.llllllŀ"
+    ".ł.nnnnnn.ŋ.ooooooœ.rrrrrrssssssssttttŧ.uuuuuuuuuuuuwwyyyzzzzzz."
+    ".ɓƃ.ƅ.ɔƈ.ɖɗƌ..ǝəɛƒ.ɠɣ.ɩɨƙ...ɯɲ.ɵooƣ.ƥ.ʀƨ.ʃ..ƭ.ʈuuʊʋƴ.ƶ.ʒƹ...ƽ..."
+    "....ǆǆ.ǉǉ.ǌǌ.aaiioouuuuuuuuuu.aaaaææǥ.ggkkooooʒʒjǳǳ.ggƕƿnnaaææøø"
+    "aaaaeeeeiiiioooorrrruuuussttȝ.hhƞ.ȣ.ȥ.aaeeooooooooyy......ⱥȼ.ƚⱦ."
+    ".ɂ.ƀʉʌɇ.ɉ.ɋ.ɍ.ɏ."
+  }
+}
+
+func greekCyrillicFolds() ret List(String) {
+  ret List(String) {
+    "ͱ.ͳ.ʹ.ͷ.......;ϳ.....¨α·εηι.ο.υωιαβγδεζηθικλμνξοπρ.στυφχψωιυαεηι"
+    "υ.................σ.......ιυουωϗ...ϒϒ...ϙ.ϛ.ϝ.ϟ.ϡ.ϣ.ϥ.ϧ.ϩ.ϫ.ϭ.ϯ."
+    "....θ..ϸ.ϲϻ..ͻͼͽееђгєѕііјљњћкиуџабвгдежзииклмнопрстуфхцчшщъыьэюя"
+    ".........и......................ее.г...і....киу.ѡ.ѣ.ѥ.ѧ.ѩ.ѫ.ѭ.ѯ."
+    "ѱ.ѳ.ѵ.ѵѵѹ.ѻ.ѽ.ѿ.ҁ.........ҋ.ҍ.ҏ.ґ.ғ.ҕ.җ.ҙ.қ.ҝ.ҟ.ҡ.ң.ҥ.ҧ.ҩ.ҫ.ҭ.ү."
+    "ұ.ҳ.ҵ.ҷ.ҹ.һ.ҽ.ҿ.ӏжжӄ.ӆ.ӈ.ӊ.ӌ.ӎ..ааааӕ.ееә.әәжжззӡ.ииииооө.өөээуу"
+    "ууууччӷ.ыыӻ.ӽ.ӿ.ԁ.ԃ.ԅ.ԇ.ԉ.ԋ.ԍ.ԏ.ԑ.ԓ.ԕ.ԗ.ԙ.ԛ.ԝ.ԟ.ԡ.ԣ.ԥ.ԧ.ԩ.ԫ.ԭ.ԯ."
+  }
+}
+
+func extendedFolds() ret List(String) {
+  ret List(String) {
+    "aabbbbbbccddddddddddeeeeeeeeeeffgghhhhhhhhhhiiiikkkkkkllllllllmm"
+    "mmmmnnnnnnnnoooooooopppprrrrrrrrssssssssssttttttttuuuuuuuuuuvvvv"
+    "wwwwwwwwwwxxxxyyzzzzzzhtwy.ſ..ß.aaaaaaaaaaaaaaaaaaaaaaaaeeeeeeee"
+    "eeeeeeeeiiiioooooooooooooooooooooooouuuuuuuuuuuuuuyyyyyyyyỻ.ỽ.ỿ."
+    "ααααααααααααααααεεεεεε..εεεεεε..ηηηηηηηηηηηηηηηηιιιιιιιιιιιιιιιι"
+    "οοοοοο..οοοοοο..υυυυυυυυ.υ.υ.υ.υωωωωωωωωωωωωωωωωααεεηηιιοουυωω.."
+    "ααααααααααααααααηηηηηηηηηηηηηηηηωωωωωωωωωωωωωωωωααααα.ααααααα.ι."
+    ".¨ηηη.ηηεεηηη᾿᾿᾿ιιιι..ιιιιιι.῾῾῾υυυυρρυυυυυυρ¨¨`..ωωω.ωωοοωωω´.."
+  }
+}
+
+type CodePoint {
+  code: Int
+  # in bytes
+  length: Int
+}
+
+# The code point at byte `at`; a byte that starts no UTF-8 character is itself
+func codePointAt(text: view String, at: view Int) ret CodePoint {
+  let first: Int = text.byteAt(index: at)
+  if first < 128 {
+    ret CodePoint { code: first, length: 1 }
+  }
+  var length: Int = 0
+  var code: Int = 0
+  if first >= 194 and first < 224 {
+    length = 2
+    code = first - 192
+  } else if first >= 224 and first < 240 {
+    length = 3
+    code = first - 224
+  } else if first >= 240 and first < 245 {
+    length = 4
+    code = first - 240
+  }
+  if length is 0 or at + length > text.length() {
+    ret CodePoint { code: first, length: 1 }
+  }
+  loop var i: Int = 1, i < length, ++i {
+    let next: Int = text.byteAt(index: at + i)
+    if next < 128 or next >= 192 {
+      ret CodePoint { code: first, length: 1 }
+    }
+    code = code * 64 + next - 128
+  }
+  ret CodePoint { code: code, length: length }
+}
+
+func foldTable(lines: view List(String), start: view Int) ret List(Int) {
+  var table: List(Int) = {}
+  loop let line: view String in lines {
+    var at: Int = 0
+    loop at < line.length() {
+      let point: CodePoint = codePointAt(text: line, at: at)
+      if point.code is 46 {
+        table.add(value: start + table.length)
+      } else {
+        table.add(value: point.code)
+      }
+      at = at + point.length
+    }
+  }
+  ret table
+}
+
+func createNameFold() ret NameFold {
+  ret NameFold {
+    latin: foldTable(lines: latinFolds(), start: latinStart)
+    greekCyrillic: foldTable(lines: greekCyrillicFolds(), start: greekStart)
+    extended: foldTable(lines: extendedFolds(), start: extendedStart)
+  }
+}
+
+# A code point's folded letter; 0 for a combining mark
+func foldCode(fold: view NameFold, code: view Int) ret Int {
+  if code < 128 {
+    if code >= 65 and code <= 90 {
+      ret code + 32
+    }
+    ret code
+  }
+  if code >= marksStart and code < greekStart {
+    ret 0
+  }
+  if code >= latinStart and code < latinStart + fold.latin.length {
+    ret fold.latin.copyAtFallback(index: code - latinStart, fallback: code)
+  }
+  if code >= greekStart and code < greekStart + fold.greekCyrillic.length {
+    ret fold.greekCyrillic.copyAtFallback(index: code - greekStart, fallback: code)
+  }
+  if code >= extendedStart and code < extendedStart + fold.extended.length {
+    ret fold.extended.copyAtFallback(index: code - extendedStart, fallback: code)
+  }
+  ret code
+}
+
+func appendUtf8(bytes: mod List(UInt8), code: view Int) {
+  if code < 128 {
+    bytes.add(value: code as UInt8)
+  } else if code < 2048 {
+    bytes.add(value: (192 + code / 64) as UInt8)
+    bytes.add(value: (128 + code % 64) as UInt8)
+  } else if code < 65536 {
+    bytes.add(value: (224 + code / 4096) as UInt8)
+    bytes.add(value: (128 + code / 64 % 64) as UInt8)
+    bytes.add(value: (128 + code % 64) as UInt8)
+  } else {
+    bytes.add(value: (240 + code / 262144) as UInt8)
+    bytes.add(value: (128 + code / 4096 % 64) as UInt8)
+    bytes.add(value: (128 + code / 64 % 64) as UInt8)
+    bytes.add(value: (128 + code % 64) as UInt8)
+  }
+}
+
+# `text` folded (case and accents), for finding a part or the start of a name
+func foldedText(fold: view NameFold, text: view String) ret String {
+  var bytes: List(UInt8) = List.create(UInt8, cap: text.length() + 4)
+  var at: Int = 0
+  loop at < text.length() {
+    let point: CodePoint = codePointAt(text: text, at: at)
+    let code: Int = foldCode(fold: fold, code: point.code)
+    if code > 0 {
+      appendUtf8(bytes: bytes, code: code)
+    }
+    at = at + point.length
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# A number longer than this many digits is ordered by its first ones
+const longestNumber: Int = 200
+
+# The key of `name`: folded, each run of digits as "0", how many digits it has (leading zeros
+# left out) and the digits, so a longer number is a larger one. Only to be compared: its bytes are
+# not always UTF-8.
+func nameKey(fold: view NameFold, name: view String) ret String {
+  let length: Int = name.length()
+  var bytes: List(UInt8) = List.create(UInt8, cap: length + 8)
+  var at: Int = 0
+  loop at < length {
+    let byte: Int = name.byteAt(index: at)
+    if byte >= 48 and byte <= 57 {
+      var start: Int = at
+      loop at < length and name.byteAt(index: at) >= 48 and name.byteAt(index: at) <= 57 {
+        at = at + 1
+      }
+      loop start < at - 1 and name.byteAt(index: start) is 48 {
+        start = start + 1
+      }
+      var digits: Int = at - start
+      if digits > longestNumber {
+        digits = longestNumber
+      }
+      bytes.add(value: 48)
+      bytes.add(value: (digits + 1) as UInt8)
+      loop var i: Int = 0, i < digits, ++i {
+        bytes.add(value: name.byteAt(index: start + i) as UInt8)
+      }
+    } else {
+      let point: CodePoint = codePointAt(text: name, at: at)
+      let code: Int = foldCode(fold: fold, code: point.code)
+      if code > 0 {
+        appendUtf8(bytes: bytes, code: code)
+      }
+      at = at + point.length
+    }
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: bytes.length)
+}
+
+# The order of two names: < 0, 0 or > 0. For a few names; a long list makes its keys once.
+func compareNames(fold: view NameFold, a: view String, b: view String) ret Int {
+  let byKey: Int = nameKey(fold: fold, name: a).compare(other: nameKey(fold: fold, name: b))
+  if byKey is not 0 {
+    ret byKey
+  }
+  ret a.compare(other: b)
+}

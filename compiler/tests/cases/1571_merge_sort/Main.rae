@@ -1,0 +1,98 @@
+# collections/MergeSort: an order sorted by numbers and by text, stable (equal keys keep their
+# order, also descending), several keys one after the other, applied to a list in place; 0, 1 and
+# odd counts; 100,000 keys, right and in order n log n (an insertion sort would take minutes).
+open collections/MergeSort
+
+type Person {
+  name: String
+  age: Int
+}
+
+func show(people: view List(Person), label: view String) {
+  var text: String = ""
+  loop let person: view Person in people {
+    text = "{text} {person.name}{person.age}"
+  }
+  log("{label}:{text}")
+}
+
+func sortPeople(people: mod List(Person), descending: view Bool) {
+  var names: List(String) = {}
+  var ages: List(Int) = {}
+  loop let person: view Person in people {
+    names.add(value: "{person.name}")
+    ages.add(value: person.age)
+  }
+  var order: List(Int) = indexOrder(count: people.length)
+  sortOrderByText(order: order, keys: names, descending: false)
+  sortOrder(order: order, keys: ages, descending: descending)
+  applyOrder(items: people, order: order)
+}
+
+# Sorted: each key at most the next, and equal keys by their index
+func inOrder(order: view List(Int), keys: view List(Int)) ret Bool {
+  loop var i: Int = 1, i < order.length, ++i {
+    let before: Int = order.copyAtDefault(index: i - 1)
+    let here: Int = order.copyAtDefault(index: i)
+    let a: Int = keys.copyAtDefault(index: before)
+    let b: Int = keys.copyAtDefault(index: here)
+    if a > b or (a is b and before > here) {
+      ret false
+    }
+  }
+  ret true
+}
+
+func indexText(order: view List(Int)) ret String {
+  var text: String = ""
+  loop let index: Int in order {
+    text = "{text}{index} "
+  }
+  ret text.trim()
+}
+
+func main() {
+  var people: List(Person) = {
+    { name: "Eva", age: 30 }
+    { name: "Bo", age: 25 }
+    { name: "Ada", age: 30 }
+    { name: "Cy", age: 25 }
+    { name: "Di", age: 41 }
+  }
+  sortPeople(people: people, descending: false)
+  show(people: people, label: "by age, then name")
+  sortPeople(people: people, descending: true)
+  show(people: people, label: "oldest first, then name")
+  var empty: List(Person) = {}
+  sortPeople(people: empty, descending: false)
+  var one: List(Person) = { { name: "Solo", age: 1 } }
+  sortPeople(people: one, descending: false)
+  show(people: one, label: "{empty.length} and one")
+  let words: List(String) = {
+    "pear"
+    ""
+    "fig"
+    "pearl"
+    "apple"
+    "fig"
+  }
+  var order: List(Int) = indexOrder(count: words.length)
+  sortOrderByText(order: order, keys: words, descending: false)
+  log("text {indexText(order: order)}")
+  order = indexOrder(count: words.length)
+  sortOrderByText(order: order, keys: words, descending: true)
+  log("text down {indexText(order: order)}")
+  # 100,000 keys, many equal
+  var keys: List(Int) = {}
+  var value: Int = 12345
+  loop var i: Int = 0, i < 100000, ++i {
+    value = (value * 1103515245 + 12345) % 2147483648
+    keys.add(value: value / 65536 % 5000)
+  }
+  let start: Int = nowNs()
+  var many: List(Int) = indexOrder(count: keys.length)
+  sortOrder(order: many, keys: keys, descending: false)
+  log(
+    "100000: in order {inOrder(order: many, keys: keys)}, under 5 s {nowNs() - start < 5000000000}"
+  )
+}

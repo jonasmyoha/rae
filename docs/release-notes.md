@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.44, 2026-11-23: what a folder holds
+
+- `lib/Files` is a module folder (no import changes) and says what a folder holds: `FileEntry` (kind,
+  a symlink's target's kind, hidden, size, modified time), `readFolder` (names and kinds, with the
+  reason a folder could not be read), `readEntryDetails`, `listFolder` with an `EntryOrder` and an
+  `EntryFilter`, `pathStatus`, `mountedVolumes` (docs/file-browser-design.md §3).
+- `text/NameOrder`: names ordered as people read them (numbers, case and accents aside, composed or
+  not). `collections/MergeSort`: a stable O(n log n) sort by one or more keys.
+- `Filesystem.moviesDir`, `musicDir`, `downloadsDir`. Cases 1571 to 1574.
+
 ## 0.4.43, 2026-11-23: an iOS app held on its side only
 
 - `RAE_IOS_ORIENTATIONS=landscape` (tools/ios/gen-ios.sh) generates an app that opens and stays in

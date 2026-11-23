@@ -185,6 +185,7 @@ tested on a BSD yet.
 | `runtime_filesystem.c:187, 199, 216` | `flock` and file locking: absent under wasm |
 | `runtime_filesystem.c:229` | the resident-set-size call (`task_info` / `/proc`) |
 | `runtime_filesystem.c:278` | the `stat` field holding nanosecond mtimes (`st_mtimespec` / `st_mtim`) |
+| `runtime_files.c` | `d_type`, `stat`'s kind, date and hidden flag, `statfs` / `statvfs` flags: per-OS struct layouts and constants, one call each (lib/Files) |
 | `runtime_args.c:10, 44` | the parent-death watcher thread: none under wasm |
 | `runtime_net.c:66, 74` | `SO_NOSIGPIPE` / `MSG_NOSIGNAL`: per-OS constants |
 | `runtime_file_notify.c:41` | `O_EVTONLY` where it exists |

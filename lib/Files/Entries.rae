@@ -1,0 +1,198 @@
+# Files: what a folder holds (docs/file-browser-design.md §3). lib/Files is one module (see
+# Files.rae); these are the entries with their kinds, sizes and dates, and why a folder could not
+# be read. Nothing here knows threads or UI. A disk can be slow or never answer (a network volume
+# that went away), so a program that must not wait calls these from a thread of its own
+# (`spawn thread`, as case 1572 does).
+import Sys
+import Time
+
+# `other`: a pipe, a socket, a device. A symlink is followed only for its target's kind.
+enum EntryKind { other, file, folder, symlink }
+
+type FileEntry {
+  # as the disk has it
+  name: String
+  kind: EntryKind
+  # what a symlink points at, followed to its end; `other` when that is missing or a loop
+  targetKind: EntryKind = EntryKind.other
+  # a leading dot or, once the details are read, the OS's own flag (macOS)
+  hidden: Bool = false
+  # -1 until the details are read (readEntryDetails), and when they cannot be
+  size: Int = -1
+  modifiedSeconds: Float64 = -1.0
+}
+
+enum ListError {
+  none
+  notFound
+  noPermission
+  notFolder
+  other
+}
+
+type FolderListing {
+  error: ListError
+  entries: List(FileEntry)
+  # whether every entry's details were read too
+  detailed: Bool = false
+}
+
+func nativeNextEntry(folder: Ptr) unsafe extern("rae_ext_Files_nextEntry") ret Ptr
+
+func nativeEntryName(entry: Ptr) unsafe extern("rae_ext_Files_entryName") ret String
+
+func nativeEntryKind(entry: Ptr) unsafe extern("rae_ext_Files_entryKind") ret Int
+
+func nativeStatus(
+  path: String
+  follow: Bool
+  words: Buffer(Int)
+) unsafe extern("rae_ext_Files_status") ret Int
+
+# What stat or lstat says of a path
+type PathStatus {
+  found: Bool = false
+  kind: EntryKind = EntryKind.other
+  size: Int = -1
+  modifiedSeconds: Float64 = -1.0
+  hiddenFlag: Bool = false
+  device: Int = 0
+}
+
+func entryKindOf(code: view Int) ret EntryKind {
+  if code is 1 {
+    ret EntryKind.file
+  }
+  if code is 2 {
+    ret EntryKind.folder
+  }
+  if code is 3 {
+    ret EntryKind.symlink
+  }
+  ret EntryKind.other
+}
+
+# The status of `path`, or of what it points at when it is a symlink and `follow` is true
+func pathStatus(path: view String, follow: view Bool) ret PathStatus {
+  var status: PathStatus = {}
+  unsafe {
+    var words: Buffer(Int) = rae_ext_rae_buf_alloc(size: 6, elemSize: sizeof(Int))
+    if nativeStatus(path: path, follow: follow, words: words) is 0 {
+      status.found = true
+      status.kind = entryKindOf(code: rae_ext_rae_buf_get(buf: words, index: 0))
+      status.size = rae_ext_rae_buf_get(buf: words, index: 1)
+      let seconds: Int = rae_ext_rae_buf_get(buf: words, index: 2)
+      let nanoseconds: Int = rae_ext_rae_buf_get(buf: words, index: 3)
+      status.modifiedSeconds = seconds as Float64 + (nanoseconds as Float64) / 1000000000.0
+      status.hiddenFlag = rae_ext_rae_buf_get(buf: words, index: 4) is not 0
+      status.device = rae_ext_rae_buf_get(buf: words, index: 5)
+    }
+    rae_ext_rae_buf_free(buf: words)
+  }
+  ret status
+}
+
+func joinPath(folder: view String, name: view String) ret String {
+  if folder.endsWith(suffix: "/") {
+    ret "{folder}{name}"
+  }
+  ret "{folder}/{name}"
+}
+
+# A folder, or a symlink to one
+func isFolder(entry: view FileEntry) ret Bool {
+  ret entry.kind is EntryKind.folder or (entry.kind is EntryKind.symlink and entry.targetKind is EntryKind.folder)
+}
+
+# The lowercase extension without its dot; "" for none and for a name that only starts with a dot
+func extensionOf(name: view String) ret String {
+  if let dot: Int = name.lastIndexOf(sub: ".") {
+    if dot > 0 {
+      ret name.sub(start: dot + 1, len: name.length() - dot - 1).toLower()
+    }
+  }
+  ret ""
+}
+
+# Why the last folder call of this thread failed
+func lastListError() ret ListError {
+  var code: Int = 0
+  unsafe {
+    code = Sys.rae_sys_file_errno()
+  }
+  if code is not 0 and code is Sys.errnoConstant(which: 6) {
+    ret ListError.notFolder
+  }
+  let error: FileError = Sys.fileErrorOf(errnoCode: code)
+  if error is FileError.none {
+    ret ListError.none
+  }
+  if error is FileError.notFound {
+    ret ListError.notFound
+  }
+  if error is FileError.noPermission {
+    ret ListError.noPermission
+  }
+  ret ListError.other
+}
+
+# The names and kinds in `folder`, in the disk's own order, without `.` and `..`: the quick pass
+# (sizes, dates and the OS's hidden flag are not read). An error part-way keeps what was read.
+func readFolder(folder: view String) ret FolderListing {
+  var listing: FolderListing = { error: ListError.none, entries: {} }
+  unsafe {
+    let dir: Ptr = rae_sys_dir_open(folder: folder)
+    listing.error = lastListError()
+    if listing.error is not ListError.none {
+      ret listing
+    }
+    var entry: Ptr = nativeNextEntry(folder: dir)
+    listing.error = lastListError()
+    # after the last there is no entry, and its name is empty (an entry's never is)
+    var name: String = nativeEntryName(entry: entry)
+    loop name.length() > 0 {
+      if name is not "." and name is not ".." {
+        var kindCode: Int = nativeEntryKind(entry: entry)
+        var found: FileEntry = { name: name, kind: entryKindOf(code: kindCode) }
+        found.hidden = name.startsWith(prefix: ".")
+        if kindCode < 0 {
+          # a disk whose folders do not hold the kinds
+          found.kind = pathStatus(path: joinPath(folder: folder, name: name), follow: false).kind
+        }
+        if found.kind is EntryKind.symlink {
+          let target: PathStatus = pathStatus(
+            path: joinPath(folder: folder, name: name)
+            follow: true
+          )
+          found.targetKind = target.kind
+        }
+        listing.entries.add(value: own found)
+      }
+      entry = nativeNextEntry(folder: dir)
+      listing.error = lastListError()
+      name = nativeEntryName(entry: entry)
+    }
+    rae_sys_dir_close(dir: dir)
+  }
+  ret listing
+}
+
+# The slow pass for one entry: its size, date and the OS's hidden flag (a symlink's target's size
+# and date when there is one). An entry that is gone keeps -1.
+func readEntryDetails(folder: view String, entry: mod FileEntry) {
+  let path: String = joinPath(folder: folder, name: entry.name)
+  var status: PathStatus = pathStatus(path: path, follow: false)
+  if status.hiddenFlag {
+    entry.hidden = true
+  }
+  if entry.kind is EntryKind.symlink {
+    let target: PathStatus = pathStatus(path: path, follow: true)
+    if target.found {
+      status = target
+    }
+  }
+  if status.found {
+    entry.size = status.size
+    entry.modifiedSeconds = status.modifiedSeconds
+  }
+}
