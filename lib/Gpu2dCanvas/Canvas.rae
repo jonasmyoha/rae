@@ -618,6 +618,28 @@ func pushBox(
     ret
   }
   canvasKeepOrder(canvas: canvas, level: 0, atlas: -1)
+  # A negative size (a node flipped by scale -1) is the same box from its other corner: queued
+  # with a positive size and the corners' radii swapped to match, its middle where it was
+  if w < 0.0 {
+    x = x + w
+    w = -w
+    let topLeft: Float = radiusTopLeft
+    radiusTopLeft = radiusTopRight
+    radiusTopRight = topLeft
+    let bottomLeft: Float = radiusBottomLeft
+    radiusBottomLeft = radiusBottomRight
+    radiusBottomRight = bottomLeft
+  }
+  if h < 0.0 {
+    y = y + h
+    h = -h
+    let topLeft: Float = radiusTopLeft
+    radiusTopLeft = radiusBottomLeft
+    radiusBottomLeft = topLeft
+    let topRight: Float = radiusTopRight
+    radiusTopRight = radiusBottomRight
+    radiusBottomRight = topRight
+  }
   # The canvas rotation (#1003): the box's center turns about the pivot and
   # the quad itself turns by the same angle in the shader.
   var boxX: Float = x

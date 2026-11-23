@@ -583,19 +583,23 @@ func paintSubtreeG(
             this: uiSystems.transform2d.worldTransforms
             entityId: entityId
           )
-          let clipRect: WorldRect = worldRectOf(
+          # the box round the card as drawn: turned past a quarter turn, its own unturned box
+          # from its turned origin would miss it, and nothing would be drawn
+          let clipRect: WorldRect = turnedWorldRectOf(
             wt: cwt
             cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
           )
           let crad: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
-          if crad > 0.0 {
+          # rounded only while the turn keeps the box upright (or upside down); turned
+          # otherwise the box round it has no corners of the card's
+          if crad > 0.0 and turnKeepsAxes(rotation: cwt.rotation) {
             Gpu2d.pushClipRoundedRect(
               canvas: canvas
               x: clipRect.x
               y: clipRect.y
               w: clipRect.w
               h: clipRect.h
-              radius: crad * cwt.scale.x
+              radius: crad * Math.abs(value: cwt.scale.x)
             )
           } else {
             Gpu2d.pushClipRect(

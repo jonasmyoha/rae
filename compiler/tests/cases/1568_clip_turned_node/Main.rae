@@ -1,0 +1,198 @@
+# A clipped rounded node (a card: Overflow clip, CornerRadius) turned by TransformFx paints at every
+# angle (ui/RenderSystem): its children are clipped to the window-space box round the turned card,
+# so a card upside down (3.14) or past a quarter turn (2.0, -2.0) still shows its face. Before, the
+# clip was the card's unturned box from its turned origin, which past a quarter turn no longer
+# meets the card, and the face was clipped away. The card (100x150 at 200,200, turned and scaled
+# about its middle, 250,275) and its face (60x60 in its middle) both paint about that point, at
+# scale 1, at 0.7, at 0.5 wide and flipped (scaleX -1). A flipped card's children are painted (the
+# speck check took scale -1 for tiny and skipped them), and every box is queued with a positive
+# size (a flip's negative width is the same box from its other corner).
+import SdfText
+import Gpu2d
+import Math
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/Transform
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"cards\",\"root\":\"Table\",\"nodes\":\{\"Table\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":200,\"y\":200,\"w\":100,\"h\":150\},\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"#ff0000\",\"radius\":12\},\"CornerRadius\":\{\"radius\":12\},\"Overflow\":\{\"mode\":\"Clip\"\},\"TransformFx\":\{\"scaleX\":1,\"scaleY\":1,\"alpha\":1,\"visible\":true,\"pivot\":\{\"x\":0.5,\"y\":0.5\}\},\"Children\":[\"Face\"]\},\"Face\":\{\"Rect\":\{\"x\":20,\"y\":45,\"w\":60,\"h\":60\},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"#0000ff\"\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func clipText(canvas: view Gpu2dCanvas, clip: view Int) ret String {
+  if clip <= 0 {
+    ret "no clip"
+  }
+  let x: Float = canvas.clipX.copyAtDefault(index: clip)
+  let y: Float = canvas.clipY.copyAtDefault(index: clip)
+  let w: Float = canvas.clipW.copyAtDefault(index: clip)
+  let h: Float = canvas.clipH.copyAtDefault(index: clip)
+  ret "clip {rounded(value: x)},{rounded(value: y)} {rounded(value: w)}x{rounded(value: h)} radius {rounded(
+    value: canvas.clipRadius.copyAtDefault(index: clip)
+  )}"
+}
+
+# Whether the box's middle is inside its clip
+func middleInClip(
+  canvas: view Gpu2dCanvas
+  middleX: view Float
+  middleY: view Float
+  clip: view Int
+) ret Bool {
+  if clip <= 0 {
+    ret true
+  }
+  let x: Float = canvas.clipX.copyAtDefault(index: clip)
+  let y: Float = canvas.clipY.copyAtDefault(index: clip)
+  let w: Float = canvas.clipW.copyAtDefault(index: clip)
+  let h: Float = canvas.clipH.copyAtDefault(index: clip)
+  ret middleX >= x and middleX <= x + w and middleY >= y and middleY <= y + h
+}
+
+func paint(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  resources: view Gpu2dUi
+  rotation: view Float
+  scaleX: view Float
+  scaleY: view Float
+) {
+  let fx: mod TransformFx = componentMod(
+    this: world.transforms
+    entityId: nodeOf(world: world, nodeId: "Card")
+  )
+  fx.rotation = rotation
+  fx.scaleX = scaleX
+  fx.scaleY = scaleY
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  # as a frame starts: the clip stack gets its "no clip" entry
+  clipReset(canvas: canvas)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  var line: String = "turned {rotation}, scale {scaleX}x{scaleY}:"
+  loop var i: Int = 0, i < boxes, ++i {
+    let x: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats)
+    let y: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 1)
+    let w: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 2)
+    let h: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 3)
+    let clip: Int = canvas.primClips.copyAtDefault(index: i)
+    let middleX: Float = x + w / 2.0
+    let middleY: Float = y + h / 2.0
+    var name: String = "card"
+    if i > 0 {
+      name = "face"
+    }
+    line = "{line} {name} {rounded(value: w)}x{rounded(value: h)} about {rounded(value: middleX)},{rounded(
+      value: middleY
+    )} ({clipText(canvas: canvas, clip: clip)}, middle in it {middleInClip(
+      canvas: canvas
+      middleX: middleX
+      middleY: middleY
+      clip: clip
+    )});"
+  }
+  log(line)
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  # the paint walk culls against the design canvas, which has no size without a window
+  Gpu2d.setDesignResolution(width: 600.0, height: 600.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 600.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  loop let rotation: Float in List(Float) {
+    0.0
+    1.0
+    2.0
+    3.14
+    -2.0
+  } {
+    paint(
+      world: world
+      uiSystems: uiSystems
+      resources: resources
+      rotation: rotation
+      scaleX: 1.0
+      scaleY: 1.0
+    )
+  }
+  paint(
+    world: world
+    uiSystems: uiSystems
+    resources: resources
+    rotation: 2.0
+    scaleX: 0.7
+    scaleY: 0.7
+  )
+  paint(
+    world: world
+    uiSystems: uiSystems
+    resources: resources
+    rotation: 0.5
+    scaleX: -1.0
+    scaleY: 1.0
+  )
+  paint(
+    world: world
+    uiSystems: uiSystems
+    resources: resources
+    rotation: 0.0
+    scaleX: -1.0
+    scaleY: 1.0
+  )
+  paint(
+    world: world
+    uiSystems: uiSystems
+    resources: resources
+    rotation: 0.0
+    scaleX: 0.5
+    scaleY: 1.0
+  )
+}

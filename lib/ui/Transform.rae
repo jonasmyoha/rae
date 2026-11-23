@@ -109,6 +109,38 @@ func worldRectOf(wt: view WorldTransform2D, cr: view ComputedRect) ret WorldRect
   }
 }
 
+# The window-space box that holds a node's box as drawn: turned by its rotation about its origin
+# and scaled (a flip's negative scale included). For an unturned node with a positive scale it is
+# worldRectOf. A clipping node clips its children to it: the clip is axis-aligned, so a node turned
+# by other than a half turn clips to the box round its turned rect (ui/RenderSystem).
+func turnedWorldRectOf(wt: view WorldTransform2D, cr: view ComputedRect) ret WorldRect {
+  let w: Float = cr.size.x * wt.scale.x
+  let h: Float = cr.size.y * wt.scale.y
+  let cosR: Float = Math.cos(x: wt.rotation)
+  let sinR: Float = Math.sin(x: wt.rotation)
+  # the corners (w, 0), (0, h) and (w, h) turned about the origin (0, 0)
+  let ax: Float = w * cosR
+  let ay: Float = w * sinR
+  let bx: Float = -h * sinR
+  let by: Float = h * cosR
+  let left: Float = Math.min(a: Math.min(a: 0.0, b: ax), b: Math.min(a: bx, b: ax + bx))
+  let right: Float = Math.max(a: Math.max(a: 0.0, b: ax), b: Math.max(a: bx, b: ax + bx))
+  let top: Float = Math.min(a: Math.min(a: 0.0, b: ay), b: Math.min(a: by, b: ay + by))
+  let bottom: Float = Math.max(a: Math.max(a: 0.0, b: ay), b: Math.max(a: by, b: ay + by))
+  ret WorldRect {
+    x: wt.position.x + left
+    y: wt.position.y + top
+    w: right - left
+    h: bottom - top
+  }
+}
+
+# Whether a node's turn keeps its box axis-aligned (none, or a half turn), so a rounded clip of
+# its box is still exact
+func turnKeepsAxes(rotation: view Float) ret Bool {
+  ret Math.abs(value: Math.sin(x: rotation)) < 0.01
+}
+
 # Runtime-only translation applied in TRANSFORM (post-layout), not in
 # layout. Scrolling writes this instead of `Offset` so a scroll step
 # reruns only transform (a cheap translation of the subtree) and never

@@ -147,13 +147,12 @@ func paintChildrenChoose(
     this: uiSystems.transform2d.worldTransforms
     entityId: entityId
   )
-  # a node scaled down to a speck: its own box only
-  if transform.scale.x < 1.0 and componentHas(
-    this: uiSystems.layout.computedRects
-    entityId: entityId
-  ) {
+  # a node scaled down to a speck: its own box only. By the scale's size: a flip (scale -1) is
+  # full size, not a speck
+  let scaleSize: Float = Math.abs(value: transform.scale.x)
+  if scaleSize < 1.0 and componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
     let size: Vec2 = componentView(this: uiSystems.layout.computedRects, entityId: entityId).size
-    if size.x > 0.0 and size.y > 0.0 and Math.max(a: size.x, b: size.y) * transform.scale.x <= paintDetailPixels {
+    if size.x > 0.0 and size.y > 0.0 and Math.max(a: size.x, b: size.y) * scaleSize <= paintDetailPixels {
       ret PaintChildren.skip
     }
   }

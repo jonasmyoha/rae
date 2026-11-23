@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.39, 2026-11-23: a turned or flipped clipping node paints its children
+
+- A node that clips its children (`Overflow` clip, a card) and is turned by its `TransformFx`
+  clips them to the window-space box round its turned box (`turnedWorldRectOf`), with rounded
+  corners while the turn keeps it upright or upside down. The clip was its unturned box placed at
+  its turned origin, which past a quarter turn no longer meets the card, so nothing of its
+  content was drawn.
+- A node flipped by a negative scale paints its children: the "scaled down to a speck" check
+  took scale -1 for tiny. Every box is queued with a positive size (a negative width or height is
+  the same box from its other corner, its corner radii swapped). Case 1568.
+
 ## 0.4.38, 2026-11-23: nine-slice borders shrink to fit
 
 - A nine-slice (`canvasDrawImageKeyNineSlice`, a Sprite's `nineSlice`) in a box smaller than two
