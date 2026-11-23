@@ -1,14 +1,20 @@
 # ui/Components: the authored visual and interaction components.
 
 # Visual / interaction
+
+# A node's own scale, turn (radians) and opacity on top of its layout. A scene key it does not
+# write keeps the default here (the same as defaultTransformFx): unscaled, unturned, opaque,
+# shown, about its middle. `pivot` (a share of the box) is the point the scale and the turn keep
+# in place; it is what Pixi calls a sprite's anchor. `anchor` is not read by the transform: a
+# scene that means the point the card scales about writes `pivot`.
 type TransformFx {
-  scaleX: Float
-  scaleY: Float
-  rotation: Float
-  alpha: Float
-  visible: Bool
-  pivot: Vec2
-  anchor: Vec2
+  scaleX: Float = 1.0
+  scaleY: Float = 1.0
+  rotation: Float = 0.0
+  alpha: Float = 1.0
+  visible: Bool = true
+  pivot: Vec2 = Vec2 { x: 0.5, y: 0.5 }
+  anchor: Vec2 = Vec2 { x: 0.5, y: 0.5 }
 }
 
 type Sprite {

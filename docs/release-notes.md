@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.42, 2026-11-23: a TransformFx key a scene leaves out keeps its default
+
+- A `TransformFx` read from a scene starts from the type's defaults, now the same as
+  `defaultTransformFx()`: scale 1, rotation 0, alpha 1, visible, and `pivot` at the node's middle.
+  They were 0 and false, so a scene written as Pixi writes it (an `anchor`, no `pivot`) scaled its
+  node about the top-left corner: a card at scaleX 0.5 kept its left edge. A scene that wrote only
+  some keys drew nothing. `pivot` is the point the scale and the turn keep (Pixi's anchor);
+  `TransformFx.anchor` is not read by the transform. Case 1570.
+
 ## 0.4.41, 2026-11-23: a Sprite's hue rotation and brightness
 
 - `Sprite.hueRotate` (degrees) and `Sprite.brightness` (1 unchanged), scene keys of the same

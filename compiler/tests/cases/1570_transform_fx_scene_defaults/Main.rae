@@ -1,0 +1,97 @@
+# A TransformFx key a scene does not write keeps the type's default (ui/Components TransformFx, the
+# same as defaultTransformFx): unscaled, opaque, shown, and scaled and turned about the node's
+# middle. A card (163.8x252 at 100,100: Overflow clip, CornerRadius, its face in its middle) written
+# the way a Pixi scene is, with an `anchor` and no `pivot`, scales about its middle (181.9,226) at
+# scaleX 1, 0.5 and 0.1: before, a pivot not written was 0,0, so the card kept its left edge and
+# its middle moved left by half the width it lost. A TransformFx that writes only `scaleX` is drawn
+# (before, its alpha, scaleY and visible were 0 and it was not).
+import SdfText
+import Gpu2d
+import Math
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText(fx: view String) ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"cards\",\"root\":\"Table\",\"nodes\":\{\"Table\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":600,\"h\":600\},\"Children\":[\"Card\"]\},\"Card\":\{\"Rect\":\{\"x\":100,\"y\":100,\"w\":163.8,\"h\":252\},\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"#ff0000\",\"radius\":12\},\"CornerRadius\":\{\"radius\":12\},\"Overflow\":\{\"mode\":\"Clip\"\},\"TransformFx\":{fx},\"Children\":[\"Face\"]\},\"Face\":\{\"Rect\":\{\"x\":51.9,\"y\":96,\"w\":60,\"h\":60\},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"#0000ff\"\}\}\}\}"
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 10.0) / 10.0
+}
+
+func show(label: view String, fx: view String, resources: view Gpu2dUi) {
+  let scene: Scene = parseScene(source: sceneText(fx: fx))
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 600.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  # as a frame starts: the clip stack gets its "no clip" entry
+  clipReset(canvas: canvas)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let boxes: Int = canvas.prims.length / boxPrimFloats
+  var line: String = "{label}: {boxes} boxes"
+  loop var i: Int = 0, i < boxes, ++i {
+    let x: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats)
+    let y: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 1)
+    let w: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 2)
+    let h: Float = canvas.prims.copyAtDefault(index: i * boxPrimFloats + 3)
+    var name: String = "card"
+    if i > 0 {
+      name = "face"
+    }
+    line = "{line}; {name} {rounded(value: w)}x{rounded(value: h)} about {rounded(
+      value: x + w / 2.0
+    )},{rounded(value: y + h / 2.0)}"
+  }
+  log(line)
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText(fx: "\{\}"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  # the paint walk culls against the design canvas, which has no size without a window
+  Gpu2d.setDesignResolution(width: 600.0, height: 600.0, fit: 0)
+  loop let scaleX: String in List(String) { "1", "0.5", "0.1" } {
+    show(
+      label: "anchor 0.5, no pivot, scaleX {scaleX}"
+      fx: "\{\"scaleX\":{scaleX},\"scaleY\":1,\"rotation\":0,\"alpha\":1,\"visible\":true,\"anchor\":\{\"x\":0.5,\"y\":0.5\}\}"
+      resources: resources
+    )
+  }
+  show(label: "only scaleX 0.5 written", fx: "\{\"scaleX\":0.5\}", resources: resources)
+  show(label: "nothing written", fx: "\{\}", resources: resources)
+}
