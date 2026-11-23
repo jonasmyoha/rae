@@ -1,0 +1,16 @@
+# `x mod y` on one line was read as two statements, `x` and a `mod y` that does nothing, so the
+# result was silently wrong. The remainder is `%`, in every place an expression stands.
+func wrap(index: view Int, count: view Int) ret Int {
+  ret index mod count
+}
+
+func main() {
+  let start: Int = 5
+  let step: Int = 4
+  let count: Int = 6
+  let row: Int = (start + step) mod count
+  if start mod 2 is 0 {
+    log("even")
+  }
+  log("{row} {wrap(index: start mod count, count: count)}")
+}

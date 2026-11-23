@@ -1817,10 +1817,32 @@ static AstExpr* parse_cast(Parser* parser) {
   return expr;
 }
 
+static const char* mode_keyword_name(TokenKind kind) {
+  switch (kind) {
+    case TOK_KW_VIEW: return "view";
+    case TOK_KW_MOD: return "mod";
+    case TOK_KW_OWN: return "own";
+    default: return NULL;
+  }
+}
+
+/* `x mod y` on one line: `mod` is a mode, never an operator. Read on as if it
+ * were `%`, so that the rest of the line gives no second error. */
+static bool mod_as_operator(Parser* parser) {
+  return parser_check(parser, TOK_KW_MOD) && parser_peek(parser)->line == parser_previous(parser)->line
+         && !parser_check_at(parser, 1, TOK_COLON);
+}
+
 static AstExpr* parse_binary(Parser* parser, int min_prec) {
   AstExpr* left = parse_cast(parser);
   for (;;) {
     BinaryInfo info = get_binary_info(parser_peek(parser)->kind);
+    if (mod_as_operator(parser)) {
+      info = get_binary_info(TOK_PERCENT);
+      if (info.precedence >= min_prec) {
+        parser_error(parser, parser_peek(parser), "'mod' is not an operator: the remainder is '%%', as in 'a %% b'");
+      }
+    }
     if (info.precedence < min_prec) {
       break;
     }
@@ -3116,6 +3138,12 @@ static AstStmt* parse_statement(Parser* parser) {
    * the `=` as its anchor: diagnostics point at it, and it is on the
    * statement's first line. */
   const Token* stmt_start = parser_peek(parser);
+  const char* mode = mode_keyword_name(stmt_start->kind);
+  if (mode) {
+    parser_error(parser, stmt_start,
+                 "'%s' starts no statement: it says how a value is passed, bound or returned, and alone it does nothing",
+                 mode);
+  }
   AstExpr* expr = parse_expression(parser);
   if (parser_match(parser, TOK_ASSIGN)) {
     AstStmt* stmt = new_stmt(parser, AST_STMT_ASSIGN, parser_previous(parser));

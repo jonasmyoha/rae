@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.47, 2026-11-24: `mod` is no operator, and a mode starts no statement
+
+- `x mod y` on one line is an error that says the remainder is `%`. It was read as `x` and a
+  statement `mod y` that did nothing, so the result was silently wrong.
+- A statement that starts with `mod`, `view` or `own` is an error. The formatter leaves such a file
+  as it is, with the error. Cases 1579 and 1580.
+
 ## 0.4.46, 2026-11-24: pointer buttons, double clicks and menus
 
 - `Gpu2d.buttonDown/Pressed/Released/Clicks(button:)` for the primary, middle and secondary button;
