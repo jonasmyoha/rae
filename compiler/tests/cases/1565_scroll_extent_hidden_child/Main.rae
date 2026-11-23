@@ -1,0 +1,65 @@
+# A scroll root's extent counts only the children shown (ui/ScrollRootSystem
+# scrollContentExtent). A Vertical scroll root 400 high holds three sections 500 high: its
+# content is 1500 and it scrolls 1100. Hiding two (Active false, a filter tab) leaves one: its
+# content is 500 and it scrolls 100, although the hidden sections keep their last boxes. Shown
+# again, it scrolls 1100 again.
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/ScrollRootSystem
+open ecs/Entity
+open ecs/ComponentTable
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func setShown(world: mod UiWorld, nodeId: view String, value: view Bool) {
+  let active: mod Active = componentMod(
+    this: world.actives
+    entityId: nodeOf(world: world, nodeId: nodeId)
+  )
+  active.value = value
+}
+
+func report(world: mod UiWorld, uiSystems: mod UiSystems, label: view String) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  let page: EntityId = nodeOf(world: world, nodeId: "Page")
+  let extent: Float = scrollContentExtent(
+    world: world
+    uiSystems: uiSystems
+    entityId: page
+    root: componentView(this: world.scrollRoots, entityId: page)
+  )
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: page)
+  log("{label}: content {extent}, window {range.window}, scrolls {-range.floor}")
+}
+
+func main() {
+  let scene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"menu\",\"root\":\"Window\",\"nodes\":\{\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},\"Children\":[\"Page\"]\},\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":400\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"ScrollRoot\":\{\"axis\":\"y\"\},\"Layout\":\{\"type\":\"Vertical\"\},\"Children\":[\"Cards\",\"Decks\",\"Rules\"]\},\"Cards\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":500\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Active\":\{\"value\":true\}\},\"Decks\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":500\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Active\":\{\"value\":true\}\},\"Rules\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":500\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Active\":\{\"value\":true\}\}\}\}"
+  )
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 400.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  report(world: world, uiSystems: uiSystems, label: "three sections")
+  setShown(world: world, nodeId: "Decks", value: false)
+  setShown(world: world, nodeId: "Rules", value: false)
+  report(world: world, uiSystems: uiSystems, label: "Decks and Rules hidden")
+  setShown(world: world, nodeId: "Decks", value: true)
+  setShown(world: world, nodeId: "Rules", value: true)
+  report(world: world, uiSystems: uiSystems, label: "shown again")
+}

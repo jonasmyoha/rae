@@ -161,7 +161,11 @@ func scrollContentExtent(
     let children: view Children = componentView(this: world.childrens, entityId: entityId)
     loop var i: Int = 0, i < children.ids.length, ++i {
       let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
-      if componentHas(this: uiSystems.layout.computedRects, entityId: child) {
+      # a child switched off keeps its last box but takes no place, as in the layout
+      if layoutActive(world: world, entityId: child) and componentHas(
+        this: uiSystems.layout.computedRects
+        entityId: child
+      ) {
         let rect: view ComputedRect = componentView(
           this: uiSystems.layout.computedRects
           entityId: child

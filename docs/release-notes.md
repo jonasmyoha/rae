@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.36, 2026-11-23: a hidden child no longer stretches a scroll
+
+- `ScrollRoot`'s content extent (`scrollContentExtent`) counts only the children the layout
+  places: a child switched off (`Active false`) keeps its last box, and the scroll went on as far
+  as before, over empty space (a page whose sections a filter tab hides). Case 1565.
+
 ## 0.4.35, 2026-11-23: a List of List can be set
 
 - `set`, `remove`/`removeAt`, `swapRemove` and the like on a `List(List(T))` (or a List of
