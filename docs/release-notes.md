@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.43, 2026-11-23: an iOS app held on its side only
+
+- `RAE_IOS_ORIENTATIONS=landscape` (tools/ios/gen-ios.sh) generates an app that opens and stays in
+  landscape, either side up, on a phone and an iPad, as `RAE_ANDROID_ORIENTATION=landscape` does on
+  Android. `any` (the default) and `portrait` are unchanged.
+
 ## 0.4.42, 2026-11-23: a TransformFx key a scene leaves out keeps its default
 
 - A `TransformFx` read from a scene starts from the type's defaults, now the same as

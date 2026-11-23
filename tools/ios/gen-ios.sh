@@ -43,10 +43,11 @@ esac
 bundle_id=${2:-${RAE_IOS_BUNDLE_ID:-com.rae.$(printf '%s' "$name" | tr -cd 'a-zA-Z0-9')}}
 disp=${3:-${RAE_IOS_NAME:-$name}}
 # The orientations the app turns to (Info.plist): `any` (the default: portrait
-# and both landscapes, phone and iPad — the app follows how the device is held)
-# or `portrait` (phone upright only, iPad either way up), for an app designed
-# for one shape. SDL follows the device within them; the window is resizable,
-# so the app sees a resize and re-lays out.
+# and both landscapes, phone and iPad — the app follows how the device is
+# held), `portrait` (phone upright only, iPad either way up) or `landscape` (on
+# its side only, either side up, phone and iPad), for an app designed for one
+# shape. SDL follows the device within them; the window is resizable, so the
+# app sees a resize and re-lays out.
 # The oldest iOS the app runs on. 15.0 is the oldest current Xcode builds for
 # (Xcode 27 refuses anything older); RAE_IOS_DEPLOYMENT_TARGET overrides it.
 deployment_target=${RAE_IOS_DEPLOYMENT_TARGET:-15.0}
@@ -142,8 +143,9 @@ upsideDown='<string>UIInterfaceOrientationPortraitUpsideDown</string>'
 landscape='<string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string>'
 case "$orientations" in
   portrait) phone_orientations="$portrait"; pad_orientations="$portrait$upsideDown" ;;
+  landscape) phone_orientations="$landscape"; pad_orientations="$landscape" ;;
   any) phone_orientations="$portrait$upsideDown$landscape"; pad_orientations="$portrait$upsideDown$landscape" ;;
-  *) echo "error: RAE_IOS_ORIENTATIONS is portrait or any, not '$orientations'" >&2; exit 1 ;;
+  *) echo "error: RAE_IOS_ORIENTATIONS is portrait, landscape or any, not '$orientations'" >&2; exit 1 ;;
 esac
 
 rae="$root/compiler/bin/rae"
