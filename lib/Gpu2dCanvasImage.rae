@@ -325,9 +325,46 @@ func queueImageEx(
   canvas.imageCommandClips.add(value: clip)
 }
 
-# Nine-slice (#1003): the image's `left/top/right/bottom` source pixels stay
-# that many DESIGN units thick at the destination's edges, the middle
-# stretches — nine sub-rect draws of one texture.
+# The borders of a nine-slice as drawn in a w x h box
+type NineSliceBorders {
+  left: Float
+  top: Float
+  right: Float
+  bottom: Float
+}
+
+# A nine-slice's borders keep their size (in design units, one a source pixel) while two of them
+# fit the box; in a smaller box all four shrink together by one scale, s = min(1, w / (left +
+# right), h / (top + bottom)), as Pixi's NineSliceSprite and CSS border-image do. So a ribbon
+# whose art has 256-px caps, drawn 52 high, keeps its shape: its caps are 52 wide and its middle
+# stretches between them.
+func nineSliceBorders(
+  w: view Float
+  h: view Float
+  left: view Float
+  top: view Float
+  right: view Float
+  bottom: view Float
+) ret NineSliceBorders {
+  var scale: Float = 1.0
+  if left + right > 0.0 {
+    scale = Math.min(a: scale, b: w / (left + right))
+  }
+  if top + bottom > 0.0 {
+    scale = Math.min(a: scale, b: h / (top + bottom))
+  }
+  scale = Math.max(a: scale, b: 0.0)
+  ret NineSliceBorders {
+    left: left * scale
+    top: top * scale
+    right: right * scale
+    bottom: bottom * scale
+  }
+}
+
+# Nine-slice (#1003): the image's `left/top/right/bottom` source pixels stay that many DESIGN units
+# thick at the destination's edges, the middle stretches: nine sub-rect draws of one texture. In a
+# box smaller than two borders they all shrink together (nineSliceBorders).
 func canvasDrawImageKeyNineSlice(
   canvas: mod Gpu2dCanvas
   key: view String
@@ -354,13 +391,16 @@ func canvasDrawImageKeyNineSlice(
   if imageWidth <= 0.0 or imageHeight <= 0.0 {
     ret
   }
-  # Borders never exceed half the destination (a tiny box keeps its corners).
-  let borderL: Float = Math.min(a: left, b: w / 2.0)
-  let borderR: Float = Math.min(a: right, b: w / 2.0)
-  let borderT: Float = Math.min(a: top, b: h / 2.0)
-  let borderB: Float = Math.min(a: bottom, b: h / 2.0)
-  let xs: List(Float) = { x, x + borderL, x + w - borderR, x + w }
-  let ys: List(Float) = { y, y + borderT, y + h - borderB, y + h }
+  let borders: NineSliceBorders = nineSliceBorders(
+    w: w
+    h: h
+    left: left
+    top: top
+    right: right
+    bottom: bottom
+  )
+  let xs: List(Float) = { x, x + borders.left, x + w - borders.right, x + w }
+  let ys: List(Float) = { y, y + borders.top, y + h - borders.bottom, y + h }
   let us: List(Float) = { 0.0, left / imageWidth, 1.0 - right / imageWidth, 1.0 }
   let vs: List(Float) = { 0.0, top / imageHeight, 1.0 - bottom / imageHeight, 1.0 }
   loop var row: Int = 0, row < 3, ++row {

@@ -1,0 +1,63 @@
+# A nine-slice's borders shrink together in a box smaller than two of them (Gpu2dCanvasImage
+# nineSliceBorders, used by canvasDrawImageKeyNineSlice and so by a Sprite's nineSlice):
+#   1. a 1024x256 ribbon with 256-px caps and 128-px top and bottom, in a 300x52 box: one scale
+#      of 52/256, so 52-unit caps, 26-unit top and bottom, and a 196-unit middle (its rows are all
+#      top and bottom: 128 + 128 is the art's whole height). Before, the caps took half the box
+#      each and the middle never showed;
+#   2. in a box that fits them (1200x400) the borders keep their source size;
+#   3. a box narrow but tall (300x800): the width decides (300/512);
+#   4. a box with no top and bottom border: only the width counts.
+open Gpu2dCanvasImage
+
+func show(
+  label: view String
+  w: view Float
+  h: view Float
+  left: view Float
+  top: view Float
+) {
+  let borders: NineSliceBorders = nineSliceBorders(
+    w: w
+    h: h
+    left: left
+    top: top
+    right: left
+    bottom: top
+  )
+  let middleW: Float = w - borders.left - borders.right
+  let middleH: Float = h - borders.top - borders.bottom
+  log(
+    "{label} {w}x{h}: caps {borders.left} and {borders.right}, top {borders.top} bottom {borders.bottom}, middle {middleW}x{middleH}"
+  )
+}
+
+func main() {
+  show(
+    label: "1. ribbon"
+    w: 300.0
+    h: 52.0
+    left: 256.0
+    top: 128.0
+  )
+  show(
+    label: "2. room enough"
+    w: 1200.0
+    h: 400.0
+    left: 256.0
+    top: 128.0
+  )
+  show(
+    label: "3. narrow"
+    w: 300.0
+    h: 800.0
+    left: 256.0
+    top: 128.0
+  )
+  show(
+    label: "4. no top or bottom"
+    w: 300.0
+    h: 52.0
+    left: 256.0
+    top: 0.0
+  )
+}

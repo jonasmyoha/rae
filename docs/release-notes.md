@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.38, 2026-11-23: nine-slice borders shrink to fit
+
+- A nine-slice (`canvasDrawImageKeyNineSlice`, a Sprite's `nineSlice`) in a box smaller than two
+  of its borders scales all four together, s = min(1, w / (left + right), h / (top + bottom)),
+  as Pixi's NineSliceSprite and CSS border-image do (`nineSliceBorders`). Each border used to be
+  clamped to half the box alone, so a ribbon with 256-px caps drawn 52 high got caps of half its
+  width and no middle. In a box that fits the borders nothing changes. Case 1567.
+
 ## 0.4.37, 2026-11-23: a loop over a temporary's list reads all of it
 
 - `loop let point: view Point in outlineOf(count: 5).points` reads every element: the struct a
