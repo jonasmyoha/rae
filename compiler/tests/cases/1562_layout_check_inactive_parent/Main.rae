@@ -1,0 +1,79 @@
+# app3d/LayoutCheck layoutBoxOfEntity: a node under an inactive parent is hidden. A modal whose
+# root starts `Active false` is never laid out or transformed, so its buttons have no box of
+# their own (or a stale one): they are reported hidden, not shown at a wrong place.
+#   1. the modal's root starts inactive: its buttons are hidden;
+#   2. activated and laid out: they are shown at their places;
+#   3. deactivated again and read before the next transform pass (the boxes and visuals of
+#      step 2 are still there, visible): hidden again, the root too;
+#   4. after that pass: still hidden.
+open ecs/ComponentTable
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/LayoutSystem
+open ui/Transform
+open app3d/LayoutCheck
+open ecs/Entity
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func dump(world: view UiWorld, uiSystems: view UiSystems, step: view String) {
+  loop let nodeId: String in List(String) { "Modal", "Ok", "Cancel" } {
+    let box: LayoutBox = layoutBoxOfEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    )
+    if box.shown {
+      log("{step} {nodeId}: shown at {box.x},{box.y} {box.w}x{box.h}")
+    } else {
+      log("{step} {nodeId}: hidden")
+    }
+  }
+}
+
+func setModalActive(world: mod UiWorld, value: view Bool) {
+  let active: mod Active = componentMod(
+    this: world.actives
+    entityId: nodeOf(world: world, nodeId: "Modal")
+  )
+  active.value = value
+}
+
+func frame(world: mod UiWorld, uiSystems: mod UiSystems) {
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+}
+
+func main() {
+  let scene: Scene = parseScene(
+    source: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"modal\",\"root\":\"Root\",\"nodes\":\{\"Root\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":800\},\"Children\":[\"Modal\"]\},\"Modal\":\{\"Rect\":\{\"x\":50,\"y\":200,\"w\":300,\"h\":200\},\"Active\":\{\"value\":false\},\"Layout\":\{\"type\":\"Horizontal\"\},\"Children\":[\"Ok\",\"Cancel\"]\},\"Ok\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":44\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},\"Cancel\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":120,\"h\":44\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\}\}\}"
+  )
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 400.0
+  world.layoutH = 800.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  frame(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, step: "1. inactive")
+  setModalActive(world: world, value: true)
+  frame(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, step: "2. active")
+  setModalActive(world: world, value: false)
+  layoutSystem(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, step: "3. inactive again")
+  transformSystem(world: world, uiSystems: uiSystems)
+  dump(world: world, uiSystems: uiSystems, step: "4. after the transform pass")
+}

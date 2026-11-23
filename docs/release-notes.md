@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.33, 2026-11-23: a layout check hides a node under an inactive parent
+
+- `app3d/LayoutCheck`'s `layoutBoxOfEntity` (and `layoutBoxOf`) report a node hidden when any of
+  its ancestors is inactive. Such a subtree is not laid out or transformed, so its nodes kept the
+  boxes of an earlier pass and came back shown at a wrong place, also when read right after the
+  parent's `Active` changed, before the next transform pass. Case 1562.
+
 ## 0.4.32, 2026-11-23: a scene value the decoder drops says so
 
 - A number field of a scene written as `true` / `false`, a list or an object is a

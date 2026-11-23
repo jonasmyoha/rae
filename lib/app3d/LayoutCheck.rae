@@ -72,6 +72,17 @@ func layoutBoxOfEntity(
   if isNone(this: entityId) or uiEntityActive(world: world, entityId: entityId) is false {
     ret hiddenLayoutBox()
   }
+  # A node under an inactive parent is hidden too. Such a subtree is not laid out or transformed,
+  # so its nodes keep the boxes of an earlier pass (or none, or zeros) and have no world visual
+  # to say so
+  var ancestor: EntityId = { index: entityId.index, generation: entityId.generation }
+  loop componentHas(this: uiSystems.hierarchy.parents, entityId: ancestor) {
+    let link: view Parent = componentView(this: uiSystems.hierarchy.parents, entityId: ancestor)
+    ancestor = { index: link.parent.index, generation: link.parent.generation }
+    if uiEntityActive(world: world, entityId: ancestor) is false {
+      ret hiddenLayoutBox()
+    }
+  }
   if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) is false or componentHas(
     this: uiSystems.layout.computedRects
     entityId: entityId
