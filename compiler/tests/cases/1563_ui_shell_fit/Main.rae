@@ -1,0 +1,94 @@
+# app3d/UiShell runs fitSystem: a ScaleToFit FitHeight stage of 1080x2280 in a 393x852 window
+# is drawn at 852/2280 of its size (403.6x852, its sides cropped), with its child scaled with it,
+# after runUiSystems and after runScheduledUiSystems alike. Before, neither ran the fit step and
+# the stage stayed 1080x2280 (docs: ui/Pipeline's uiSystemFit, 106's order).
+import SdfText
+import Math
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeResolved
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/Pipeline
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"stage\",\"root\":\"Box\",\"nodes\":\{\"Box\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":393,\"h\":852\},\"Children\":[\"Stage\"]\},\"Stage\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":1080,\"h\":2280\},\"ScaleToFit\":\{\"mode\":\"FitHeight\"\},\"Children\":[\"Button\"]\},\"Button\":\{\"Rect\":\{\"x\":340,\"y\":2000,\"w\":400,\"h\":160\}\}\}\}"
+}
+
+func rectText(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret String {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    let rect: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: nodeEntityId(world: world, index: raw)
+    )
+    let x: Float = Math.round(x: rect.position.x * 10.0) / 10.0
+    let y: Float = Math.round(x: rect.position.y * 10.0) / 10.0
+    let w: Float = Math.round(x: rect.size.x * 10.0) / 10.0
+    let h: Float = Math.round(x: rect.size.y * 10.0) / 10.0
+    ret "{nodeId} at {x},{y} size {w}x{h}"
+  }
+  ret "{nodeId} missing"
+}
+
+func show(scheduled: view Bool, resources: view Gpu2dUi) {
+  let scene: Scene = parseScene(source: sceneText())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 393.0
+  world.layoutH = 852.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  var label: String = "runUiSystems"
+  if scheduled {
+    label = "runScheduledUiSystems"
+    var schedule: Schedule = createUiPipeline(world: world)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: resources
+    )
+  } else {
+    runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  }
+  log(
+    "{label}: {rectText(world: world, uiSystems: uiSystems, nodeId: "Stage")}; {rectText(
+      world: world
+      uiSystems: uiSystems
+      nodeId: "Button"
+    )}"
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  show(scheduled: false, resources: resources)
+  show(scheduled: true, resources: resources)
+}

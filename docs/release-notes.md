@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.34, 2026-11-23: UiShell runs fitSystem
+
+- `app3d/UiShell`'s `runUiSystems` and `runScheduledUiSystems` run `fitSystem` between the layout
+  and the animation step (example 106's order; ui/Pipeline's `uiSystemFit`). Without it, in every
+  app on UiShell and in the 121 viewer, a `ScaleToFit` stage, `Aspect` and Overflow
+  `scaleToFitY` did nothing: a 1080x2280 stage drew unscaled. Case 1563.
+
 ## 0.4.33, 2026-11-23: a layout check hides a node under an inactive parent
 
 - `app3d/LayoutCheck`'s `layoutBoxOfEntity` (and `layoutBoxOf`) report a node hidden when any of
