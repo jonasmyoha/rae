@@ -1,0 +1,146 @@
+# Files: the disk calls under the operations (docs/file-browser-design.md §11), each one call of
+# compiler/runtime/runtime_file_operations.c: 0, a count or a handle, or a negated errno. None
+# follows a symlink at the path it is given and none overwrites, but renameAsIs.
+import Sys
+
+func nativeOpenRead(path: String) unsafe extern("rae_ext_Files_openRead") ret Int
+
+func nativeCreateNew(path: String) unsafe extern("rae_ext_Files_createNew") ret Int
+
+func nativeReadChunk(
+  fd: Int
+  bytes: Buffer(UInt8)
+  count: Int
+) unsafe extern("rae_ext_Files_readChunk") ret Int
+
+func nativeWriteChunk(
+  fd: Int
+  bytes: Buffer(UInt8)
+  start: Int
+  count: Int
+) unsafe extern("rae_ext_Files_writeChunk") ret Int
+
+func nativeSyncFile(fd: Int) unsafe extern("rae_ext_Files_syncFile") ret Int
+
+func nativeCloseFile(fd: Int) unsafe extern("rae_ext_Files_closeFile") ret Int
+
+func nativeClone(path: String, copyPath: String) unsafe extern("rae_ext_Files_clone") ret Int
+
+func nativeCopyMetadata(
+  path: String
+  copyPath: String
+) unsafe extern("rae_ext_Files_copyMetadata") ret Int
+
+func nativeSetTimes(
+  path: String
+  seconds: Int
+  nanoseconds: Int
+) unsafe extern("rae_ext_Files_setTimes") ret Int
+
+func nativeReadLink(path: String) unsafe extern("rae_ext_Files_readLink") ret String
+
+func nativeMakeLink(target: String, path: String) unsafe extern("rae_ext_Files_makeLink") ret Int
+
+func nativeMakeFolder(path: String, mode: Int) unsafe extern("rae_ext_Files_makeFolder") ret Int
+
+func nativeRemoveFile(path: String) unsafe extern("rae_ext_Files_removeFile") ret Int
+
+func nativeRemoveFolder(path: String) unsafe extern("rae_ext_Files_removeFolder") ret Int
+
+func nativeRenameExclusive(
+  path: String
+  newPath: String
+) unsafe extern("rae_ext_Files_renameExclusive") ret Int
+
+func nativeRenameAsIs(
+  path: String
+  newPath: String
+) unsafe extern("rae_ext_Files_renameAsIs") ret Int
+
+func nativeRealPath(path: String) unsafe extern("rae_ext_Files_realPath") ret String
+
+func nativeProcessId() unsafe extern("rae_ext_Files_processId") ret Int
+
+func nativeUserId() unsafe extern("rae_ext_Files_userId") ret Int
+
+# Why an operation, or one item of it, did not happen
+enum OperationError {
+  none
+  notFound
+  noPermission
+  noSpace
+  # the name is taken (an undo with something in the way)
+  exists
+  badName
+  # a folder into itself, or over a folder it is in
+  intoItself
+  # this system (or this item's disk) has no trash
+  noTrash
+  # the thing changed while it was copied, or since the operation that is undone
+  changed
+  # a disk, the system's root, the user's home or a folder it is in
+  protected
+  # a pipe, a socket or a device
+  notCopyable
+  # outside the folder the operations are held to
+  outside
+  other
+}
+
+func errnoIs(code: view Int, which: view Int) ret Bool {
+  ret code > 0 and code is Sys.errnoConstant(which: which)
+}
+
+# What a call's negated errno means
+func operationErrorOf(answer: view Int) ret OperationError {
+  let code: Int = -answer
+  if answer >= 0 {
+    ret OperationError.none
+  }
+  if errnoIs(code: code, which: 8) or errnoIs(code: code, which: 11) {
+    ret OperationError.exists
+  }
+  if errnoIs(code: code, which: 10) {
+    ret OperationError.badName
+  }
+  let error: FileError = Sys.fileErrorOf(errnoCode: code)
+  if error is FileError.noSpace {
+    ret OperationError.noSpace
+  }
+  if error is FileError.notFound {
+    ret OperationError.notFound
+  }
+  if error is FileError.noPermission {
+    ret OperationError.noPermission
+  }
+  ret OperationError.other
+}
+
+# The OS or the disk has no such call (renameExclusive, clone)
+func notSupported(answer: view Int) ret Bool {
+  let code: Int = -answer
+  ret errnoIs(code: code, which: 9) or errnoIs(code: code, which: 12) or errnoIs(
+    code: code
+    which: 13
+  ) or errnoIs(code: code, which: 15)
+}
+
+func acrossVolumes(answer: view Int) ret Bool {
+  ret errnoIs(code: -answer, which: 7)
+}
+
+# Move `path` to a name that must be free. Where the OS has no call that fails on a taken name (some
+# disks), the name is looked at just before, which leaves a moment in which another program could
+# take it.
+func renameToFree(path: view String, newPath: view String) ret Int {
+  unsafe {
+    let answer: Int = nativeRenameExclusive(path: path, newPath: newPath)
+    if answer is 0 or not notSupported(answer: answer) {
+      ret answer
+    }
+    if pathStatus(path: newPath, follow: false).found {
+      ret -Sys.errnoConstant(which: 8)
+    }
+    ret nativeRenameAsIs(path: path, newPath: newPath)
+  }
+}

@@ -1,0 +1,350 @@
+# lib/Files' operations (docs/file-browser-design.md §11) in a temporary folder that they are held
+# to: new folder, rename (names refused, case only, two hard links), copy and duplicate (trees,
+# links, permissions, dates), move on one disk and by copying as across disks, conflicts (skip, keep
+# both, replace, for all), cancel part-way, a crash's leftovers, a read-only target, a file that
+# changes while it is copied or moved, and what is refused (into itself, outside, a pipe).
+import Files
+import Sys
+
+func sources(root: view String, names: view List(String)) ret List(String) {
+  var paths: List(String) = {}
+  loop let name: view String in names {
+    paths.add(value: "{root}/{name}")
+  }
+  ret paths
+}
+
+func naming(root: view String, rules: view OperationRules) {
+  log("--- new folder and rename")
+  let at: String = "{root}/naming"
+  folder(path: at)
+  var made: FileOperation = Files.newFolder(folder: at, name: "untitled folder", rules: rules)
+  log(finished(operation: made))
+  var again: FileOperation = Files.newFolder(folder: at, name: "untitled folder", rules: rules)
+  log(finished(operation: again))
+  var dotted: FileOperation = Files.newFolder(folder: at, name: "untitled folder", rules: rules)
+  log(finished(operation: dotted))
+  file(path: "{at}/a.txt", content: "A")
+  file(path: "{at}/b.txt", content: "B")
+  var plain: FileOperation = Files.renameFile(source: "{at}/a.txt", name: "c.txt", rules: rules)
+  log("free: {finished(operation: plain)}")
+  var cased: FileOperation = Files.renameFile(source: "{at}/c.txt", name: "C.txt", rules: rules)
+  log("case only: {finished(operation: cased)}")
+  var same: FileOperation = Files.renameFile(source: "{at}/C.txt", name: "C.txt", rules: rules)
+  log("the same: {finished(operation: same)}")
+  var taken: FileOperation = Files.renameFile(source: "{at}/C.txt", name: "b.txt", rules: rules)
+  log("taken: {finished(operation: taken)}")
+  unsafe {
+    let linked: Int = makeHardLink(path: "{at}/b.txt".toCStr(), other: "{at}/twin.txt".toCStr())
+  }
+  var twin: FileOperation = Files.renameFile(source: "{at}/b.txt", name: "twin.txt", rules: rules)
+  log("onto a hard link of it: {finished(operation: twin)}")
+  var refused: String = ""
+  loop let name: view String in List(String) {
+    ""
+    "."
+    ".."
+    "a/b"
+    "a\tb"
+  } {
+    var wrong: FileOperation = Files.renameFile(source: "{at}/C.txt", name: name, rules: rules)
+    refused = "{refused} {Files.checkName(name: name)}:{finished(operation: wrong)}"
+  }
+  log("refused:{refused}")
+  var long: String = ""
+  loop var i: Int = 0, i < 128, ++i {
+    long = "{long}é"
+  }
+  log(
+    "too long: {Files.checkName(name: long)}; a free name fits: {Files.withStem(
+      name: long.sub(start: 0, len: 254)
+      stemBytes: 254
+      added: " copy"
+    ).length() <= 255}"
+  )
+  log(treeText(path: at))
+}
+
+func copying(root: view String, rules: view OperationRules) {
+  log("--- copy and duplicate")
+  let from: String = "{root}/from"
+  let to: String = "{root}/to"
+  folder(path: "{from}/album/inner")
+  folder(path: to)
+  file(path: "{from}/one.tar.gz", content: "1")
+  file(path: "{from}/album/two.txt", content: "2")
+  file(path: "{from}/album/inner/three.txt", content: "3")
+  makeLink(target: "two.txt", path: "{from}/album/link")
+  makeLink(target: "{root}/nowhere", path: "{from}/album/broken")
+  makeLink(target: "{from}", path: "{from}/album/up")
+  let mode: Bool = Sys.setFileMode(path: "{from}/album/two.txt", mode: 384) and Sys.setFileMode(
+    path: "{from}/album/inner"
+    mode: 320
+  )
+  var copied: FileOperation = Files.copyFiles(
+    sources: sources(root: from, names: List(String) { "one.tar.gz", "album" })
+    folder: to
+    rules: rules
+  )
+  log(finished(operation: copied))
+  log(treeText(path: to))
+  let was: PathStatus = Files.pathStatus(path: "{from}/album/two.txt", follow: false)
+  let now: PathStatus = Files.pathStatus(path: "{to}/album/two.txt", follow: false)
+  let inner: PathStatus = Files.pathStatus(path: "{to}/album/inner", follow: false)
+  log(
+    "kept: mode {now.permissions is 384} {inner.permissions is 320}, date {now.modifiedWholeSeconds is was.modifiedWholeSeconds}, its own file {now.inode is not was.inode}; {copied.bytesDone} bytes of {Files.measureFiles(
+      paths: sources(root: from, names: List(String) { "one.tar.gz", "album" })
+    )}"
+  )
+  var doubled: FileOperation = Files.duplicateFiles(
+    sources: sources(root: to, names: List(String) { "one.tar.gz", "one.tar.gz", "album" })
+    rules: rules
+  )
+  log("duplicate: {finished(operation: doubled)}")
+  var beside: FileOperation = Files.copyFiles(
+    sources: sources(root: to, names: List(String) { "one.tar.gz" })
+    folder: to
+    rules: rules
+  )
+  log("copied beside itself: {finished(operation: beside)}")
+  makeLink(target: to, path: "{root}/alias")
+  var aliased: FileOperation = Files.moveFiles(
+    sources: sources(root: to, names: List(String) { "one.tar.gz" })
+    folder: "{root}/alias"
+    rules: rules
+  )
+  log("moved to where it is, by another path: {finished(operation: aliased)}")
+  var aliasCopy: FileOperation = Files.copyFiles(
+    sources: sources(root: to, names: List(String) { "one.tar.gz" })
+    folder: "{root}/alias"
+    rules: rules
+  )
+  log("copied there: {finished(operation: aliasCopy)}")
+  var inside: FileOperation = Files.copyFiles(
+    sources: sources(root: from, names: List(String) { "album" })
+    folder: "{from}/album/inner"
+    rules: rules
+  )
+  log("into itself: {finished(operation: inside)}")
+  var linkInside: FileOperation = Files.moveFiles(
+    sources: sources(root: root, names: List(String) { "from" })
+    folder: "{from}/album/up"
+    rules: rules
+  )
+  log("into itself by a link: {finished(operation: linkInside)}")
+  log("left behind: {Files.copyLeftovers(folder: to, olderThanSeconds: 0.0).length}")
+}
+
+func moving(root: view String, rules: view OperationRules, label: view String) {
+  log("--- {label}")
+  let from: String = "{root}/{label} from"
+  let to: String = "{root}/{label} to"
+  folder(path: "{from}/album/inner")
+  folder(path: to)
+  file(path: "{from}/album/two.txt", content: "2")
+  file(path: "{from}/album/inner/three.txt", content: "3")
+  makeLink(target: "two.txt", path: "{from}/album/link")
+  file(path: "{from}/one.txt", content: "1")
+  var moved: FileOperation = Files.moveFiles(
+    sources: sources(root: from, names: List(String) { "album", "one.txt", "missing" })
+    folder: to
+    rules: rules
+  )
+  log(finished(operation: moved))
+  log("from: [{treeText(path: from)}] to: [{treeText(path: to)}]")
+  # conflicts: a and b are taken, c is free
+  loop let name: view String in List(String) { "a", "b", "c" } {
+    file(path: "{from}/{name}", content: "new {name}")
+  }
+  file(path: "{to}/a", content: "old a")
+  file(path: "{to}/b", content: "old b")
+  var skipped: FileOperation = Files.copyFiles(
+    sources: sources(root: from, names: List(String) { "a", "b" })
+    folder: to
+    rules: rules
+  )
+  let asked: Int = runToEnd(operation: skipped, answer: ConflictAnswer.skip, forAll: false)
+  log("skip, asked {asked}: {outcomes(operation: skipped)}")
+  var kept: FileOperation = Files.copyFiles(
+    sources: sources(root: from, names: List(String) { "a", "b" })
+    folder: to
+    rules: rules
+  )
+  let askedOnce: Int = runToEnd(operation: kept, answer: ConflictAnswer.keepBoth, forAll: true)
+  log("keep both for all, asked {askedOnce}: {outcomes(operation: kept)}")
+  var replaced: FileOperation = Files.moveFiles(
+    sources: sources(root: from, names: List(String) { "a", "b", "c" })
+    folder: to
+    rules: rules
+  )
+  let askedReplace: Int = runToEnd(
+    operation: replaced
+    answer: ConflictAnswer.replace
+    forAll: true
+  )
+  log("replace for all, asked {askedReplace}: {outcomes(operation: replaced)}")
+  log("from: [{treeText(path: from)}] to: [{treeText(path: to)}]")
+}
+
+# 3 MB, so that its copy takes chunks
+func bigText() ret String {
+  var text: String = "0123456789abcdef"
+  loop text.length() < 3000000 {
+    text = "{text}{text}"
+  }
+  ret text
+}
+
+func trouble(root: view String, rules: view OperationRules) {
+  log("--- trouble")
+  let at: String = "{root}/trouble"
+  let to: String = "{at}/to"
+  folder(path: to)
+  file(path: "{at}/big.bin", content: bigText())
+  folder(path: "{at}/tree/shut")
+  file(path: "{at}/tree/shut/small.txt", content: "s")
+  let shut: Bool = Sys.setFileMode(path: "{at}/tree/shut", mode: 320)
+  file(path: "{at}/tree/zbig.bin", content: bigText())
+  # canceled in the middle of the first of two
+  var canceled: FileOperation = Files.moveFiles(
+    sources: sources(root: at, names: List(String) { "tree", "big.bin" })
+    folder: to
+    rules: rules
+  )
+  var steps: Int = 0
+  loop canceled.bytesDone < 1048576 {
+    Files.stepOperation(operation: canceled)
+    steps = steps + 1
+  }
+  log(
+    "part-way, only a temporary name: {Files.copyLeftovers(folder: to, olderThanSeconds: 0.0).length}, real {Sys.exists(
+      path: "{to}/tree"
+    )}"
+  )
+  Files.cancelOperation(operation: canceled)
+  log(
+    "canceled: {finished(operation: canceled)}; left [{treeText(path: to)}], source kept {Sys.exists(
+      path: "{at}/tree/shut/small.txt"
+    )}"
+  )
+  # a crash: the operation is stepped no more
+  var crashed: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "big.bin" })
+    folder: to
+    rules: rules
+  )
+  Files.stepOperation(operation: crashed)
+  Files.stepOperation(operation: crashed)
+  Files.stepOperation(operation: crashed)
+  Files.closeCopyFiles(treeCopy: crashed.treeCopy)
+  log(
+    "after a crash: leftovers {Files.copyLeftovers(folder: to, olderThanSeconds: 0.0).length}, an hour old {Files.copyLeftovers(
+      folder: to
+      olderThanSeconds: 3600.0
+    ).length}, under the real name {Sys.exists(path: "{to}/big.bin")}"
+  )
+  # a source that changes while it is copied
+  var changing: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "big.bin" })
+    folder: to
+    rules: rules
+  )
+  loop changing.bytesDone < 1048576 {
+    Files.stepOperation(operation: changing)
+  }
+  file(path: "{at}/big.bin", content: "another")
+  log("changed while copied: {finished(operation: changing)}")
+  # a move whose source got a new file after it was copied: that file stays
+  folder(path: "{at}/grows")
+  file(path: "{at}/grows/one", content: "1")
+  var growing: FileOperation = Files.moveFiles(
+    sources: sources(root: at, names: List(String) { "grows" })
+    folder: to
+    rules: rules
+  )
+  loop growing.phase is not ItemPhase.placing {
+    Files.stepOperation(operation: growing)
+  }
+  file(path: "{at}/grows/late", content: "L")
+  log(
+    "a late file in a moved folder: {finished(operation: growing)}; source [{treeText(
+      path: "{at}/grows"
+    )}] moved [{treeText(path: "{to}/grows")}]"
+  )
+  # another program takes the name while the copy is made
+  file(path: "{at}/race", content: "mine")
+  var racing: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "race" })
+    folder: to
+    rules: rules
+  )
+  loop racing.phase is not ItemPhase.placing {
+    Files.stepOperation(operation: racing)
+  }
+  file(path: "{to}/race", content: "theirs")
+  let asked: Int = runToEnd(operation: racing, answer: ConflictAnswer.keepBoth, forAll: false)
+  log("the name taken meanwhile, asked {asked}: {outcomes(operation: racing)}")
+  # a target that may not be written
+  let locked: String = "{at}/locked"
+  folder(path: locked)
+  let lockedMode: Bool = Sys.setFileMode(path: locked, mode: 320)
+  var denied: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "race" })
+    folder: locked
+    rules: rules
+  )
+  log("a read-only target: {finished(operation: denied)}")
+  var unreadable: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "tree" })
+    folder: to
+    rules: rules
+  )
+  let closedMode: Bool = Sys.setFileMode(path: "{at}/tree/shut", mode: 0)
+  log(
+    "an unreadable folder in it: {finished(operation: unreadable)}, left {Sys.exists(
+      path: "{to}/tree"
+    )}"
+  )
+  unsafe {
+    let made: Int = makePipeAt(path: "{at}/pipe".toCStr())
+  }
+  var pipe: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "pipe" })
+    folder: to
+    rules: rules
+  )
+  log("a pipe: {finished(operation: pipe)}")
+  var outside: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "race" })
+    folder: "/tmp"
+    rules: rules
+  )
+  log("outside: {finished(operation: outside)}")
+  makeLink(target: "/tmp", path: "{at}/out")
+  var byLink: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "race" })
+    folder: "{at}/out"
+    rules: rules
+  )
+  log("outside by a link: {finished(operation: byLink)}")
+  var dots: FileOperation = Files.moveFiles(
+    sources: sources(root: at, names: List(String) { "../../x" })
+    folder: to
+    rules: rules
+  )
+  log("by dots: {finished(operation: dots)}")
+}
+
+func main() {
+  let root: String = createRoot()
+  let rules: OperationRules = Files.operationRules()
+  var byCopy: OperationRules = rules
+  byCopy.moveByCopy = true
+  naming(root: root, rules: rules)
+  copying(root: root, rules: rules)
+  moving(root: root, rules: rules, label: "move")
+  moving(root: root, rules: byCopy, label: "move by copy")
+  trouble(root: root, rules: byCopy)
+  removeTree(path: root)
+  log("removed {not Sys.exists(path: root)}")
+}

@@ -55,9 +55,9 @@ int64_t rae_ext_Files_entryKind(void* entry) {
 #endif
 }
 
-/* stat (`follow`) or lstat of `path` into six words: the kind, the size, the
+/* stat (`follow`) or lstat of `path` into eight words: the kind, the size, the
  * modified time in whole seconds and nanoseconds, 1 when the OS's hidden flag
- * is set, the device. 0, or -errno. */
+ * is set, the device, the inode, the permission bits. 0, or -errno. */
 int64_t rae_ext_Files_status(rae_String path, rae_Bool follow, void* words) {
   if (!path.data || !words) return -EINVAL;
   struct stat st;
@@ -84,6 +84,8 @@ int64_t rae_ext_Files_status(rae_String path, rae_Bool follow, void* words) {
   out[3] = (int64_t)st.st_mtim.tv_nsec;
 #endif
   out[5] = (int64_t)st.st_dev;
+  out[6] = (int64_t)st.st_ino;
+  out[7] = (int64_t)(st.st_mode & 07777);
   return 0;
 }
 

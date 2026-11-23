@@ -1,0 +1,51 @@
+--- new folder and rename
+done->untitled folder
+done->untitled folder 2
+done->untitled folder 3
+free: done->c.txt
+case only: done->C.txt
+the same: done->C.txt
+taken: skipped
+onto a hard link of it: skipped
+refused: empty:failed(badName) dots:failed(badName) dots:failed(badName) separator:failed(badName) control:failed(badName)
+too long: tooLong; a free name fits: true
+b.txt:B C.txt:A twin.txt:B untitled folder/( ) untitled folder 2/( ) untitled folder 3/( )
+--- copy and duplicate
+done->one.tar.gz done->album
+album/( broken@ inner/( three.txt:3 ) link@ two.txt:2 up@ ) one.tar.gz:1
+kept: mode true true, date true, its own file true; 3 bytes of 3
+duplicate: done->one.tar copy.gz done->one.tar copy 2.gz done->album copy
+copied beside itself: done->one.tar copy 3.gz
+moved to where it is, by another path: done->one.tar.gz
+copied there: done->one.tar copy 4.gz
+into itself: failed(intoItself)
+into itself by a link: failed(intoItself)
+left behind: 0
+--- move
+done->album done->one.txt failed(notFound)
+from: [] to: [album/( inner/( three.txt:3 ) link@ two.txt:2 ) one.txt:1]
+skip, asked 2: skipped skipped
+keep both for all, asked 1: done->a 2 done->b 2
+replace for all, asked 1: done->a done->b done->c
+from: [] to: [a:new a a 2:new a album/( inner/( three.txt:3 ) link@ two.txt:2 ) b:new b b 2:new b c:new c one.txt:1]
+--- move by copy
+done->album done->one.txt failed(notFound)
+from: [] to: [album/( inner/( three.txt:3 ) link@ two.txt:2 ) one.txt:1]
+skip, asked 2: skipped skipped
+keep both for all, asked 1: done->a 2 done->b 2
+replace for all, asked 1: done->a done->b done->c
+from: [] to: [a:new a a 2:new a album/( inner/( three.txt:3 ) link@ two.txt:2 ) b:new b b 2:new b c:new c one.txt:1]
+--- trouble
+part-way, only a temporary name: 1, real false
+canceled: canceled canceled; left [], source kept true
+after a crash: leftovers 1, an hour old 0, under the real name false
+changed while copied: failed(changed)
+a late file in a moved folder: done(changed)->grows; source [late:L] moved [one:1]
+the name taken meanwhile, asked 1: done->race 2
+a read-only target: failed(noPermission)
+an unreadable folder in it: failed(noPermission), left false
+a pipe: failed(notCopyable)
+outside: failed(outside)
+outside by a link: failed(outside)
+by dots: failed(badName)
+removed true

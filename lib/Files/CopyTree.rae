@@ -1,0 +1,376 @@
+# Files: copying one item, a file or a whole tree, in small steps (docs/file-browser-design.md §11).
+# The copy is made under a temporary name beside its place (`.rae-copy-...`), so nothing has the
+# real
+# name until it is complete. Symlinks are copied as symlinks and never followed. A file is cloned
+# where the disk can (APFS), else read and written a chunk a step; permissions and dates are
+# copied, with extended attributes and access lists on macOS. What was copied is remembered as it
+# was, so a move across disks removes only that.
+import Sys
+
+const copyChunkBytes: Int = 1048576
+
+const temporaryPrefix: String = ".rae-copy-"
+
+enum CopyTaskKind { entry, finishFolder }
+
+type CopyTask {
+  kind: CopyTaskKind
+  source: String
+  target: String
+}
+
+# A thing as it was when it was copied
+type CopiedThing {
+  path: String
+  kind: EntryKind
+  device: Int
+  inode: Int
+  size: Int
+  modifiedWholeSeconds: Int
+  modifiedNanoseconds: Int
+}
+
+type TreeCopy {
+  # the temporary name of the copy's root
+  temporary: String
+  tasks: List(CopyTask)
+  copied: List(CopiedThing)
+  error: OperationError = OperationError.none
+  # where the error was
+  errorPath: String
+  bytesDone: Int = 0
+  # the file being copied, -1 when none is
+  readFd: Int = -1
+  writeFd: Int = -1
+  source: String
+  target: String
+  sourceStatus: PathStatus
+  chunk: List(UInt8)
+  # written through to the disk before it counts (a move, whose source is then removed)
+  durable: Bool = false
+  # never a clone (a test, so that the chunks are)
+  noClone: Bool = false
+}
+
+func createTreeCopy() ret TreeCopy {
+  ret TreeCopy {
+    temporary: ""
+    tasks: {}
+    copied: {}
+    errorPath: ""
+    source: ""
+    target: ""
+    sourceStatus: {}
+    chunk: {}
+  }
+}
+
+# A temporary name in `folder`, this process's own
+func temporaryName(folder: view String) ret String {
+  var process: Int = 0
+  unsafe {
+    process = nativeProcessId()
+  }
+  ret joinPath(folder: folder, name: "{temporaryPrefix}{process}-{nowNs()}")
+}
+
+# Copies a crash left in `folder`: temporary names no one has changed for `olderThanSeconds`. They
+# are only listed; an app trashes them.
+func copyLeftovers(folder: view String, olderThanSeconds: view Float64) ret List(String) {
+  var found: List(String) = {}
+  let now: Float64 = (nowMs() as Float64) / 1000.0
+  let listing: FolderListing = readFolder(folder: folder)
+  loop let entry: view FileEntry in listing.entries {
+    if entry.name.startsWith(prefix: temporaryPrefix) {
+      let path: String = joinPath(folder: folder, name: entry.name)
+      let age: Float64 = now - pathStatus(path: path, follow: false).modifiedSeconds
+      # 0: any, also one just made (the clock here counts milliseconds, the disk's finer)
+      if olderThanSeconds <= 0.0 or age >= olderThanSeconds {
+        found.add(value: path)
+      }
+    }
+  }
+  ret found
+}
+
+# The bytes of the files at `paths` and in them (links not followed): an operation's whole, for
+# showing how far it is. It reads every folder, so it runs where the operation does.
+func measureFiles(paths: view List(String)) ret Int {
+  var bytes: Int = 0
+  var waiting: List(String) = paths
+  loop waiting.length > 0 {
+    let path: String = waiting.copyAtDefault(index: waiting.length - 1)
+    waiting.removeLast()
+    let status: PathStatus = pathStatus(path: path, follow: false)
+    if status.kind is EntryKind.file {
+      bytes = bytes + status.size
+    }
+    if status.kind is EntryKind.folder {
+      let listing: FolderListing = readFolder(folder: path)
+      loop let entry: view FileEntry in listing.entries {
+        waiting.add(value: joinPath(folder: path, name: entry.name))
+      }
+    }
+  }
+  ret bytes
+}
+
+# Begin copying `source` to a temporary name in `folder`
+func beginTreeCopy(treeCopy: mod TreeCopy, source: view String, folder: view String) {
+  treeCopy.temporary = temporaryName(folder: folder)
+  treeCopy.tasks.clear()
+  treeCopy.copied.clear()
+  treeCopy.error = OperationError.none
+  treeCopy.errorPath = ""
+  treeCopy.tasks.add(
+    value: { kind: CopyTaskKind.entry, source: source, target: treeCopy.temporary }
+  )
+}
+
+func treeCopyFinished(treeCopy: view TreeCopy) ret Bool {
+  ret treeCopy.error is not OperationError.none or (treeCopy.tasks.length is 0 and treeCopy.readFd < 0)
+}
+
+func copyFailed(treeCopy: mod TreeCopy, error: view OperationError, path: view String) {
+  treeCopy.error = error
+  treeCopy.errorPath = "{path}"
+  closeCopyFiles(treeCopy: treeCopy)
+}
+
+func closeCopyFiles(treeCopy: mod TreeCopy) {
+  unsafe {
+    if treeCopy.readFd >= 0 {
+      let shut: Int = nativeCloseFile(fd: treeCopy.readFd)
+    }
+    if treeCopy.writeFd >= 0 {
+      let shut: Int = nativeCloseFile(fd: treeCopy.writeFd)
+    }
+  }
+  treeCopy.readFd = -1
+  treeCopy.writeFd = -1
+}
+
+func rememberCopied(treeCopy: mod TreeCopy, path: view String, status: view PathStatus) {
+  treeCopy.copied.add(value: {
+    path: path
+    kind: status.kind
+    device: status.device
+    inode: status.inode
+    size: status.size
+    modifiedWholeSeconds: status.modifiedWholeSeconds
+    modifiedNanoseconds: status.modifiedNanoseconds
+  })
+}
+
+# Whether the thing at `path` is the one `was` describes, untouched
+func unchangedSince(was: view CopiedThing) ret Bool {
+  let now: PathStatus = pathStatus(path: was.path, follow: false)
+  if not now.found or now.device is not was.device or now.inode is not was.inode or now.kind is not was.kind {
+    ret false
+  }
+  if was.kind is EntryKind.folder {
+    ret true
+  }
+  ret now.size is was.size and now.modifiedWholeSeconds is was.modifiedWholeSeconds and now.modifiedNanoseconds is was.modifiedNanoseconds
+}
+
+# Permissions and dates on a copy, and what else the OS copies in one call. `status` is the
+# source's.
+func copyMetadataOf(source: view String, target: view String, status: view PathStatus) ret Int {
+  unsafe {
+    let answer: Int = nativeCopyMetadata(path: source, copyPath: target)
+    if answer is 0 {
+      ret 0
+    }
+    if status.kind is not EntryKind.symlink {
+      let moded: Bool = Sys.setFileMode(path: target, mode: status.permissions)
+    }
+    ret nativeSetTimes(
+      path: target
+      seconds: status.modifiedWholeSeconds
+      nanoseconds: status.modifiedNanoseconds
+    )
+  }
+}
+
+# One piece of the copy: an entry begun, a chunk, or a folder finished
+func stepTreeCopy(treeCopy: mod TreeCopy) {
+  if treeCopyFinished(treeCopy: treeCopy) {
+    ret
+  }
+  if treeCopy.readFd >= 0 {
+    copyOneChunk(treeCopy: treeCopy)
+    ret
+  }
+  let task: CopyTask = treeCopy.tasks.copyAtDefault(index: treeCopy.tasks.length - 1)
+  treeCopy.tasks.removeLast()
+  let status: PathStatus = pathStatus(path: task.source, follow: false)
+  if not status.found {
+    copyFailed(treeCopy: treeCopy, error: OperationError.notFound, path: task.source)
+    ret
+  }
+  if task.kind is CopyTaskKind.finishFolder {
+    # after its children: a read-only folder could not be written into
+    let answer: Int = copyMetadataOf(source: task.source, target: task.target, status: status)
+    ret
+  }
+  if status.kind is EntryKind.symlink {
+    copyLink(treeCopy: treeCopy, task: task, status: status)
+  } else if status.kind is EntryKind.folder {
+    copyFolder(treeCopy: treeCopy, task: task, status: status)
+  } else if status.kind is EntryKind.file {
+    beginFile(treeCopy: treeCopy, task: task, status: status)
+  } else {
+    copyFailed(treeCopy: treeCopy, error: OperationError.notCopyable, path: task.source)
+  }
+}
+
+func copyLink(treeCopy: mod TreeCopy, task: view CopyTask, status: view PathStatus) {
+  var answer: Int = 0
+  unsafe {
+    let target: String = nativeReadLink(path: task.source)
+    if target.length() is 0 {
+      answer = -Sys.rae_sys_file_errno()
+    } else {
+      answer = nativeMakeLink(target: target, path: task.target)
+    }
+  }
+  if answer < 0 {
+    copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: answer), path: task.source)
+    ret
+  }
+  let dated: Int = copyMetadataOf(source: task.source, target: task.target, status: status)
+  rememberCopied(treeCopy: treeCopy, path: task.source, status: status)
+}
+
+func copyFolder(treeCopy: mod TreeCopy, task: view CopyTask, status: view PathStatus) {
+  var answer: Int = 0
+  unsafe {
+    # its owner's only, until it is finished
+    answer = nativeMakeFolder(path: task.target, mode: 448)
+  }
+  if answer < 0 {
+    copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: answer), path: task.source)
+    ret
+  }
+  let listing: FolderListing = readFolder(folder: task.source)
+  if listing.error is not ListError.none {
+    var error: OperationError = OperationError.other
+    if listing.error is ListError.noPermission {
+      error = OperationError.noPermission
+    }
+    copyFailed(treeCopy: treeCopy, error: error, path: task.source)
+    ret
+  }
+  rememberCopied(treeCopy: treeCopy, path: task.source, status: status)
+  treeCopy.tasks.add(
+    value: { kind: CopyTaskKind.finishFolder, source: task.source, target: task.target }
+  )
+  loop let entry: view FileEntry in listing.entries {
+    treeCopy.tasks.add(
+      value: {
+        kind: CopyTaskKind.entry
+        source: joinPath(folder: task.source, name: entry.name)
+        target: joinPath(folder: task.target, name: entry.name)
+      }
+    )
+  }
+}
+
+func beginFile(treeCopy: mod TreeCopy, task: view CopyTask, status: view PathStatus) {
+  unsafe {
+    if not treeCopy.noClone and not treeCopy.durable {
+      let cloned: Int = nativeClone(path: task.source, copyPath: task.target)
+      if cloned is 0 {
+        treeCopy.bytesDone = treeCopy.bytesDone + status.size
+        rememberCopied(treeCopy: treeCopy, path: task.source, status: status)
+        ret
+      }
+    }
+    let read: Int = nativeOpenRead(path: task.source)
+    if read < 0 {
+      copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: read), path: task.source)
+      ret
+    }
+    let write: Int = nativeCreateNew(path: task.target)
+    if write < 0 {
+      let shut: Int = nativeCloseFile(fd: read)
+      copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: write), path: task.source)
+      ret
+    }
+    treeCopy.readFd = read
+    treeCopy.writeFd = write
+  }
+  treeCopy.source = "{task.source}"
+  treeCopy.target = "{task.target}"
+  treeCopy.sourceStatus = status
+  if treeCopy.chunk.length is 0 {
+    treeCopy.chunk.addDefaults(count: copyChunkBytes)
+  }
+}
+
+# Read a chunk and write it; at the file's end, finish it
+func copyOneChunk(treeCopy: mod TreeCopy) {
+  var got: Int = 0
+  unsafe {
+    got = nativeReadChunk(fd: treeCopy.readFd, bytes: treeCopy.chunk.data, count: copyChunkBytes)
+    if got < 0 {
+      if errnoIs(code: -got, which: 14) {
+        ret
+      }
+      copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: got), path: treeCopy.source)
+      ret
+    }
+    var written: Int = 0
+    loop written < got {
+      let put: Int = nativeWriteChunk(
+        fd: treeCopy.writeFd
+        bytes: treeCopy.chunk.data
+        start: written
+        count: got - written
+      )
+      if put < 0 and not errnoIs(code: -put, which: 14) {
+        copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: put), path: treeCopy.target)
+        ret
+      }
+      if put > 0 {
+        written = written + put
+      }
+    }
+  }
+  treeCopy.bytesDone = treeCopy.bytesDone + got
+  if got is 0 {
+    finishFile(treeCopy: treeCopy)
+  }
+}
+
+func finishFile(treeCopy: mod TreeCopy) {
+  var answer: Int = 0
+  unsafe {
+    if treeCopy.durable {
+      answer = nativeSyncFile(fd: treeCopy.writeFd)
+    }
+    let shutRead: Int = nativeCloseFile(fd: treeCopy.readFd)
+    let shutWrite: Int = nativeCloseFile(fd: treeCopy.writeFd)
+    treeCopy.readFd = -1
+    treeCopy.writeFd = -1
+    # a full disk can show only here
+    if answer is 0 {
+      answer = shutWrite
+    }
+  }
+  if answer < 0 {
+    copyFailed(treeCopy: treeCopy, error: operationErrorOf(answer: answer), path: treeCopy.target)
+    ret
+  }
+  let before: PathStatus = treeCopy.sourceStatus
+  let after: PathStatus = pathStatus(path: treeCopy.source, follow: false)
+  let copied: PathStatus = pathStatus(path: treeCopy.target, follow: false)
+  let same: Bool = sameThing(a: before, b: after) and after.size is before.size and after.modifiedWholeSeconds is before.modifiedWholeSeconds and after.modifiedNanoseconds is before.modifiedNanoseconds
+  if not same or copied.size is not before.size {
+    copyFailed(treeCopy: treeCopy, error: OperationError.changed, path: treeCopy.source)
+    ret
+  }
+  let dated: Int = copyMetadataOf(source: treeCopy.source, target: treeCopy.target, status: before)
+  rememberCopied(treeCopy: treeCopy, path: treeCopy.source, status: before)
+}

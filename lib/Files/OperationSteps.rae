@@ -1,0 +1,592 @@
+# Files: one step of an operation (Operations.rae): an item begun, a piece of its copy, its real
+# name given, a piece of a removal.
+import Sys
+
+func stepOperation(operation: mod FileOperation) {
+  if operation.state is not OperationState.running {
+    ret
+  }
+  if operation.canceled and operation.phase is ItemPhase.begin {
+    cancelRest(operation: operation)
+    ret
+  }
+  if operation.phase is ItemPhase.begin {
+    beginItem(operation: operation)
+  } else if operation.phase is ItemPhase.copying {
+    stepCopying(operation: operation)
+  } else if operation.phase is ItemPhase.placing {
+    placeCopy(operation: operation)
+  } else {
+    stepRemoving(operation: operation)
+  }
+}
+
+func cancelRest(operation: mod FileOperation) {
+  loop var i: Int = operation.index, i < operation.items.length, ++i {
+    if let item: view OperationItem = operation.items.viewAt(index: i) {
+      operation.results.add(
+        value: { source: item.source, target: "", outcome: ItemOutcome.canceled, errorPath: "" }
+      )
+    }
+  }
+  operation.index = operation.items.length
+  operation.state = OperationState.done
+}
+
+# The item ends so; a temporary copy is taken away first
+func endItem(
+  operation: mod FileOperation
+  outcome: view ItemOutcome
+  error: view OperationError
+  errorPath: view String
+) {
+  operation.endOutcome = outcome
+  operation.endError = error
+  operation.endErrorPath = "{errorPath}"
+  closeCopyFiles(treeCopy: operation.treeCopy)
+  operation.treeCopy.tasks.clear()
+  if outcome is not ItemOutcome.done and operation.treeCopy.temporary.length() > 0 {
+    operation.removals.clear()
+    operation.phase = ItemPhase.cleaning
+    pushRemoval(operation: operation, path: operation.treeCopy.temporary)
+    ret
+  }
+  finishItem(operation: operation)
+}
+
+func failItem(operation: mod FileOperation, error: view OperationError) {
+  endItem(
+    operation: operation
+    outcome: ItemOutcome.failed
+    error: error
+    errorPath: ""
+  )
+}
+
+# Write the item's result and go to the next
+func finishItem(operation: mod FileOperation) {
+  let item: OperationItem = operation.items.copyAtDefault(index: operation.index)
+  var target: String = ""
+  if operation.endOutcome is ItemOutcome.done and item.action is not ItemAction.trash and item.action is not ItemAction.delete {
+    target = joinPath(folder: item.folder, name: item.name)
+  }
+  operation.results.add(value: {
+    source: item.source
+    target: target
+    outcome: operation.endOutcome
+    error: operation.endError
+    errorPath: operation.endErrorPath
+  })
+  operation.endErrorPath = ""
+  operation.treeCopy.temporary = ""
+  operation.treeCopy.copied.clear()
+  operation.removals.clear()
+  operation.phase = ItemPhase.begin
+  operation.index = operation.index + 1
+  if operation.index >= operation.items.length {
+    operation.state = OperationState.done
+  }
+}
+
+# The name is taken: by the rule, the answer for all, or a question. True when the item can go on
+# now (its name is another one); false when it ended or waits.
+func nameTaken(operation: mod FileOperation, item: view OperationItem) ret Bool {
+  if item.taken is TakenRule.refuse {
+    failItem(operation: operation, error: OperationError.exists)
+    ret false
+  }
+  if item.taken is TakenRule.keepBoth {
+    applyAnswer(operation: operation, answer: ConflictAnswer.keepBoth)
+    ret true
+  }
+  if operation.answered {
+    let answer: ConflictAnswer = operation.answerForAll
+    applyAnswer(operation: operation, answer: answer)
+    ret answer is not ConflictAnswer.skip
+  }
+  operation.conflict = Conflict {
+    source: item.source
+    target: joinPath(folder: item.folder, name: item.name)
+  }
+  operation.state = OperationState.asking
+  ret false
+}
+
+# Why the item may not be done at all, whatever is at its target
+func refusalOf(operation: view FileOperation, item: view OperationItem) ret OperationError {
+  let target: String = joinPath(folder: item.folder, name: item.name)
+  let takesAway: Bool = item.action is not ItemAction.makeFolder and item.action is not ItemAction.copy
+  let places: Bool = item.action is not ItemAction.trash and item.action is not ItemAction.delete
+  if item.action is not ItemAction.makeFolder and not isPlainPath(path: item.source) {
+    ret OperationError.badName
+  }
+  if places and (checkName(name: item.name) is not NameError.none or not isPlainPath(path: target)) {
+    ret OperationError.badName
+  }
+  if operation.rules.onlyIn.length() > 0 {
+    let root: String = operation.rules.onlyIn
+    if item.action is not ItemAction.makeFolder and not isWithin(path: item.source, root: root) {
+      ret OperationError.outside
+    }
+    if places and not isWithin(path: target, root: root) {
+      ret OperationError.outside
+    }
+  }
+  if item.action is ItemAction.makeFolder {
+    ret OperationError.none
+  }
+  let source: PathStatus = pathStatus(path: item.source, follow: false)
+  if not source.found {
+    ret OperationError.notFound
+  }
+  if item.inode is not 0 and (source.inode is not item.inode or source.device is not item.device) {
+    ret OperationError.changed
+  }
+  if takesAway and isProtected(path: item.source) {
+    ret OperationError.protected
+  }
+  if places and source.kind is EntryKind.folder and isInside(
+    folder: item.folder
+    ancestor: item.source
+  ) {
+    ret OperationError.intoItself
+  }
+  ret OperationError.none
+}
+
+func beginItem(operation: mod FileOperation) {
+  let item: OperationItem = operation.items.copyAtDefault(index: operation.index)
+  let refusal: OperationError = refusalOf(operation: operation, item: item)
+  if refusal is not OperationError.none {
+    failItem(operation: operation, error: refusal)
+    ret
+  }
+  if item.action is ItemAction.trash {
+    trashItem(operation: operation, item: item)
+    ret
+  }
+  if item.action is ItemAction.delete {
+    operation.phase = ItemPhase.deleting
+    operation.removals.clear()
+    pushRemoval(operation: operation, path: item.source)
+    ret
+  }
+  let target: String = joinPath(folder: item.folder, name: item.name)
+  if item.action is ItemAction.makeFolder {
+    var answer: Int = 0
+    unsafe {
+      answer = nativeMakeFolder(path: target, mode: 493)
+    }
+    if operationErrorOf(answer: answer) is OperationError.exists {
+      # the next free name, at the next step
+      let again: Bool = nameTaken(operation: operation, item: item)
+    } else if answer < 0 {
+      failItem(operation: operation, error: operationErrorOf(answer: answer))
+    } else {
+      recordUndo(
+        operation: operation
+        kind: UndoKind.created
+        from: ""
+        to: target
+      )
+      endDone(operation: operation)
+    }
+    ret
+  }
+  let there: PathStatus = pathStatus(path: target, follow: false)
+  # the target is the source itself: the same name, or one the disk takes for the same (another
+  # case), in the same folder (also by another path to it)
+  let itself: Bool = isSameEntry(source: item.source, folder: item.folder, name: item.name)
+  if itself and (item.action is ItemAction.copy or nameOf(path: item.source) is item.name) {
+    if item.action is ItemAction.copy {
+      # beside the original, a copy has another name
+      if let current: mod OperationItem = operation.items.modAt(index: operation.index) {
+        current.asCopy = true
+      }
+      applyAnswer(operation: operation, answer: ConflictAnswer.keepBoth)
+      ret
+    }
+    endDone(operation: operation)
+    ret
+  }
+  if there.found and not itself and not item.replace {
+    let goOn: Bool = nameTaken(operation: operation, item: item)
+    ret
+  }
+  if item.action is ItemAction.copy {
+    startCopy(operation: operation, item: item, durable: false)
+    ret
+  }
+  if operation.rules.moveByCopy and item.action is ItemAction.move {
+    startCopy(operation: operation, item: item, durable: true)
+    ret
+  }
+  moveItem(
+    operation: operation
+    item: item
+    target: target
+    caseOnly: itself
+    taken: there.found
+  )
+}
+
+func startCopy(operation: mod FileOperation, item: view OperationItem, durable: view Bool) {
+  operation.phase = ItemPhase.copying
+  operation.treeCopy.durable = durable
+  operation.treeCopy.noClone = operation.rules.moveByCopy
+  beginTreeCopy(treeCopy: operation.treeCopy, source: item.source, folder: item.folder)
+}
+
+func endDone(operation: mod FileOperation) {
+  endItem(
+    operation: operation
+    outcome: ItemOutcome.done
+    error: OperationError.none
+    errorPath: ""
+  )
+}
+
+func recordUndo(
+  operation: mod FileOperation
+  kind: view UndoKind
+  from: view String
+  to: view String
+) {
+  let status: PathStatus = pathStatus(path: to, follow: false)
+  operation.undo.add(value: {
+    kind: kind
+    from: from
+    to: to
+    device: status.device
+    inode: status.inode
+  })
+}
+
+func trashItem(operation: mod FileOperation, item: view OperationItem) {
+  let answer: TrashAnswer = trashPath(path: item.source, rules: operation.rules)
+  if answer.error is not OperationError.none {
+    failItem(operation: operation, error: answer.error)
+    ret
+  }
+  recordUndo(
+    operation: operation
+    kind: UndoKind.trashed
+    from: item.source
+    to: answer.path
+  )
+  endDone(operation: operation)
+}
+
+# What has the name goes to the trash. Refused for a folder the item itself is in.
+func trashTaken(
+  operation: mod FileOperation
+  item: view OperationItem
+  target: view String
+) ret Bool {
+  if isProtected(path: target) {
+    failItem(operation: operation, error: OperationError.protected)
+    ret false
+  }
+  if pathStatus(path: target, follow: false).kind is EntryKind.folder and isInside(
+    folder: folderOf(path: item.source)
+    ancestor: target
+  ) {
+    failItem(operation: operation, error: OperationError.intoItself)
+    ret false
+  }
+  let answer: TrashAnswer = trashPath(path: target, rules: operation.rules)
+  if answer.error is not OperationError.none {
+    failItem(operation: operation, error: answer.error)
+    ret false
+  }
+  recordUndo(
+    operation: operation
+    kind: UndoKind.trashed
+    from: target
+    to: answer.path
+  )
+  ret true
+}
+
+# What trashTaken took away comes back, when its place could not be filled after all
+func untrashLast(operation: mod FileOperation) {
+  if let step: UndoStep = operation.undo.copyAt(index: operation.undo.length - 1) {
+    if step.kind is UndoKind.trashed and renameToFree(path: step.to, newPath: step.from) is 0 {
+      forgetTrashInfo(trashedPath: step.to)
+      operation.undo.removeLast()
+    }
+  }
+}
+
+# A rename, a move on one disk, or the return of a trashed item
+func moveItem(
+  operation: mod FileOperation
+  item: view OperationItem
+  target: view String
+  caseOnly: view Bool
+  taken: view Bool
+) {
+  let replaced: Bool = taken and not caseOnly
+  if replaced and not trashTaken(operation: operation, item: item, target: target) {
+    ret
+  }
+  var answer: Int = 0
+  if caseOnly {
+    unsafe {
+      # the same thing under the same name but for its case: no other can be there
+      answer = nativeRenameAsIs(path: item.source, newPath: target)
+    }
+  } else {
+    answer = renameToFree(path: item.source, newPath: target)
+  }
+  if answer is 0 {
+    var kind: UndoKind = UndoKind.moved
+    if item.action is ItemAction.restore {
+      kind = UndoKind.restored
+      forgetTrashInfo(trashedPath: item.source)
+    }
+    recordUndo(
+      operation: operation
+      kind: kind
+      from: item.source
+      to: target
+    )
+    endDone(operation: operation)
+    ret
+  }
+  if replaced {
+    untrashLast(operation: operation)
+  }
+  if acrossVolumes(answer: answer) {
+    startCopy(operation: operation, item: item, durable: true)
+    ret
+  }
+  if operationErrorOf(answer: answer) is OperationError.exists {
+    # taken since it was looked at: ask again
+    if let current: mod OperationItem = operation.items.modAt(index: operation.index) {
+      current.replace = false
+    }
+    let goOn: Bool = nameTaken(operation: operation, item: item)
+    ret
+  }
+  failItem(operation: operation, error: operationErrorOf(answer: answer))
+}
+
+func stepCopying(operation: mod FileOperation) {
+  if operation.canceled {
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.canceled
+      error: OperationError.none
+      errorPath: ""
+    )
+    ret
+  }
+  let before: Int = operation.treeCopy.bytesDone
+  stepTreeCopy(treeCopy: operation.treeCopy)
+  operation.bytesDone = operation.bytesDone + operation.treeCopy.bytesDone - before
+  if treeCopyFinished(treeCopy: operation.treeCopy) is false {
+    ret
+  }
+  if operation.treeCopy.error is not OperationError.none {
+    let error: OperationError = operation.treeCopy.error
+    let errorPath: String = operation.treeCopy.errorPath
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.failed
+      error: error
+      errorPath: errorPath
+    )
+    ret
+  }
+  operation.phase = ItemPhase.placing
+}
+
+# The copy is complete: give it its name, by a rename that fails on a taken one
+func placeCopy(operation: mod FileOperation) {
+  let item: OperationItem = operation.items.copyAtDefault(index: operation.index)
+  if operation.canceled {
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.canceled
+      error: OperationError.none
+      errorPath: ""
+    )
+    ret
+  }
+  let target: String = joinPath(folder: item.folder, name: item.name)
+  var replaced: Bool = false
+  if item.replace and pathStatus(path: target, follow: false).found {
+    if not trashTaken(operation: operation, item: item, target: target) {
+      ret
+    }
+    replaced = true
+  }
+  let answer: Int = renameToFree(path: operation.treeCopy.temporary, newPath: target)
+  if answer < 0 {
+    if replaced {
+      untrashLast(operation: operation)
+    }
+    if operationErrorOf(answer: answer) is OperationError.exists {
+      if let current: mod OperationItem = operation.items.modAt(index: operation.index) {
+        current.replace = false
+      }
+      let goOn: Bool = nameTaken(operation: operation, item: item)
+      ret
+    }
+    failItem(operation: operation, error: operationErrorOf(answer: answer))
+    ret
+  }
+  operation.treeCopy.temporary = ""
+  if item.action is ItemAction.copy {
+    recordUndo(
+      operation: operation
+      kind: UndoKind.created
+      from: ""
+      to: target
+    )
+    endDone(operation: operation)
+    ret
+  }
+  # a move across disks: the copy is whole and on the disk; now the source goes
+  var kind: UndoKind = UndoKind.moved
+  if item.action is ItemAction.restore {
+    kind = UndoKind.restored
+  }
+  recordUndo(
+    operation: operation
+    kind: kind
+    from: item.source
+    to: target
+  )
+  operation.phase = ItemPhase.removingSource
+}
+
+# ----- removing --------------------------------------------------------------
+
+# `path` waits to be removed. The last one waiting is removed first; a folder is looked into, and
+# waits again until it is empty.
+func pushRemoval(operation: mod FileOperation, path: view String) {
+  let status: PathStatus = pathStatus(path: path, follow: false)
+  if status.found {
+    operation.removals.add(value: {
+      path: path
+      kind: status.kind
+      device: status.device
+      inode: status.inode
+      size: -1
+      modifiedWholeSeconds: 0
+      modifiedNanoseconds: 0
+    })
+  }
+}
+
+func stepRemoving(operation: mod FileOperation) {
+  if operation.phase is ItemPhase.removingSource {
+    removeCopiedSource(operation: operation)
+    ret
+  }
+  if operation.canceled and operation.phase is ItemPhase.deleting {
+    operation.removals.clear()
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.canceled
+      error: OperationError.none
+      errorPath: ""
+    )
+    ret
+  }
+  let cleaning: Bool = operation.phase is ItemPhase.cleaning
+  if operation.removals.length is 0 {
+    if cleaning {
+      operation.treeCopy.temporary = ""
+      finishItem(operation: operation)
+    } else {
+      endDone(operation: operation)
+    }
+    ret
+  }
+  let removal: CopiedThing = operation.removals.copyAtDefault(index: operation.removals.length - 1)
+  operation.removals.removeLast()
+  var answer: Int = 0
+  if removal.kind is EntryKind.folder and removal.size is -1 {
+    # first visit: its children go before it. A disk mounted in it is not part of it.
+    if cleaning {
+      # a finished read-only folder of our own copy
+      let opened: Bool = Sys.setFileMode(path: removal.path, mode: 448)
+    }
+    let listing: FolderListing = readFolder(folder: removal.path)
+    operation.removals.add(value: {
+      path: removal.path
+      kind: removal.kind
+      device: removal.device
+      inode: removal.inode
+      size: 0
+      modifiedWholeSeconds: 0
+      modifiedNanoseconds: 0
+    })
+    loop let entry: view FileEntry in listing.entries {
+      let path: String = joinPath(folder: removal.path, name: entry.name)
+      if pathStatus(path: path, follow: false).device is removal.device {
+        pushRemoval(operation: operation, path: path)
+      }
+    }
+    ret
+  }
+  unsafe {
+    if removal.kind is EntryKind.folder {
+      answer = nativeRemoveFolder(path: removal.path)
+    } else {
+      answer = nativeRemoveFile(path: removal.path)
+    }
+  }
+  if answer < 0 and operationErrorOf(answer: answer) is not OperationError.notFound and not cleaning {
+    operation.removals.clear()
+    var error: OperationError = operationErrorOf(answer: answer)
+    if error is OperationError.exists {
+      # not empty: something came into it, or a disk is mounted in it
+      error = OperationError.changed
+    }
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.failed
+      error: error
+      errorPath: removal.path
+    )
+  }
+}
+
+# After a move across disks: remove exactly what was copied, the last first, and only while it is
+# as it was. What changed, or came in since, stays, and the item says so.
+func removeCopiedSource(operation: mod FileOperation) {
+  let count: Int = operation.treeCopy.copied.length
+  if count is 0 {
+    if operation.endErrorPath.length() > 0 {
+      let errorPath: String = operation.endErrorPath
+      endItem(
+        operation: operation
+        outcome: ItemOutcome.done
+        error: OperationError.changed
+        errorPath: errorPath
+      )
+    } else {
+      endDone(operation: operation)
+    }
+    ret
+  }
+  let was: CopiedThing = operation.treeCopy.copied.copyAtDefault(index: count - 1)
+  operation.treeCopy.copied.removeLast()
+  var gone: Bool = false
+  if unchangedSince(was: was) {
+    unsafe {
+      if was.kind is EntryKind.folder {
+        gone = nativeRemoveFolder(path: was.path) is 0
+      } else {
+        gone = nativeRemoveFile(path: was.path) is 0
+      }
+    }
+  }
+  if not gone and operation.endErrorPath.length() is 0 {
+    operation.endErrorPath = was.path
+  }
+}

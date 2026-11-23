@@ -56,7 +56,13 @@ type PathStatus {
   size: Int = -1
   modifiedSeconds: Float64 = -1.0
   hiddenFlag: Bool = false
+  # the disk and the file's number on it: together they are the thing itself, whatever its name
   device: Int = 0
+  inode: Int = 0
+  permissions: Int = 0
+  # the modified time exactly, for setting it on a copy
+  modifiedWholeSeconds: Int = 0
+  modifiedNanoseconds: Int = 0
 }
 
 func entryKindOf(code: view Int) ret EntryKind {
@@ -76,7 +82,7 @@ func entryKindOf(code: view Int) ret EntryKind {
 func pathStatus(path: view String, follow: view Bool) ret PathStatus {
   var status: PathStatus = {}
   unsafe {
-    var words: Buffer(Int) = rae_ext_rae_buf_alloc(size: 6, elemSize: sizeof(Int))
+    var words: Buffer(Int) = rae_ext_rae_buf_alloc(size: 8, elemSize: sizeof(Int))
     if nativeStatus(path: path, follow: follow, words: words) is 0 {
       status.found = true
       status.kind = entryKindOf(code: rae_ext_rae_buf_get(buf: words, index: 0))
@@ -86,6 +92,10 @@ func pathStatus(path: view String, follow: view Bool) ret PathStatus {
       status.modifiedSeconds = seconds as Float64 + (nanoseconds as Float64) / 1000000000.0
       status.hiddenFlag = rae_ext_rae_buf_get(buf: words, index: 4) is not 0
       status.device = rae_ext_rae_buf_get(buf: words, index: 5)
+      status.inode = rae_ext_rae_buf_get(buf: words, index: 6)
+      status.permissions = rae_ext_rae_buf_get(buf: words, index: 7)
+      status.modifiedWholeSeconds = seconds
+      status.modifiedNanoseconds = nanoseconds
     }
     rae_ext_rae_buf_free(buf: words)
   }

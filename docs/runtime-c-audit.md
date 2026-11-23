@@ -186,6 +186,7 @@ tested on a BSD yet.
 | `runtime_filesystem.c:229` | the resident-set-size call (`task_info` / `/proc`) |
 | `runtime_filesystem.c:278` | the `stat` field holding nanosecond mtimes (`st_mtimespec` / `st_mtim`) |
 | `runtime_files.c` | `d_type`, `stat`'s kind, date and hidden flag, `statfs` / `statvfs` flags: per-OS struct layouts and constants, one call each (lib/Files) |
+| `runtime_file_operations.c` | `clonefile` / `copyfile`, `renamex_np` / `renameat2`, `open` flags, `NSFileManager` trash: the system calls and their per-OS flags, one call each (lib/Files' operations) |
 | `runtime_args.c:10, 44` | the parent-death watcher thread: none under wasm |
 | `runtime_net.c:66, 74` | `SO_NOSIGPIPE` / `MSG_NOSIGNAL`: per-OS constants |
 | `runtime_file_notify.c:41` | `O_EVTONLY` where it exists |

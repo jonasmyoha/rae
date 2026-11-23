@@ -1,0 +1,120 @@
+# A test tree in a temporary folder, and what it holds as text. Every operation of the case is held
+# to that folder (RAE_FILES_ONLY_IN), and so is its trash (RAE_FILES_TRASH).
+import Files
+import Sys
+open text/NameOrder
+
+func makeLinkAt(target: Ptr, path: Ptr) unsafe extern ret Int
+
+func makeHardLink(path: Ptr, other: Ptr) unsafe extern ret Int
+
+func makePipeAt(path: Ptr) unsafe extern ret Int
+
+func makeLink(target: view String, path: view String) {
+  unsafe {
+    let made: Int = makeLinkAt(target: target.toCStr(), path: path.toCStr())
+  }
+}
+
+# The temporary folder of this run, which every operation is held to
+func createRoot() ret String {
+  var base: String = Sys.getEnv(name: "TMPDIR")
+  if base.length() is 0 {
+    base = "/tmp/"
+  }
+  let root: String = "{base}/rae-file-operations-{nowNs()}".replace(old: "//", new: "/")
+  let made: Bool = Sys.makeDir(path: root)
+  let held: Bool = Sys.setEnv(name: "RAE_FILES_ONLY_IN", value: root)
+  let trash: Bool = Sys.setEnv(name: "RAE_FILES_TRASH", value: "{root}/trash")
+  ret root
+}
+
+func file(path: view String, content: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: content)
+}
+
+func folder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func addTree(fold: view NameFold, text: mod String, path: view String) {
+  let listing: FolderListing = Files.listFolder(
+    fold: fold
+    folder: path
+    order: EntryOrder { foldersFirst: false }
+    filter: EntryFilter { showHidden: true, namePart: "", extensions: {} }
+  )
+  loop let entry: view FileEntry in listing.entries {
+    let at: String = "{path}/{entry.name}"
+    if entry.kind is EntryKind.folder {
+      text = "{text} {entry.name}/("
+      addTree(fold: fold, text: text, path: at)
+      text = "{text} )"
+    } else if entry.kind is EntryKind.symlink {
+      text = "{text} {entry.name}@"
+    } else if entry.size > 100 {
+      text = "{text} {entry.name}:{entry.size}B"
+    } else if let content: String = Sys.readFile(path: at) {
+      text = "{text} {entry.name}:{content}"
+    }
+  }
+}
+
+func treeText(path: view String) ret String {
+  let fold: NameFold = createNameFold()
+  var text: String = ""
+  addTree(fold: fold, text: text, path: path)
+  ret text.trim()
+}
+
+# Delete the run's folder, not following links
+func removeTree(path: view String) {
+  let opened: Bool = Sys.setFileMode(path: path, mode: 448)
+  let listing: FolderListing = Files.readFolder(folder: path)
+  loop let entry: view FileEntry in listing.entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(path: "{path}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{path}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: path)
+}
+
+# Step to the end; a conflict gets `answer`
+func runToEnd(
+  operation: mod FileOperation
+  answer: view ConflictAnswer
+  forAll: view Bool
+) ret Int {
+  var asked: Int = 0
+  loop operation.state is not OperationState.done {
+    if operation.state is OperationState.asking {
+      asked = asked + 1
+      Files.answerConflict(operation: operation, answer: answer, forAll: forAll)
+    } else {
+      Files.stepOperation(operation: operation)
+    }
+  }
+  ret asked
+}
+
+func outcomes(operation: view FileOperation) ret String {
+  var text: String = ""
+  loop let result: view ItemResult in operation.results {
+    text = "{text} {result.outcome}"
+    if result.error is not OperationError.none {
+      text = "{text}({result.error})"
+    }
+    if result.target.length() > 0 {
+      text = "{text}->{Files.nameOf(path: result.target)}"
+    }
+  }
+  ret text.trim()
+}
+
+# Run it and say how its items ended
+func finished(operation: mod FileOperation) ret String {
+  let asked: Int = runToEnd(operation: operation, answer: ConflictAnswer.skip, forAll: false)
+  ret outcomes(operation: operation)
+}

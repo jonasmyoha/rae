@@ -1,0 +1,183 @@
+# Files: the trash (docs/file-browser-design.md §11). On macOS the system's (NSFileManager). On
+# Linux
+# the freedesktop.org trash: a `files` folder, and an `info` file per item that says where it was
+# and
+# when it went; the home trash for items on the home's disk, else `.Trash-<user>` at the top of the
+# item's own disk, so trashing never copies. A program, or a test, can name a folder of its own in
+# the same form (OperationRules.trashFolder).
+import Sys
+import Time
+
+const hasSystemTrash: Bool = Target.os is Os.macos
+
+const hasFolderTrash: Bool = Target.os is Os.linux
+
+when hasSystemTrash {
+  func nativeSystemTrash(path: String) unsafe extern("rae_ext_Files_systemTrash") ret String
+}
+
+type TrashAnswer {
+  error: OperationError
+  # where the item is now
+  path: String
+}
+
+func hexDigit(value: view Int) ret String {
+  ret "0123456789ABCDEF".sub(start: value, len: 1)
+}
+
+# A path as an info file holds it: percent-encoded but for letters, digits and "/-_.~"
+func encodedPath(path: view String) ret String {
+  var text: String = ""
+  loop var i: Int = 0, i < path.length(), ++i {
+    let byte: Int = path.byteAt(index: i)
+    let letter: Bool = (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
+    let digit: Bool = byte >= 48 and byte <= 57
+    if letter or digit or byte is 47 or byte is 45 or byte is 95 or byte is 46 or byte is 126 {
+      text = "{text}{path.sub(start: i, len: 1)}"
+    } else {
+      text = "{text}%{hexDigit(value: byte / 16)}{hexDigit(value: byte % 16)}"
+    }
+  }
+  ret text
+}
+
+# The trash folder for an item on this system; "" when there is none for it
+func trashFolderFor(path: view String) ret String {
+  let device: Int = pathStatus(path: path, follow: false).device
+  var data: String = Sys.getEnv(name: "XDG_DATA_HOME")
+  let home: String = Sys.getEnv(name: "HOME")
+  if data.length() is 0 and home.length() > 0 {
+    data = "{home}/.local/share"
+  }
+  if data.length() > 0 and Sys.makeDir(path: data) and pathStatus(path: data, follow: true).device is device {
+    ret "{data}/Trash"
+  }
+  # the top of the item's disk
+  var top: String = folderOf(path: path)
+  loop top is not "/" and pathStatus(path: folderOf(path: top), follow: true).device is device {
+    top = folderOf(path: top)
+  }
+  unsafe {
+    ret joinPath(folder: top, name: ".Trash-{nativeUserId()}")
+  }
+}
+
+# Move `path` into a trash folder of the freedesktop form. The info file is made first, under a name
+# that must be free: that claims the name for the item.
+func trashIntoFolder(path: view String, trashFolder: view String) ret TrashAnswer {
+  let files: String = "{trashFolder}/files"
+  let info: String = "{trashFolder}/info"
+  if not Sys.makeDir(path: files) or not Sys.makeDir(path: info) {
+    ret TrashAnswer { error: OperationError.noTrash, path: "" }
+  }
+  let privately: Bool = Sys.setFileMode(path: trashFolder, mode: 448)
+  if pathStatus(path: files, follow: true).device is not pathStatus(path: path, follow: false).device {
+    ret TrashAnswer { error: OperationError.noTrash, path: "" }
+  }
+  let trashedAt: CivilTime = Time.localCivilFromEpochSeconds(epochSeconds: nowMs() / 1000)
+  let date: String = Time.civilText(civil: trashedAt, withTime: true).replace(old: " ", new: "T")
+  let content: String = "[Trash Info]\nPath={encodedPath(path: path)}\nDeletionDate={date}\n"
+  var name: String = nameOf(path: path)
+  let isFolderItem: Bool = pathStatus(path: path, follow: false).kind is EntryKind.folder
+  # another program may take a name between the look and the claim; then the next one is tried
+  loop var tries: Int = 0, tries < 100, ++tries {
+    let infoPath: String = "{info}/{name}.trashinfo"
+    let target: String = "{files}/{name}"
+    var claimed: Int = -1
+    unsafe {
+      claimed = nativeCreateNew(path: infoPath)
+    }
+    if claimed >= 0 {
+      unsafe {
+        let shut: Int = nativeCloseFile(fd: claimed)
+      }
+      if not Sys.writeFile(path: infoPath, content: content) {
+        var code: Int = 0
+        unsafe {
+          code = Sys.rae_sys_file_errno()
+        }
+        let error: OperationError = operationErrorOf(answer: -code)
+        removeQuietly(path: infoPath)
+        ret TrashAnswer { error: error, path: "" }
+      }
+      let answer: Int = renameToFree(path: path, newPath: target)
+      if answer is 0 {
+        ret TrashAnswer { error: OperationError.none, path: target }
+      }
+      removeQuietly(path: infoPath)
+      if operationErrorOf(answer: answer) is not OperationError.exists {
+        ret TrashAnswer { error: operationErrorOf(answer: answer), path: "" }
+      }
+    } else if operationErrorOf(answer: claimed) is not OperationError.exists {
+      ret TrashAnswer { error: operationErrorOf(answer: claimed), path: "" }
+    }
+    name = freeName(
+      folder: files
+      name: nameOf(path: path)
+      isFolder: isFolderItem
+      asCopy: false
+    )
+    if pathStatus(path: "{info}/{name}.trashinfo", follow: false).found {
+      name = "{nameOf(path: path)} {nowNs()}"
+    }
+  }
+  ret TrashAnswer { error: OperationError.exists, path: "" }
+}
+
+func removeQuietly(path: view String) {
+  unsafe {
+    let gone: Int = nativeRemoveFile(path: path)
+  }
+}
+
+# An item that left a trash folder of the freedesktop form takes its info file with it
+func forgetTrashInfo(trashedPath: view String) {
+  let files: String = folderOf(path: trashedPath)
+  if nameOf(path: files) is "files" {
+    let infoPath: String = "{folderOf(path: files)}/info/{nameOf(path: trashedPath)}.trashinfo"
+    if pathStatus(path: infoPath, follow: false).kind is EntryKind.file {
+      removeQuietly(path: infoPath)
+    }
+  }
+}
+
+# Whether items can be trashed here at all
+func canTrash(rules: view OperationRules) ret Bool {
+  if rules.trashFolder.length() > 0 {
+    ret true
+  }
+  # held to a folder (a test): never the user's own trash
+  if rules.onlyIn.length() > 0 {
+    ret false
+  }
+  ret hasSystemTrash or hasFolderTrash
+}
+
+func trashPath(path: view String, rules: view OperationRules) ret TrashAnswer {
+  if not pathStatus(path: path, follow: false).found {
+    ret TrashAnswer { error: OperationError.notFound, path: "" }
+  }
+  if not canTrash(rules: rules) {
+    ret TrashAnswer { error: OperationError.noTrash, path: "" }
+  }
+  if rules.trashFolder.length() > 0 {
+    ret trashIntoFolder(path: path, trashFolder: rules.trashFolder)
+  }
+  when hasSystemTrash {
+    unsafe {
+      let landed: String = nativeSystemTrash(path: path)
+      if landed.length() > 0 {
+        ret TrashAnswer { error: OperationError.none, path: landed }
+      }
+    }
+    # a disk without a trash, or one that may not be written
+    ret TrashAnswer { error: OperationError.noTrash, path: "" }
+  } else when hasFolderTrash {
+    let trashFolder: String = trashFolderFor(path: path)
+    if trashFolder.length() > 0 {
+      ret trashIntoFolder(path: path, trashFolder: trashFolder)
+    }
+  }
+  ret TrashAnswer { error: OperationError.noTrash, path: "" }
+}

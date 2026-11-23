@@ -1,7 +1,7 @@
 # The file browser: design
 
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
-collections/MergeSort). The steps are the `[file browser ...]` tasks in
+collections/MergeSort) and step 3 (§11: lib/Files' operations, without UI). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -404,13 +404,22 @@ None of these is about files; each is its own module with its own cases.
 All are requests handled by `OperationsSystem`; the disk work runs on its own thread (one per
 operation, at most two; others wait), with progress over a channel and a stop channel.
 
+Built (`lib/Files/Operations.rae`, `OperationSteps.rae`, `CopyTree.rae`, `Trash.rae`): an operation is a value that is
+stepped (`stepOperation`), each step a bounded piece of work: a chunk of a file, an entry. Between
+two steps its thread can send progress (`bytesDone`, `index`; `measureFiles` gives the whole), take a
+cancel (`cancelOperation`), or wait for an answer (`state` is `asking`, `conflict` says what is in
+the way, `answerConflict`). One that was begun is stepped to its end, which is also how a canceled
+one takes its temporary copies away. `undo` lists what was done; `undoFiles` makes the operation
+that undoes it, whose own `undo` is the redo. A step remembers the thing itself (disk and file
+number): a file that an editor replaced since is not undone (`changed`).
+
 | operation | rules |
 |---|---|
 | new folder | "untitled folder", then 2, 3 ...; opens the rename |
 | rename | checked first (empty, `/`, `.`, `..`, too long, control characters; `\ : * ? " < > \|` refused on Windows only); a case-only change is allowed |
 | duplicate | "name copy", "name copy 2" |
 | copy, move | several items; symlinks copied as symlinks; permissions and dates kept; into itself refused |
-| move across volumes | copy, compare size, then remove the source; a failed copy leaves the source |
+| move across volumes | copy, written through to the disk and compared, then exactly what was copied is removed, and only while it is unchanged; a late file stays and the item says `changed` |
 | trash | the OS's trash (macOS `trashItemAtURL`, freedesktop on Linux). Where there is none, `OperationAsked` says so, and only an explicit yes deletes |
 | undo, redo | from each operation's record: rename and move go back, copies and new folders go to the trash, trashed items return. Refused, with a reason, when something is now in the way |
 
@@ -424,8 +433,13 @@ Safety:
   `renameat2`).
 - A folder is walked without following symlinks, so a delete or a copy stays inside it.
 - `allowOperations: false` disables every one, keys and menu included.
-- Tests run only inside a temporary folder they made; the operations refuse to run in test mode
-  elsewhere.
+- Not moved, trashed or deleted: the root, a mounted disk, the user's home and the folders it is in.
+  A delete does not go into a disk mounted in what it deletes.
+- `RAE_FILES_ONLY_IN=<folder>` holds every operation of the process to a folder, by where paths
+  really lead, and then the user's own trash is never used (`RAE_FILES_TRASH=<folder>` names one).
+  The tests set both. An app's root limit is the same rule (`OperationRules.onlyIn`).
+- Not done: a folder is not merged into one of its name (replace trashes the old one), and on Linux
+  extended attributes are not copied.
 
 ## 12. Platforms
 

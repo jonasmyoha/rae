@@ -1,0 +1,235 @@
+# lib/Files' trash, delete, undo and redo (docs/file-browser-design.md §11) in a temporary folder
+# that they and the trash are held to: the freedesktop trash's form (an info file per item, taken
+# names, the place percent-encoded), no trash (nothing is deleted instead), delete never through a
+# link, and each operation undone and redone, with something in the way, with another thing in its
+# place, and after a replace; the system's root, disks and the home refused.
+import Files
+import Sys
+
+func sources(root: view String, names: view List(String)) ret List(String) {
+  var paths: List(String) = {}
+  loop let name: view String in names {
+    paths.add(value: "{root}/{name}")
+  }
+  ret paths
+}
+
+# The steps undone (redone, when they are an undo's): how it went, and its own steps
+func undone(
+  label: view String
+  steps: view List(UndoStep)
+  rules: view OperationRules
+) ret List(UndoStep) {
+  var operation: FileOperation = Files.undoFiles(steps: steps, rules: rules)
+  log("{label}: {finished(operation: operation)}")
+  ret operation.undo
+}
+
+func main() {
+  let root: String = createRoot()
+  let rules: OperationRules = Files.operationRules()
+  let at: String = "{root}/at"
+  folder(path: "{at}/box/inner")
+  folder(path: "{at}/to")
+  file(path: "{at}/box/inner/x", content: "X")
+  file(path: "{at}/a é%.txt", content: "A")
+  file(path: "{at}/b", content: "B")
+
+  log("--- trash")
+  var trashed: FileOperation = Files.trashFiles(
+    sources: sources(root: at, names: List(String) { "a é%.txt", "box", "missing" })
+    rules: rules
+  )
+  log("{finished(operation: trashed)}; left [{treeText(path: at)}]")
+  if let info: String = Sys.readFile(path: "{root}/trash/info/a é%.txt.trashinfo") {
+    let lines: List(String) = info.split(sep: "\n")
+    log(
+      "info: {lines.copyAtDefault(index: 0)}, {lines.copyAtDefault(index: 1).replace(
+        old: "{root}"
+        new: "ROOT"
+      ).endsWith(suffix: "/at/a%20%C3%A9%25.txt")}, date {lines.copyAtDefault(index: 2).length()} {lines.copyAtDefault(
+        index: 2
+      ).contains(sub: "T")}"
+    )
+  }
+  file(path: "{at}/box", content: "another box")
+  var second: FileOperation = Files.trashFiles(
+    sources: sources(root: at, names: List(String) { "box" })
+    rules: rules
+  )
+  log(
+    "a taken name in the trash: {finished(operation: second)}; files [{treeText(
+      path: "{root}/trash/files"
+    )}]"
+  )
+  let redoSecond: List(UndoStep) = undone(
+    label: "undo the second"
+    steps: second.undo
+    rules: rules
+  )
+  log("at [{treeText(path: at)}]")
+  let blocked: List(UndoStep) = undone(
+    label: "undo the first, box in the way"
+    steps: trashed.undo
+    rules: rules
+  )
+  log(
+    "at [{treeText(path: at)}], files [{treeText(path: "{root}/trash/files")}], {blocked.length} undone"
+  )
+  let secondAgain: List(UndoStep) = undone(
+    label: "redo the second"
+    steps: redoSecond
+    rules: rules
+  )
+  let rest: List(UndoStep) = undone(
+    label: "undo the first again"
+    steps: trashed.undo
+    rules: rules
+  )
+  log("at [{treeText(path: at)}]")
+  let restoredInfo: Int = Files.readFolder(folder: "{root}/trash/info").entries.length
+  log("info files left: {restoredInfo} (the second box's)")
+  var noTrash: OperationRules = rules
+  noTrash.trashFolder = ""
+  var refused: FileOperation = Files.trashFiles(
+    sources: sources(root: at, names: List(String) { "b" })
+    rules: noTrash
+  )
+  log(
+    "no trash here: can {Files.canTrash(rules: noTrash)}, {finished(operation: refused)}, b kept {Sys.exists(
+      path: "{at}/b"
+    )}"
+  )
+
+  log("--- undo and redo")
+  var made: FileOperation = Files.newFolder(folder: at, name: "new", rules: rules)
+  log(finished(operation: made))
+  let redoMade: List(UndoStep) = undone(label: "undo new folder", steps: made.undo, rules: rules)
+  log("gone {not Sys.exists(path: "{at}/new")}")
+  let undoMade: List(UndoStep) = undone(label: "redo it", steps: redoMade, rules: rules)
+  log("back {Sys.exists(path: "{at}/new")}")
+  var renamed: FileOperation = Files.renameFile(source: "{at}/b", name: "bee", rules: rules)
+  log(finished(operation: renamed))
+  let redoRename: List(UndoStep) = undone(label: "undo rename", steps: renamed.undo, rules: rules)
+  let undoRename: List(UndoStep) = undone(label: "redo it", steps: redoRename, rules: rules)
+  log("bee {Sys.exists(path: "{at}/bee")}, b {Sys.exists(path: "{at}/b")}")
+  file(path: "{at}/b", content: "in the way")
+  let wayBack: List(UndoStep) = undone(label: "undo with b taken", steps: undoRename, rules: rules)
+  log("nothing lost: {treeText(path: at).contains(sub: "b:in the way bee:B")}")
+  var copied: FileOperation = Files.copyFiles(
+    sources: sources(root: at, names: List(String) { "bee", "box" })
+    folder: "{at}/to"
+    rules: rules
+  )
+  log(finished(operation: copied))
+  # an editor saves by replacing the file: it is another thing now, and stays
+  file(path: "{at}/saved", content: "edited")
+  let saved: Bool = Sys.delete(path: "{at}/to/bee") and Sys.rename(
+    oldPath: "{at}/saved"
+    newPath: "{at}/to/bee"
+  )
+  let redoCopy: List(UndoStep) = undone(
+    label: "undo copy, one edited"
+    steps: copied.undo
+    rules: rules
+  )
+  log("to [{treeText(path: "{at}/to")}]")
+  let undoCopy: List(UndoStep) = undone(label: "redo it", steps: redoCopy, rules: rules)
+  log("to [{treeText(path: "{at}/to")}]")
+  # a move that replaced
+  var byCopy: OperationRules = rules
+  byCopy.moveByCopy = true
+  loop let how: view OperationRules in List(OperationRules) { rules, byCopy } {
+    file(path: "{at}/mover", content: "moved")
+    file(path: "{at}/to/mover", content: "old")
+    var replacing: FileOperation = Files.moveFiles(
+      sources: sources(root: at, names: List(String) { "mover" })
+      folder: "{at}/to"
+      rules: how
+    )
+    let asked: Int = runToEnd(operation: replacing, answer: ConflictAnswer.replace, forAll: false)
+    log(
+      "replace by a move (copied {how.moveByCopy}): {outcomes(operation: replacing)}, {replacing.undo.length} steps"
+    )
+    let redoReplace: List(UndoStep) = undone(label: "undo it", steps: replacing.undo, rules: how)
+    log(
+      "at {treeText(path: at).contains(sub: "mover:moved")}, to {treeText(path: "{at}/to").contains(
+        sub: "mover:old"
+      )}"
+    )
+    let undoReplace: List(UndoStep) = undone(label: "redo it", steps: redoReplace, rules: how)
+    log(
+      "to {treeText(path: "{at}/to").contains(sub: "mover:moved")}, at {Sys.exists(
+        path: "{at}/mover"
+      )}"
+    )
+    let gone: Bool = Sys.delete(path: "{at}/to/mover")
+  }
+  # a folder over one it is in
+  folder(path: "{at}/deep/deep")
+  file(path: "{at}/deep/deep/y", content: "Y")
+  var over: FileOperation = Files.moveFiles(
+    sources: sources(root: at, names: List(String) { "deep/deep" })
+    folder: at
+    rules: rules
+  )
+  let askedOver: Int = runToEnd(operation: over, answer: ConflictAnswer.replace, forAll: false)
+  log(
+    "over the folder it is in: {outcomes(operation: over)}, kept {Sys.exists(
+      path: "{at}/deep/deep/y"
+    )}"
+  )
+
+  log("--- delete")
+  folder(path: "{at}/kept")
+  file(path: "{at}/kept/z", content: "Z")
+  folder(path: "{at}/doomed/sub")
+  file(path: "{at}/doomed/sub/w", content: "W")
+  makeLink(target: "{at}/kept", path: "{at}/doomed/link")
+  var deleted: FileOperation = Files.deleteFiles(
+    sources: sources(root: at, names: List(String) { "doomed" })
+    rules: rules
+  )
+  log(
+    "{finished(operation: deleted)}, {deleted.undo.length} undo, gone {not Sys.exists(
+      path: "{at}/doomed"
+    )}, the link's folder kept {Sys.exists(path: "{at}/kept/z")}"
+  )
+  folder(path: "{at}/half/sub")
+  file(path: "{at}/half/sub/w", content: "W")
+  let shut: Bool = Sys.setFileMode(path: "{at}/half/sub", mode: 320)
+  var half: FileOperation = Files.deleteFiles(
+    sources: sources(root: at, names: List(String) { "half" })
+    rules: rules
+  )
+  log(
+    "not allowed inside: {finished(operation: half)} at {Files.nameOf(
+      path: half.results.copyAtDefault(index: 0).errorPath
+    )}"
+  )
+  var canceled: FileOperation = Files.deleteFiles(
+    sources: sources(root: at, names: List(String) { "kept", "to" })
+    rules: rules
+  )
+  Files.cancelOperation(operation: canceled)
+  log(
+    "canceled before it began: {finished(operation: canceled)}, kept {Sys.exists(
+      path: "{at}/kept/z"
+    )}"
+  )
+
+  log("--- refused")
+  let home: String = Sys.getEnv(name: "HOME")
+  log(
+    "protected: / {Files.isProtected(path: "/")}, the home {Files.isProtected(path: home)}, its folder {Files.isProtected(
+      path: Files.folderOf(path: home)
+    )}, a folder here {Files.isProtected(path: at)}"
+  )
+  var outside: FileOperation = Files.deleteFiles(
+    sources: List(String) { home, "/", "{root}/../x" }
+    rules: rules
+  )
+  log("held to the folder: {finished(operation: outside)}")
+  removeTree(path: root)
+  log("removed {not Sys.exists(path: root)}")
+}

@@ -95,6 +95,7 @@ static inline void rae_perf_lock(pthread_mutex_t* mutex, int64_t code);
 #include "runtime_strings_algorithms.c"
 #include "runtime_filesystem.c"
 #include "runtime_files.c"
+#include "runtime_file_operations.c"
 #include "runtime_file_notify.c"
 #include "runtime_net.c"
 #include "runtime_web_socket.c"

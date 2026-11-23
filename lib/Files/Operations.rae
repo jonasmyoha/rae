@@ -1,0 +1,388 @@
+# Files: new folder, rename, duplicate, copy, move, trash and delete (docs/file-browser-design.md
+# §11), without UI.
+#
+#     var operation: FileOperation = copyFiles(sources: paths, folder: folder, rules: rules)
+#     loop operation.state is not OperationState.done {
+#       if operation.state is OperationState.asking {
+#         # operation.conflict says what is in the way
+#         answerConflict(operation: operation, answer: ConflictAnswer.keepBoth, forAll: false)
+#       }
+#       stepOperation(operation: operation)
+#     }
+#
+# One step does a bounded piece of work (a chunk of a file, an entry), so the thread that steps it
+# can report progress, take a cancel (cancelOperation) and wait for an answer between two. An
+# operation that was begun is stepped to its end: that is also how a canceled one takes its
+# temporary copies away. Every item has a result, and what was done is `undo`, newest last
+# (undoFiles).
+#
+# Rules it never breaks: nothing is overwritten without an answer, and then the old thing is in the
+# trash first; nothing has a real name before it is complete; a symlink is the thing itself, never
+# what it points at; `rules.onlyIn` holds it to a folder; a disk, the root, the home and the
+# folders it is in are not moved, trashed or deleted.
+import Sys
+
+enum OperationKind {
+  newFolder
+  rename
+  copy
+  move
+  duplicate
+  trash
+  delete
+  undo
+}
+
+# One operation's rules. operationRules() is what programs use.
+type OperationRules {
+  # a trash folder of the program's own ("": the system's)
+  trashFolder: String
+  # no path outside this folder is touched ("": no limit)
+  onlyIn: String
+  # copy a move even on one disk, in chunks (tests)
+  moveByCopy: Bool = false
+}
+
+# The rules of this process. RAE_FILES_ONLY_IN=<folder> holds every operation to that folder, and
+# then the user's own trash is never used (RAE_FILES_TRASH=<folder> names one): the tests set them.
+func operationRules() ret OperationRules {
+  ret OperationRules {
+    trashFolder: Sys.getEnv(name: "RAE_FILES_TRASH")
+    onlyIn: Sys.getEnv(name: "RAE_FILES_ONLY_IN")
+  }
+}
+
+enum OperationState { running, asking, done }
+
+enum ConflictAnswer { skip, keepBoth, replace }
+
+# A name that is taken: the thing to put there, and what has it
+type Conflict {
+  source: String
+  target: String
+}
+
+enum ItemOutcome { done, skipped, canceled, failed }
+
+type ItemResult {
+  source: String
+  # where it is now; "" when nothing was done
+  target: String
+  outcome: ItemOutcome
+  error: OperationError = OperationError.none
+  # inside a tree, where the error was
+  errorPath: String
+}
+
+enum UndoKind { moved, created, trashed, restored }
+
+# One thing done. Undoing it: moved goes back, created and restored go to the trash, trashed
+# returns.
+type UndoStep {
+  kind: UndoKind
+  # where it was ("" for created)
+  from: String
+  # where it is
+  to: String
+  # the thing itself, so that another one at `to` is not taken for it
+  device: Int
+  inode: Int
+}
+
+enum ItemAction {
+  makeFolder
+  rename
+  copy
+  move
+  trash
+  delete
+  restore
+}
+
+# What an item does when its name is taken
+enum TakenRule { ask, keepBoth, refuse }
+
+type OperationItem {
+  action: ItemAction
+  source: String
+  folder: String
+  name: String
+  taken: TakenRule
+  # a kept-both name says "copy" instead of a number (duplicate, a paste beside the original)
+  asCopy: Bool = false
+  # answered: what has the name goes to the trash
+  replace: Bool = false
+  # the thing it must still be; 0 for any
+  device: Int = 0
+  inode: Int = 0
+}
+
+enum ItemPhase {
+  begin
+  copying
+  placing
+  removingSource
+  deleting
+  cleaning
+}
+
+type FileOperation {
+  kind: OperationKind
+  state: OperationState
+  rules: OperationRules
+  items: List(OperationItem)
+  # the item at hand
+  index: Int = 0
+  phase: ItemPhase = ItemPhase.begin
+  conflict: Conflict
+  results: List(ItemResult)
+  undo: List(UndoStep)
+  treeCopy: TreeCopy
+  # removing a tree: folders waiting for their children, and what is left to remove
+  removals: List(CopiedThing)
+  # how the item ends once its temporary copy is gone
+  endOutcome: ItemOutcome = ItemOutcome.done
+  endError: OperationError = OperationError.none
+  endErrorPath: String
+  canceled: Bool = false
+  answered: Bool = false
+  answerForAll: ConflictAnswer = ConflictAnswer.skip
+  # bytes of the items' files so far
+  bytesDone: Int = 0
+}
+
+func createOperation(kind: view OperationKind, rules: view OperationRules) ret FileOperation {
+  ret FileOperation {
+    kind: kind
+    state: OperationState.running
+    rules: rules
+    items: {}
+    conflict: { source: "", target: "" }
+    results: {}
+    undo: {}
+    treeCopy: createTreeCopy()
+    removals: {}
+    endErrorPath: ""
+  }
+}
+
+# ----- the operations -----------------------------------------------------
+func itemsInto(
+  operation: mod FileOperation
+  action: view ItemAction
+  sources: view List(String)
+  folder: view String
+  taken: view TakenRule
+  asCopy: view Bool
+) {
+  loop let source: view String in sources {
+    var into: String = "{folder}"
+    if into.length() is 0 {
+      into = folderOf(path: source)
+    }
+    operation.items.add(value: {
+      action: action
+      source: source
+      folder: into
+      name: nameOf(path: source)
+      taken: taken
+      asCopy: asCopy
+    })
+  }
+  if operation.items.length is 0 {
+    operation.state = OperationState.done
+  }
+}
+
+# A new folder in `folder`; a taken name gets a number
+func newFolder(
+  folder: view String
+  name: view String
+  rules: view OperationRules
+) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.newFolder, rules: rules)
+  operation.items.add(value: {
+    action: ItemAction.makeFolder
+    source: ""
+    folder: folder
+    name: name
+    taken: TakenRule.keepBoth
+  })
+  ret operation
+}
+
+# `source` under another name in its folder. A change of case only is a rename like any other.
+func renameFile(
+  source: view String
+  name: view String
+  rules: view OperationRules
+) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.rename, rules: rules)
+  operation.items.add(value: {
+    action: ItemAction.rename
+    source: source
+    folder: folderOf(path: source)
+    name: name
+    taken: TakenRule.ask
+  })
+  ret operation
+}
+
+func copyFiles(
+  sources: view List(String)
+  folder: view String
+  rules: view OperationRules
+) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.copy, rules: rules)
+  itemsInto(
+    operation: operation
+    action: ItemAction.copy
+    sources: sources
+    folder: folder
+    taken: TakenRule.ask
+    asCopy: false
+  )
+  ret operation
+}
+
+func moveFiles(
+  sources: view List(String)
+  folder: view String
+  rules: view OperationRules
+) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.move, rules: rules)
+  itemsInto(
+    operation: operation
+    action: ItemAction.move
+    sources: sources
+    folder: folder
+    taken: TakenRule.ask
+    asCopy: false
+  )
+  ret operation
+}
+
+func duplicateFiles(sources: view List(String), rules: view OperationRules) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.duplicate, rules: rules)
+  itemsInto(
+    operation: operation
+    action: ItemAction.copy
+    sources: sources
+    folder: ""
+    taken: TakenRule.keepBoth
+    asCopy: true
+  )
+  ret operation
+}
+
+# An item that cannot be trashed fails with noTrash; it is never deleted instead
+func trashFiles(sources: view List(String), rules: view OperationRules) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.trash, rules: rules)
+  itemsInto(
+    operation: operation
+    action: ItemAction.trash
+    sources: sources
+    folder: ""
+    taken: TakenRule.refuse
+    asCopy: false
+  )
+  ret operation
+}
+
+# For good: no trash and no undo. Only when a person asked for exactly this.
+func deleteFiles(sources: view List(String), rules: view OperationRules) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.delete, rules: rules)
+  itemsInto(
+    operation: operation
+    action: ItemAction.delete
+    sources: sources
+    folder: ""
+    taken: TakenRule.refuse
+    asCopy: false
+  )
+  ret operation
+}
+
+# Undo what an operation did (its `undo`), newest first. Its own `undo` is the redo. A step whose
+# thing is another one now fails with `changed`, one whose place is taken with `exists`, and the
+# others are still undone.
+func undoFiles(steps: view List(UndoStep), rules: view OperationRules) ret FileOperation {
+  var operation: FileOperation = createOperation(kind: OperationKind.undo, rules: rules)
+  loop var i: Int = steps.length - 1, i >= 0, --i {
+    if let step: view UndoStep = steps.viewAt(index: i) {
+      var item: OperationItem = {
+        action: ItemAction.trash
+        source: step.to
+        folder: folderOf(path: step.to)
+        name: nameOf(path: step.to)
+        taken: TakenRule.refuse
+        device: step.device
+        inode: step.inode
+      }
+      if step.kind is UndoKind.moved or step.kind is UndoKind.trashed {
+        item.action = ItemAction.move
+        if step.kind is UndoKind.trashed {
+          item.action = ItemAction.restore
+        }
+        item.folder = folderOf(path: step.from)
+        item.name = nameOf(path: step.from)
+      }
+      operation.items.add(value: own item)
+    }
+  }
+  if operation.items.length is 0 {
+    operation.state = OperationState.done
+  }
+  ret operation
+}
+
+# ----- between two steps ----------------------------------------------------
+
+# Stop: the item at hand takes its temporary copy away, and the rest are not begun. What was done
+# stays done. Step it on until it is done.
+func cancelOperation(operation: mod FileOperation) {
+  operation.canceled = true
+  if operation.state is OperationState.asking {
+    operation.state = OperationState.running
+  }
+}
+
+func answerConflict(operation: mod FileOperation, answer: view ConflictAnswer, forAll: view Bool) {
+  if operation.state is not OperationState.asking {
+    ret
+  }
+  operation.state = OperationState.running
+  if forAll {
+    operation.answered = true
+    operation.answerForAll = answer
+  }
+  applyAnswer(operation: operation, answer: answer)
+}
+
+func applyAnswer(operation: mod FileOperation, answer: view ConflictAnswer) {
+  let item: OperationItem = operation.items.copyAtDefault(index: operation.index)
+  if answer is ConflictAnswer.skip {
+    endItem(
+      operation: operation
+      outcome: ItemOutcome.skipped
+      error: OperationError.none
+      errorPath: ""
+    )
+    ret
+  }
+  if let current: mod OperationItem = operation.items.modAt(index: operation.index) {
+    if answer is ConflictAnswer.replace {
+      current.replace = true
+    } else {
+      current.name = freeName(
+        folder: item.folder
+        name: item.name
+        isFolder: item.action is ItemAction.makeFolder or pathStatus(
+          path: item.source
+          follow: false
+        ).kind is EntryKind.folder
+        asCopy: item.asCopy
+      )
+    }
+  }
+}

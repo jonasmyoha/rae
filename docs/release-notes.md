@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.45, 2026-11-24: operations on files
+
+- `lib/Files`: new folder, rename, duplicate, copy, move (also across disks), trash and delete, as an
+  operation that is stepped, with a result per item, conflicts asked (skip, keep both, replace),
+  cancel, undo and redo (docs/file-browser-design.md §11). Nothing is overwritten without an answer,
+  a replaced thing is in the trash first, nothing has its real name before it is whole, links are
+  never followed. The trash is macOS's, or the freedesktop one on Linux. Cases 1575 and 1576.
+
 ## 0.4.44, 2026-11-23: what a folder holds
 
 - `lib/Files` is a module folder (no import changes) and says what a folder holds: `FileEntry` (kind,

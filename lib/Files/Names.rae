@@ -1,0 +1,216 @@
+# Files: names and paths of the operations (docs/file-browser-design.md §11): which names are
+# allowed, a free name beside a taken one, and which paths an operation may touch.
+import Sys
+
+enum NameError {
+  none
+  empty
+  dots
+  separator
+  control
+  tooLong
+  reserved
+}
+
+# The longest name disks take, in bytes
+const longestName: Int = 255
+
+# Why `name` cannot be a file's name. What is refused on Windows only is refused there.
+func checkName(name: view String) ret NameError {
+  if name.length() is 0 {
+    ret NameError.empty
+  }
+  if name is "." or name is ".." {
+    ret NameError.dots
+  }
+  if name.length() > longestName {
+    ret NameError.tooLong
+  }
+  loop var i: Int = 0, i < name.length(), ++i {
+    let byte: Int = name.byteAt(index: i)
+    if byte is 47 {
+      ret NameError.separator
+    }
+    if byte < 32 or byte is 127 {
+      ret NameError.control
+    }
+    when Target.os is Os.windows {
+      if "\\:*?\"<>|".indexOf(sub: name.sub(start: i, len: 1)) is not none {
+        ret NameError.reserved
+      }
+    }
+  }
+  ret NameError.none
+}
+
+# The folder a path is in ("/" for a name in the root), and its last name
+func folderOf(path: view String) ret String {
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    if slash is 0 {
+      ret "/"
+    }
+    ret path.sub(start: 0, len: slash)
+  }
+  ret ""
+}
+
+func nameOf(path: view String) ret String {
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    ret path.sub(start: slash + 1, len: path.length() - slash - 1)
+  }
+  ret path
+}
+
+# A path the operations take: absolute, without ".", ".." or an empty part, and no trailing slash
+func isPlainPath(path: view String) ret Bool {
+  if path.startsWith(prefix: "/") is false {
+    ret false
+  }
+  let parts: List(String) = path.split(sep: "/")
+  loop var i: Int = 1, i < parts.length, ++i {
+    let part: String = parts.copyAtDefault(index: i)
+    if part.length() is 0 or part is "." or part is ".." {
+      ret false
+    }
+  }
+  ret true
+}
+
+# The place in `name` where a number or " copy" goes: before the extension of a file, at the end of
+# a folder's name
+func stemLength(name: view String, isFolder: view Bool) ret Int {
+  if not isFolder {
+    if let dot: Int = name.lastIndexOf(sub: ".") {
+      if dot > 0 {
+        ret dot
+      }
+    }
+  }
+  ret name.length()
+}
+
+# The stem cut so that the whole name fits, never inside a character
+func withStem(name: view String, stemBytes: view Int, added: view String) ret String {
+  let tail: String = name.sub(start: stemBytes, len: name.length() - stemBytes)
+  var keep: Int = stemBytes
+  if keep + added.length() + tail.length() > longestName {
+    keep = longestName - added.length() - tail.length()
+    loop keep > 0 and name.byteAt(index: keep) >= 128 and name.byteAt(index: keep) < 192 {
+      keep = keep - 1
+    }
+  }
+  if keep < 0 {
+    keep = 0
+  }
+  ret "{name.sub(start: 0, len: keep)}{added}{tail}"
+}
+
+# A name free in `folder`: "name 2.txt", "name 3.txt" ..., or with `asCopy` "name copy.txt", "name
+# copy 2.txt" ... It is only looked at: what takes it must fail when it is taken by then.
+func freeName(
+  folder: view String
+  name: view String
+  isFolder: view Bool
+  asCopy: view Bool
+) ret String {
+  let stem: Int = stemLength(name: name, isFolder: isFolder)
+  var number: Int = 2
+  if asCopy {
+    number = 1
+  }
+  loop {
+    var added: String = " {number}"
+    if asCopy {
+      added = " copy"
+      if number > 1 {
+        added = " copy {number}"
+      }
+    }
+    let candidate: String = withStem(name: name, stemBytes: stem, added: added)
+    if not pathStatus(path: joinPath(folder: folder, name: candidate), follow: false).found {
+      ret candidate
+    }
+    number = number + 1
+  }
+}
+
+func sameThing(a: view PathStatus, b: view PathStatus) ret Bool {
+  ret a.found and b.found and a.device is b.device and a.inode is b.inode
+}
+
+# Whether `name` in `folder` is the very entry `source`: the same name, or another spelling of it
+# that the disk takes for the same (its case). Two hard links to one file are two entries.
+func isSameEntry(source: view String, folder: view String, name: view String) ret Bool {
+  let target: PathStatus = pathStatus(path: joinPath(folder: folder, name: name), follow: false)
+  if not sameThing(a: target, b: pathStatus(path: source, follow: false)) {
+    ret false
+  }
+  let real: String = realPath(path: folder)
+  if real.length() is 0 or realPath(path: folderOf(path: source)) is not real {
+    ret false
+  }
+  let ownName: String = nameOf(path: source)
+  if ownName is name {
+    ret true
+  }
+  # both names in the folder: two links
+  var ownListed: Bool = false
+  var nameListed: Bool = false
+  let listing: FolderListing = readFolder(folder: folder)
+  loop let entry: view FileEntry in listing.entries {
+    if entry.name is ownName {
+      ownListed = true
+    }
+    if entry.name is name {
+      nameListed = true
+    }
+  }
+  ret not (ownListed and nameListed)
+}
+
+# Whether `folder` is the folder `ancestor`, or in it, whatever the paths say (a link, a name in
+# another case)
+func isInside(folder: view String, ancestor: view String) ret Bool {
+  let wanted: PathStatus = pathStatus(path: ancestor, follow: false)
+  var at: String = realPath(path: folder)
+  loop at.length() > 0 {
+    if sameThing(a: pathStatus(path: at, follow: false), b: wanted) {
+      ret true
+    }
+    if at is "/" {
+      ret false
+    }
+    at = folderOf(path: at)
+  }
+  ret false
+}
+
+func realPath(path: view String) ret String {
+  unsafe {
+    ret nativeRealPath(path: path)
+  }
+}
+
+# What no operation may move, trash or delete: the root, a mounted disk, the user's home, and any
+# folder the home is in
+func isProtected(path: view String) ret Bool {
+  let status: PathStatus = pathStatus(path: path, follow: false)
+  if status.kind is not EntryKind.folder {
+    ret path is "/"
+  }
+  if path is "/" or pathStatus(path: folderOf(path: path), follow: true).device is not status.device {
+    ret true
+  }
+  let home: String = Sys.getEnv(name: "HOME")
+  ret home.length() > 0 and isInside(folder: home, ancestor: path)
+}
+
+# Whether `path` (which need not exist) is in the folder `root`, by where its folder really is
+func isWithin(path: view String, root: view String) ret Bool {
+  let realRoot: String = realPath(path: root)
+  let folder: String = realPath(path: folderOf(path: path))
+  if realRoot.length() is 0 or folder.length() is 0 {
+    ret false
+  }
+  ret folder is realRoot or folder.startsWith(prefix: "{realRoot}/")
+}

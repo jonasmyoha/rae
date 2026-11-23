@@ -1,0 +1,49 @@
+--- trash
+done done failed(notFound); left [b:B to/( )]
+info: [Trash Info], true, date 32 true
+a taken name in the trash: done; files [a é%.txt:A box/( inner/( x:X ) ) box 2:another box]
+undo the second: done->box
+at [b:B box:another box to/( )]
+undo the first, box in the way: failed(exists) done->a é%.txt
+at [a é%.txt:A b:B box:another box to/( )], files [box/( inner/( x:X ) )], 1 undone
+redo the second: done
+undo the first again: done->box failed(notFound)
+at [a é%.txt:A b:B box/( inner/( x:X ) ) to/( )]
+info files left: 1 (the second box's)
+no trash here: can false, failed(noTrash), b kept true
+--- undo and redo
+done->new
+undo new folder: done
+gone true
+redo it: done->new
+back true
+done->bee
+undo rename: done->b
+redo it: done->bee
+bee true, b false
+undo with b taken: failed(exists)
+nothing lost: true
+done->bee done->box
+undo copy, one edited: done failed(changed)
+to [bee:edited]
+redo it: done->box
+to [bee:edited box/( inner/( x:X ) )]
+replace by a move (copied false): done->mover, 2 steps
+undo it: done->mover done->mover
+at true, to true
+redo it: done done->mover
+to true, at false
+replace by a move (copied true): done->mover, 2 steps
+undo it: done->mover done->mover
+at true, to true
+redo it: done done->mover
+to true, at false
+over the folder it is in: failed(intoItself), kept true
+--- delete
+done, 0 undo, gone true, the link's folder kept true
+not allowed inside: failed(noPermission) at w
+canceled before it began: canceled canceled, kept true
+--- refused
+protected: / true, the home true, its folder true, a folder here false
+held to the folder: failed(outside) failed(badName) failed(badName)
+removed true

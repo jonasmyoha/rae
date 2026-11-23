@@ -176,7 +176,9 @@ static void rae_file_errno_set(int code) { g_rae_file_errno = code; }
 int64_t rae_ext_rae_sys_file_errno(void) { return (int64_t)g_rae_file_errno; }
 
 /* The per-OS errno values lib/Sys.rae maps (FileError): 0 ENOSPC, 1 EDQUOT,
- * 2 ENOENT, 3 EACCES, 4 EPERM, 5 EROFS, 6 ENOTDIR; -1 for one this OS does
+ * 2 ENOENT, 3 EACCES, 4 EPERM, 5 EROFS, 6 ENOTDIR, and for lib/Files'
+ * operations 7 EXDEV, 8 EEXIST, 9 ENOTSUP, 10 ENAMETOOLONG, 11 ENOTEMPTY,
+ * 12 EINVAL, 13 ENOSYS, 14 EINTR, 15 EOPNOTSUPP; -1 for one this OS does
  * not have. Platform reason: per-OS constants. */
 int64_t rae_ext_rae_sys_errno_constant(int64_t which) {
     switch (which) {
@@ -191,6 +193,17 @@ int64_t rae_ext_rae_sys_errno_constant(int64_t which) {
     case 5: return EROFS;
 #endif
     case 6: return ENOTDIR;
+    case 7: return EXDEV;
+    case 8: return EEXIST;
+    case 9: return ENOTSUP;
+    case 10: return ENAMETOOLONG;
+    case 11: return ENOTEMPTY;
+    case 12: return EINVAL;
+    case 13: return ENOSYS;
+    case 14: return EINTR;
+#ifdef EOPNOTSUPP
+    case 15: return EOPNOTSUPP;
+#endif
     default: return -1;
     }
 }
