@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.37, 2026-11-23: a loop over a temporary's list reads all of it
+
+- `loop let point: view Point in outlineOf(count: 5).points` reads every element: the struct a
+  call in a loop's header returns now lives for the whole loop, as a `let` would keep it. It was
+  dropped at the end of the first iteration (and by a `continue`), and the loop read the first
+  element and then freed memory. It is dropped once after the loop, or by a `break` or `ret`.
+  Case 1566.
+
 ## 0.4.36, 2026-11-23: a hidden child no longer stretches a scroll
 
 - `ScrollRoot`'s content extent (`scrollContentExtent`) counts only the children the layout

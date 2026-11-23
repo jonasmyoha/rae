@@ -2109,6 +2109,15 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         // break/continue drop back to here (before the element binding), so a
         // non-local exit drops the current element too, matching the per-
         // iteration drop below.
+        // The header is evaluated once, so its temporaries (the struct a call returned, in
+        // `in outlineOf(count: 5).points`) live for the whole loop: the body gets an empty layer
+        // of its own above the loop statement's, where break / continue and the end of each
+        // iteration stop. A `ret` still walks the whole chain; the statement drops the header's
+        // temporaries once, after the loop.
+        CStmtTemps body_temps = {0};
+        body_temps.parent = ctx->stmt_temps;
+        CStmtTemps* header_temps = ctx->stmt_temps;
+        ctx->stmt_temps = &body_temps;
         if (ctx->loop_depth < 32) ctx->loop_body_local_start[ctx->loop_depth] = saved_locals;
         if (ctx->loop_depth < 32) ctx->loop_temps[ctx->loop_depth] = ctx->stmt_temps;
         ctx->loop_depth++;
@@ -2120,6 +2129,15 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         }
         ctx->loop_depth--;
         emit_stmt_temp_drops_keep(ctx, out);
+        ctx->stmt_temps = header_temps;
+        if (body_temps.drops) {
+            fclose(body_temps.drops);
+            free(body_temps.drops_buf);
+        }
+        if (body_temps.decls) {
+            fclose(body_temps.decls);
+            free(body_temps.decls_buf);
+        }
         emit_implicit_drops_for_body(ctx, out, saved_locals);
         ctx->local_count = saved_locals;
         fprintf(out, "    }\n");

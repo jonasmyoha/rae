@@ -1,0 +1,63 @@
+# A loop over a List field of a function's returned struct (`in outlineOf(count: 5).points`)
+# reads every element: the returned struct lives for the whole loop, as a `let` would keep it.
+# It was freed after the first iteration, and the loop read (1, 1) then zeros. The same with a
+# `continue`, a `break` and a `ret` inside the loop; the run is leak-checked at exit, so the
+# temporary is still dropped once on every way out.
+type Point {
+  x: Int
+  y: Int
+  name: String
+}
+
+type Outline {
+  points: List(Point)
+  title: String
+}
+
+func outlineOf(count: view Int) ret Outline {
+  var points: List(Point) = {}
+  loop var i: Int = 1, i <= count, ++i {
+    points.add(value: { x: i, y: 2 * i - 1, name: "p{i}" })
+  }
+  ret Outline { points: points, title: "outline of {count}" }
+}
+
+func firstAbove(limit: view Int) ret String {
+  loop let point: view Point in outlineOf(count: 5).points {
+    if point.y > limit {
+      ret point.name
+    }
+  }
+  ret "none"
+}
+
+func main() {
+  var temporary: String = ""
+  loop let point: view Point in outlineOf(count: 5).points {
+    temporary = "{temporary}({point.x}, {point.y}) "
+  }
+  log("temporary: {temporary.trim()}")
+  let outline: Outline = outlineOf(count: 5)
+  var bound: String = ""
+  loop let point: view Point in outline.points {
+    bound = "{bound}({point.x}, {point.y}) "
+  }
+  log("bound: {bound.trim()}")
+  var odd: String = ""
+  loop let point: view Point in outlineOf(count: 5).points {
+    if point.x % 2 is 0 {
+      continue
+    }
+    odd = "{odd}{point.name} "
+  }
+  log("with continue: {odd.trim()}")
+  var upTo: String = ""
+  loop let point: view Point in outlineOf(count: 5).points {
+    if point.x > 3 {
+      break
+    }
+    upTo = "{upTo}{point.name} "
+  }
+  log("with break: {upTo.trim()}")
+  log("with ret: the first above 4 is {firstAbove(limit: 4)}, above 20 {firstAbove(limit: 20)}")
+}
