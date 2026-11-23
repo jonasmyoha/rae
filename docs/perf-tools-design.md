@@ -583,9 +583,11 @@ p95 against the program's baseline on this machine (exit 1 beyond it). `perf/Per
 checks:
 - `perfRealtimeBudget()`: lib/Realtime's guard counted no allocation, lock or log on a real-time
   thread (`RAE_REALTIME_CHECK=1`);
-- `perfAudioBudget(renderNanoseconds:, periodNanoseconds:, share:, calibrationNs:)`: the blocks'
-  worst but one (the single slowest is set aside: an operating-system pause of a thread in a busy
-  test run is not the scene's) under `share` of the period times this machine's slowness, from
+- `perfAudioBudget(renderNanoseconds:, periodNanoseconds:, share:, calibrationNs:)`: the slowest
+  block once the slowest tenth (at least one) is set aside (the operating system pausing a thread
+  in a busy test run lands on a few blocks and is not the scene's; a slower scene slows most of its
+  blocks; the single slowest alone was set aside until 2026-11-23, and the full suite's parallel
+  load failed 1456 with it) under `share` of the period times this machine's slowness, from
   `perfCalibrationNs()` (a clock-seeded integer loop, best of five, against its 2.5 ms on the
   M-series Mac the shares were chosen on; a faster machine is never held tighter);
 - `perfFrameRegression(p95Ns:, history:)`: a regression only past the baseline's mean by three of

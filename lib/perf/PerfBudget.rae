@@ -77,7 +77,10 @@ func perfMicroseconds(nanoseconds: view Int) ret String {
 }
 
 # The blocks' render times (`renderNanoseconds`, audio/RenderTimes' takeRenderNanoseconds) against
-# `share` of the period, scaled by the machine (perfCalibrationNs, timed before the scene)
+# `share` of the period, scaled by the machine (perfCalibrationNs, timed before the scene). The
+# slowest tenth of the blocks (at least one) is set aside and the slowest of the rest is judged: a
+# test run's other jobs pause a thread now and then, and those pauses land on a few blocks, while
+# a scene that got slower makes most of its blocks slower.
 func perfAudioBudget(
   renderNanoseconds: view List(Int)
   periodNanoseconds: view Int
@@ -87,28 +90,21 @@ func perfAudioBudget(
   if renderNanoseconds.length is 0 {
     ret PerfBudget { ok: false, text: "no blocks were rendered" }
   }
-  var slowest: Int = 0
-  var next: Int = 0
-  loop let nanoseconds: Int in renderNanoseconds {
-    if nanoseconds > slowest {
-      next = slowest
-      slowest = nanoseconds
-    } else if nanoseconds > next {
-      next = nanoseconds
-    }
-  }
-  if renderNanoseconds.length is 1 {
-    next = slowest
-  }
+  var sorted: List(Int) = renderNanoseconds
+  sorted.sort()
+  let count: Int = sorted.length
+  let setAside: Int = Math.min(a: count - 1, b: Math.max(a: 1, b: count / 10))
+  let judged: Int = sorted.copyAtDefault(index: count - 1 - setAside)
+  let slowest: Int = sorted.copyAtDefault(index: count - 1)
   let scale: Float = perfMachineScale(calibrationNs: calibrationNs)
   let allowed: Int = (periodNanoseconds as Float * share * scale) as Int
   let tenths: Int = (scale * 10.0 + 0.5).toInt()
-  let numbers: String = "{renderNanoseconds.length} blocks, the worst but one {perfMicroseconds(
-    nanoseconds: next
+  let numbers: String = "{count} blocks, the slowest after the {setAside} slowest set aside {perfMicroseconds(
+    nanoseconds: judged
   )} (the worst {perfMicroseconds(nanoseconds: slowest)}), allowed {perfMicroseconds(
     nanoseconds: allowed
   )}: {(share * 100.0 + 0.5).toInt()} % of the {perfMicroseconds(nanoseconds: periodNanoseconds)} period x {tenths / 10}.{tenths % 10} for this machine"
-  ret PerfBudget { ok: next <= allowed, text: numbers }
+  ret PerfBudget { ok: judged <= allowed, text: numbers }
 }
 
 # ---- frame-time regressions ---------------------------------------------------------------------

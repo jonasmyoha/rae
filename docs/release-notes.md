@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.40, 2026-11-23: an audio render budget holds under a busy test run
+
+- `perfAudioBudget` (perf/PerfBudget) judges the slowest block once the slowest tenth of the
+  blocks (at least one) is set aside, where it set aside the single slowest. Under the full
+  suite's parallel load a few blocks are paused by the operating system, and 1456 failed its
+  budget in two runs in a row while its sound held. A scene that got slower still fails: most of
+  its blocks are slower (case 1480 checks both).
+
 ## 0.4.39, 2026-11-23: a turned or flipped clipping node paints its children
 
 - A node that clips its children (`Overflow` clip, a card) and is turned by its `TransformFx`

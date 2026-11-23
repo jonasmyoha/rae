@@ -1,12 +1,31 @@
 # perf/PerfBudget: the real-time rules over a run (the guard is on: config.env), an audio scene's
 # blocks against a share of the period scaled by the machine (calibrations given, so the numbers are
-# fixed; the slowest block set aside), a frame-time p95 against a learned baseline and its spread,
+# fixed; the slowest tenth of the blocks, at least one, set aside), a frame-time p95 against a
+# learned baseline and its spread,
 # and the baseline file kept outside the repository (RAE_PERF_BASELINES, a temporary folder here).
 import Sys
 open perf/PerfBudget
 
 func show(label: view String, budget: view PerfBudget) {
   log("{label}: ok {budget.ok}: {budget.text}")
+}
+
+# `count` blocks of `normal` ns, the last `slow` of them `slowNs`
+func blocksWith(
+  count: view Int
+  normal: view Int
+  slow: view Int
+  slowNs: view Int
+) ret List(Int) {
+  var blocks: List(Int) = {}
+  loop var i: Int = 0, i < count, ++i {
+    if i >= count - slow {
+      blocks.add(value: slowNs)
+    } else {
+      blocks.add(value: normal)
+    }
+  }
+  ret blocks
 }
 
 func main() {
@@ -55,6 +74,50 @@ func main() {
       periodNanoseconds: 5333333
       share: 0.33
       calibrationNs: 5000000
+    )
+  )
+  # 40 blocks of 1 ms: a few paused by the machine (4, a tenth) are set aside; more than a tenth
+  # (6) is the scene's; and every block slower is a slowdown, whatever is set aside
+  show(
+    label: "audio, 4 of 40 blocks paused"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocksWith(
+        count: 40
+        normal: 1000000
+        slow: 4
+        slowNs: 9000000
+      )
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 2500000
+    )
+  )
+  show(
+    label: "audio, 6 of 40 blocks slow"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocksWith(
+        count: 40
+        normal: 1000000
+        slow: 6
+        slowNs: 9000000
+      )
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 2500000
+    )
+  )
+  show(
+    label: "audio, every block slower"
+    budget: perfAudioBudget(
+      renderNanoseconds: blocksWith(
+        count: 40
+        normal: 3000000
+        slow: 0
+        slowNs: 0
+      )
+      periodNanoseconds: 5333333
+      share: 0.5
+      calibrationNs: 2500000
     )
   )
   show(
