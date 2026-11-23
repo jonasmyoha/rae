@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.35, 2026-11-23: a List of List can be set
+
+- `set`, `remove`/`removeAt`, `swapRemove` and the like on a `List(List(T))` (or a List of
+  `StringMap`/`IntMap`) compile: the element they replace or take out is dropped by its
+  container's own `drop`, where the C called a struct drop helper no List has and failed with
+  "call to undeclared function 'rae_drop_struct_rae_List_...'". Case 1564.
+
 ## 0.4.34, 2026-11-23: UiShell runs fitSystem
 
 - `app3d/UiShell`'s `runUiSystems` and `runScheduledUiSystems` run `fitSystem` between the layout

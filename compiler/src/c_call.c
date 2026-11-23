@@ -786,6 +786,26 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             fprintf(out, "(void)0");
             return true;
         }
+        // A container element (a List of List(Card), a List of StringMap(V)) is dropped by its
+        // container's own `drop` specialization, as a container field or a nested list's
+        // element is; there is no rae_drop_struct_ helper for it
+        if (!elem_is_string && !elem_is_opt && elem_tr->generic_args
+            && (str_eq_cstr(ebase, "List") || str_eq_cstr(ebase, "StringMap") || str_eq_cstr(ebase, "IntMap"))) {
+            const AstFuncDecl* container_drop = find_container_drop(ctx->compiler_ctx, ebase);
+            if (!container_drop) {
+                fprintf(out, "(void)0");
+                return true;
+            }
+            register_function_specialization(ctx->compiler_ctx, container_drop, elem_tr->generic_args);
+            const char* drop_fn = rae_mangle_specialized_function(ctx->compiler_ctx, container_drop, elem_tr->generic_args);
+            const char* container_mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
+            fprintf(out, "({ %s* __bd = (%s*)( (char*)(", container_mangled, container_mangled);
+            emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
+            fprintf(out, ") + (");
+            emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
+            fprintf(out, ") * sizeof(%s) ); %s(__bd); })", container_mangled, drop_fn);
+            return true;
+        }
         // A rae_drop_struct_<T> exists for a non-generic user struct (Pass
         // A) and for a concrete generic instance registered in
         // ctx->generic_types (Pass A', e.g. StringMapEntry(Int)). For

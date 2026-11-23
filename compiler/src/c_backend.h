@@ -9,5 +9,7 @@
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path);
 void register_generic_type(CompilerContext* ctx, const AstTypeRef* type);
 void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* concrete_args);
+/* The generic `drop` overload whose receiver is the container `base` (List, StringMap, IntMap) */
+const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base);
 
 #endif /* C_BACKEND_H */

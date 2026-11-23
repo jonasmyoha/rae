@@ -2371,7 +2371,7 @@ static bool is_container_base(Str base) {
 }
 
 // The generic `drop` overload whose receiver is the container `base`.
-static const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
+const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
     const AstDecl* d = ctx->all_decls[i];
     if (d->kind != AST_DECL_FUNC) continue;

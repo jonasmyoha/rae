@@ -1,0 +1,75 @@
+# A List of List of a struct with String fields, changed in place: set, swap, remove, insert,
+# swapRemove and a sort by swapping (selection sort on each group's first rank). The set and
+# the removes drop the List they replace or take out through List's own drop: the C used to call
+# a rae_drop_struct_ helper that no List has, and failed to compile. The run is leak-checked at
+# exit like every run case.
+type Card {
+  name: String
+  suit: String
+  rank: Int
+}
+
+func makeGroup(first: view Int, count: view Int, suit: view String) ret List(Card) {
+  var group: List(Card) = {}
+  loop var i: Int = 0, i < count, ++i {
+    group.add(value: { name: "{suit}{first + i}", suit: suit, rank: first + i })
+  }
+  ret group
+}
+
+func show(groups: view List(List(Card)), label: view String) {
+  var text: String = ""
+  loop let group: view List(Card) in groups {
+    var names: String = ""
+    loop let card: view Card in group {
+      names = "{names}{card.name} "
+    }
+    text = "{text}[{names.trim()}] "
+  }
+  log("{label}: {text.trim()}")
+}
+
+func firstRank(groups: view List(List(Card)), index: view Int) ret Int {
+  if let group: view List(Card) = groups.viewAt(index: index) {
+    if let card: view Card = group.viewAt(index: 0) {
+      ret card.rank
+    }
+  }
+  ret 0
+}
+
+func main() {
+  var groups: List(List(Card)) = {}
+  groups.add(value: makeGroup(first: 7, count: 2, suit: "h"))
+  groups.add(value: makeGroup(first: 3, count: 3, suit: "s"))
+  groups.add(value: makeGroup(first: 9, count: 1, suit: "d"))
+  groups.add(value: makeGroup(first: 1, count: 2, suit: "c"))
+  show(groups: groups, label: "built")
+  groups.set(index: 2, value: makeGroup(first: 5, count: 2, suit: "d"))
+  show(groups: groups, label: "set 2")
+  groups.swap(i: 0, j: 1)
+  show(groups: groups, label: "swap 0 1")
+  # a sort by swapping: the smallest first rank to the front, each place in turn
+  loop var place: Int = 0, place < groups.length, ++place {
+    var smallest: Int = place
+    loop var i: Int = place + 1, i < groups.length, ++i {
+      if firstRank(groups: groups, index: i) < firstRank(groups: groups, index: smallest) {
+        smallest = i
+      }
+    }
+    if smallest is not place {
+      groups.swap(i: place, j: smallest)
+    }
+  }
+  show(groups: groups, label: "sorted")
+  groups.removeAt(index: 1)
+  show(groups: groups, label: "removeAt 1")
+  groups.insert(index: 0, value: makeGroup(first: 11, count: 1, suit: "h"))
+  show(groups: groups, label: "insert 0")
+  groups.swapRemove(index: 0)
+  show(groups: groups, label: "swapRemove 0")
+  if let taken: List(Card) = groups.copyAt(index: 1) {
+    groups.set(index: 0, value: taken)
+  }
+  show(groups: groups, label: "set 0 to a copy of 1")
+}
