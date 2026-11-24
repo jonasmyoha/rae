@@ -1,0 +1,40 @@
+# A generic type whose argument is itself generic: its `List(T)` field is a `List(List(String))`
+open ecs/Event
+
+type Box(T: type) {
+  items: List(T)
+}
+
+type Nested(T: type) {
+  box: Box(T)
+}
+
+type Pair(First: type, Second: type) {
+  first: First
+  second: Second
+}
+
+func main() {
+  var queue: EventQueue(List(String)) = createEventQueue(List(String))
+  eventSend(this: queue, value: List(String) { "a", "b {1}" })
+  eventSend(this: queue, value: List(String) { "c {2}" })
+  log("{eventCount(this: queue)}")
+  frameAdvance(this: queue)
+  var box: Box(List(String)) = { items: {} }
+  box.items.add(List(String) { "in a box {3}", "two" })
+  let kept: Box(List(String)) = box
+  box.items.add(List(String) { "more {4}" })
+  log("{box.items.length} {kept.items.length}")
+  log("{box.items}")
+  log("{box.items is kept.items}")
+  log("{kept}")
+  var nested: Nested(List(Int)) = { box: { items: {} } }
+  nested.box.items.add(List(Int) { 1, 2 })
+  log("{nested.box.items}")
+  var boxes: Box(Box(String)) = { items: {} }
+  boxes.items.add(Box(String) { items: { "deep {5}" } })
+  log("{boxes}")
+  var pairs: Box(Pair(Int, List(String))) = { items: {} }
+  pairs.items.add(Pair(Int, List(String)) { first: 6, second: { "six {6}" } })
+  log("{pairs.items}")
+}

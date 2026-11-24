@@ -1,0 +1,151 @@
+# `own` of a local into an optional: a let, an assignment, a field, an argument, a result.
+# The optional takes the value as it is: nothing is copied, leaked or freed twice.
+type Note {
+  name: String
+  parts: List(String)
+}
+
+type Holder {
+  note: opt Note = none
+  text: opt String = none
+  names: opt List(String) = none
+}
+
+func make(n: view Int) ret Note {
+  ret Note { name: "a note {n}", parts: List(String) { "part {n}", "more" } }
+}
+
+func takeNote(note: opt own Note) ret Int {
+  if let held: view Note = note {
+    ret held.parts.length
+  }
+  ret -1
+}
+
+func answerNote(n: view Int) ret opt Note {
+  let note: Note = make(n: n)
+  ret own note
+}
+
+func answerText(n: view Int) ret opt String {
+  let text: String = "answered {n}"
+  ret own text
+}
+
+func showNote(label: view String, note: opt view Note) {
+  if let held: view Note = note {
+    log("{label}: {held.name}, {held.parts.join(sep: "+")}")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func showText(label: view String, text: opt view String) {
+  if let held: view String = text {
+    log("{label}: {held}")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func showNames(label: view String, names: opt view List(String)) {
+  if let held: view List(String) = names {
+    log("{label}: {held.join(sep: "+")}")
+  } else {
+    log("{label}: none")
+  }
+}
+
+func wrap(T: type, value: own T) ret opt T {
+  let kept: opt T = own value
+  ret own kept
+}
+
+func takeText(text: opt own String) ret Int {
+  if let held: view String = text {
+    ret held.length()
+  }
+  ret -1
+}
+
+func keep(text: own String, holder: mod Holder) {
+  holder.text = own text
+}
+
+func perhaps(text: own String, give: view Bool) ret opt String {
+  if give {
+    let kept: opt String = own text
+    ret own kept
+  }
+  ret none
+}
+
+func main() {
+  let note: Note = make(n: 1)
+  let maybe: opt Note = own note
+  showNote(label: "let note", note: maybe)
+  let text: String = "text {2}"
+  let maybeText: opt String = own text
+  showText(label: "let text", text: maybeText)
+  let names: List(String) = { "name {3}", "other {3}" }
+  let maybeNames: opt List(String) = own names
+  showNames(label: "let names", names: maybeNames)
+  let count: Int = 4
+  let maybeCount: opt Int = own count
+  if let held: view Int = maybeCount {
+    log("let count: {held}")
+  }
+  # an optional moved into an optional
+  let first: opt Note = make(n: 5)
+  let second: opt Note = own first
+  showNote(label: "let optional", note: second)
+  let empty: opt Note = none
+  let emptyToo: opt Note = own empty
+  showNote(label: "let empty", note: emptyToo)
+  # an assignment
+  var later: opt Note = make(n: 6)
+  let replacement: Note = make(n: 7)
+  later = own replacement
+  showNote(label: "assign note", note: later)
+  var laterText: opt String = "old {8}"
+  let replacementText: String = "new {8}"
+  laterText = own replacementText
+  showText(label: "assign text", text: laterText)
+  # the fields of a literal
+  let fieldNote: Note = make(n: 9)
+  let fieldText: String = "field {9}"
+  let fieldNames: List(String) = { "field {9}" }
+  var holder: Holder = { note: own fieldNote, text: own fieldText, names: own fieldNames }
+  showNote(label: "field note", note: holder.note)
+  showText(label: "field text", text: holder.text)
+  showNames(label: "field names", names: holder.names)
+  let fieldLater: Note = make(n: 10)
+  holder.note = own fieldLater
+  showNote(label: "assign field", note: holder.note)
+  # a result and an argument
+  showNote(label: "result note", note: answerNote(n: 11))
+  showText(label: "result text", text: answerText(n: 12))
+  let given: Note = make(n: 13)
+  log("argument: {takeNote(note: own given)}")
+  # inside a generic function
+  showNote(label: "generic note", note: wrap(Note, value: make(n: 14)))
+  showText(label: "generic text", text: wrap(String, value: "generic {15}"))
+  # an argument, a parameter given on, and a move on one path only
+  let givenText: String = "given {16}"
+  log("text argument: {takeText(text: own givenText)}")
+  let keptText: String = "kept {17}"
+  keep(text: own keptText, holder: holder)
+  showText(label: "kept text", text: holder.text)
+  showText(label: "given", text: perhaps(text: "perhaps {18}", give: true))
+  loop var i: Int = 0, i < 3, ++i {
+    let round: Note = make(n: i)
+    let roundText: String = "round {i}"
+    var roundNote: opt Note = none
+    if i is not 1 {
+      roundNote = own round
+      holder.text = own roundText
+    }
+    showNote(label: "round", note: roundNote)
+    showText(label: "round text", text: holder.text)
+  }
+}

@@ -2478,10 +2478,9 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
                             if (g_count > 0) {
                                 AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
                                 for (size_t i = 0; i < g_count; i++) {
-                                    AstTypeRef* ga = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                                    ga->resolved_type = g_args[i]; ga->next = NULL;
-                                    ga->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
-                                    ga->parts->text = g_args[i]->name;
+                                    // spelled in parts (`List(String)`), not by the
+                                    // TypeInfo name `List_String`
+                                    AstTypeRef* ga = sema_type_ref_of(ctx, g_args[i]);
                                     if (!head) head = ga; else tail->next = ga; tail = ga;
                                 }
                                 rec_tr.generic_args = head;
@@ -8487,10 +8486,11 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     // Rebuild AstTypeRef from concrete TypeInfo generic args
                     AstTypeRef* concrete_args = NULL; AstTypeRef* last_ca = NULL;
                     for (size_t i = 0; i < t->as.structure.generic_count; i++) {
-                        AstTypeRef* ca = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-                        ca->resolved_type = t->as.structure.generic_args[i]; ca->next = NULL;
-                        ca->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
-                        ca->parts->text = t->as.structure.generic_args[i]->name;
+                        /* in parts (`List(String)`): by its TypeInfo name
+                         * `List_String`, a `List(T)` field became a
+                         * `List(List_String)`, a type of its own whose text
+                         * and copies were emitted for elements that do not exist */
+                        AstTypeRef* ca = sema_type_ref_of(ctx, t->as.structure.generic_args[i]);
                         if (!concrete_args) concrete_args = ca; else last_ca->next = ca;
                         last_ca = ca;
                     }

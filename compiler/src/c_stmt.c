@@ -304,13 +304,22 @@ static bool c_expr_is_moved_owned_local(const CFuncContext* ctx, const AstExpr* 
 // `ret text` of an owned String local into an `opt String` return: the ret
 // marked text moved, so its drop is skipped and the payload must take its
 // heap. Copying it orphaned the local: one leaked String per such return.
+// `own text` is the same in every position (`let kept: opt String = own
+// text`, an assignment, a literal's field): the statement marks text moved,
+// before or after its value is emitted.
 static bool c_expr_is_moved_string_local(const CFuncContext* ctx, const AstExpr* expr) {
-  if (!ctx || !expr || expr->kind != AST_EXPR_IDENT) return false;
+  if (!ctx || !expr) return false;
+  bool given_away = expr->kind == AST_EXPR_OWN;
+  if (given_away) expr = expr->as.unary.operand;
+  if (!expr || expr->kind != AST_EXPR_IDENT) return false;
   for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
     if (!str_eq(ctx->locals[i], expr->as.ident)) continue;
     const AstTypeRef* type = ctx->local_type_refs[i];
+    if (ctx->generic_params && ctx->generic_args)
+      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                 ctx->generic_args, (AstTypeRef*)type);
     if (!c_type_is_plain_string(type) || ctx->local_is_ptr[i]) return false;
-    return ctx->local_moved[i];
+    return given_away || ctx->local_moved[i];
   }
   return false;
 }
@@ -3182,7 +3191,12 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // concrete T, wrap with rae_any() so RaeAny holds the boxed value.
                 bool needs_box = false;
                 if (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt) {
-                    const AstTypeRef* val_tr = infer_expr_type_ref(ctx, stmt->as.let_stmt.value);
+                    /* `own note` has the type of `note`: asked about the `own`
+                     * itself, the moved Note was never boxed, and C got a Note
+                     * where the binding is a rae_opt_Note */
+                    const AstExpr* boxed_value = stmt->as.let_stmt.value;
+                    if (boxed_value->kind == AST_EXPR_OWN) boxed_value = boxed_value->as.unary.operand;
+                    const AstTypeRef* val_tr = infer_expr_type_ref(ctx, boxed_value);
                     if (val_tr && !val_tr->is_opt) {
                         Str val_base = get_base_type_name(val_tr);
                         // Don't box if value is already RaeAny (e.g. another opt result)

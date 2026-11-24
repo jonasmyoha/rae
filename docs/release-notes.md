@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.60, 2026-11-24: an owned local moved into an optional, and lists in generic types
+
+- `let maybe: opt Note = own note` compiles: it emitted C that the C compiler refused. An `own` String local
+  moved into an `opt String` (a binding, an assignment, a field, a result) is moved; it was copied, and the
+  local was never freed.
+- A generic type's `List(T)` field with a generic `T` (`EventQueue(List(String))`, a `List(List(String))`
+  inside) compiles: its type was registered under the name `List_String`, and the text of that type was
+  emitted as Strings.
+- Cases 1603 and 1604, both also in the AddressSanitizer gate.
+
 ## 0.4.59, 2026-11-24: what is taken from a slot is a copy
 
 - A call that answers a slot someone else owns (`eventAt`, `queueAt`, a function over the raw slot read)
