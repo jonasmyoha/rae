@@ -1,0 +1,56 @@
+# Dividers and scrollbars (ui/DividerSystem, ui/ScrollBarSystem): their authored components and
+# events.
+open ecs/Entity
+open ui/Components
+
+# On a thin node between two panes, or after one: a line dragged along `axis` (x: an upright line
+# dragged sideways) that sets the size of its sibling before it, or with `after` the one after it.
+#
+#     "Split": { "Divider": { "axis": "x", "size": 220, "min": 120, "max": 600 } }
+#
+# `size` is the sibling's size as it was set last, what a program saves; 0: the sibling's own. It is
+# shown inside `min`..`max` (0 no maximum), and so that `rest` is left for the other siblings (0 no
+# limit), so a window made smaller and larger again brings it back. The arrow keys move it by `step`
+# while the node has the keys (TakesKeys). Its Shape has the theme slot `activeFill` ("" its own)
+# under the pointer and while it is dragged.
+type Divider {
+  axis: ScrollAxis = ScrollAxis.x
+  after: Bool = false
+  size: Float = 0.0
+  min: Float = 0.0
+  max: Float = 0.0
+  rest: Float = 0.0
+  step: Float = 16.0
+  activeFill: String = ""
+}
+
+enum DividerEventKind { moved, dropped, doubleClicked }
+
+# A divider was moved (by a drag or a key), let go, or double-clicked (a program then fits the
+# pane);
+# `size` is the pane's size shown now
+type DividerEvent {
+  kind: DividerEventKind
+  divider: EntityId
+  size: Float = 0.0
+}
+
+# When a scrollbar shows: while its root scrolls (and then while the pointer is on it), also while
+# the
+# pointer is over the root's window, or always
+enum ScrollBarShow { scrolling, hovered, always }
+
+# A scrollbar: the node's box is the track, the thumb is drawn in it. It is the bar of the first
+# ScrollRoot of `axis` among its siblings and what is below them.
+#
+#     "Bar": { "ScrollBar": { "axis": "y", "show": "scrolling" } }
+type ScrollBar {
+  axis: ScrollAxis = ScrollAxis.y
+  show: ScrollBarShow = ScrollBarShow.scrolling
+  # Theme slots; "" draws no track
+  thumb: String = "textMuted"
+  track: String = ""
+  # The shortest thumb, and the space around it in the box
+  minThumb: Float = 28.0
+  inset: Float = 2.0
+}

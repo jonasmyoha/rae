@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.53, 2026-11-24: dividers and scrollbars
+
+- `Divider` and `ui/DividerSystem`: a line dragged to size a pane, with limits, the resize cursor, the
+  keys, a double click, and its size a field to save (docs/ui-scene-format.md section 52).
+- `ScrollBar` and `ui/ScrollBarSystem`: a scrollbar for any `ScrollRoot`, both axes, shown while it
+  scrolls, over its list, or always (section 53). `setScrollPosition`. Cases 1588, 1589, check `uiPanes`.
+
 ## 0.4.52, 2026-11-24: a list's rows in view only, and several scroll roots
 
 - `ui/ListWindow`: a virtual `ListView` given only the rows in view, so 100,000 rows cost what 20 do

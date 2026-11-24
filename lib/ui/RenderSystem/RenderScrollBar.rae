@@ -1,0 +1,87 @@
+# RenderScrollBar — a scrollbar (ui/ScrollBarSystem): its track, when it has one, and its thumb as
+# the
+# system placed and faded it, a little brighter under the pointer.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open Gpu2dCanvas
+open ui/Components
+open ui/Ecs
+open ui/PaneComponents
+open ui/Theme
+open ui/Transform
+open ui/UiSystems
+
+# How much of the thumb's color shows at rest and under the pointer
+const scrollThumbRest: Float = 0.55
+
+const scrollThumbHovered: Float = 0.85
+
+func paintScrollBarG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  canvas: mod Gpu2dCanvas
+) {
+  if componentHas(this: uiSystems.scrollBars.states, entityId: entityId) is false {
+    ret
+  }
+  let state: view ScrollBarState = componentView(
+    this: uiSystems.scrollBars.states
+    entityId: entityId
+  )
+  if state.active is false or state.opacity <= 0.0 {
+    ret
+  }
+  let settings: view ScrollBar = componentView(this: world.scrollBars, entityId: entityId)
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  if settings.track.length() > 0 {
+    var track: RgbaColor = uiThemeColor(theme: world.theme, name: settings.track)
+    track.a = (track.a.toFloat() * state.opacity).toInt()
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: rect.x
+      y: rect.y
+      w: rect.w
+      h: rect.h
+      radius: 0.0
+      color: g2dColor(color: g2dChain(color: track, chain255: chain255))
+    )
+  }
+  let sideways: Bool = settings.axis is ScrollAxis.x
+  var inset: Float = settings.inset * wt.scale.y
+  if sideways {
+    inset = settings.inset * wt.scale.x
+  }
+  var x: Float = rect.x + inset
+  var y: Float = rect.y + inset + state.start
+  var w: Float = rect.w - inset * 2.0
+  var h: Float = state.length
+  var radius: Float = w / 2.0
+  if sideways {
+    x = rect.x + inset + state.start
+    y = rect.y + inset
+    w = state.length
+    h = rect.h - inset * 2.0
+    radius = h / 2.0
+  }
+  var strength: Float = scrollThumbRest
+  if state.hovered {
+    strength = scrollThumbHovered
+  }
+  var thumb: RgbaColor = uiThemeColor(theme: world.theme, name: settings.thumb)
+  thumb.a = (thumb.a.toFloat() * state.opacity * strength).toInt()
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    color: g2dColor(color: g2dChain(color: thumb, chain255: chain255))
+  )
+}

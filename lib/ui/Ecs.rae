@@ -32,6 +32,7 @@ open ui/BindingComponents
 open ui/InputComponents
 open ui/MenuComponents
 open ui/SelectionComponents
+open ui/PaneComponents
 open ui/ListWindowComponents
 open ui/AnimationComponents
 open ui/BackdropComponents
@@ -106,6 +107,8 @@ type UiWorld {
   onSecondaryClicks: ComponentTable(OnSecondaryClick)
   menuRows: ComponentTable(MenuRow)
   takesKeys: ComponentTable(TakesKeys)
+  dividers: ComponentTable(Divider)
+  scrollBars: ComponentTable(ScrollBar)
   # lists of rows to select (ui/ListSelectionSystem); the last two are runtime
   listSelections: ComponentTable(ListSelection)
   selectionStyles: ComponentTable(SelectionStyle)
@@ -323,6 +326,7 @@ type UiWorld {
   # resource: one node has the keys.
   keyFocus: KeyFocus
   listEvents: EventQueue(ListEvent)
+  dividerEvents: EventQueue(DividerEvent)
 
   # #996: what the loader does with a scene it cannot fully apply (ui/ScenePolicy)
   # and what it could not apply. Both RUNTIME resources: not per-entity, never
@@ -377,6 +381,8 @@ func createUiWorld() ret UiWorld {
     onSecondaryClicks: ComponentTable.create(OnSecondaryClick)
     menuRows: ComponentTable.create(MenuRow)
     takesKeys: ComponentTable.create(TakesKeys)
+    dividers: ComponentTable.create(Divider)
+    scrollBars: ComponentTable.create(ScrollBar)
     listSelections: ComponentTable.create(ListSelection)
     selectionStyles: ComponentTable.create(SelectionStyle)
     listRowNames: ComponentTable.create(ListRowNames)
@@ -501,6 +507,7 @@ func createUiWorld() ret UiWorld {
     menuEvents: createEventQueue(MenuEvent)
     keyFocus: KeyFocus {}
     listEvents: createEventQueue(ListEvent)
+    dividerEvents: createEventQueue(DividerEvent)
     scenePolicy: createScenePolicy()
     sceneDiagnostics: createSceneDiagnostics()
     pendingComponents: createPendingComponents()

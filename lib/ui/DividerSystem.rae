@@ -1,0 +1,543 @@
+# Dividers between panes (docs/ui-scene-format.md "Dividers"). Once a frame, after updateUiInput and
+# menuSystem, before keyFocusSystem and the layout:
+#
+#   let moved: Bool = dividerSystem(
+#     world: world  uiSystems: uiSystems  input: input  keys: dividerKeysFromDevice()
+#   )
+#   loop var i: Int = 0, i < eventCount(DividerEvent, this: world.dividerEvents), ++i { ... }
+#
+# A press within a few points of the line takes it (the press is nothing else's), a finger's within
+# more. The mouse cursor is the resize one over it. The pane's size is its Rect's, its Size fixed.
+import Gpu2d
+import Keys
+import Sdl3
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/LayoutSystem
+open ui/PaneComponents
+open ui/Transform
+open ui/UiSystems
+
+# How wide the part that takes a press is, in points
+const dividerGrabPoints: Float = 8.0
+
+const dividerTouchPoints: Float = 28.0
+
+# The mouse cursors (Gpu2d.setMouseCursor)
+const cursorArrow: Int = 0
+
+const cursorResizeX: Int = 3
+
+const cursorResizeY: Int = 4
+
+# The keys of a divider that has them
+type DividerKeys {
+  less: Bool = false
+  more: Bool = false
+  home: Bool = false
+  end: Bool = false
+}
+
+func dividerKeysFromDevice() ret DividerKeys {
+  ret DividerKeys {
+    less: Sdl3.isKeyTyped(key: Keys.keyLeft) or Sdl3.isKeyTyped(key: Keys.keyUp)
+    more: Sdl3.isKeyTyped(key: Keys.keyRight) or Sdl3.isKeyTyped(key: Keys.keyDown)
+    home: Sdl3.isKeyPressed(key: Keys.keyHome)
+    end: Sdl3.isKeyPressed(key: Keys.keyEnd)
+  }
+}
+
+# The sibling the divider sizes (noEntity when it has none)
+func dividerPane(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+) ret EntityId {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: divider) is false {
+    ret noEntity()
+  }
+  let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: divider).parent
+  let after: Bool = componentView(this: world.dividers, entityId: divider).after
+  if componentHas(this: world.childrens, entityId: parent) {
+    let children: view Children = componentView(this: world.childrens, entityId: parent)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      if children.ids.copyAtFallback(index: i, fallback: noEntity()) is divider {
+        var place: Int = i - 1
+        if after {
+          place = i + 1
+        }
+        ret children.ids.copyAtFallback(index: place, fallback: noEntity())
+      }
+    }
+  }
+  ret noEntity()
+}
+
+func lengthAlong(axis: view ScrollAxis, size: view Vec2) ret Float {
+  if axis is ScrollAxis.x {
+    ret size.x
+  }
+  ret size.y
+}
+
+# The room for the pane: its parent's inside, less the divider and the `rest` (-1: no limit)
+func dividerRoom(world: view UiWorld, uiSystems: view UiSystems, divider: view EntityId) ret Float {
+  let settings: view Divider = componentView(this: world.dividers, entityId: divider)
+  if settings.rest <= 0.0 or componentHas(this: uiSystems.hierarchy.parents, entityId: divider) is false {
+    ret -1.0
+  }
+  let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: divider).parent
+  if componentHas(this: uiSystems.layout.computedRects, entityId: parent) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: divider
+  ) is false {
+    ret -1.0
+  }
+  let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: parent)
+  var inside: Float = lengthAlong(
+    axis: settings.axis
+    size: componentView(this: uiSystems.layout.computedRects, entityId: parent).size
+  )
+  if settings.axis is ScrollAxis.x {
+    inside = inside - padding.l - padding.r
+  } else {
+    inside = inside - padding.t - padding.b
+  }
+  let line: Float = lengthAlong(
+    axis: settings.axis
+    size: componentView(this: uiSystems.layout.computedRects, entityId: divider).size
+  )
+  let room: Float = inside - line - settings.rest
+  if room < 0.0 {
+    ret 0.0
+  }
+  ret room
+}
+
+# `size` inside the divider's limits (the minimum wins over the room)
+func dividerClamp(settings: view Divider, size: view Float, room: view Float) ret Float {
+  var shown: Float = size
+  if settings.max > 0.0 and shown > settings.max {
+    shown = settings.max
+  }
+  if room >= 0.0 and shown > room {
+    shown = room
+  }
+  if shown < settings.min {
+    shown = settings.min
+  }
+  if shown < 0.0 {
+    shown = 0.0
+  }
+  ret shown
+}
+
+# The pane's size now (its Rect's)
+func dividerPaneSize(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+) ret Float {
+  let pane: EntityId = dividerPane(world: world, uiSystems: uiSystems, divider: divider)
+  if componentHas(this: world.rects, entityId: pane) is false {
+    ret 0.0
+  }
+  ret lengthAlong(
+    axis: componentView(this: world.dividers, entityId: divider).axis
+    size: componentView(this: world.rects, entityId: pane).size
+  )
+}
+
+# Set what a divider's pane is to be (a restored size, a double click's fit), inside its limits
+func setDividerSize(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+  size: view Float
+) {
+  let room: Float = dividerRoom(world: world, uiSystems: uiSystems, divider: divider)
+  let settings: mod Divider = componentMod(this: world.dividers, entityId: divider)
+  settings.size = dividerClamp(settings: settings, size: size, room: room)
+}
+
+# The pane's Rect as the divider says; true when it changed
+func applyDivider(world: mod UiWorld, uiSystems: view UiSystems, divider: view EntityId) ret Bool {
+  let settings: Divider = dividerOf(world: world, divider: divider)
+  if settings.size <= 0.0 {
+    ret false
+  }
+  let pane: EntityId = dividerPane(world: world, uiSystems: uiSystems, divider: divider)
+  if componentHas(this: world.rects, entityId: pane) is false {
+    ret false
+  }
+  let wanted: Float = dividerClamp(
+    settings: settings
+    size: settings.size
+    room: dividerRoom(world: world, uiSystems: uiSystems, divider: divider)
+  )
+  let sideways: Bool = settings.axis is ScrollAxis.x
+  var changed: Bool = false
+  if lengthAlong(axis: settings.axis, size: componentView(this: world.rects, entityId: pane).size) is not wanted {
+    let rect: mod Rect = componentMod(this: world.rects, entityId: pane)
+    if sideways {
+      rect.size.x = wanted
+    } else {
+      rect.size.y = wanted
+    }
+    changed = true
+  }
+  var size: Size = entitySize(world: world, entityId: pane)
+  if sideways and size.w.mode is not SizeMode.fixed {
+    size.w.mode = SizeMode.fixed
+    componentSet(this: world.sizes, entityId: pane, data: size)
+    changed = true
+  } else if sideways is false and size.h.mode is not SizeMode.fixed {
+    size.h.mode = SizeMode.fixed
+    componentSet(this: world.sizes, entityId: pane, data: size)
+    changed = true
+  }
+  ret changed
+}
+
+func dividerOf(world: view UiWorld, divider: view EntityId) ret Divider {
+  if let settings: Divider = componentCopy(this: world.dividers, entityId: divider) {
+    ret settings
+  }
+  ret Divider {}
+}
+
+# The divider a press at the pointer takes: the nearest line within reach
+func dividerAt(world: view UiWorld, uiSystems: view UiSystems, input: view UiInput) ret EntityId {
+  var points: Float = dividerGrabPoints
+  if input.pointer.kind is InputKind.touch {
+    points = dividerTouchPoints
+  }
+  let reach: Float = uiUnitsFromPoints(input: input, points: points)
+  var nearest: EntityId = noEntity()
+  var distance: Float = 0.0
+  loop var i: Int = 0, i < componentCount(this: world.dividers), ++i {
+    let divider: EntityId = componentEntityAt(this: world.dividers, i: i)
+    if uiPointInEntityTarget(
+      world: world
+      uiSystems: uiSystems
+      entityId: divider
+      x: input.pointer.x
+      y: input.pointer.y
+      targetSize: reach
+    ) and uiMayTakePress(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      entityId: divider
+    ) {
+      let away: Float = dividerDistance(
+        world: world
+        uiSystems: uiSystems
+        divider: divider
+        input: input
+      )
+      if isNone(this: nearest) or away < distance {
+        nearest = divider
+        distance = away
+      }
+    }
+  }
+  ret nearest
+}
+
+# How far the pointer is from the middle of the line
+func dividerDistance(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+  input: view UiInput
+) ret Float {
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: divider
+  )
+  let cr: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: divider)
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  var away: Float = input.pointer.y - rect.y - rect.h / 2.0
+  if componentView(this: world.dividers, entityId: divider).axis is ScrollAxis.x {
+    away = input.pointer.x - rect.x - rect.w / 2.0
+  }
+  if away < 0.0 {
+    ret -away
+  }
+  ret away
+}
+
+func pointerAlong(axis: view ScrollAxis, input: view UiInput) ret Float {
+  if axis is ScrollAxis.x {
+    ret input.pointer.x
+  }
+  ret input.pointer.y
+}
+
+func sendDividerEvent(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  kind: copy DividerEventKind
+  divider: view EntityId
+) {
+  let event: DividerEvent = {
+    kind: kind
+    divider: divider
+    size: dividerPaneSize(world: world, uiSystems: uiSystems, divider: divider)
+  }
+  eventSend(this: world.dividerEvents, value: own event)
+}
+
+# Move the divider so that its pane is `size`; true when that changed it
+func moveDivider(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+  size: view Float
+) ret Bool {
+  setDividerSize(
+    world: world
+    uiSystems: uiSystems
+    divider: divider
+    size: size
+  )
+  let changed: Bool = applyDivider(world: world, uiSystems: uiSystems, divider: divider)
+  if changed {
+    sendDividerEvent(
+      world: world
+      uiSystems: uiSystems
+      kind: DividerEventKind.moved
+      divider: divider
+    )
+  }
+  ret changed
+}
+
+# One frame of every divider; true when something changed on screen
+func dividerSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  keys: view DividerKeys
+) ret Bool {
+  frameAdvance(this: world.dividerEvents)
+  var changed: Bool = false
+  # sizes that were set, and rooms that changed
+  loop var i: Int = 0, i < componentCount(this: world.dividers), ++i {
+    let divider: EntityId = componentEntityAt(this: world.dividers, i: i)
+    changed = applyDivider(world: world, uiSystems: uiSystems, divider: divider) or changed
+  }
+  if isAlive(world: world, entityId: uiSystems.dividers.dragged) is false {
+    uiSystems.dividers.dragged = noEntity()
+  }
+  var over: EntityId = uiSystems.dividers.dragged
+  if isNone(this: over) and componentCount(this: world.dividers) > 0 and (input.pointer.down is false or input.pointer.pressed) {
+    over = dividerAt(world: world, uiSystems: uiSystems, input: input)
+  }
+  if isNone(this: over) is false and input.pointer.pressed and isNone(
+    this: uiSystems.dividers.dragged
+  ) {
+    pressDivider(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      divider: over
+    )
+    changed = true
+  }
+  if isNone(this: uiSystems.dividers.dragged) is false {
+    changed = dragDivider(world: world, uiSystems: uiSystems, input: input) or changed
+  }
+  changed = showDividerOver(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    over: over
+  ) or changed
+  let holder: EntityId = keyHolder(world: world, uiSystems: uiSystems)
+  if componentHas(this: world.dividers, entityId: holder) {
+    changed = keyDivider(
+      world: world
+      uiSystems: uiSystems
+      divider: holder
+      keys: keys
+    ) or changed
+  }
+  ret changed
+}
+
+func pressDivider(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  divider: view EntityId
+) {
+  # the second press of a double click on the same line
+  let second: Bool = input.pointer.clicks is 2 and uiSystems.dividers.lastPressed is divider
+  uiSystems.dividers.lastPressed = divider
+  uiSystems.dividers.dragged = divider
+  let axis: ScrollAxis = componentView(this: world.dividers, entityId: divider).axis
+  uiSystems.dividers.pressAt = pointerAlong(axis: axis, input: input)
+  uiSystems.dividers.pressSize = dividerPaneSize(
+    world: world
+    uiSystems: uiSystems
+    divider: divider
+  )
+  uiSystems.dividers.moved = false
+  if componentHas(this: world.takesKeys, entityId: divider) {
+    setKeyFocus(world: world, entityId: divider)
+  }
+  takeUiPress(input: input)
+  if second {
+    sendDividerEvent(
+      world: world
+      uiSystems: uiSystems
+      kind: DividerEventKind.doubleClicked
+      divider: divider
+    )
+  }
+}
+
+# The divider held follows the pointer; let go, it says so when it was moved
+func dragDivider(world: mod UiWorld, uiSystems: mod UiSystems, input: view UiInput) ret Bool {
+  let divider: EntityId = uiSystems.dividers.dragged
+  let settings: Divider = dividerOf(world: world, divider: divider)
+  var changed: Bool = false
+  var scale: Float = 1.0
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: divider) {
+    let wt: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: divider
+    )
+    scale = lengthAlong(axis: settings.axis, size: wt.scale)
+  }
+  var delta: Float = pointerAlong(axis: settings.axis, input: input) - uiSystems.dividers.pressAt
+  if scale > 0.0 {
+    delta = delta / scale
+  }
+  if settings.after {
+    delta = -delta
+  }
+  if delta is not 0.0 or uiSystems.dividers.moved {
+    changed = moveDivider(
+      world: world
+      uiSystems: uiSystems
+      divider: divider
+      size: uiSystems.dividers.pressSize + delta
+    )
+    uiSystems.dividers.moved = uiSystems.dividers.moved or changed
+  }
+  if input.pointer.down is false {
+    uiSystems.dividers.dragged = noEntity()
+    if uiSystems.dividers.moved {
+      sendDividerEvent(
+        world: world
+        uiSystems: uiSystems
+        kind: DividerEventKind.dropped
+        divider: divider
+      )
+    }
+    ret true
+  }
+  ret changed
+}
+
+# The look and the cursor of the divider under the pointer, and the last one's own back
+func showDividerOver(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  over: view EntityId
+) ret Bool {
+  var shown: EntityId = over
+  # a finger hovers nothing
+  if input.pointer.kind is InputKind.touch and isNone(this: uiSystems.dividers.dragged) {
+    shown = noEntity()
+  }
+  let before: EntityId = uiSystems.dividers.shown
+  if shown is before {
+    ret false
+  }
+  if componentHas(this: world.shapes, entityId: before) and componentHas(
+    this: world.dividers
+    entityId: before
+  ) and componentView(this: world.dividers, entityId: before).activeFill.length() > 0 {
+    let fill: String = "{uiSystems.dividers.shownFill}"
+    componentMod(this: world.shapes, entityId: before).fillSlot = fill
+  }
+  uiSystems.dividers.shown = shown
+  var cursor: Int = cursorArrow
+  if isNone(this: shown) is false {
+    let settings: Divider = dividerOf(world: world, divider: shown)
+    cursor = cursorResizeY
+    if settings.axis is ScrollAxis.x {
+      cursor = cursorResizeX
+    }
+    if settings.activeFill.length() > 0 and componentHas(this: world.shapes, entityId: shown) {
+      uiSystems.dividers.shownFill = "{componentView(this: world.shapes, entityId: shown).fillSlot}"
+      componentMod(this: world.shapes, entityId: shown).fillSlot = "{settings.activeFill}"
+    }
+  }
+  if cursor is not uiSystems.dividers.cursor {
+    uiSystems.dividers.cursor = cursor
+    Gpu2d.setMouseCursor(kind: cursor)
+  }
+  ret true
+}
+
+# The arrow keys move the line by its step, Home and End to its limits
+func keyDivider(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  divider: view EntityId
+  keys: view DividerKeys
+) ret Bool {
+  let settings: Divider = dividerOf(world: world, divider: divider)
+  var size: Float = dividerPaneSize(world: world, uiSystems: uiSystems, divider: divider)
+  var delta: Float = 0.0
+  if keys.less {
+    delta = -settings.step
+  }
+  if keys.more {
+    delta = settings.step
+  }
+  if settings.after {
+    delta = -delta
+  }
+  var toLeast: Bool = keys.home
+  var toMost: Bool = keys.end
+  if settings.after {
+    toLeast = keys.end
+    toMost = keys.home
+  }
+  if toLeast {
+    size = settings.min
+  } else if toMost {
+    let room: Float = dividerRoom(world: world, uiSystems: uiSystems, divider: divider)
+    if settings.max > 0.0 {
+      size = settings.max
+    } else if room >= 0.0 {
+      size = room
+    }
+  } else if delta is not 0.0 {
+    size = size + delta
+  } else {
+    ret false
+  }
+  if size <= 0.0 {
+    size = 1.0
+  }
+  ret moveDivider(
+    world: world
+    uiSystems: uiSystems
+    divider: divider
+    size: size
+  )
+}

@@ -1757,3 +1757,63 @@ Case 1586: 100,000 rows with 21 live, scrolled, jumped in and resized.
 - `ScrollMemory` keeps a page's first root (`findScrollRoot`'s); its other roots start at their start.
 
 Case 1585: two lists inside a sideways strip, by wheel, trackpad, mouse drag and finger.
+
+## 52. Dividers
+
+A thin node between two panes, or after one, that is dragged to size a pane (`ui/DividerSystem`):
+
+```jsonc
+"Page":  { "Layout": {"type": "Horizontal", "gap": 0}, "Children": ["Side", "Split", "Main"] },
+"Split": { "Rect": {"x": 0, "y": 0, "w": 2, "h": 600}, "Shape": {"kind": "Rect", "fill": "outline"},
+           "Divider": {"axis": "x", "size": 220, "min": 120, "max": 600, "activeFill": "accent"} }
+```
+
+| field | default | |
+|---|---|---|
+| `axis` | `"x"` | `x`: an upright line dragged sideways; `y`: a level one dragged up and down |
+| `after` | `false` | it sizes the sibling after it, not the one before |
+| `size` | `0` | the sibling's size as it was set last: what a program saves; `0` its own |
+| `min`, `max` | `0` | its limits; `max` 0 is none |
+| `rest` | `0` | the room kept for the other siblings; `0` none. A window made smaller shows less, `size` stays, and a larger one brings it back |
+| `step` | `16` | what an arrow key moves it |
+| `activeFill` | `""` | its Shape's fill slot under the pointer and while dragged |
+
+- A press within 4 points of the line takes it (a finger's within 14), whatever is under it; the press
+  is nothing else's. The mouse has the resize cursor over it. A cut-off line, or one under a dialog or a
+  menu, takes nothing.
+- With `TakesKeys` (section 48) a press gives it the keys: the arrows move it by `step`, Home and End to
+  its limits.
+- `dividerSystem(world:, uiSystems:, input:, keys: dividerKeysFromDevice())` runs after `updateUiInput`
+  and `menuSystem`, before `keyFocusSystem` and the layout. `world.dividerEvents` has `moved`, `dropped`
+  (a program saves then) and `doubleClicked` (it fits the pane: `setDividerSize`).
+
+Case 1589.
+
+## 53. Scrollbars
+
+A node whose box is the track (`ui/ScrollBarSystem`). It is the bar of the first `ScrollRoot` of its
+axis among its siblings and below them, so it names none:
+
+```jsonc
+"Column":  { "Layout": {"type": "Stack"}, "Overflow": {"mode": "Clip"}, "Children": ["Files", "FilesBar"] },
+"FilesBar": { "Rect": {"x": 0, "y": 0, "w": 12, "h": 100}, "Size": {"w": {"mode": "Fixed"}, "h": {"mode": "Fill"}},
+              "Align": {"x": "End"}, "ScrollBar": {"show": "scrolling"} }
+```
+
+| field | default | |
+|---|---|---|
+| `axis` | `"y"` | the axis of its root |
+| `show` | `"scrolling"` | `scrolling`: while the root scrolls, and then while the pointer is on the bar; `hovered`: also while the pointer is over the root; `always` |
+| `thumb`, `track` | `"textMuted"`, `""` | their slots; `""` draws no track |
+| `minThumb`, `inset` | `28`, `2` | the shortest thumb, and the space around it in the box |
+
+- The thumb is as long against the track as the window against the content (a windowed list's by its
+  count). Nothing shows when all fits.
+- A mouse drags the thumb. A press beside it pages, and held goes on until the thumb is there, in a bar
+  that shows `always`. A bar that comes and goes takes a press on its thumb only, and one that is not
+  shown takes none, so a row under it keeps its press. A finger scrolls the content, never the bar.
+- `scrollBarSystem(world:, uiSystems:, input:)` runs after `updateUiInput` and `menuSystem`, before
+  `updateScrollRoots`; `scrollBarPlaceSystem` after the transforms (`app3d/UiShell`'s pipelines call it).
+  An event loop renders while `scrollBarsSettling`.
+
+Case 1588, and check `uiPanes` for both.

@@ -1,0 +1,650 @@
+# Dividers (ui/DividerSystem): drags along both axes with limits, a pane after the line, the press
+# taken
+# from what is under it, the mouse cursor and the line's own color, a double click, the keys, a
+# finger,
+# a window made smaller and larger again, a saved size, a menu over it, and a line cut off by a
+# clip.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/LayoutSystem
+open ui/PaneComponents
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func box(app: view App, nodeId: view String) ret String {
+  let rect: view ComputedRect = componentView(
+    this: app.uiSystems.layout.computedRects
+    entityId: nodeOf(world: app.world, nodeId: nodeId)
+  )
+  ret "{nodeId} {Math.round(x: rect.size.x)}x{Math.round(x: rect.size.y)}"
+}
+
+func show(app: view App, step: view String) {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(DividerEvent, this: app.world.dividerEvents), ++i {
+    let event: DividerEvent = eventAt(DividerEvent, this: app.world.dividerEvents, i: i)
+    var kind: String = "moved"
+    if event.kind is DividerEventKind.dropped {
+      kind = "dropped"
+    } else if event.kind is DividerEventKind.doubleClicked {
+      kind = "double click"
+    }
+    text = text.concat(other: " ({kind} {event.size})")
+  }
+  loop var i: Int = 0, i < eventCount(UiAction, this: app.world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: app.world.uiActions, i: i)
+    text = text.concat(other: " action {action.actionId}")
+  }
+  let fill: String = "{componentView(
+    this: app.world.shapes
+    entityId: nodeOf(world: app.world, nodeId: "Split")
+  ).fillSlot}"
+  log(
+    "{step}: {box(app: app, nodeId: "Left")}, {box(app: app, nodeId: "Top")}, {box(
+      app: app
+      nodeId: "Right"
+    )}, cursor {app.uiSystems.dividers.cursor}, line {fill}{text}"
+  )
+}
+
+func layOut(app: mod App) {
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+}
+
+func pointer(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+  clicks: view Int
+  kind: view InputKind
+  keys: view DividerKeys
+) {
+  var state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: kind
+  )
+  state.clicks = clicks
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: state
+    wheel: 0.0
+  )
+  let changed: Bool = dividerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: keys
+  )
+  let moved: Bool = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  layOut(app: app)
+  if step.length() > 0 {
+    show(app: app, step: step)
+  }
+}
+
+func main() {
+  var app: App = { world: createUiWorld(), uiSystems: createUiSystems(), input: createUiInput() }
+  app.world.layoutW = 600.0
+  app.world.layoutH = 300.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  layOut(app: app)
+  pointer(
+    app: app
+    step: "start, the saved 120 shown"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "over the line"
+    x: 203.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press beside it"
+    x: 198.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged 50"
+    x: 248.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "past the maximum"
+    x: 420.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "past the minimum"
+    x: 20.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "back to 150"
+    x: 148.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 148.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "away"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press on the pane"
+    x: 60.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 60.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press on the line"
+    x: 151.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 151.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "again at once"
+    x: 151.0
+    y: 150.0
+    down: true
+    clicks: 2
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 151.0
+    y: 150.0
+    down: false
+    clicks: 2
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  # the line across, and the pane after its line
+  pointer(
+    app: app
+    step: "over it"
+    x: 300.0
+    y: 121.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press"
+    x: 300.0
+    y: 121.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "up 60"
+    x: 300.0
+    y: 61.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "up 200"
+    x: 300.0
+    y: -80.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 300.0
+    y: 200.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press the right one"
+    x: 519.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged left 70"
+    x: 449.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 449.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  # the keys
+  pointer(
+    app: app
+    step: "press the first"
+    x: 151.0
+    y: 20.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 151.0
+    y: 20.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  log(
+    "the keys are its {keyHolder(world: app.world, uiSystems: app.uiSystems) is nodeOf(
+      world: app.world
+      nodeId: "Split"
+    )}"
+  )
+  pointer(
+    app: app
+    step: "more"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys { more: true }
+  )
+  pointer(
+    app: app
+    step: "less"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys { less: true }
+  )
+  pointer(
+    app: app
+    step: "End"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys { end: true }
+  )
+  pointer(
+    app: app
+    step: "Home"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys { home: true }
+  )
+  setKeyFocus(world: app.world, entityId: noEntity())
+  pointer(
+    app: app
+    step: "more, without the keys"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys { more: true }
+  )
+  # a finger
+  pointer(
+    app: app
+    step: "finger 12 away"
+    x: 112.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.touch
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged 60"
+    x: 172.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.touch
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "lifted"
+    x: 172.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.touch
+    keys: DividerKeys {}
+  )
+  # a smaller window leaves the rest its room, a larger one brings the size back
+  setDividerSize(
+    world: app.world
+    uiSystems: app.uiSystems
+    divider: nodeOf(world: app.world, nodeId: "Split")
+    size: 280.0
+  )
+  pointer(
+    app: app
+    step: "set to 280"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  componentMod(this: app.world.rects, entityId: root).size.x = 420.0
+  pointer(
+    app: app
+    step: ""
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "the window 420 wide"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  log(
+    "saved {componentView(
+      this: app.world.dividers
+      entityId: nodeOf(world: app.world, nodeId: "Split")
+    ).size}"
+  )
+  componentMod(this: app.world.rects, entityId: root).size.x = 600.0
+  pointer(
+    app: app
+    step: ""
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "and 600 again"
+    x: 400.0
+    y: 250.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  # a menu takes the press, a clip hides the line
+  app.world.menu.open = true
+  pointer(
+    app: app
+    step: "press with a menu open"
+    x: 281.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged"
+    x: 250.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 250.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  app.world.menu.open = false
+  componentSet(
+    this: app.world.overflows
+    entityId: root
+    data: OverflowPolicy { mode: OverflowMode.clip }
+  )
+  componentMod(this: app.world.rects, entityId: root).size.y = 100.0
+  pointer(
+    app: app
+    step: ""
+    x: 400.0
+    y: 50.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press outside the clip"
+    x: 281.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged"
+    x: 250.0
+    y: 150.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 250.0
+    y: 150.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "press inside it"
+    x: 281.0
+    y: 50.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "dragged"
+    x: 250.0
+    y: 50.0
+    down: true
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 250.0
+    y: 50.0
+    down: false
+    clicks: 1
+    kind: InputKind.mouse
+    keys: DividerKeys {}
+  )
+  destroyEntitySubtree(
+    world: app.world
+    uiSystems: app.uiSystems
+    root: nodeOf(world: app.world, nodeId: "SplitRight")
+  )
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+  log("dividers {componentCount(this: app.world.dividers)}")
+}

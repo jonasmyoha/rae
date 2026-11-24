@@ -2,7 +2,8 @@
 
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
-menus, text editing, key focus, list selection, the row window and the scrolling (steps 4 to 5b). The steps are the `[file browser ...]` tasks in
+menus, text editing, key focus, list selection, the row window, the
+scrolling, dividers and scrollbars (steps 4 to 5c). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -394,7 +395,7 @@ None of these is about files; each is its own module with its own cases.
 | **list selection** | built (section 49) | `ListSelection` and `listSelectionSystem` (§1.2), keyed by `itemKeyField` |
 | **pointer buttons, double click** | built (docs/ui-scene-format.md section 46) | press, release and click count per button through `UiInput` and captures; Control+click and a long press as the second button |
 | **menus** | built: `ui/MenuSystem` (section 47) | `menuSystem` with items as data, keys, one submenu level, kept in the window |
-| **dividers, scrollbars** | none | `Divider` and `ScrollBar` components with a system each |
+| **dividers, scrollbars** | built (docs/ui-scene-format.md sections 52, 53) | `Divider` and `ScrollBar` components with a system each |
 | **text editing** | built (docs/ui-scene-format.md section 11) | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
 | **drags** | per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |
 | **images** | a registered image is never released | release behind in-flight frames; decode off the main thread; a budget. `lib/Gpu2dCanvas/Canvas.rae` has 999 lines, so it is split first |

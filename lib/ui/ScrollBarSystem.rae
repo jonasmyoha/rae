@@ -1,0 +1,476 @@
+# Scrollbars (docs/ui-scene-format.md "Scrollbars"). Once a frame, after updateUiInput and
+# menuSystem,
+# before updateScrollRoots (or updateScrollRoot):
+#
+#   let moved: Bool = scrollBarSystem(world: world, uiSystems: uiSystems, input: input)
+#
+# and after the transforms scrollBarPlaceSystem, which sizes and fades the thumbs (app3d/UiShell's
+# pipelines call it). A program that sleeps between frames renders while scrollBarsSettling.
+#
+# The thumb is as long against the track as the window is against the content (a windowed list's by
+# its count). A mouse drags it; in a bar that always shows, a press beside it pages. A bar that is
+# not
+# shown takes nothing, and one that comes and goes takes a press on its thumb only, so a row under
+# it
+# keeps its own. Fingers scroll the content and never the bar.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/PaneComponents
+open ui/ScrollDrag
+open ui/ScrollRootSystem
+open ui/Transform
+open ui/UiSystems
+
+# How long a bar stays after its root's last move, and how long it takes to go
+const scrollBarStaySeconds: Float64 = 0.8
+
+const scrollBarFadeSeconds: Float64 = 0.25
+
+# A track held down pages again after this, then every so often
+const scrollBarHoldSeconds: Float64 = 0.4
+
+const scrollBarRepeatSeconds: Float64 = 0.1
+
+# A page is this much of the window
+const scrollBarPage: Float = 0.9
+
+# The scroll root of a bar: the first of its axis among its siblings and below them
+func findScrollBarRoot(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  bar: view EntityId
+) ret EntityId {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: bar) is false {
+    ret noEntity()
+  }
+  let axis: ScrollAxis = componentView(this: world.scrollBars, entityId: bar).axis
+  var nodes: List(EntityId) = {}
+  collectSubtree(
+    childrens: world.childrens
+    node: componentView(this: uiSystems.hierarchy.parents, entityId: bar).parent
+    out: nodes
+  )
+  loop let node: view EntityId in nodes {
+    if componentHas(this: world.scrollRoots, entityId: node) and componentView(
+      this: world.scrollRoots
+      entityId: node
+    ).axis is axis {
+      ret node
+    }
+  }
+  ret noEntity()
+}
+
+# The bar's state, made when it has none, with its root found again when it is gone or the tree of
+# roots changed
+func scrollBarStateOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  bar: view EntityId
+) ret ScrollBarState {
+  var state: ScrollBarState = {}
+  if let current: ScrollBarState = componentCopy(this: uiSystems.scrollBars.states, entityId: bar) {
+    state = current
+  }
+  let roots: Int = componentTableGeneration(this: world.scrollRoots) + componentTableGeneration(
+    this: world.childrens
+  )
+  if state.rootsGeneration is not roots or isAlive(world: world, entityId: state.root) is false {
+    let root: EntityId = findScrollBarRoot(world: world, uiSystems: uiSystems, bar: bar)
+    if root is not state.root {
+      state = ScrollBarState { root: root }
+    }
+    state.rootsGeneration = roots
+  }
+  ret state
+}
+
+# The track: the bar's box on screen inside its inset, along its axis and across it
+type ScrollBarTrack {
+  start: Float = 0.0
+  length: Float = 0.0
+  across: Float = 0.0
+  thick: Float = 0.0
+  scale: Float = 1.0
+}
+
+func scrollBarTrack(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  bar: view EntityId
+) ret opt ScrollBarTrack {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: bar) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: bar
+  ) is false {
+    ret none
+  }
+  let settings: view ScrollBar = componentView(this: world.scrollBars, entityId: bar)
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: bar
+  )
+  let cr: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: bar)
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  var track: ScrollBarTrack = { scale: wt.scale.y }
+  if settings.axis is ScrollAxis.x {
+    track.scale = wt.scale.x
+    track.start = rect.x
+    track.length = rect.w
+    track.across = rect.y
+    track.thick = rect.h
+  } else {
+    track.start = rect.y
+    track.length = rect.h
+    track.across = rect.x
+    track.thick = rect.w
+  }
+  let inset: Float = settings.inset * track.scale
+  track.start = track.start + inset
+  track.length = track.length - inset * 2.0
+  track.across = track.across + inset
+  track.thick = track.thick - inset * 2.0
+  ret track
+}
+
+# Put the root at `position`, at rest there
+func setScrollPosition(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  position: view Float
+) {
+  componentSet(
+    this: world.scrollStates
+    entityId: entityId
+    data: ScrollState { y: position, velocity: 0.0 }
+  )
+  if componentHas(this: world.scrollDrags, entityId: entityId) {
+    componentMod(this: world.scrollDrags, entityId: entityId).pinnedToEnd = false
+  }
+  let root: ScrollRoot = componentCopyOrDefault(world: world, entityId: entityId)
+  applyScrollPosition(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    root: root
+    position: position
+  )
+}
+
+func componentCopyOrDefault(world: view UiWorld, entityId: view EntityId) ret ScrollRoot {
+  if let root: ScrollRoot = componentCopy(this: world.scrollRoots, entityId: entityId) {
+    ret root
+  }
+  ret ScrollRoot.default()
+}
+
+# Is the bar shown now (so that it takes a press)?
+func scrollBarShown(world: view UiWorld, uiSystems: view UiSystems, bar: view EntityId) ret Bool {
+  if componentHas(this: uiSystems.scrollBars.states, entityId: bar) is false {
+    ret false
+  }
+  let state: view ScrollBarState = componentView(this: uiSystems.scrollBars.states, entityId: bar)
+  ret state.active and (state.opacity > 0.1 or componentView(this: world.scrollBars, entityId: bar).show is ScrollBarShow.always)
+}
+
+# One frame of the bars' input; true when a root moved by one
+func scrollBarSystem(world: mod UiWorld, uiSystems: mod UiSystems, input: mod UiInput) ret Bool {
+  uiSystems.scrollBars.now = input.nowSeconds
+  uiSystems.scrollBars.pointerX = input.pointer.x
+  uiSystems.scrollBars.pointerY = input.pointer.y
+  # a finger hovers nothing
+  uiSystems.scrollBars.hovers = input.pointer.kind is not InputKind.touch and world.menu.open is false
+  let held: EntityId = uiSystems.scrollBars.held
+  if isNone(this: held) is false {
+    if input.pointer.down is false or scrollBarShown(world: world, uiSystems: uiSystems, bar: held) is false {
+      uiSystems.scrollBars.held = noEntity()
+      ret false
+    }
+    ret holdScrollBar(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      bar: held
+    )
+  }
+  if input.pointer.pressed is false or input.pointer.kind is InputKind.touch {
+    ret false
+  }
+  loop var i: Int = 0, i < componentCount(this: world.scrollBars), ++i {
+    let bar: EntityId = componentEntityAt(this: world.scrollBars, i: i)
+    if scrollBarShown(world: world, uiSystems: uiSystems, bar: bar) and uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: bar
+      x: input.pointer.x
+      y: input.pointer.y
+    ) and uiMayTakePress(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      entityId: bar
+    ) {
+      ret pressScrollBar(
+        world: world
+        uiSystems: uiSystems
+        input: input
+        bar: bar
+      )
+    }
+  }
+  ret false
+}
+
+func barPointer(world: view UiWorld, bar: view EntityId, input: view UiInput) ret Float {
+  if componentView(this: world.scrollBars, entityId: bar).axis is ScrollAxis.x {
+    ret input.pointer.x
+  }
+  ret input.pointer.y
+}
+
+# Where the pointer is against the thumb: -1 before it, 0 on it, 1 after it
+func thumbSide(
+  state: view ScrollBarState
+  track: view ScrollBarTrack
+  pointer: view Float
+) ret Int {
+  if pointer < track.start + state.start {
+    ret -1
+  }
+  if pointer > track.start + state.start + state.length {
+    ret 1
+  }
+  ret 0
+}
+
+func pressScrollBar(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  bar: view EntityId
+) ret Bool {
+  let state: ScrollBarState = scrollBarStateOf(world: world, uiSystems: uiSystems, bar: bar)
+  if let track: ScrollBarTrack = scrollBarTrack(world: world, uiSystems: uiSystems, bar: bar) {
+    let pointer: Float = barPointer(world: world, bar: bar, input: input)
+    let side: Int = thumbSide(state: state, track: track, pointer: pointer)
+    let always: Bool = componentView(this: world.scrollBars, entityId: bar).show is ScrollBarShow.always
+    if side is not 0 and always is false {
+      ret false
+    }
+    uiSystems.scrollBars.held = bar
+    uiSystems.scrollBars.onThumb = side is 0
+    uiSystems.scrollBars.pressAt = pointer
+    uiSystems.scrollBars.pressStart = state.start
+    uiSystems.scrollBars.nextPage = input.nowSeconds + scrollBarHoldSeconds
+    takeUiPress(input: input)
+    if side is not 0 {
+      ret pageScrollBar(
+        world: world
+        uiSystems: uiSystems
+        state: state
+        side: side
+      )
+    }
+  }
+  ret false
+}
+
+# A page toward `side`; true when the root moved
+func pageScrollBar(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  state: view ScrollBarState
+  side: view Int
+) ret Bool {
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: state.root)
+  let before: Float = scrollPositionOf(world: world, entityId: state.root)
+  var position: Float = before - side.toFloat() * range.window * scrollBarPage
+  if position > 0.0 {
+    position = 0.0
+  }
+  if position < range.floor {
+    position = range.floor
+  }
+  if range.active is false or position is before {
+    ret false
+  }
+  setScrollPosition(
+    world: world
+    uiSystems: uiSystems
+    entityId: state.root
+    position: position
+  )
+  ret true
+}
+
+# The bar held: its thumb follows the pointer, or its track pages on until the thumb is there
+func holdScrollBar(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  bar: view EntityId
+) ret Bool {
+  let state: ScrollBarState = scrollBarStateOf(world: world, uiSystems: uiSystems, bar: bar)
+  var track: ScrollBarTrack = {}
+  if let found: ScrollBarTrack = scrollBarTrack(world: world, uiSystems: uiSystems, bar: bar) {
+    track = found
+  }
+  let pointer: Float = barPointer(world: world, bar: bar, input: input)
+  if uiSystems.scrollBars.onThumb is false {
+    let side: Int = thumbSide(state: state, track: track, pointer: pointer)
+    # only on toward where the press was, never back
+    if side is 0 or input.nowSeconds < uiSystems.scrollBars.nextPage or (side > 0) is not (uiSystems.scrollBars.pressAt > track.start + uiSystems.scrollBars.pressStart) {
+      ret false
+    }
+    uiSystems.scrollBars.nextPage = input.nowSeconds + scrollBarRepeatSeconds
+    ret pageScrollBar(
+      world: world
+      uiSystems: uiSystems
+      state: state
+      side: side
+    )
+  }
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: state.root)
+  let free: Float = track.length - state.length
+  if range.active is false or free <= 0.0 {
+    ret false
+  }
+  var share: Float = (uiSystems.scrollBars.pressStart + pointer - uiSystems.scrollBars.pressAt) / free
+  if share < 0.0 {
+    share = 0.0
+  }
+  if share > 1.0 {
+    share = 1.0
+  }
+  let position: Float = range.floor * share
+  if position is scrollPositionOf(world: world, entityId: state.root) {
+    ret false
+  }
+  setScrollPosition(
+    world: world
+    uiSystems: uiSystems
+    entityId: state.root
+    position: position
+  )
+  ret true
+}
+
+# Each bar's thumb and how much of it shows, after the transforms; true when one changed
+func scrollBarPlaceSystem(world: view UiWorld, uiSystems: mod UiSystems) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.scrollBars), ++i {
+    let bar: EntityId = componentEntityAt(this: world.scrollBars, i: i)
+    var state: ScrollBarState = scrollBarStateOf(world: world, uiSystems: uiSystems, bar: bar)
+    let before: ScrollBarState = state
+    placeScrollBar(
+      world: world
+      uiSystems: uiSystems
+      bar: bar
+      state: state
+    )
+    let same: Bool = before.start is state.start and before.length is state.length and before.opacity is state.opacity and before.active is state.active and before.hovered is state.hovered
+    if same is false {
+      changed = true
+    }
+    componentSet(this: uiSystems.scrollBars.states, entityId: bar, data: state)
+  }
+  ret changed
+}
+
+func placeScrollBar(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  bar: view EntityId
+  state: mod ScrollBarState
+) {
+  let settings: ScrollBar = componentCopyBar(world: world, bar: bar)
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: state.root)
+  state.active = range.active
+  let position: Float = scrollPositionOf(world: world, entityId: state.root)
+  let now: Float64 = uiSystems.scrollBars.now
+  let moved: Bool = state.placed and position is not state.position
+  state.position = position
+  if range.active is false {
+    state.opacity = 0.0
+    state.placed = true
+    ret
+  }
+  if let track: ScrollBarTrack = scrollBarTrack(world: world, uiSystems: uiSystems, bar: bar) {
+    let content: Float = range.window - range.floor
+    var length: Float = track.length * range.window / content
+    let least: Float = settings.minThumb * track.scale
+    if length < least {
+      length = least
+    }
+    if length > track.length {
+      length = track.length
+    }
+    var share: Float = position / range.floor
+    if share <= 0.0 {
+      share = 0.0
+    }
+    if share > 1.0 {
+      share = 1.0
+    }
+    state.length = length
+    state.start = (track.length - length) * share
+  }
+  let held: Bool = uiSystems.scrollBars.held is bar
+  let shown: Bool = state.opacity > 0.0 or settings.show is ScrollBarShow.always
+  state.hovered = held or (shown and uiSystems.scrollBars.hovers and uiPointInEntity(
+    world: world
+    uiSystems: uiSystems
+    entityId: bar
+    x: uiSystems.scrollBars.pointerX
+    y: uiSystems.scrollBars.pointerY
+  ))
+  let over: Bool = settings.show is ScrollBarShow.hovered and uiSystems.scrollBars.hovers and pointerOverScrollRoot(
+    world: world
+    uiSystems: uiSystems
+    entityId: state.root
+    x: uiSystems.scrollBars.pointerX
+    y: uiSystems.scrollBars.pointerY
+  )
+  if moved or state.hovered or over {
+    state.shownUntil = now + scrollBarStaySeconds
+  }
+  state.placed = true
+  state.opacity = 1.0
+  if settings.show is not ScrollBarShow.always {
+    if now > state.shownUntil + scrollBarFadeSeconds {
+      state.opacity = 0.0
+    } else if now > state.shownUntil {
+      state.opacity = ((state.shownUntil + scrollBarFadeSeconds - now) / scrollBarFadeSeconds) as Float
+    }
+  }
+}
+
+func componentCopyBar(world: view UiWorld, bar: view EntityId) ret ScrollBar {
+  if let settings: ScrollBar = componentCopy(this: world.scrollBars, entityId: bar) {
+    ret settings
+  }
+  ret ScrollBar {}
+}
+
+# Is a bar shown that will fade, or held? An event loop renders frames while it is
+func scrollBarsSettling(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  if isNone(this: uiSystems.scrollBars.held) is false {
+    ret true
+  }
+  loop var i: Int = 0, i < componentCount(this: world.scrollBars), ++i {
+    let bar: EntityId = componentEntityAt(this: world.scrollBars, i: i)
+    if componentView(this: world.scrollBars, entityId: bar).show is not ScrollBarShow.always and componentHas(
+      this: uiSystems.scrollBars.states
+      entityId: bar
+    ) and componentView(this: uiSystems.scrollBars.states, entityId: bar).opacity > 0.0 {
+      ret true
+    }
+  }
+  ret false
+}

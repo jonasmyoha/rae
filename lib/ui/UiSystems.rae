@@ -279,6 +279,49 @@ type ListSelectionSystem {
   pressDone: Bool = false
 }
 
+# dividerSystem's state: the divider dragged (where and how big its pane was at the press), the one
+# under the pointer with its own fill, and the mouse cursor it set
+type DividerSystem {
+  dragged: EntityId = noEntity()
+  pressAt: Float = 0.0
+  pressSize: Float = 0.0
+  moved: Bool = false
+  lastPressed: EntityId = noEntity()
+  shown: EntityId = noEntity()
+  shownFill: String = ""
+  cursor: Int = 0
+}
+
+# A scrollbar's root, its thumb along the track on screen, and how much of it shows
+# (ui/ScrollBarSystem)
+type ScrollBarState {
+  root: EntityId = noEntity()
+  rootsGeneration: Int = -1
+  active: Bool = false
+  start: Float = 0.0
+  length: Float = 0.0
+  opacity: Float = 0.0
+  hovered: Bool = false
+  # Its root's position as it was placed last, and until when it shows
+  placed: Bool = false
+  position: Float = 0.0
+  shownUntil: Float64 = -1000.0
+}
+
+# scrollBarSystem's: each bar's state, the pointer and the time of the last input, and the bar held
+type ScrollBarSystem {
+  states: ComponentTable(ScrollBarState)
+  now: Float64 = 0.0
+  pointerX: Float = 0.0
+  pointerY: Float = 0.0
+  hovers: Bool = false
+  held: EntityId = noEntity()
+  onThumb: Bool = false
+  pressAt: Float = 0.0
+  pressStart: Float = 0.0
+  nextPage: Float64 = 0.0
+}
+
 # touchStickSystem's output: each TouchStick node's state
 type TouchStickSystem {
   states: ComponentTable(TouchStickState)
@@ -295,6 +338,8 @@ type UiSystems {
   textField: TextFieldSystem
   listRows: ListRowSystem
   listSelection: ListSelectionSystem
+  dividers: DividerSystem
+  scrollBars: ScrollBarSystem
   # where the clickable nodes are (ui/HitIndex, kept by ui/InputSystem/HitIndexQuery)
   hitIndex: HitIndex
 }
@@ -347,6 +392,8 @@ func createUiSystems() ret UiSystems {
       rowsShown: ComponentTable.create(ListRowShown)
       authored: ComponentTable.create(SelectionAuthored)
     }
+    dividers: DividerSystem {}
+    scrollBars: ScrollBarSystem { states: ComponentTable.create(ScrollBarState) }
     hitIndex: emptyHitIndex()
     textField: TextFieldSystem {
       caretLineEntityId: noEntity()
@@ -390,6 +437,7 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)
   componentRemove(this: uiSystems.listRows.rowsBound, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.seen, entityId: entityId)
+  componentRemove(this: uiSystems.scrollBars.states, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.rowsShown, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.authored, entityId: entityId)
   componentRemove(this: uiSystems.listRows.listsSeen, entityId: entityId)

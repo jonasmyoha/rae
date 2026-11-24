@@ -1,0 +1,608 @@
+# Scrollbars (ui/ScrollBarSystem): the thumb's length and place, also for a windowed list of
+# 100,000; a
+# bar that shows while its list scrolls and fades, one that shows over its list, one that always
+# shows;
+# a thumb dragged, a track paged and held, a row's press left to the row, a finger, all that fits.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/LayoutSystem
+open ui/ListViewSystem
+open ui/ListWindow
+open ui/PaneComponents
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  scenes: SceneRegistry
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func barText(app: view App, nodeId: view String) ret String {
+  let bar: EntityId = nodeOf(world: app.world, nodeId: nodeId)
+  let state: view ScrollBarState = componentView(
+    this: app.uiSystems.scrollBars.states
+    entityId: bar
+  )
+  if state.active is false {
+    ret "{nodeId} off"
+  }
+  var mark: String = ""
+  if state.hovered {
+    mark = "*"
+  }
+  ret "{nodeId}{mark} {Math.round(x: state.start * 10.0) / 10.0}+{Math.round(x: state.length * 10.0) / 10.0} shows {Math.round(
+    x: state.opacity * 100.0
+  ) / 100.0}"
+}
+
+func at(app: view App, nodeId: view String) ret Float {
+  ret Math.round(
+    x: scrollPositionOf(world: app.world, entityId: nodeOf(world: app.world, nodeId: nodeId)) * 10.0
+  ) / 10.0
+}
+
+func show(app: view App, step: view String) {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(UiAction, this: app.world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: app.world.uiActions, i: i)
+    text = text.concat(other: " action {action.actionId}")
+  }
+  log(
+    "{step}: A {at(app: app, nodeId: "ListA")} {barText(app: app, nodeId: "BarA")} | B {at(
+      app: app
+      nodeId: "ListB"
+    )} {barText(app: app, nodeId: "BarB")} | strip {at(app: app, nodeId: "Strip")} {barText(
+      app: app
+      nodeId: "BarX"
+    )}{text}"
+  )
+}
+
+func frame(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+  kind: view InputKind
+  wheel: view Float
+  wait: view Float64
+) {
+  app.input.nowSeconds = app.input.nowSeconds + wait
+  let state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: kind
+  )
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: state
+    wheel: wheel
+  )
+  let pulled: Bool = scrollBarSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  let moved: Bool = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.016
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  let placed: Bool = scrollBarPlaceSystem(world: app.world, uiSystems: app.uiSystems)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+  if step.length() > 0 {
+    show(app: app, step: step)
+  }
+}
+
+func rows(count: view Int) ret List(ListViewRow) {
+  var rows: List(ListViewRow) = {}
+  loop var i: Int = 0, i < count, ++i {
+    rows.add(value: ListViewRow { keys: List(String) { "key" }, values: List(String) { "{i}" } })
+  }
+  ret rows
+}
+
+func setRows(app: mod App, nodeId: view String, count: view Int) {
+  let data: ListViewData = { rows: rows(count: count) }
+  componentSet(
+    this: app.world.listViewDatas
+    entityId: nodeOf(world: app.world, nodeId: nodeId)
+    data: own data
+  )
+}
+
+func main() {
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    scenes: createSceneRegistry()
+  }
+  let row: Scene = parseScene(source: embedText(file: "Row.raescene"))
+  registerScene(reg: app.scenes, key: "Row", scene: own row)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 300.0
+  app.input.nowSeconds = 10.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  setRows(app: app, nodeId: "ListA", count: 60)
+  setRows(app: app, nodeId: "ListB", count: 5)
+  frame(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "start"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  # a row keeps its press where the bar does not show
+  frame(
+    app: app
+    step: "press at the bar's place"
+    x: 395.0
+    y: 50.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 395.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  # it shows as the list scrolls, stays under the pointer, and fades
+  frame(
+    app: app
+    step: "a notch"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: -1.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "onto its thumb"
+    x: 395.0
+    y: 30.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.5
+  )
+  frame(
+    app: app
+    step: "a second later"
+    x: 395.0
+    y: 30.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 1.0
+  )
+  frame(
+    app: app
+    step: "off it"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.5
+  )
+  log("settling {scrollBarsSettling(world: app.world, uiSystems: app.uiSystems)}")
+  frame(
+    app: app
+    step: "0.4 s on, fading"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.4
+  )
+  frame(
+    app: app
+    step: "gone"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.5
+  )
+  log("settling {scrollBarsSettling(world: app.world, uiSystems: app.uiSystems)}")
+  # its thumb dragged, its track left to the row
+  frame(
+    app: app
+    step: "a notch"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: -1.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "press on the thumb"
+    x: 395.0
+    y: 30.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "dragged 50"
+    x: 395.0
+    y: 80.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "past the end"
+    x: 395.0
+    y: 400.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "and out of the bar"
+    x: 100.0
+    y: 100.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 100.0
+    y: 100.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "press beside the thumb"
+    x: 395.0
+    y: 20.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 395.0
+    y: 20.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  # a finger scrolls, and takes no thumb
+  frame(
+    app: app
+    step: "finger on the thumb"
+    x: 395.0
+    y: 200.0
+    down: true
+    kind: InputKind.touch
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "dragged 40 down"
+    x: 395.0
+    y: 240.0
+    down: true
+    kind: InputKind.touch
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "dragged on"
+    x: 395.0
+    y: 260.0
+    down: true
+    kind: InputKind.touch
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "lifted"
+    x: 395.0
+    y: 260.0
+    down: false
+    kind: InputKind.touch
+    wheel: 0.0
+    wait: 0.016
+  )
+  loop var i: Int = 0, i < 200, ++i {
+    frame(
+      app: app
+      step: ""
+      x: 50.0
+      y: 50.0
+      down: false
+      kind: InputKind.mouse
+      wheel: 0.0
+      wait: 0.016
+    )
+  }
+  # the strip's bar always shows: its track pages, held it goes on to the pointer
+  frame(
+    app: app
+    step: "press right of the thumb"
+    x: 390.0
+    y: 294.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "held 0.2 s"
+    x: 390.0
+    y: 294.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.2
+  )
+  frame(
+    app: app
+    step: "held 0.5 s"
+    x: 390.0
+    y: 294.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.3
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 390.0
+    y: 294.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "B under the pointer"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  setRows(app: app, nodeId: "ListB", count: 100)
+  frame(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "B with a hundred rows"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "away from B"
+    x: 500.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.1
+  )
+  frame(
+    app: app
+    step: "later"
+    x: 500.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 2.0
+  )
+  frame(
+    app: app
+    step: "press left of the strip's thumb"
+    x: 20.0
+    y: 294.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 20.0
+    y: 294.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  # a windowed list of 100,000 rows
+  setListWindowRows(
+    world: app.world
+    list: nodeOf(world: app.world, nodeId: "ListA")
+    count: 100000
+    first: 0
+    rows: rows(count: 16)
+  )
+  frame(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "100,000 rows"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: -1.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "press on the thumb"
+    x: 355.0
+    y: 5.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "to the middle"
+    x: 355.0
+    y: 129.0
+    down: true
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "let go"
+    x: 355.0
+    y: 129.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  # all fits, and the list gone
+  componentRemove(this: app.world.listWindows, entityId: nodeOf(world: app.world, nodeId: "ListA"))
+  setRows(app: app, nodeId: "ListA", count: 3)
+  frame(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  frame(
+    app: app
+    step: "three rows"
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  destroyEntitySubtree(
+    world: app.world
+    uiSystems: app.uiSystems
+    root: nodeOf(world: app.world, nodeId: "ListA")
+  )
+  frame(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    kind: InputKind.mouse
+    wheel: 0.0
+    wait: 0.016
+  )
+  log("after the list {barText(app: app, nodeId: "BarA")}")
+}

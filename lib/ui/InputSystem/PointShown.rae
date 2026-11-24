@@ -1,0 +1,69 @@
+# A point against what cuts a node off on screen, and a press taken by a widget of no OnClick (a
+# divider, a scrollbar).
+open ui/Ecs
+open ui/AnimationSystem
+open ui/Components
+open ui/UiSystems
+open ecs/Entity
+open ecs/ComponentTable
+
+# Is (x, y) inside every ancestor of `entityId` that clips?
+func uiPointInClips(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+) ret Bool {
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret true
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    if componentHas(this: world.overflows, entityId: at) and componentView(
+      this: world.overflows
+      entityId: at
+    ).mode is OverflowMode.clip and uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: at
+      x: x
+      y: y
+    ) is false {
+      ret false
+    }
+  }
+  ret true
+}
+
+# May `entityId`, a node with no OnClick, take a press at (x, y): it is shown, not cut off there, no
+# menu is open, and no dialog or other layer is over it at that point?
+func uiMayTakePress(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+  entityId: view EntityId
+) ret Bool {
+  if world.menu.open or shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) is false or uiPointInClips(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: input.pointer.x
+    y: input.pointer.y
+  ) is false or dialogLayerCovers(world: world, uiSystems: uiSystems, entityId: entityId) {
+    ret false
+  }
+  let hovered: EntityId = input.hoveredEntityId
+  ret isNone(this: hovered) or hitRootOf(world: world, uiSystems: uiSystems, entityId: hovered) is hitRootOf(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  )
+}
+
+# A widget took this frame's press: what is under it gets none, and its release clicks nothing
+func takeUiPress(input: mod UiInput) {
+  input.pointer.pressed = false
+  input.pressedEntityId = noEntity()
+}

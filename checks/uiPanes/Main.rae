@@ -1,0 +1,135 @@
+# Dividers and scrollbars, painted (ui/DividerSystem, ui/ScrollBarSystem): a side pane sized by its
+# divider, which is under the pointer, a list scrolled by a dragged thumb, a strip with a sideways
+# bar and
+# its track, and a pane above another.
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/panes.bmp \
+#     compiler/bin/rae run checks/uiPanes/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1589_divider and 1588_scroll_bar. Exit 0
+# when it
+# drew.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Schedule
+open Gpu2dCanvas
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/UiSystems
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI panes check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiPanes/page.raescene")
+  if scene.ok is false {
+    log("UI PANES FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  var files: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Files") {
+    files = id(v: raw)
+  }
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    # the list's thumb pressed at the third frame, dragged down, let go; then the pointer on the
+    # divider
+    var x: Float = 314.0
+    var y: Float = 40.0
+    var down: Bool = frames is 3 or frames is 4
+    if frames > 3 {
+      y = 190.0
+    }
+    if frames > 5 {
+      x = 321.0
+    }
+    input.nowSeconds = frames as Float64 * 0.016
+    updateUiInputWith(
+      input: input
+      world: world
+      uiSystems: uiSystems
+      pointer: uiPointerScriptFrame(
+        previous: input.pointer
+        x: x
+        y: y
+        down: down
+        kind: InputKind.mouse
+      )
+      wheel: 0.0
+    )
+    let resized: Bool = dividerSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      keys: DividerKeys {}
+    )
+    let pulled: Bool = scrollBarSystem(world: world, uiSystems: uiSystems, input: input)
+    let moved: Bool = updateScrollRoots(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      deltaTime: 0.016
+    )
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let scrolled: Float = scrollPositionOf(world: world, entityId: files)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if scrolled >= 0.0 {
+    log("UI PANES FAILED: the thumb did not scroll the list")
+    ret 1
+  }
+  log("UI PANES OK")
+  ret 0
+}
