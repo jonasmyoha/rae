@@ -426,7 +426,8 @@ let anything: Int = create(cap: 4)               # ERROR: no `create` returns In
   `break`/`continue`, reassignment, an `own` parameter consumed by the callee,
   a returned local (not run in the callee), `opt T` present and none, a field
   of a struct, an element of a `List`, an element of a component table.
-- Explicit `x.drop()` then scope exit: one run. Use after explicit drop: sema
+- Explicit `x.drop()` then scope exit: one run, and the fields released right
+  after it (their own destructors run then). Use after explicit drop: sema
   error.
 - Copy of a type with a destructor and no `copy`, by `=`, by `copy` parameter,
   by a struct-literal field without `own`, by `copyAt`: sema errors.

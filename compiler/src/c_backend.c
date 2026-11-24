@@ -3986,6 +3986,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                 rae_mangle_function(ctx, user_drop));
         emit_param_list(&ptctx, user_drop->params, out, false);
         fprintf(out, ");\n");
+        // ... and the fields alone, released after an explicit `x.drop()`
+        for (int is_alias = 0; is_alias < 2; is_alias++)
+          fprintf(out, "RAE_UNUSED static void rae_drop_fields_%s%s(%s* this);\n",
+                  drop_entries[i].mangled, is_alias ? "_alias" : "", drop_entries[i].mangled);
       }
     }
   }
@@ -4060,16 +4064,20 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const AstFuncDecl* user_drop = gp ? NULL
         : find_user_drop_for(ctx, e->decl->as.type_decl.name);
     for (int is_alias = 0; is_alias < 2; is_alias++) {
-      fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n",
-              e->mangled, is_alias ? "_alias" : "", e->mangled);
       // #881: the destructor runs FIRST, with every field still live, then
       // the fields drop in reverse declaration order. Both variants call it:
       // a value of a type with a destructor is never an alias of another
       // (it cannot be copied without a `copy`), so it is released exactly
-      // once wherever it ends up.
+      // once wherever it ends up. The fields are a function of their own,
+      // for an explicit `x.drop()`: the statement has run the destructor.
+      const char* suffix = is_alias ? "_alias" : "";
       if (user_drop) {
-        fprintf(out, "  %s(this);\n", rae_mangle_function(ctx, user_drop));
+        fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n  %s(this);\n"
+                "  rae_drop_fields_%s%s(this);\n}\n\n", e->mangled, suffix, e->mangled,
+                rae_mangle_function(ctx, user_drop), e->mangled, suffix);
       }
+      fprintf(out, "RAE_UNUSED static void rae_drop_%s_%s%s(%s* this) {\n",
+              user_drop ? "fields" : "struct", e->mangled, suffix, e->mangled);
       for (size_t j = field_count; j > 0; j--) {
         const AstTypeField* f = fields[j - 1];
         AstTypeRef* concrete = (gp && ga) ? substitute_type_ref(ctx, gp, ga, f->type) : f->type;

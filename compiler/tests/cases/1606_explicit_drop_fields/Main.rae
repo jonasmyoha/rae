@@ -1,0 +1,146 @@
+# An explicit `x.drop()` runs the destructor and then releases the fields, once
+type Handle {
+  name: String
+  parts: List(String)
+  note: opt String = none
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.name}")
+}
+
+type Owner {
+  title: String
+  first: Handle
+  handles: List(Handle)
+}
+
+func drop(this: mod Owner) {
+  log("drop owner {this.title}")
+}
+
+type Plain {
+  first: Handle
+}
+
+func makeHandle(name: view String) ret Handle {
+  ret Handle { name: "{name}", parts: List(String) { "part of {name}" }, note: "note of {name}" }
+}
+
+func maybeHandle(name: view String) ret opt Handle {
+  ret makeHandle(name: name)
+}
+
+func local(early: view Bool) {
+  var handle: Handle = makeHandle(name: "local {early}")
+  if early {
+    handle.drop()
+    log("early")
+  }
+  log("end")
+}
+
+func literal() {
+  let number: Int = 1
+  var handle: Handle = { name: "literal {number}", parts: { "one {number}", "two" } }
+  handle.drop()
+  log("end")
+}
+
+func parameter(handle: own Handle, early: view Bool) {
+  if early {
+    handle.drop()
+    ret
+  }
+  log("end")
+}
+
+func deferred() {
+  var handle: Handle = makeHandle(name: "deferred")
+  defer {
+    handle.drop()
+  }
+  log("end")
+}
+
+func again() {
+  var handle: Handle = makeHandle(name: "first")
+  handle.drop()
+  handle = makeHandle(name: "second")
+  log("end")
+}
+
+func narrowed() {
+  if var handle: Handle = maybeHandle(name: "narrowed") {
+    handle.drop()
+    log("end")
+  }
+}
+
+func inLoop() {
+  loop var i: Int = 0, i < 3, ++i {
+    var handle: Handle = makeHandle(name: "loop {i}")
+    if i is 0 {
+      handle.drop()
+      continue
+    } else if i is 1 {
+      handle.drop()
+      break
+    }
+  }
+}
+
+# The fields of an owner have destructors of their own
+func nested() {
+  var owner: Owner = { title: "owner", first: makeHandle(name: "field"), handles: {} }
+  owner.handles.add(makeHandle(name: "element 0"))
+  owner.handles.add(makeHandle(name: "element 1"))
+  owner.drop()
+  log("end")
+}
+
+# The destructor runs at a wait of the task's own
+func inTask(name: own String) ret Int {
+  var handle: Handle = makeHandle(name: name)
+  sleep(ms: 1)
+  handle.drop()
+  sleep(ms: 1)
+  ret name.length()
+}
+
+type Slow {
+  name: String
+}
+
+func drop(this: mod Slow) {
+  sleep(ms: 1)
+  log("drop slow {this.name}")
+}
+
+func slowTask(n: copy Int) ret Int {
+  var slow: Slow = { name: "slow {n}" }
+  sleep(ms: 1)
+  slow.drop()
+  sleep(ms: 1)
+  ret n
+}
+
+func main() {
+  local(early: true)
+  local(early: false)
+  literal()
+  parameter(handle: makeHandle(name: "parameter"), early: true)
+  parameter(handle: makeHandle(name: "kept"), early: false)
+  deferred()
+  again()
+  narrowed()
+  inLoop()
+  nested()
+  let task: Task(Int) = spawn inTask(name: "task")
+  log("{task.get()}")
+  let slow: Task(Int) = spawn slowTask(n: 7)
+  log("{slow.get()}")
+  # An owner without a destructor releases its field as always
+  let plain: Plain = { first: makeHandle(name: "plain") }
+  log("{plain.first.name}")
+}

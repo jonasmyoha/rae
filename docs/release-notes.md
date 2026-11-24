@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.62, 2026-11-24: an explicit drop releases the fields
+
+- `handle.drop()` on a local or an `own` parameter runs the destructor and then releases the fields, at that
+  line. Before, scope exit skipped the whole value: its Strings and lists leaked, and the destructors of its
+  fields never ran.
+- Case 1606, also in the AddressSanitizer gate.
+
 ## 0.4.61, 2026-11-24: a parameter moved on one path is freed on the others
 
 - An `own` or `copy` parameter that is moved, or dropped explicitly, on some paths of a function only is freed

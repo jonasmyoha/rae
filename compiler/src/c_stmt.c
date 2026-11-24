@@ -2787,6 +2787,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
                         if (!str_eq(ctx->locals[i], name)) continue;
                         if (type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[i])) {
+                            // The call above ran the destructor; the fields
+                            // it left are released here, since scope exit
+                            // skips the whole value.
+                            fprintf(out, "  rae_drop_fields_%s%s(&%.*s);\n",
+                                    rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
+                                                                ctx->generic_args, ctx->local_type_refs[i]),
+                                    ctx->local_struct_owns_heap[i] ? "" : "_alias",
+                                    (int)name.len, name.data);
                             if (ctx->local_drop_flag[i]) {
                                 // #885: a runtime flag makes a drop inside a branch
                                 // exactly-once on every path.
