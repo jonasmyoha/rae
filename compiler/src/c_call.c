@@ -1430,6 +1430,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                                 && (sa->value->kind == AST_EXPR_CALL
                                     || sa->value->kind == AST_EXPR_METHOD_CALL
                                     || sa->value->kind == AST_EXPR_INTERP
+                                    || sa->value->kind == AST_EXPR_MATCH
                                     || sa->value->kind == AST_EXPR_BINARY)) {
                                 wrap_fresh_string[slot] = true;
                             }
@@ -1794,6 +1795,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && (a->value->kind == AST_EXPR_CALL ||
                     a->value->kind == AST_EXPR_METHOD_CALL ||
                     a->value->kind == AST_EXPR_INTERP ||
+                    a->value->kind == AST_EXPR_MATCH ||
                     a->value->kind == AST_EXPR_BINARY)) {
                 const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
                 if (arg_tr2 && !(arg_tr2->is_view || arg_tr2->is_mod)
@@ -2035,6 +2037,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_METHOD_CALL ||
                     a->value->kind == AST_EXPR_BINARY ||
                     a->value->kind == AST_EXPR_INTERP ||
+                    a->value->kind == AST_EXPR_MATCH ||
                     a->value->kind == AST_EXPR_OBJECT ||
                     member_of_rvalue_call);
             if (use_hoisted_temp || use_string_place || use_string_view_slot || mod_place) {

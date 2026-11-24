@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.66, 2026-11-24: a match expression owns its value
+
+- `let text: String = match kind { case 1 => "one {kind}" default => other }` owns its String, and a list or a
+  struct the same, in every position: an arm that is a place is copied, `own x` and a fresh value are taken.
+  Before, the arm's value leaked, or was shared with its place.
+- The arms of a match expression are checked by the compiler; an unknown name in one reached the C compiler. An
+  Int or a String needs a `default`, and an enum without one names every case. A `none` arm makes the value
+  optional. The subject is evaluated once.
+- In a generic function `let held: T = call()` and `let held: T = place` are right for a `T` that owns heap: a
+  String was freed under the binding, and a place was shared and freed twice.
+- Cases 1617 to 1619; 1617 and 1619 are in the AddressSanitizer gate.
+
 ## 0.4.65, 2026-11-24: `own x` moves wherever it stands
 
 - Breaking: after `own x` of a local that owns heap (or a Task) a use of x is an error wherever the `own`

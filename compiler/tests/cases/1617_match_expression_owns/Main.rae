@@ -1,0 +1,594 @@
+# A match expression is a value of its own, in every position: an arm that is a place is copied, an
+# arm that is `own x` or a fresh value is taken. Nothing is leaked or freed twice.
+enum Color { red, green, blue }
+
+type Note {
+  name: String
+  parts: List(String)
+}
+
+type Holder {
+  text: String
+  note: Note
+  names: List(String)
+  maybe: opt String = none
+  label: String = match 1 { case 1 => "label {1}", default => "none" }
+}
+
+func makeNote(n: view Int) ret Note {
+  ret Note { name: "note {n}", parts: List(String) { "part {n}" } }
+}
+
+func makeNames(n: view Int) ret List(String) {
+  ret List(String) { "name {n}", "more" }
+}
+
+func makeText(n: view Int) ret String {
+  ret "text {n}"
+}
+
+func viewText(text: view String) ret Int {
+  ret text.length()
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func viewNote(note: view Note) ret Int {
+  ret note.parts.length
+}
+
+func takeNote(note: own Note) ret Int {
+  ret note.parts.length
+}
+
+func takeNames(names: own List(String)) ret Int {
+  ret names.length
+}
+
+func retText(k: view Int, text: view String) ret String {
+  ret match k { case 1 => "one {k}", case 2 => text, default => makeText(n: k) }
+}
+
+func retNote(k: view Int, note: view Note) ret Note {
+  ret match k { case 1 => makeNote(n: 1), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: {}
+  } }
+}
+
+func retNames(k: view Int, names: view List(String)) ret List(String) {
+  ret match k { case 1 => makeNames(n: 1), default => names }
+}
+
+func maybeText(k: view Int, text: view String) ret opt String {
+  ret match k { case 1 => "one {k}", case 2 => text, default => "none" }
+}
+
+func generic(
+  T: type
+  k: view Int
+  first: view T
+  second: own T
+) ret T {
+  let chosen: T = match k { case 1 => first, default => own second }
+  ret own chosen
+}
+
+func pass(k: view Int) ret Int {
+  ret k
+}
+
+func countedSubject(calls: mod Int, k: view Int) ret Int {
+  calls = calls + 1
+  ret k
+}
+
+func colorText(color: view Color, text: view String) ret String {
+  ret match color { case Color.red => "red {text}", case Color.green => text, case Color.blue => "blue" }
+}
+
+func maybeNote(k: view Int, note: view Note) ret opt Note {
+  ret match k { case 1 => none, case 2 => note, default => makeNote(n: k) }
+}
+
+func inTask(k: copy Int, text: own String) ret Int {
+  let chosen: String = match k { case 1 => "one {k}", case 2 => own text, default => "other {k}" }
+  sleep(ms: 1)
+  ret chosen.length()
+}
+
+func letTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  log(chosen)
+}
+
+func varTextReassignForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var chosen: String = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  chosen = "again {k}"
+  log(chosen)
+}
+
+func assignTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var chosen: String = "a {k}"
+  chosen = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  log(chosen)
+}
+
+func assignFieldTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  holder.text = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  log(holder.text)
+}
+
+func literalFieldTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let other: Holder = {
+    text: match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+    note: makeNote(n: 1)
+    names: {}
+  }
+  log(other.text)
+}
+
+func optLetTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: opt String = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  if let value: view String = chosen {
+    log(value)
+  }
+}
+
+func optAssignForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  holder.maybe = match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  log("{holder.maybe is none}")
+}
+
+func viewArgTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(
+    "{viewText(text: match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) })}"
+  )
+}
+
+func ownArgTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(
+    "{takeText(text: match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) })}"
+  )
+}
+
+func logTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) })
+}
+
+func listElemTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let list: List(String) = {
+    match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+    "b"
+  }
+  log("{list}")
+}
+
+func addTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var list: List(String) = {}
+  list.add(value: match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) })
+  log("{list}")
+}
+
+func retTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(retText(k: k, text: place))
+}
+
+func retOptForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  if let value: String = maybeText(k: k, text: place) {
+    log(value)
+  }
+}
+
+func ownTextArmForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = match k { case 1 => own place, default => "other {k}" }
+  log(chosen)
+}
+
+func concatForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = (match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }) + "!"
+  log(chosen)
+}
+
+func compareForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log("{(match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }) is "text 3"}")
+}
+
+func letNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: Note = match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: List(String) { "x {k}" }
+  } }
+  log("{chosen.name} {chosen.parts}")
+}
+
+func assignNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var chosen: Note = makeNote(n: 9)
+  chosen = match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: List(String) { "x {k}" }
+  } }
+  log("{chosen.name} {chosen.parts}")
+}
+
+func fieldNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  holder.note = match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: List(String) { "x {k}" }
+  } }
+  log("{holder.note.name}")
+}
+
+func literalFieldNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let other: Holder = {
+    text: "t"
+    note: match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+      name: "literal {k}"
+      parts: List(String) { "x {k}" }
+    } }
+    names: {}
+  }
+  log(other.note.name)
+}
+
+func viewArgNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(
+    "{viewNote(
+      note: match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+        name: "literal {k}"
+        parts: List(String) { "x {k}" }
+      } }
+    )}"
+  )
+}
+
+func ownArgNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(
+    "{takeNote(
+      note: match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+        name: "literal {k}"
+        parts: List(String) { "x {k}" }
+      } }
+    )}"
+  )
+}
+
+func retNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: Note = retNote(k: k, note: note)
+  log(chosen.name)
+}
+
+func optNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: opt Note = match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: List(String) { "x {k}" }
+  } }
+  log("{chosen is none}")
+}
+
+func addNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var list: List(Note) = {}
+  list.add(
+    value: match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+      name: "literal {k}"
+      parts: List(String) { "x {k}" }
+    } }
+  )
+  log("{list}")
+}
+
+func ownNoteArmForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: Note = match k { case 1 => own note, default => makeNote(n: 5) }
+  log(chosen.name)
+}
+
+func letNamesForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: List(String) = match k { case 1 => makeNames(n: k), case 2 => names, default => holder.names }
+  log("{chosen}")
+}
+
+func assignNamesForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  var chosen: List(String) = { "a {k}" }
+  chosen = match k { case 1 => makeNames(n: k), case 2 => names, default => holder.names }
+  log("{chosen}")
+}
+
+func fieldNamesForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  holder.names = match k { case 1 => makeNames(n: k), case 2 => names, default => makeNames(n: 7) }
+  log("{holder.names}")
+}
+
+func ownArgNamesForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log(
+    "{takeNames(
+      names: match k { case 1 => makeNames(n: k), case 2 => names, default => holder.names }
+    )}"
+  )
+}
+
+func retNamesForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: List(String) = retNames(k: k, names: names)
+  log("{chosen}")
+}
+
+func memberForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = (match k { case 1 => makeNote(n: k), case 2 => note, default => Note {
+    name: "literal {k}"
+    parts: List(String) { "x {k}" }
+  } }).name
+  log(chosen)
+}
+
+func nestedForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = match k { case 1 => match k + 1 { case 2 => "deep {k}", default => place }, default => place }
+  log(chosen)
+}
+
+func genericTextForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = generic(
+    String
+    k: k
+    first: place
+    second: "second {k}"
+  )
+  log(chosen)
+}
+
+func genericNoteForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: Note = generic(
+    Note
+    k: k
+    first: note
+    second: makeNote(n: 4)
+  )
+  log(chosen.name)
+}
+
+func freshSubjectForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let chosen: String = match makeText(n: k) { case "text 1" => "yes {k}", default => "no {k}" }
+  log(chosen)
+}
+
+func loopInForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  loop let value: String in match k { case 1 => makeNames(n: k), case 2 => names, default => holder.names } {
+    log(value)
+  }
+}
+
+func interpForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  log("<{match k { case 1 => makeText(n: 1), case 2 => place, default => makeText(n: k) }}>")
+}
+
+func spawnArgForm(k: view Int) {
+  let place: String = "place {k}"
+  let note: Note = makeNote(n: 8)
+  let names: List(String) = makeNames(n: 6)
+  var holder: Holder = { text: "held {k}", note: makeNote(n: 2), names: makeNames(n: 3) }
+  let task: Task(Int) = spawn takeText(
+    text: match k { case 1 => "one {k}", case 2 => place, default => makeText(n: k) }
+  )
+  log("{task.get()}")
+}
+
+func main() {
+  loop var k: Int = 1, k <= 3, ++k {
+    log("--- {k}")
+    letTextForm(k: k)
+    varTextReassignForm(k: k)
+    assignTextForm(k: k)
+    assignFieldTextForm(k: k)
+    literalFieldTextForm(k: k)
+    optLetTextForm(k: k)
+    optAssignForm(k: k)
+    viewArgTextForm(k: k)
+    ownArgTextForm(k: k)
+    logTextForm(k: k)
+    listElemTextForm(k: k)
+    addTextForm(k: k)
+    retTextForm(k: k)
+    retOptForm(k: k)
+    ownTextArmForm(k: k)
+    concatForm(k: k)
+    compareForm(k: k)
+    letNoteForm(k: k)
+    assignNoteForm(k: k)
+    fieldNoteForm(k: k)
+    literalFieldNoteForm(k: k)
+    viewArgNoteForm(k: k)
+    ownArgNoteForm(k: k)
+    retNoteForm(k: k)
+    optNoteForm(k: k)
+    addNoteForm(k: k)
+    ownNoteArmForm(k: k)
+    letNamesForm(k: k)
+    assignNamesForm(k: k)
+    fieldNamesForm(k: k)
+    ownArgNamesForm(k: k)
+    retNamesForm(k: k)
+    memberForm(k: k)
+    nestedForm(k: k)
+    genericTextForm(k: k)
+    genericNoteForm(k: k)
+    freshSubjectForm(k: k)
+    loopInForm(k: k)
+    interpForm(k: k)
+    spawnArgForm(k: k)
+    var calls: Int = 0
+    let counted: String = match countedSubject(calls: mod calls, k: k) { case 5 => "five", case 3 => "three {k}", default => "other {k}" }
+    log("{counted} {calls}")
+    let note: Note = makeNote(n: 8)
+    if let found: Note = maybeNote(k: k, note: note) {
+      log(found.name)
+    }
+    let maybe: opt String = match k { case 1 => none, case 2 => note.name, default => "some {k}" }
+    if let found: view String = maybe {
+      log(found)
+    }
+    let task: Task(Int) = spawn inTask(k: k, text: "task {k}")
+    log("{task.get()}")
+    let number: Int = match k { case 1 => 10, default => k * 2 }
+    let held: Holder = { text: "t", note: makeNote(n: 1), names: {} }
+    log("{number} {held.label}")
+  }
+  log(colorText(color: Color.red, text: "a {1}"))
+  log(colorText(color: Color.green, text: "b {2}"))
+  log(colorText(color: Color.blue, text: "c {3}"))
+}

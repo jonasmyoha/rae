@@ -632,6 +632,103 @@ static const AstDecl* module_qualified_function(CFuncContext* ctx, Str qualifier
     return first;
 }
 
+/* One arm of a match expression. The match is a value of its own, like a
+ * call's result: an arm that is a place is copied, `own x` and a fresh value
+ * are taken. A String is left in the string pool, as a call leaves its own. */
+static void emit_match_arm(CFuncContext* ctx, const AstTypeRef* type, const AstExpr* value, FILE* out) {
+    if (!type || type->is_view || type->is_mod) {
+        emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+        return;
+    }
+    if (type->is_opt) {
+        emit_optional_boxed_expr(ctx, type, value, out);
+        return;
+    }
+    bool place = value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER || value->kind == AST_EXPR_INDEX;
+    if (str_eq_cstr(get_base_type_name(type), "String")) {
+        if (place) {
+            fprintf(out, "rae_string_pool_register_owned(rae_string_copy(");
+            emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+            fprintf(out, "))");
+        } else if (value->kind == AST_EXPR_OWN) {
+            fprintf(out, "rae_string_pool_register_owned(");
+            emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+            fprintf(out, ")");
+        } else if (expr_is_alias_call(ctx, value)) {
+            fprintf(out, "rae_string_pool_register_owned(");
+            emit_alias_call_copy(ctx, value, type, out);
+            fprintf(out, ")");
+        } else {
+            emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+        }
+        return;
+    }
+    if (place && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)type, 0)) {
+        emit_deep_copy_value(ctx, rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
+                                                              ctx->generic_args, (AstTypeRef*)type),
+                             value, (int)ctx->temp_counter++, out);
+        return;
+    }
+    if (emit_alias_call_copy(ctx, value, type, out)) return;
+    if (value->kind == AST_EXPR_OBJECT && !value->as.object_literal.type) {
+        fprintf(out, "(");
+        emit_type_ref_as_c_type(ctx, type, out, true);
+        fprintf(out, ")");
+    }
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+}
+
+/* match x { case 1 => a  case 2 => b  default => c }, as a chain of
+ * conditionals. A subject that is not a name or a literal is evaluated once,
+ * first. Without a `default` the last arm is the rest (sema: every case is
+ * named). */
+static void emit_match_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    const AstExpr* subject = expr->as.match_expr.subject;
+    const AstTypeRef* subject_type = infer_expr_type_ref(ctx, subject);
+    Str subject_base = get_base_type_name(subject_type);
+    bool string_subject = str_eq_cstr(subject_base, "String") || str_eq_cstr(subject_base, "rae_String");
+    const AstTypeRef* type = infer_expr_type_ref(ctx, expr);
+    if (!type && ctx->has_expected_type) type = &ctx->expected_type;
+    if (type && ctx->generic_params && ctx->generic_args)
+        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+    bool once = subject->kind != AST_EXPR_IDENT && subject->kind != AST_EXPR_INTEGER && subject->kind != AST_EXPR_STRING
+        && subject->kind != AST_EXPR_BOOL && subject->kind != AST_EXPR_CHAR;
+    int id = once ? (int)ctx->temp_counter++ : 0;
+    bool saved_has = ctx->has_expected_type;
+    AstTypeRef saved_expected = ctx->expected_type;
+    ctx->has_expected_type = false;
+    if (once) {
+        fprintf(out, "(__extension__ ({ __auto_type __rae_subject%d = ", id);
+        emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+        fprintf(out, "; ");
+    }
+    fprintf(out, "(");
+    int open = 0;
+    for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next) {
+        bool last = !arm->pattern || !arm->next;
+        if (!last) {
+            ctx->has_expected_type = false;
+            fprintf(out, string_subject ? "(rae_ext_rae_str_eq(" : "((");
+            if (once) fprintf(out, "__rae_subject%d", id);
+            else emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
+            fprintf(out, string_subject ? ", " : " == ");
+            emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
+            fprintf(out, ") ? ");
+            open++;
+        }
+        ctx->has_expected_type = type != NULL;
+        if (type) ctx->expected_type = *type;
+        emit_match_arm(ctx, type, arm->value, out);
+        if (last) break;
+        fprintf(out, " : ");
+    }
+    for (; open > 0; open--) fprintf(out, ")");
+    fprintf(out, ")");
+    if (once) fprintf(out, "; }))");
+    ctx->has_expected_type = saved_has;
+    ctx->expected_type = saved_expected;
+}
+
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   /* A wait a resumable twin hoisted before the statement: its result */
@@ -1670,7 +1767,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     || str_eq_cstr(base->as.call.callee->as.ident, "rae_ext___buf_get")
                     || str_eq_cstr(base->as.call.callee->as.ident, "__buf_get"));
             const AstTypeRef* base_tr = !base_is_storage_place
-                && (base->kind == AST_EXPR_CALL || base->kind == AST_EXPR_METHOD_CALL)
+                && (base->kind == AST_EXPR_CALL || base->kind == AST_EXPR_METHOD_CALL
+                    || base->kind == AST_EXPR_MATCH)
                 ? infer_expr_type_ref(ctx, base) : NULL;
             bool base_is_owned = base_tr && !base_tr->is_view && !base_tr->is_mod && !base_tr->is_opt
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_tr, 0);
@@ -2082,6 +2180,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 f->value->kind == AST_EXPR_CALL ||
                 f->value->kind == AST_EXPR_METHOD_CALL ||
                 f->value->kind == AST_EXPR_INTERP ||
+                f->value->kind == AST_EXPR_MATCH ||
                 f->value->kind == AST_EXPR_BINARY);
             // Detect "RHS is a function parameter used exactly
             // once". Parameters live in locals[0..func_first_let_idx).
@@ -2463,43 +2562,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         fprintf(out, ")");
         break;
     }
-    case AST_EXPR_MATCH: {
-        // Match expression: emit as ternary chain
-        // match x { case 1 => 10, case 2 => 20, default => 30 }
-        // -> (x == 1) ? 10 : (x == 2) ? 20 : 30
-        const AstMatchArm* arm = expr->as.match_expr.arms;
-        fprintf(out, "(");
-        while (arm) {
-            if (!arm->pattern) {
-                // default arm
-                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
-            } else {
-                // Check if string comparison needed
-                const AstTypeRef* subj_tr = infer_expr_type_ref(ctx, expr->as.match_expr.subject);
-                Str subj_base = get_base_type_name(subj_tr);
-                bool is_string = str_eq_cstr(subj_base, "String") || str_eq_cstr(subj_base, "rae_String");
-                if (is_string) {
-                    fprintf(out, "rae_ext_rae_str_eq(");
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
-                    fprintf(out, ", ");
-                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")");
-                } else {
-                    fprintf(out, "(");
-                    emit_expr(ctx, expr->as.match_expr.subject, out, PREC_LOWEST, false, false);
-                    fprintf(out, " == ");
-                    emit_expr(ctx, arm->pattern, out, PREC_LOWEST, false, false);
-                    fprintf(out, ")");
-                }
-                fprintf(out, " ? ");
-                emit_expr(ctx, arm->value, out, PREC_LOWEST, false, false);
-                fprintf(out, " : ");
-            }
-            arm = arm->next;
-        }
-        fprintf(out, ")");
-        break;
-    }
+    case AST_EXPR_MATCH: emit_match_expr(ctx, expr, out); break;
     case AST_EXPR_NONE:
         // `none` for an optional REFERENCE is a null pointer; for an optional
         // value it is the empty box. The expected type decides which.

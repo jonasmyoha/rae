@@ -491,6 +491,18 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             for (const AstInterpPart* p = expr->as.interp.parts; p; p = p->next) discover_specializations_expr_impl(ctx, p->value);
             break;
         }
+        case AST_EXPR_MATCH: {
+            bool saved_has = ctx->has_expected_type;
+            ctx->has_expected_type = false;
+            discover_specializations_expr_impl(ctx, expr->as.match_expr.subject);
+            for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next)
+                discover_specializations_expr_impl(ctx, arm->pattern);
+            ctx->has_expected_type = saved_has;
+            // An arm lands where the match does: the same expected type
+            for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next)
+                discover_specializations_expr_impl(ctx, arm->value);
+            break;
+        }
         case AST_EXPR_BOX:
         case AST_EXPR_UNBOX:
         case AST_EXPR_OWN:

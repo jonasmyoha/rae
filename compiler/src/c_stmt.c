@@ -282,6 +282,7 @@ static bool c_expr_can_move_owned_payload(const AstExpr* expr) {
     case AST_EXPR_COLLECTION_LITERAL:
     case AST_EXPR_LIST:
     case AST_EXPR_INTERP:
+    case AST_EXPR_MATCH:
     case AST_EXPR_BINARY:
     case AST_EXPR_OWN:
       return true;
@@ -743,7 +744,7 @@ static bool c_opt_source_aliases(CFuncContext* ctx, const AstExpr* value) {
 // the same call already follows.
 bool c_stmt_temp_value_owns(CFuncContext* ctx, const AstExpr* value) {
   if (!value) return false;
-  if (value->kind == AST_EXPR_OBJECT) return true;
+  if (value->kind == AST_EXPR_OBJECT || value->kind == AST_EXPR_MATCH) return true;
   if (value->kind != AST_EXPR_CALL && value->kind != AST_EXPR_METHOD_CALL) return false;
   if (value->kind == AST_EXPR_CALL) {
     const AstExpr* callee = value->as.call.callee;
@@ -846,8 +847,8 @@ bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e) {
   return false;
 }
 
-static void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
-                                 int id, FILE* out);
+void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
+                          int id, FILE* out);
 
 // Is `e` the raw slot read itself (`rae_ext_rae_buf_get`, unsafe code)?
 static bool expr_is_raw_slot_read(const AstExpr* e) {
@@ -897,8 +898,8 @@ bool emit_alias_call_copy(CFuncContext* ctx, const AstExpr* value, const AstType
 // A deep copy of `source` as an expression of C type `type_name`: a place
 // is copied where it is; an alias call (expr_is_alias_call) is evaluated
 // into a temporary first, since a call is no lvalue to take the address of.
-static void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
-                                 int id, FILE* out) {
+void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
+                          int id, FILE* out) {
   if (source->kind == AST_EXPR_CALL || source->kind == AST_EXPR_METHOD_CALL) {
     fprintf(out, "(__extension__ ({ %s __src%d = ", type_name, id);
     emit_expr(ctx, source, out, PREC_LOWEST, false, false);
@@ -2688,6 +2689,8 @@ bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
         if (expr_may_pool(ctx, el->value)) return true;
       return false;
     case AST_EXPR_MATCH:
+      // a place as an arm is copied into the pool (emit_match_arm)
+      if (type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) return true;
       if (expr_may_pool(ctx, e->as.match_expr.subject)) return true;
       for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next)
         if (expr_may_pool(ctx, arm->value)) return true;
@@ -2875,6 +2878,22 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_LET: {
+            // In a specialization the binding's type is the concrete one: as
+            // `T` a String was not detached from the pool (its statement's
+            // flush freed it) and a place was bound bit for bit, so both
+            // owners freed it. A raw slot read keeps `T`: the binding holds
+            // the bits of a slot its container owns (c_local_is_slot_alias),
+            // and an abstract type is what keeps the scope exit off it. So does
+            // a binding without a value: `var zero: T` is all zeros for every
+            // T (List.copyAtDefault), not a struct's declared defaults.
+            AstStmt concrete_let;
+            if (ctx->generic_params && ctx->generic_args && stmt->as.let_stmt.type && stmt->as.let_stmt.value
+                && !expr_is_raw_slot_read(stmt->as.let_stmt.value)) {
+                concrete_let = *stmt;
+                concrete_let.as.let_stmt.type = substitute_type_ref(
+                    ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
+                stmt = &concrete_let;
+            }
             // Tracks whether the RHS was wrapped in rae_string_copy /
             // rae_deep_copy_<T>. The post-init ownership classifier
             // below uses this to mark the local as owning (since the
@@ -3471,6 +3490,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 bool owns = (init == NULL)
                     || (init->kind == AST_EXPR_OBJECT)
                     || (init->kind == AST_EXPR_INTERP)
+                    || (init->kind == AST_EXPR_MATCH)   // emit_match_expr
                     || (init->kind == AST_EXPR_BINARY)
                     // #965: `own <place>` MOVES the value in (the source is
                     // marked moved or zeroed), so the binding is its owner.
@@ -3556,7 +3576,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 const AstExpr* rhs = stmt->as.assign_stmt.value;
                 bool fresh = rhs && (rhs->kind == AST_EXPR_CALL
                     || rhs->kind == AST_EXPR_METHOD_CALL || rhs->kind == AST_EXPR_INTERP
-                    || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_OWN);
+                    || rhs->kind == AST_EXPR_MATCH || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_OWN);
                 int temporary = ctx->temp_counter++;
                 // Copy/take before dropping: source may alias destination.
                 fprintf(out, "{ rae_String __asg%d = %s(", temporary,
@@ -3603,7 +3623,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // pool-owned: take it, as the String local/field stores do.
                     bool rhs_fresh_string = pointee_is_string && rhs && (
                         rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
-                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_MATCH ||
                         rhs->kind == AST_EXPR_OWN);
                     // `=` COPIES (#79484806): an RHS that reads an existing
                     // location lands as a deep copy, never as an alias of the
@@ -3797,7 +3817,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     const AstExpr* rhs = stmt->as.assign_stmt.value;
                     bool rhs_fresh_string = target_is_string && rhs && (
                         rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
-                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_MATCH ||
                         rhs->kind == AST_EXPR_OWN);
                     fprintf(out, "{ ");
                     emit_type_ref_as_c_type(ctx, &elem, out, false);
@@ -3830,7 +3850,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // safe); only produced temporaries / explicit own transfer.
                     bool rhs_owning_temp = rhs && (
                         rhs->kind == AST_EXPR_CALL || rhs->kind == AST_EXPR_METHOD_CALL ||
-                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY ||
+                        rhs->kind == AST_EXPR_INTERP || rhs->kind == AST_EXPR_BINARY || rhs->kind == AST_EXPR_MATCH ||
                         rhs->kind == AST_EXPR_OWN);
                     int tmpn = ctx->temp_counter++;
                     // The old value is released only while the local owns it:
@@ -3883,6 +3903,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         rhs->kind == AST_EXPR_CALL ||
                         rhs->kind == AST_EXPR_METHOD_CALL ||
                         rhs->kind == AST_EXPR_INTERP ||
+                        rhs->kind == AST_EXPR_MATCH ||
                         rhs->kind == AST_EXPR_BINARY ||
                         rhs->kind == AST_EXPR_OWN);
                     int tmpn = ctx->temp_counter++;

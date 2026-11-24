@@ -1614,6 +1614,7 @@ static TypeInfo* sema_resolve_decl_type(CompilerContext* ctx, AstModule* module,
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static bool sema_own_moves_local(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* operand);
+static void sema_analyze_match_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
 static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
@@ -1798,6 +1799,19 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
                 if (!head) head = p; else tail->next = p; tail = p; curr = curr->next;
             }
             res->as.interp.parts = head;
+            break;
+        }
+        case AST_EXPR_MATCH: {
+            res->as.match_expr.subject = clone_expr(arena, expr->as.match_expr.subject);
+            AstMatchArm* head = NULL; AstMatchArm* tail = NULL;
+            for (AstMatchArm* curr = expr->as.match_expr.arms; curr; curr = curr->next) {
+                AstMatchArm* arm = arena_alloc(arena, sizeof(AstMatchArm)); *arm = *curr;
+                arm->pattern = clone_expr(arena, curr->pattern);
+                arm->value = clone_expr(arena, curr->value); arm->next = NULL;
+                if (!head) head = arm; else tail->next = arm;
+                tail = arm;
+            }
+            res->as.match_expr.arms = head;
             break;
         }
         default: break;
@@ -5090,6 +5104,11 @@ static bool reflect_expr_has_type_name(const AstExpr* e) {
             for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next)
                 if (reflect_expr_has_type_name(p->value)) return true;
             return false;
+        case AST_EXPR_MATCH:
+            if (reflect_expr_has_type_name(e->as.match_expr.subject)) return true;
+            for (const AstMatchArm* a = e->as.match_expr.arms; a; a = a->next)
+                if (reflect_expr_has_type_name(a->value)) return true;
+            return false;
         default: return false;
     }
 }
@@ -7301,6 +7320,20 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
             s_current_decl_origin ? s_current_decl_origin : (s_current_module ? s_current_module->file_path : NULL));
     }
     AstExpr* expr = *expr_ptr;
+    /* A match expression: its arms are what lands in the destination. An arm
+     * that is `none` or an optional makes the whole one optional. */
+    if (expr->kind == AST_EXPR_MATCH && expected->kind != TYPE_ANY) {
+        TypeInfo* arm_type = sema_strip_ref(expected);
+        bool optional = false;
+        for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next)
+            if (arm->value && (arm->value->kind == AST_EXPR_NONE
+                               || (arm->value->resolved_type && arm->value->resolved_type->kind == TYPE_OPT)))
+                optional = true;
+        if (!optional && arm_type->kind == TYPE_OPT && arm_type->as.opt.base) arm_type = arm_type->as.opt.base;
+        for (AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next)
+            ensure_type_match(ctx, arm_type, &arm->value);
+        expr->resolved_type = arm_type;
+    }
     /* An untyped `{ ... }` list literal has no type of its own (so the checks
      * below return early); its integer elements must fit the destination's
      * element type. A typed one is checked at its own analysis. */
@@ -9715,6 +9748,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     sema_diag_file(module));
             break;
         }
+        case AST_EXPR_MATCH: sema_analyze_match_expr(ctx, module, symbols, expr); break;
         case AST_EXPR_INTERP: {
             AstInterpPart* part = expr->as.interp.parts;
             while (part) {
@@ -10301,6 +10335,7 @@ static bool expr_is_owning(SymbolTable* symbols, const AstExpr* e) {
         case AST_EXPR_COLLECTION_LITERAL:
         case AST_EXPR_LIST:
         case AST_EXPR_STRING:
+        case AST_EXPR_MATCH:   /* each arm is copied, moved or fresh */
             return true;
         /* Explicit transfer — the author has said this is intentional. */
         case AST_EXPR_OWN:
@@ -10557,6 +10592,62 @@ static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symb
         }
         if (total > 0 && mods == total) sema_reject_view_to_mod(module, symbols, mod_param, a->value);
     }
+}
+
+/* `match subject { case a => x  default => y }` as a value: its type is that
+ * of its arms (ensure_type_match settles it once the destination is known).
+ * The value spaces follow the match statement's rule: an open one (Int,
+ * String) needs a `default`, an enum without one names every case. */
+static void sema_analyze_match_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+    AstExpr* subject = expr->as.match_expr.subject;
+    if (subject) sema_analyze_expr(ctx, module, symbols, subject, true);
+    const AstDecl* enum_decl = NULL;
+    Str enum_name = {0};
+    bool has_default = false;
+    for (AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next) {
+        if (arm->pattern) {
+            sema_analyze_expr(ctx, module, symbols, arm->pattern, true);
+            if (arm->pattern->kind == AST_EXPR_MEMBER && arm->pattern->as.member.object->kind == AST_EXPR_IDENT) {
+                Symbol* sym = symbol_table_lookup(symbols, arm->pattern->as.member.object->as.ident);
+                if (sym && sym->decl && sym->decl->kind == AST_DECL_ENUM) {
+                    enum_decl = sym->decl;
+                    enum_name = arm->pattern->as.member.object->as.ident;
+                }
+            }
+        } else {
+            has_default = true;
+        }
+        if (!arm->value) continue;
+        sema_analyze_expr(ctx, module, symbols, arm->value, true);
+        TypeInfo* type = arm->value->resolved_type ? sema_strip_ref(arm->value->resolved_type) : NULL;
+        if (!expr->resolved_type && type && type->kind != TYPE_VOID && arm->value->kind != AST_EXPR_NONE)
+            expr->resolved_type = type;
+        if (sema_typeinfo_uncopyable(ctx, type) && sema_expr_copies_place(arm->value))
+            sema_report_uncopyable(module, sema_diag_file(module), arm->value->line, arm->value->column, type->name,
+                                   "out of a match arm");
+    }
+    if (has_default) return;
+    char message[256];
+    message[0] = '\0';
+    if (enum_decl) {
+        for (const AstEnumMember* member = enum_decl->as.enum_decl.members; member && !message[0]; member = member->next) {
+            bool covered = false;
+            for (const AstMatchArm* arm = expr->as.match_expr.arms; arm && !covered; arm = arm->next)
+                covered = sema_pattern_names_member(arm->pattern, enum_name, member->name);
+            if (!covered)
+                snprintf(message, sizeof message, "non-exhaustive match on enum '%.*s': missing case '%.*s.%.*s' (add it)",
+                         (int)enum_name.len, enum_name.data, (int)enum_name.len, enum_name.data,
+                         (int)member->name.len, member->name.data);
+        }
+    } else {
+        TypeInfo* type = subject && subject->resolved_type ? sema_strip_ref(subject->resolved_type) : NULL;
+        if (type && (type->kind == TYPE_INT || type->kind == TYPE_STRING))
+            snprintf(message, sizeof message, "match on %s requires a 'default' arm (its value space is open-ended)",
+                     type->kind == TYPE_INT ? "Int" : "String");
+    }
+    if (!message[0]) return;
+    diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, message);
+    module->had_error = true;
 }
 
 /* Is `sym` a local that owns its value? A reference binding, a borrowed

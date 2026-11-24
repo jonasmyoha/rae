@@ -1200,6 +1200,7 @@ bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     if (str_eq_cstr(base, "Int64") || str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int32") || str_eq_cstr(base, "UInt64") || str_eq_cstr(base, "UInt32") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) fprintf(out, "0");
     else if (str_eq_cstr(base, "Float64") || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32")) fprintf(out, "0.0");
     else if (str_eq_cstr(base, "Bool")) fprintf(out, "false");
+    else if (is_scalar_primitive_type(base)) fprintf(out, "0");
     else if (str_eq_cstr(base, "String")) fprintf(out, "(rae_String){0}");
     /* Buffer and Ptr are emitted as C POINTERS, so their zero value is a null
      * pointer, not a braced aggregate. `{0}` compiles but earns
@@ -1228,7 +1229,7 @@ static bool field_default_is_pooled_string(const AstTypeField* field, const AstT
     if (!str_eq_cstr(get_base_type_name(field_tr), "String")) return false;
     AstExprKind kind = field->default_value->kind;
     return kind == AST_EXPR_CALL || kind == AST_EXPR_METHOD_CALL
-        || kind == AST_EXPR_INTERP || kind == AST_EXPR_BINARY;
+        || kind == AST_EXPR_INTERP || kind == AST_EXPR_BINARY || kind == AST_EXPR_MATCH;
 }
 
 void emit_field_default(CFuncContext* ctx, const AstTypeField* field, const AstTypeRef* field_tr, FILE* out) {
@@ -1779,6 +1780,27 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
          * the statement flush then freed (#343: garbage element + a
          * double-free abort at drop). */
         case AST_EXPR_INTERP: return &kString_tr;
+        /* The value of its arms, owned (emit_match_expr): the first arm with a
+         * type gives it, and an arm that is `none` or an optional makes it one */
+        case AST_EXPR_MATCH: {
+            const AstTypeRef* first = NULL;
+            bool optional = false;
+            for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next) {
+                if (!arm->value) continue;
+                if (arm->value->kind == AST_EXPR_NONE) { optional = true; continue; }
+                const AstTypeRef* type = infer_expr_type_ref(ctx, arm->value);
+                if (type && type->is_opt) optional = true;
+                if (!first) first = type;
+            }
+            if (!first) return NULL;
+            AstTypeRef* owned = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+            *owned = *first;
+            owned->is_view = owned->is_mod = owned->is_own = owned->is_copy = false;
+            owned->is_opt = optional;
+            owned->next = NULL;
+            if (owned->parts) owned->resolved_type = NULL;  /* it may say "reference" */
+            return owned;
+        }
         case AST_EXPR_IDENT: {
             const AstTypeRef* lt = get_local_type_ref(ctx, expr->as.ident);
             if (lt) return lt;

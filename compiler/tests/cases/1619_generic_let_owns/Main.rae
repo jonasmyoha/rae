@@ -1,0 +1,158 @@
+# `let x: T` in a generic function owns what `let x: String` (a list, a struct) would: the result of
+# a call is taken, a place is copied
+type Note {
+  name: String
+  parts: List(String)
+}
+
+type Box(T: type) {
+  value: T
+}
+
+func pass(T: type, value: own T) ret T {
+  ret own value
+}
+
+func maybePass(T: type, value: own T, give: view Bool) ret opt T {
+  if give {
+    ret own value
+  }
+  ret none
+}
+
+func viaCall(T: type, value: own T, list: mod List(T)) {
+  let held: T = pass(T, value: own value)
+  log("between {list.length}")
+  list.add(value: own held)
+}
+
+func viaCopy(T: type, value: view T, list: mod List(T)) {
+  let held: T = value
+  let again: T = held
+  list.add(value: own held)
+  list.add(value: own again)
+}
+
+func viaField(T: type, value: own T, list: mod List(T)) {
+  let box: Box(T) = { value: own value }
+  let field: T = box.value
+  list.add(value: own field)
+  list.add(value: box.value)
+}
+
+func viaVar(T: type, first: view T, second: own T) ret T {
+  var held: T = first
+  held = own second
+  ret held
+}
+
+func viaOptional(
+  T: type
+  value: own T
+  list: mod List(T)
+  give: view Bool
+) {
+  let maybe: opt T = maybePass(T, value: own value, give: give)
+  if let found: view T = maybe {
+    list.add(value: found)
+  }
+}
+
+func viaAlias(T: type, list: mod List(T), next: view T) {
+  if let slot: mod T = list.modAt(index: 0) {
+    let other: mod T = slot
+    other = next
+  }
+}
+
+func viaSlots(T: type, list: view List(T), into: mod List(T)) {
+  loop var i: Int = 0, i < list.length, ++i {
+    if let element: T = list.copyAt(index: i) {
+      let held: T = element
+      into.add(value: own held)
+    }
+  }
+}
+
+func unused(T: type, value: own T, flag: view Bool) ret Int {
+  let held: T = pass(T, value: own value)
+  let other: T = held
+  if flag {
+    ret 1
+  }
+  ret 2
+}
+
+type Defaults {
+  count: Int = 5
+  name: String = "default"
+}
+
+func makeNote(n: view Int) ret Note {
+  ret Note { name: "note {n}", parts: { "part {n}" } }
+}
+
+func main() {
+  let n: Int = 1
+  var texts: List(String) = {}
+  viaCall(String, value: "call {n}", list: texts)
+  viaCopy(String, value: "copy {n}", list: texts)
+  viaField(String, value: "field {n}", list: texts)
+  log(viaVar(String, first: "first {n}", second: "second {n}"))
+  viaOptional(
+    String
+    value: "optional {n}"
+    list: texts
+    give: true
+  )
+  viaOptional(
+    String
+    value: "none {n}"
+    list: texts
+    give: false
+  )
+  viaAlias(String, list: texts, next: "alias {n}")
+  var copies: List(String) = {}
+  viaSlots(String, list: texts, into: copies)
+  log("{texts} {copies.length} {unused(String, value: "unused {n}", flag: true)}")
+  var lists: List(List(String)) = {}
+  viaCall(List(String), value: List(String) { "call {n}" }, list: lists)
+  viaCopy(List(String), value: List(String) { "copy {n}" }, list: lists)
+  viaField(List(String), value: List(String) { "field {n}" }, list: lists)
+  viaOptional(
+    List(String)
+    value: List(String) { "optional {n}" }
+    list: lists
+    give: true
+  )
+  viaAlias(List(String), list: lists, next: List(String) { "alias {n}" })
+  var listCopies: List(List(String)) = {}
+  viaSlots(List(String), list: lists, into: listCopies)
+  log(
+    "{lists} {listCopies.length} {unused(List(String), value: List(String) { "u {n}" }, flag: false)}"
+  )
+  var notes: List(Note) = {}
+  viaCall(Note, value: makeNote(n: 1), list: notes)
+  viaCopy(Note, value: makeNote(n: 2), list: notes)
+  viaField(Note, value: makeNote(n: 3), list: notes)
+  let chosen: Note = viaVar(Note, first: makeNote(n: 4), second: makeNote(n: 5))
+  viaOptional(
+    Note
+    value: makeNote(n: 6)
+    list: notes
+    give: true
+  )
+  viaAlias(Note, list: notes, next: makeNote(n: 7))
+  var noteCopies: List(Note) = {}
+  viaSlots(Note, list: notes, into: noteCopies)
+  log("{notes} {chosen.name} {noteCopies.length} {unused(Note, value: makeNote(n: 8), flag: true)}")
+  var numbers: List(Int) = {}
+  viaCall(Int, value: 1, list: numbers)
+  viaCopy(Int, value: 2, list: numbers)
+  viaField(Int, value: 3, list: numbers)
+  viaSlots(Int, list: List(Int) { 4 }, into: numbers)
+  log("{numbers} {unused(Int, value: 5, flag: false)}")
+  # A binding without a value is all zeros (List.copyAtDefault)
+  let defaults: List(Defaults) = {}
+  log("{defaults.copyAtDefault(index: 0)}")
+}

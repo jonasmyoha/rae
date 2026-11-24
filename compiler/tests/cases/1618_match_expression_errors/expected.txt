@@ -1,0 +1,21 @@
+tests/cases/1618_match_expression_errors/Main.rae:17:27: unknown value 'missing': no local, parameter, const, or global by that name is in scope here
+    17 |   ret match k { case 1 => missing, default => 0 }
+       |                           ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:23:6: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    23 |   log("{chosen} {text}")  # ERROR
+       |      ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:28:6: use of moved value 'text': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'text' a new value before using it again, or pass a copy (`"{text}"`, or a `copy T` parameter) if the caller needs it
+    28 |   log("{count} {text}")  # ERROR
+       |      ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:32:7: match on Int requires a 'default' arm (its value space is open-ended)
+    32 |   ret match k { case 1 => 1, case 2 => 2 }  # ERROR
+       |       ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:36:7: non-exhaustive match on enum 'Color': missing case 'Color.green' (add it)
+    36 |   ret match color { case Color.red => 1 }  # ERROR
+       |       ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:40:44: cannot copy 'Handle' out of a match arm: it has a destructor (`func drop(this: mod Handle)`) and no `func copy(this: view Handle) ret Handle`; write 'own <expr>' to transfer it, or bind a 'view'/'mod' reference
+    40 |   let chosen: Handle = match k { case 1 => first, default => own second }
+       |                                            ^~~~
+tests/cases/1618_match_expression_errors/Main.rae:46:56: optional not unwrapped — use `if let`
+    46 |   let chosen: String = match k { case 1 => names.copyAt(index: 0), default => "other" }
+       |                                                        ^~~~

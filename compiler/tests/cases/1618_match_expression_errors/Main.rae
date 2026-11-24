@@ -1,0 +1,58 @@
+# The arms of a match expression are checked like any expression
+enum Color { red, green }
+
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.id}")
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func unknownName(k: view Int) ret Int {
+  ret match k { case 1 => missing, default => 0 }
+  # ERROR
+}
+
+func movedInArm(k: view Int, text: own String) {
+  let chosen: String = match k { case 1 => own text, default => "other" }
+  log("{chosen} {text}")  # ERROR
+}
+
+func movedByArgument(k: view Int, text: own String) {
+  let count: Int = match k { case 1 => takeText(text: own text), default => 0 }
+  log("{count} {text}")  # ERROR
+}
+
+func noDefault(k: view Int) ret Int {
+  ret match k { case 1 => 1, case 2 => 2 }  # ERROR
+}
+
+func missingCase(color: view Color) ret Int {
+  ret match color { case Color.red => 1 }  # ERROR
+}
+
+func copiedHandle(k: view Int, first: own Handle, second: own Handle) {
+  let chosen: Handle = match k { case 1 => first, default => own second }
+  # ERROR
+  log("{chosen.id}")
+}
+
+func optionalArm(k: view Int, names: view List(String)) {
+  let chosen: String = match k { case 1 => names.copyAt(index: 0), default => "other" }
+  # ERROR
+  log(chosen)
+}
+
+func main() {
+  log("{unknownName(k: 1)}")
+  movedInArm(k: 1, text: "a")
+  movedByArgument(k: 1, text: "a")
+  log("{noDefault(k: 1)} {missingCase(color: Color.red)}")
+  copiedHandle(k: 1, first: Handle { id: 1 }, second: Handle { id: 2 })
+  optionalArm(k: 1, names: List(String) { "a" })
+}
