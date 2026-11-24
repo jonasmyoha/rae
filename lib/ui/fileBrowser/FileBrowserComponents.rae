@@ -9,6 +9,7 @@ open collections/StringMap
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
+open ui/SelectionComponents
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FolderListing
 
@@ -31,8 +32,41 @@ type BrowserOptions {
   openCountTint: Bool = false
   columnWidth: Float = 220.0
   previewWidth: Float = 260.0
-  multiple: Bool = true
+  # none: it is walked by its bar and by the program only
+  selection: ListSelectMode = ListSelectMode.multiple
+  rowHeight: Float = 24.0
   source: BrowserSource = BrowserSource.disk
+}
+
+# A browser written in a scene, on the node it is to fill (its options by their names; the order's
+# fields too):
+#
+#     "Files": { "FileBrowser": { "root": "~/Projects", "showHidden": true, "orderBy": "modified" }
+#     }
+#
+# fileBrowserUpdate opens it, and opens it anew when the component is changed.
+type FileBrowser {
+  root: String = "~"
+  orderBy: EntryOrderBy = EntryOrderBy.name
+  descending: Bool = false
+  foldersFirst: Bool = true
+  showHidden: Bool = false
+  extensions: List(String) = {}
+  selection: ListSelectMode = ListSelectMode.multiple
+  returnKey: BrowserReturnKey = BrowserReturnKey.rename
+  allowAboveRoot: Bool = false
+  showBar: Bool = true
+  showPreview: Bool = true
+  openCountTint: Bool = false
+  columnWidth: Float = 220.0
+  previewWidth: Float = 260.0
+  rowHeight: Float = 24.0
+  source: BrowserSource = BrowserSource.disk
+}
+
+# The authored browsers, alone in a struct: the components a scene may name (applyComponentInto)
+type AuthoredBrowsers {
+  fileBrowsers: ComponentTable(FileBrowser)
 }
 
 # Which selection was looked at: a column's, by how often it and the column's entries had changed
@@ -42,7 +76,7 @@ type SelectionSeen {
   entries: Int = -1
 }
 
-type FileBrowser {
+type OpenBrowser {
   root: String
   options: BrowserOptions
   # Its nodes: the mounted scene, the strip that scrolls and its window, the bar's parts
@@ -72,6 +106,8 @@ type FileBrowser {
   # The selection looked at last
   seen: SelectionSeen = {}
   barShown: String = ""
+  # The change of its authored component that it was opened from (-1: opened by the program)
+  authoredStamp: Int = -1
 }
 
 enum ColumnState {
@@ -111,6 +147,8 @@ type FileColumn {
   rowsStamp: Int = -1
   # Its own path on the disk, with symlinks followed ("" not known yet)
   realFolder: String = ""
+  # When the folder was changed last, before its listing read it (folderStamp)
+  modified: Int = -1
   # What its state box shows
   stateShown: String = "-"
 }
@@ -197,12 +235,23 @@ type ListingJobs {
   nextGeneration: Int = 1
 }
 
-# A folder watched, by how many columns, and when a change was last acted on
+# A folder watched, and when a change was last acted on
 type FolderWatch {
   folder: String
   notify: FileNotify.FileNotify
   lastSeconds: Float64 = -10.0
   changed: Bool = false
+}
+
+# The shown folders no notification comes for, and the thread that looks when they changed
+type FolderPolling {
+  answers: Channel(FolderStamps)
+  folders: List(String) = {}
+  # The thread, when one runs
+  jobs: List(FolderJob) = {}
+  # The window had the focus; when to look next while it has
+  focused: Bool = false
+  nextSeconds: Float64 = 0.0
 }
 
 # ----- events --------------------------------------------------------------------
@@ -230,7 +279,8 @@ type EntriesRequested {
 }
 
 type FileBrowserSystems {
-  browsers: ComponentTable(FileBrowser)
+  authored: AuthoredBrowsers
+  browsers: ComponentTable(OpenBrowser)
   columns: ComponentTable(FileColumn)
   entries: ComponentTable(ColumnEntries)
   history: ComponentTable(BrowserHistory)
@@ -241,6 +291,7 @@ type FileBrowserSystems {
   # resources, shared by every browser of the app
   listing: ListingJobs
   watches: List(FolderWatch) = {}
+  polling: FolderPolling
   # columns came or went since the watches were set up
   watchesStale: Bool = false
   browsersMade: Int = 0
@@ -256,7 +307,9 @@ type FileBrowserSystems {
 
 func createFileBrowsers() ret FileBrowserSystems {
   ret FileBrowserSystems {
-    browsers: ComponentTable.create(FileBrowser)
+    authored: AuthoredBrowsers { fileBrowsers: ComponentTable.create(FileBrowser) }
+    polling: FolderPolling { answers: createChannel(FolderStamps) }
+    browsers: ComponentTable.create(OpenBrowser)
     columns: ComponentTable.create(FileColumn)
     entries: ComponentTable.create(ColumnEntries)
     history: ComponentTable.create(BrowserHistory)

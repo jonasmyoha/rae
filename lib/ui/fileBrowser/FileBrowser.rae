@@ -6,6 +6,8 @@
 #     let browser: EntityId = openFileBrowser(systems: files, world: world, uiSystems: uiSystems,
 #       scenes: scenes, host: node, root: folder, options: {})
 #
+# or, in a scene, `"Files": { "FileBrowser": { "root": "~/Projects" } }` (FileBrowserComponents).
+#
 # Each frame, after updateUiInput, dividerSystem, scrollBarSystem, keyFocusSystem, the text fields
 # and
 # listSelectionSystem: fileBrowserUpdate; then updateScrollRoots and scrollToRowSystem;
@@ -21,6 +23,8 @@ open ui/BindingComponents
 open ui/Components
 open ui/Ecs
 open ui/KeyFocusSystem
+open ui/Registry
+open ui/RenderSystem
 open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
@@ -75,7 +79,7 @@ func openFileBrowser(
   )
   systems.browsersMade = systems.browsersMade + 1
   let folder: String = cleanPath(path: homePath(path: root))
-  var browser: FileBrowser = { root: "{folder}", options: options }
+  var browser: OpenBrowser = { root: "{folder}", options: options }
   browser.scene = scene
   browser.bar = nodeIn(world: world, root: scene, nodeId: "FileBrowserBar")
   browser.back = nodeIn(world: world, root: scene, nodeId: "FileBrowserBack")
@@ -140,13 +144,14 @@ func noteButton(
 }
 
 # One frame of every browser's input, listings and columns. True when something changed, so that
-# there is a frame to draw.
+# there is a frame to draw. `windowFocused` is Gpu2d.windowFocused().
 func fileBrowserUpdate(
   systems: mod FileBrowserSystems
   world: mod UiWorld
   uiSystems: mod UiSystems
   scenes: view SceneRegistry
   keys: view BrowserKeys
+  windowFocused: view Bool
   nowSeconds: view Float64
 ) ret Bool {
   frameAdvance(this: systems.folderOpened)
@@ -155,12 +160,19 @@ func fileBrowserUpdate(
   frameAdvance(this: systems.entriesRequested)
   systems.now = nowSeconds
   closeDeadBrowsers(systems: systems, world: world, uiSystems: uiSystems)
-  var changed: Bool = fileSelectionSystem(
+  applyFileBrowserComponents(systems: systems, world: world)
+  var changed: Bool = openAuthoredBrowsers(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
   )
+  changed = fileSelectionSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
   changed = fileKeysSystem(
     systems: systems
     world: world
@@ -174,7 +186,7 @@ func fileBrowserUpdate(
     uiSystems: uiSystems
     scenes: scenes
   ) or changed
-  changed = fileWatchSystem(systems: systems) or changed
+  changed = fileWatchSystem(systems: systems, windowFocused: windowFocused) or changed
   changed = fileListingSystem(
     systems: systems
     world: world
@@ -196,12 +208,14 @@ func fileBrowserRows(
   world: mod UiWorld
   uiSystems: mod UiSystems
   scenes: view SceneRegistry
+  res: view Gpu2dUi
 ) ret Bool {
   let around: Bool = fileChromeSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
+    res: res
   )
   ret fileRowsSystem(systems: systems, world: world, uiSystems: uiSystems) or around
 }
@@ -228,6 +242,92 @@ func earlier(first: view Float64, second: view Float64) ret Float64 {
     ret second
   }
   ret first
+}
+
+# ----- browsers written in a scene ---------------------------------------------------------------
+
+# Take the FileBrowser components out of what the mounted scenes named and lib/ui has no table for.
+# fileBrowserUpdate does it; an app that reports unknown components (reportPendingComponents,
+# uiFrameEnd) before its first fileBrowserUpdate calls it before that.
+func applyFileBrowserComponents(systems: mod FileBrowserSystems, world: mod UiWorld) {
+  if world.pendingComponents.length is 0 {
+    ret
+  }
+  var kept: List(PendingComponent) = {}
+  loop let pending: view PendingComponent in world.pendingComponents {
+    if applyComponentInto(system: systems.authored, world: world, pending: pending) is false {
+      kept.add(value: pending)
+    }
+  }
+  world.pendingComponents = own kept
+}
+
+func authoredOptions(authored: view FileBrowser) ret BrowserOptions {
+  ret BrowserOptions {
+    order: EntryOrder {
+      by: authored.orderBy
+      descending: authored.descending
+      foldersFirst: authored.foldersFirst
+    }
+    showHidden: authored.showHidden
+    extensions: authored.extensions
+    selection: authored.selection
+    returnKey: authored.returnKey
+    allowAboveRoot: authored.allowAboveRoot
+    showBar: authored.showBar
+    showPreview: authored.showPreview
+    openCountTint: authored.openCountTint
+    columnWidth: authored.columnWidth
+    previewWidth: authored.previewWidth
+    rowHeight: authored.rowHeight
+    source: authored.source
+  }
+}
+
+# A browser for each node with the component; one whose component changed is opened anew
+func openAuthoredBrowsers(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = componentCount(this: systems.authored.fileBrowsers) - 1, i >= 0, --i {
+    let host: EntityId = componentEntityAt(this: systems.authored.fileBrowsers, i: i)
+    if isAlive(world: world, entityId: host) is false {
+      componentRemove(this: systems.authored.fileBrowsers, entityId: host)
+      continue
+    }
+    let stamp: Int = componentModStamp(this: systems.authored.fileBrowsers, entityId: host)
+    let open: Bool = componentHas(this: systems.browsers, entityId: host)
+    if open and componentView(this: systems.browsers, entityId: host).authoredStamp is stamp {
+      continue
+    }
+    var authored: FileBrowser = {}
+    if let copied: FileBrowser = componentCopy(this: systems.authored.fileBrowsers, entityId: host) {
+      authored = own copied
+    }
+    if open {
+      closeBrowserNodes(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: host
+      )
+    }
+    let opened: EntityId = openFileBrowser(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      host: host
+      root: authored.root
+      options: authoredOptions(authored: authored)
+    )
+    componentMod(this: systems.browsers, entityId: host).authoredStamp = stamp
+    changed = true
+  }
+  ret changed
 }
 
 # ----- what an app calls ------------------------------------------------------------------------
@@ -258,7 +358,7 @@ func setBrowserOptions(
   browser: view EntityId
   options: view BrowserOptions
 ) {
-  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
   mine.options = options
   showNode(
     world: world
@@ -331,7 +431,7 @@ func fileBrowserState(
     order: options.order
     showHidden: options.showHidden
   }
-  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
   state.widths = mine.widths
   let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
   state.selected = listSelectedOf(systems: systems, world: world, column: deepest)
@@ -360,7 +460,7 @@ func restoreFileBrowser(
   browser: view EntityId
   state: view FileBrowserState
 ) ret Bool {
-  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
   mine.options.order = state.order
   mine.options.showHidden = state.showHidden
   mine.widths = state.widths
@@ -402,8 +502,23 @@ func restoreFileBrowser(
 # ----- closing
 # --------------------------------------------------------------------------------------
 
-# Close a browser: its nodes go, the host node stays
+# Close a browser: its nodes go, the host node stays (one written in a scene does not open again)
 func closeFileBrowser(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  componentRemove(this: systems.authored.fileBrowsers, entityId: browser)
+  closeBrowserNodes(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+}
+
+func closeBrowserNodes(
   systems: mod FileBrowserSystems
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -494,5 +609,6 @@ func closeFileBrowsers(
     )
   }
   closeWatches(systems: systems)
-  ret stopFileListings(systems: systems, waitMs: 1000)
+  let polled: Bool = stopPolling(systems: systems, waitMs: 1000)
+  ret stopFileListings(systems: systems, waitMs: 1000) and polled
 }

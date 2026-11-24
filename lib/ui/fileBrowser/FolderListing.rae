@@ -26,8 +26,38 @@ type FolderAnswer {
   outside: Bool = false
   realFolder: String = ""
   entries: List(FileEntry) = {}
+  # when the folder was changed, looked at before it was read
+  modified: Int = -1
   # the entries' names, made on the thread
   names: List(String) = {}
+}
+
+# When a folder was changed last, in nanoseconds; -1 when it is not there
+func folderStamp(folder: view String) ret Int {
+  let status: PathStatus = Files.pathStatus(path: folder, follow: true)
+  if status.found is false {
+    ret -1
+  }
+  ret status.modifiedWholeSeconds * 1000000000 + status.modifiedNanoseconds
+}
+
+# When each of some folders was changed last
+type FolderStamps {
+  folders: List(String) = {}
+  stamps: List(Int) = {}
+}
+
+# Look when folders were changed (a disk may take its time, so on a thread)
+func folderStampsThread(answers: own Channel(FolderStamps), folders: own List(String)) ret Int {
+  var found: FolderStamps = {}
+  loop let folder: view String in folders {
+    found.folders.add(value: "{folder}")
+    found.stamps.add(value: folderStamp(folder: folder))
+  }
+  let count: Int = found.folders.length
+  answers.channelSend(value: own found)
+  EventLoop.wake()
+  ret count
 }
 
 func namesOf(entries: view List(FileEntry)) ret List(String) {
@@ -41,7 +71,12 @@ func namesOf(entries: view List(FileEntry)) ret List(String) {
 # One listing: what the folder has, then, when that took none of their details, those
 func listFolderThread(answers: own Channel(FolderAnswer), request: own FolderRequest) ret Int {
   let real: String = Files.realPath(path: request.folder)
-  var answer: FolderAnswer = { generation: request.generation, realFolder: "{real}" }
+  let modified: Int = folderStamp(folder: request.folder)
+  var answer: FolderAnswer = {
+    generation: request.generation
+    realFolder: "{real}"
+    modified: modified
+  }
   if request.limit.length() > 0 and real.length() > 0 and pathInside(
     folder: request.limit
     path: real
@@ -71,7 +106,11 @@ func listFolderThread(answers: own Channel(FolderAnswer), request: own FolderReq
     }
     # what the OS's own flag hides
     Files.filterEntries(fold: fold, filter: request.filter, entries: listing.entries)
-    var whole: FolderAnswer = { generation: request.generation, realFolder: "{real}" }
+    var whole: FolderAnswer = {
+      generation: request.generation
+      realFolder: "{real}"
+      modified: modified
+    }
     whole.detailsOnly = listing.entries.length is count
     if whole.detailsOnly is false {
       whole.names = namesOf(entries: listing.entries)

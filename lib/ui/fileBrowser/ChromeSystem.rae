@@ -1,6 +1,8 @@
 # What is around the rows (docs/file-browser-design.md §1.3, §5): the bar with its trail, the
 # columns'
 # widths and states, and the strip's scroll to a column.
+import Math
+import SdfText
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
@@ -11,20 +13,21 @@ open ui/PaneComponents
 open ui/DividerSystem
 open ui/SceneInstance
 open ui/ScrollBarSystem
+open ui/RenderSystem
+open ui/TextStyle
+open ui/ThemeResolved
 open ui/UiSystems
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
 open ui/fileBrowser/NavigationSystem
 
 # A folder listed sooner shows no spinner
 const spinnerSeconds: Float64 = 0.15
 
-# About how wide a letter of the names and the trail is, in points, and what a row and a trail part
-# have besides the name
+# About how wide a letter of the trail is, in points, and what a trail part has besides the name
 const letterWidth: Float = 7.6
-
-const rowExtra: Float = 58.0
 
 const trailExtra: Float = 30.0
 
@@ -33,8 +36,14 @@ func fileChromeSystem(
   world: mod UiWorld
   uiSystems: mod UiSystems
   scenes: view SceneRegistry
+  res: view Gpu2dUi
 ) ret Bool {
-  var changed: Bool = takeWidths(systems: systems, world: world, uiSystems: uiSystems)
+  var changed: Bool = takeWidths(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    res: res
+  )
   loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
     let column: EntityId = componentEntityAt(this: systems.columns, i: i)
     changed = showColumnState(systems: systems, world: world, column: column) or changed
@@ -74,6 +83,7 @@ func takeWidths(
   systems: mod FileBrowserSystems
   world: mod UiWorld
   uiSystems: mod UiSystems
+  res: view Gpu2dUi
 ) ret Bool {
   var changed: Bool = false
   loop var i: Int = 0, i < eventCount(DividerEvent, this: world.dividerEvents), ++i {
@@ -90,11 +100,17 @@ func takeWidths(
         world: world
         uiSystems: uiSystems
         divider: event.divider
-        size: widthOfNames(systems: systems, column: column)
+        size: widthOfNames(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          res: res
+          column: column
+        )
       )
       width = componentView(this: world.dividers, entityId: event.divider).size
     }
-    let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
     loop mine.widths.length <= place {
       mine.widths.add(value: 0.0)
     }
@@ -104,16 +120,154 @@ func takeWidths(
   ret changed
 }
 
-func widthOfNames(systems: view FileBrowserSystems, column: view EntityId) ret Float {
-  var longest: Int = 0
+# How wide a column is that shows each of its names whole, measured in the font of its rows
+func widthOfNames(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  column: view EntityId
+) ret Float {
+  let room: RowRoom = rowRoom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    res: res
+    column: column
+  )
+  let widest: Float = widestLetter(font: res.textFont, size: room.textSize)
+  var plain: Float = 0.0
+  var arrow: Float = 0.0
   let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
-  loop let entry: view FileEntry in held.entries {
+  # the longest names first measured, most of the others need not be
+  let long: Int = longestName(entries: held.entries) / 2
+  loop var pass: Int = 0, pass < 2, ++pass {
+    loop let entry: view FileEntry in held.entries {
+      let bytes: Int = entry.name.length()
+      if (bytes > long) is (pass is 0) {
+        let folder: Bool = opensAsFolder(kinds: systems.kinds, entry: entry)
+        var best: Float = plain
+        if folder {
+          best = arrow
+        }
+        if bytes.toFloat() * widest > best {
+          let width: Float = SdfText.sdfMeasureText(
+            font: res.textFont
+            text: entry.name
+            sizePx: room.textSize
+          )
+          if folder and width > arrow {
+            arrow = width
+          } else if folder is false and width > plain {
+            plain = width
+          }
+        }
+      }
+    }
+  }
+  var width: Float = plain + room.plain
+  if arrow > 0.0 and arrow + room.plain + room.arrow > width {
+    width = arrow + room.plain + room.arrow
+  }
+  # whole points: a name is then never a rounding error too wide
+  ret Math.ceil(x: width + 0.5)
+}
+
+# What a row has besides its name: around it, and for an arrow; and the size of its text
+type RowRoom {
+  plain: Float = 58.0
+  arrow: Float = 23.0
+  textSize: Float = 14.0
+}
+
+func rowRoom(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  column: view EntityId
+) ret RowRoom {
+  var room: RowRoom = {}
+  let body: EntityId = componentView(this: systems.columns, entityId: column).body
+  let list: EntityId = componentView(this: systems.columns, entityId: column).list
+  var row: EntityId = noEntity()
+  if componentHas(this: world.childrens, entityId: list) {
+    let rows: view Children = componentView(this: world.childrens, entityId: list)
+    row = rows.ids.copyAtFallback(index: 0, fallback: noEntity())
+  }
+  let name: EntityId = nodeIn(world: world, root: row, nodeId: "FileRowName")
+  let arrow: EntityId = nodeIn(world: world, root: row, nodeId: "FileRowArrow")
+  if isNone(this: name) or componentHas(this: uiSystems.layout.computedRects, entityId: name) is false or componentHas(
+    this: world.rects
+    entityId: body
+  ) is false {
+    # a row scene of the app's own: about
+    ret room
+  }
+  if let text: Text = componentCopy(this: world.texts, entityId: name) {
+    room.textSize = resolveTextSize(theme: res.theme, styleId: text.styleId)
+  }
+  if let override: StyleOverride = componentCopy(this: world.styleOverrides, entityId: name) {
+    room.textSize = styleOverrideSize(base: room.textSize, so: override)
+  }
+  room.plain = componentView(this: world.rects, entityId: body).size.x - componentView(
+    this: uiSystems.layout.computedRects
+    entityId: name
+  ).size.x
+  room.arrow = 0.0
+  if componentHas(this: world.rects, entityId: arrow) {
+    room.arrow = componentView(this: world.rects, entityId: arrow).size.x + gapAround(
+      world: world
+      uiSystems: uiSystems
+      node: arrow
+    )
+    if componentHas(this: world.actives, entityId: arrow) is false or componentView(
+      this: world.actives
+      entityId: arrow
+    ).value {
+      room.plain = room.plain - room.arrow
+    }
+  }
+  ret room
+}
+
+# The gap of the layout a node is in
+func gapAround(world: view UiWorld, uiSystems: view UiSystems, node: view EntityId) ret Float {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: node) {
+    let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: node).parent
+    if componentHas(this: world.layouts, entityId: parent) {
+      ret componentView(this: world.layouts, entityId: parent).gap
+    }
+  }
+  ret 0.0
+}
+
+func longestName(entries: view List(FileEntry)) ret Int {
+  var longest: Int = 0
+  loop let entry: view FileEntry in entries {
     let length: Int = entry.name.length()
     if length > longest {
       longest = length
     }
   }
-  ret longest.toFloat() * letterWidth + rowExtra
+  ret longest
+}
+
+# The widest letter a byte of a name can be
+func widestLetter(font: view SdfFont, size: view Float) ret Float {
+  var widest: Float = size * 0.5
+  let letters: String = "MW@%mw&QOGDHNUABCEFKPRSTVXYZL"
+  loop var i: Int = 0, i < letters.length(), ++i {
+    let width: Float = SdfText.sdfMeasureText(
+      font: font
+      text: letters.sub(start: i, len: 1)
+      sizePx: size
+    )
+    if width > widest {
+      widest = width
+    }
+  }
+  ret widest
 }
 
 # ----- states ----------------------------------------------------------------------------------
@@ -219,7 +373,7 @@ func showBar(
   scenes: view SceneRegistry
   browser: view EntityId
 ) ret Bool {
-  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
   if mine.options.showBar is false {
     ret false
   }
@@ -347,7 +501,7 @@ func revealColumn(
   uiSystems: mod UiSystems
   browser: view EntityId
 ) ret Bool {
-  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
   let place: Int = mine.reveal
   let strip: EntityId = mine.strip
   let window: EntityId = mine.stripWindow

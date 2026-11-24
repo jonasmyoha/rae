@@ -1,6 +1,7 @@
 # The file browser's listing thread (lib/ui/fileBrowser/FolderListing): the names of a large folder
 # first and their details after, several at once, a folder outside its limit refused, also through a
-# symlink, and a missing one. Under ThreadSanitizer too.
+# symlink, and a missing one; and the thread that looks when folders were changed. Under
+# ThreadSanitizer too.
 import Files
 import Sys
 open Channel
@@ -99,5 +100,23 @@ func main() {
   take(answers: answers, finished: 4)
   log("read {first.get()}, {second.get()}, {third.get()}, {fourth.get()}")
   answers.freeChannel()
+
+  # when folders were changed: one that gets a file, one that does not, one that is not there
+  let looked: Channel(FolderStamps) = createChannel(FolderStamps)
+  let folders: List(String) = { "{base}/small", "{base}/large", "{base}/none" }
+  let before: Task(Int) = spawn thread folderStampsThread(answers: looked, folders: folders)
+  let beforeCount: Int = before.get()
+  sleep(ms: 20)
+  let more: Bool = Sys.writeFile(path: "{base}/small/two.txt", content: "two")
+  let after: Task(Int) = spawn thread folderStampsThread(answers: looked, folders: folders)
+  let afterCount: Int = after.get()
+  let earlier: FolderStamps = looked.receive()
+  let later: FolderStamps = looked.receive()
+  loop var i: Int = 0, i < folders.length, ++i {
+    let old: Int = earlier.stamps.copyAtFallback(index: i, fallback: 0)
+    let new: Int = later.stamps.copyAtFallback(index: i, fallback: 0)
+    log("looked at: there {new >= 0}, changed {new is not old}")
+  }
+  looked.freeChannel()
   removeTree(folder: base)
 }

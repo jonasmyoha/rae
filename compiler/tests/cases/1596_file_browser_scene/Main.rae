@@ -1,0 +1,373 @@
+# A file browser written in a scene ("FileBrowser" on its host node): its options, a component of
+# another system left alone, the component changed, the browser closed, its page unmounted. A
+# divider's
+# double click: the column is as wide as its widest name needs, measured. The folders have no
+# notifications here (config.env): a change shows by the look every 2 s while the window has the
+# focus.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/PaneComponents
+open ui/Registry
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/NavigationSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  files: FileBrowserSystems
+  base: String
+  focused: Bool = true
+  # A frame's seconds: none while a thread works, however long it takes
+  step: Float64 = 0.02
+}
+
+# One frame of everything, as an app has it
+func idle(app: mod App) {
+  app.input.nowSeconds = app.input.nowSeconds + app.step
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 5.0
+      y: 395.0
+      down: false
+      kind: InputKind.mouse
+    )
+    wheel: 0.0
+  )
+  var changed: Bool = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: ListSelectionKeys {}
+  )
+  changed = fileBrowserUpdate(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    keys: BrowserKeys {}
+    windowFocused: app.focused
+    nowSeconds: app.input.nowSeconds
+  )
+  changed = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.02
+  )
+  changed = fileBrowserRows(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    res: app.resources
+  )
+  frameAdvance(this: app.world.dividerEvents)
+  changed = dividerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: DividerKeys {}
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# Frames until no folder is being read or looked at, and some more
+func settle(app: mod App) {
+  var quiet: Int = 0
+  loop var i: Int = 0, i < 3000 and quiet < 6, ++i {
+    idle(app: app)
+    quiet = quiet + 1
+    if app.files.listing.jobs.length + app.files.listing.waiting.length + app.files.polling.jobs.length > 0 {
+      quiet = 0
+      app.step = 0.0
+      sleep(ms: 1)
+    } else {
+      app.step = 0.02
+    }
+  }
+}
+
+# Frames of `seconds` of the app's clock, each folder read and looked at in its time
+func pass(app: mod App, seconds: view Float64) {
+  let end: Float64 = app.input.nowSeconds + seconds
+  loop app.input.nowSeconds < end {
+    settle(app: app)
+  }
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func boxOf(app: view App, entityId: view EntityId) ret WorldRect {
+  ret worldRectOf(
+    wt: componentView(this: app.uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: app.uiSystems.layout.computedRects, entityId: entityId)
+  )
+}
+
+func writeFile(path: view String, text: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: text)
+}
+
+func makeFolder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func makeApp(base: view String) ret App {
+  let scene: Scene = parseScene(
+    source: embedText(file: "Page.raescene").split(sep: "BASE").join(sep: base)
+  )
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    files: createFileBrowsers()
+    base: "{base}"
+  }
+  registerFileBrowserScenes(scenes: app.scenes)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 1000.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  ret app
+}
+
+func namesOf(app: view App, browser: view EntityId, place: view Int) ret String {
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+  var names: List(String) = {}
+  if componentHas(this: app.files.entries, entityId: column) {
+    let held: view ColumnEntries = componentView(this: app.files.entries, entityId: column)
+    loop let entry: view FileEntry in held.entries {
+      names.add(value: "{entry.name}")
+    }
+  }
+  ret names.join(sep: " ")
+}
+
+func show(app: view App, step: view String) {
+  log("{step}: {componentCount(this: app.files.browsers)} browsers")
+  loop let nodeId: view String in List(String) { "Left", "Right" } {
+    let host: EntityId = nodeOf(world: app.world, nodeId: nodeId)
+    if componentHas(this: app.files.browsers, entityId: host) {
+      let columns: Int = browserColumns(systems: app.files, browser: host).length
+      log("  {nodeId}: {columns} columns, {namesOf(app: app, browser: host, place: 0)}")
+    }
+  }
+}
+
+# The divider of the column at `place` double-clicked
+func fit(app: mod App, browser: view EntityId, place: view Int) {
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+  let divider: EntityId = componentView(this: app.files.columns, entityId: column).divider
+  let event: DividerEvent = { kind: DividerEventKind.doubleClicked, divider: divider, size: 220.0 }
+  eventSend(this: app.world.dividerEvents, value: own event)
+  settle(app: app)
+  # whole names, and none to spare: one point less would cut one
+  var cut: Int = 0
+  var tight: Int = 0
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  let rows: view Children = componentView(this: app.world.childrens, entityId: list)
+  loop let row: view EntityId in rows.ids {
+    let name: EntityId = nodeIn(world: app.world, root: row, nodeId: "FileRowName")
+    let text: String = "{componentView(this: app.world.texts, entityId: name).text}"
+    let wide: Float = boxOf(app: app, entityId: name).w
+    if middleCutText(
+      font: app.resources.textFont
+      text: text
+      sizePx: 14.0
+      width: wide
+    ) is not text {
+      cut = cut + 1
+    }
+    if middleCutText(
+      font: app.resources.textFont
+      text: text
+      sizePx: 14.0
+      width: wide - 2.0
+    ) is not text {
+      tight = tight + 1
+    }
+  }
+  let width: Float = componentView(
+    this: app.world.rects
+    entityId: componentView(this: app.files.columns, entityId: column).body
+  ).size.x
+  log(
+    "fit {folderOfColumn(systems: app.files, column: column).sub(start: app.base.length(), len: 20)}: {rows.ids.length} rows, {cut} cut, {tight} with nothing to spare, width changed {width is not 220.0 and width > 120.0 and width < 600.0}"
+  )
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-browser-scene-{nowNs()}"
+  makeFolder(path: base)
+  makeFolder(path: "{base}/names")
+  makeFolder(path: "{base}/wide folder with a rather long name")
+  makeFolder(path: "{base}/wide folder with a rather long name/inner")
+  writeFile(path: "{base}/names/.hidden.txt", text: "1234567890123")
+  writeFile(path: "{base}/names/iiiiiiiiiiiiiiiiiiiiiiiiiiiii.txt", text: "1")
+  writeFile(path: "{base}/names/WWWWWWWWWWWWWWWWWW.txt", text: "12345")
+  writeFile(path: "{base}/names/Ångström über alles, née.txt", text: "123")
+  writeFile(path: "{base}/names/skipped.png", text: "123")
+  writeFile(path: "{base}/short.txt", text: "1")
+  var app: App = makeApp(base: base)
+  log("pending {app.world.pendingComponents.length}")
+  applyFileBrowserComponents(systems: app.files, world: app.world)
+  loop let pending: view PendingComponent in app.world.pendingComponents {
+    log("not its own: {pending.name}")
+  }
+  settle(app: app)
+  show(app: app, step: "opened")
+  let left: EntityId = nodeOf(world: app.world, nodeId: "Left")
+  let right: EntityId = nodeOf(world: app.world, nodeId: "Right")
+  let options: BrowserOptions = browserOptions(systems: app.files, browser: right)
+  log(
+    "options: above {options.allowAboveRoot} bar {options.showBar} preview {options.showPreview} {options.previewWidth} tint {options.openCountTint} opens {options.returnKey is BrowserReturnKey.open}"
+  )
+  let column: EntityId = columnAt(systems: app.files, browser: right, place: 0)
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  log(
+    "rows {componentView(this: app.world.listViews, entityId: list).itemHeight} high, column {boxOf(
+      app: app
+      entityId: column
+    ).w}, selects nothing {componentView(this: app.world.listSelections, entityId: list).mode is ListSelectMode.none}"
+  )
+
+  # measured widths
+  fit(app: app, browser: left, place: 0)
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: left
+    folder: "{base}/names"
+  )
+  settle(app: app)
+  fit(app: app, browser: left, place: 1)
+
+  # no notifications: the folders are looked at
+  log("watched {app.files.watches.length}, looked at {app.files.polling.folders.length}")
+  app.focused = false
+  settle(app: app)
+  writeFile(path: "{base}/late.txt", text: "1")
+  pass(app: app, seconds: 5.0)
+  show(app: app, step: "a file came, without the focus")
+  log("needs a frame {fileBrowserDeadline(systems: app.files) >= 0.0}")
+  app.focused = true
+  idle(app: app)
+  settle(app: app)
+  show(app: app, step: "the focus came")
+  writeFile(path: "{base}/later.txt", text: "1")
+  pass(app: app, seconds: 1.0)
+  log("after 1 s: {namesOf(app: app, browser: left, place: 0)}")
+  log("needs a frame {fileBrowserDeadline(systems: app.files) > app.input.nowSeconds}")
+  pass(app: app, seconds: 2.0)
+  log("after 3 s: {namesOf(app: app, browser: left, place: 0)}")
+
+  # the component changed, closed, unmounted
+  componentMod(this: app.files.authored.fileBrowsers, entityId: left).root = "{base}/names"
+  settle(app: app)
+  show(app: app, step: "its root changed")
+  closeFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: left
+  )
+  settle(app: app)
+  show(app: app, step: "closed")
+  unmountPage(world: app.world, uiSystems: app.uiSystems, pageId: "p")
+  settle(app: app)
+  log(
+    "unmounted: {componentCount(this: app.files.browsers)} browsers, {componentCount(
+      this: app.files.authored.fileBrowsers
+    )} components, {componentCount(this: app.files.columns)} columns"
+  )
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

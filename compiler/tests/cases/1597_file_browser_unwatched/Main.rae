@@ -1,0 +1,333 @@
+# Folders the file browser cannot watch (more than 32 are shown): looked at every 2 s while the
+# window
+# has the focus, at once when it gets it, not without it, not read again while nothing changed, and
+# watched again when fewer are shown.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/PaneComponents
+open ui/Registry
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/NavigationSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  files: FileBrowserSystems
+  base: String
+  focused: Bool = true
+  # A frame's seconds: none while a thread works, however long it takes
+  step: Float64 = 0.02
+}
+
+# One frame of everything, as an app has it
+func idle(app: mod App) {
+  app.input.nowSeconds = app.input.nowSeconds + app.step
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 5.0
+      y: 395.0
+      down: false
+      kind: InputKind.mouse
+    )
+    wheel: 0.0
+  )
+  var changed: Bool = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: ListSelectionKeys {}
+  )
+  changed = fileBrowserUpdate(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    keys: BrowserKeys {}
+    windowFocused: app.focused
+    nowSeconds: app.input.nowSeconds
+  )
+  changed = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.02
+  )
+  changed = fileBrowserRows(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    res: app.resources
+  )
+  frameAdvance(this: app.world.dividerEvents)
+  changed = dividerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: DividerKeys {}
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# Frames until no folder is being read or looked at, and some more
+func settle(app: mod App) {
+  var quiet: Int = 0
+  loop var i: Int = 0, i < 3000 and quiet < 6, ++i {
+    idle(app: app)
+    quiet = quiet + 1
+    if app.files.listing.jobs.length + app.files.listing.waiting.length + app.files.polling.jobs.length > 0 {
+      quiet = 0
+      app.step = 0.0
+      sleep(ms: 1)
+    } else {
+      app.step = 0.02
+    }
+  }
+}
+
+# Frames of `seconds` of the app's clock, each folder read and looked at in its time
+func pass(app: mod App, seconds: view Float64) {
+  let end: Float64 = app.input.nowSeconds + seconds
+  loop app.input.nowSeconds < end {
+    settle(app: app)
+  }
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func boxOf(app: view App, entityId: view EntityId) ret WorldRect {
+  ret worldRectOf(
+    wt: componentView(this: app.uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: app.uiSystems.layout.computedRects, entityId: entityId)
+  )
+}
+
+func writeFile(path: view String, text: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: text)
+}
+
+func makeFolder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func makeApp(base: view String) ret App {
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    files: createFileBrowsers()
+    base: "{base}"
+  }
+  registerFileBrowserScenes(scenes: app.scenes)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 1000.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  ret app
+}
+
+# How many of the columns show `name`
+func showing(app: view App, browser: view EntityId, name: view String) ret Int {
+  var count: Int = 0
+  loop let column: view EntityId in browserColumns(systems: app.files, browser: browser) {
+    if entryIndex(systems: app.files, column: column, name: name) >= 0 {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+# The listings the folders that are looked at had last, added up
+func listingsOfPolled(app: view App, browser: view EntityId) ret Int {
+  var sum: Int = 0
+  loop let column: view EntityId in browserColumns(systems: app.files, browser: browser) {
+    let mine: view FileColumn = componentView(this: app.files.columns, entityId: column)
+    if app.files.polling.folders.contains(value: mine.folder) {
+      sum = sum + mine.generation
+    }
+  }
+  ret sum
+}
+
+# Frames until a watched folder's change was acted on (the OS tells of it in its own time)
+func waitFor(app: mod App, browser: view EntityId, name: view String) {
+  loop var i: Int = 0, i < 1000 and showing(app: app, browser: browser, name: name) is 0, ++i {
+    idle(app: app)
+    sleep(ms: 2)
+  }
+  settle(app: app)
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-browser-deep-{nowNs()}"
+  var folder: String = "{base}"
+  makeFolder(path: folder)
+  var folders: List(String) = { "{folder}" }
+  loop var i: Int = 1, i < 37, ++i {
+    folder = "{folder}/d"
+    makeFolder(path: folder)
+    folders.add(value: "{folder}")
+  }
+  var app: App = makeApp(base: base)
+  let host: EntityId = nodeOf(world: app.world, nodeId: "Host")
+  let browser: EntityId = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: host
+    root: base
+    options: BrowserOptions {}
+  )
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    folder: folder
+  )
+  settle(app: app)
+  log(
+    "{browserColumns(systems: app.files, browser: browser).length} columns, {app.files.watches.length} watched, {app.files.polling.folders.length} looked at"
+  )
+  app.focused = false
+  settle(app: app)
+  loop let polled: view String in app.files.polling.folders {
+    writeFile(path: "{polled}/unseen.txt", text: "1")
+  }
+  if let watched: view FolderWatch = app.files.watches.viewAt(index: 0) {
+    writeFile(path: "{watched.folder}/seen.txt", text: "1")
+  }
+  waitFor(app: app, browser: browser, name: "seen.txt")
+  pass(app: app, seconds: 5.0)
+  log(
+    "without the focus: watched {showing(app: app, browser: browser, name: "seen.txt")}, looked at {showing(
+      app: app
+      browser: browser
+      name: "unseen.txt"
+    )}"
+  )
+  app.focused = true
+  pass(app: app, seconds: 1.0)
+  log("with it: {showing(app: app, browser: browser, name: "unseen.txt")}")
+  let listings: Int = listingsOfPolled(app: app, browser: browser)
+  pass(app: app, seconds: 7.0)
+  log("nothing changed: read again {listingsOfPolled(app: app, browser: browser) is not listings}")
+
+  # one that is looked at goes: the browser falls back to the deepest there is
+  let last: Int = browserColumns(systems: app.files, browser: browser).length - 1
+  let deepest: EntityId = columnAt(systems: app.files, browser: browser, place: last)
+  let gone: String = folderOfColumn(systems: app.files, column: deepest)
+  if app.files.polling.folders.contains(value: gone) is false {
+    log("the deepest is watched")
+  }
+  removeTree(folder: gone)
+  pass(app: app, seconds: 3.0)
+  log("the deepest went: {browserColumns(systems: app.files, browser: browser).length} columns")
+
+  # fewer columns: every folder is watched again
+  let back: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    folder: folders.copyAtFallback(index: 20, fallback: "")
+  )
+  settle(app: app)
+  log(
+    "{browserColumns(systems: app.files, browser: browser).length} columns, {app.files.watches.length} watched, {app.files.polling.folders.length} looked at, needs a frame {fileBrowserDeadline(
+      systems: app.files
+    ) >= 0.0}"
+  )
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

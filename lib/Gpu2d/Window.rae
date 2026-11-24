@@ -160,6 +160,15 @@ func windowVisible() ret Bool {
   }
 }
 
+# Whether the window has the keyboard: the app is the one in front
+func nativeWindowFocused() mainThread unsafe extern("rae_ext_Gpu2d_windowFocused") ret Bool
+
+func windowFocused() ret Bool {
+  unsafe {
+    ret nativeWindowFocused()
+  }
+}
+
 # True under any of the headless-budget envs (RAE_UI_HEADLESS,
 # RAE_SDL_HEADLESS_MS, RAE_HEADLESS_FRAMES) -- the runtime's own definition,
 # the same one that creates the window hidden. A headless run renders to the

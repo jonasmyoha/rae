@@ -36,6 +36,7 @@ rae_Bool rae_ext_Gpu2d_buttonReleased(int64_t button) { (void)button; return 0; 
 int64_t rae_ext_Gpu2d_buttonClicks(int64_t button) { (void)button; return 0; }
 static int g_g2d_escape_quits = 1;
 void rae_ext_Gpu2d_setEscapeQuits(rae_Bool on) { g_g2d_escape_quits = on ? 1 : 0; }
+rae_Bool rae_ext_Gpu2d_windowFocused(void) { return 0; }
 rae_Bool rae_ext_Gpu2d_escapeQuits(void) { return g_g2d_escape_quits != 0; }
 rae_Bool rae_ext_Gpu2d_pointerDown(void) { return 0; }
 int64_t rae_ext_Gpu2d_pointerKind(void) { return 0; }

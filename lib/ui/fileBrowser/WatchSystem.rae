@@ -1,23 +1,28 @@
 # Live update (docs/file-browser-design.md §7): each folder shown is watched, and read again when it
-# changed, at most once in 200 ms.
+# changed, at most once in 200 ms. Folders no notification comes for are looked at every 2 s while
+# the window has the focus, and when it gets it.
 import FileNotify
+open Channel
 open ecs/ComponentTable
 open ecs/Entity
 open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FolderListing
 open ui/fileBrowser/NavigationSystem
 
-# Folders watched at once; those beyond are not
+# Folders watched at once; those beyond are looked at
 const watchedFolders: Int = 32
 
 const relistSeconds: Float64 = 0.2
 
+const pollSeconds: Float64 = 2.0
+
 # True when a column is to be read again
-func fileWatchSystem(systems: mod FileBrowserSystems) ret Bool {
+func fileWatchSystem(systems: mod FileBrowserSystems, windowFocused: view Bool) ret Bool {
   if systems.watchesStale {
     systems.watchesStale = false
     setWatches(systems: systems)
   }
-  var changed: Bool = false
+  var changed: Bool = pollFolders(systems: systems, windowFocused: windowFocused)
   loop var i: Int = 0, i < systems.watches.length, ++i {
     var due: Bool = false
     var folder: String = ""
@@ -45,9 +50,70 @@ func fileWatchSystem(systems: mod FileBrowserSystems) ret Bool {
   ret changed
 }
 
-# When a change that waits is acted on (below 0: none waits)
+# Columns whose folder was changed since they read it are read again
+func takeStamps(systems: mod FileBrowserSystems) ret Bool {
+  var changed: Bool = false
+  loop systems.polling.answers.pending() > 0 {
+    let found: FolderStamps = systems.polling.answers.receive()
+    # its thread is at its end: dropping its task does not wait
+    systems.polling.jobs.clear()
+    loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+      let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+      let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+      if mine.listed and mine.stale is false {
+        if let at: Int = found.folders.indexOf(value: mine.folder) {
+          if found.stamps.copyAtFallback(index: at, fallback: -1) is not mine.modified {
+            mine.stale = true
+            changed = true
+          }
+        }
+      }
+    }
+  }
+  ret changed
+}
+
+# Look at the folders that are not watched, on a thread, one look at a time
+func pollFolders(systems: mod FileBrowserSystems, windowFocused: view Bool) ret Bool {
+  let changed: Bool = takeStamps(systems: systems)
+  let gained: Bool = windowFocused and systems.polling.focused is false
+  systems.polling.focused = windowFocused
+  let due: Bool = gained or systems.now >= systems.polling.nextSeconds
+  if windowFocused is false or due is false or systems.polling.folders.length is 0 or systems.polling.jobs.length > 0 {
+    ret changed
+  }
+  systems.polling.nextSeconds = systems.now + pollSeconds
+  let task: Task(Int) = spawn thread folderStampsThread(
+    answers: systems.polling.answers
+    folders: systems.polling.folders
+  )
+  systems.polling.jobs.add(value: FolderJob { generation: 0, task: own task })
+  ret changed
+}
+
+# Wait for the look that runs; false when its disk has not answered in `waitMs`
+func stopPolling(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  systems.polling.folders.clear()
+  loop var i: Int = 0, i < waitMs and systems.polling.jobs.length > 0, ++i {
+    let taken: Bool = takeStamps(systems: systems)
+    if systems.polling.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.polling.jobs.length > 0 {
+    ret false
+  }
+  systems.polling.answers.freeChannel()
+  ret true
+}
+
+# When a change that waits is acted on, or the folders that are not watched are looked at (below 0:
+# nothing waits)
 func watchDeadline(systems: view FileBrowserSystems) ret Float64 {
   var deadline: Float64 = -1.0
+  if systems.polling.focused and systems.polling.folders.length > 0 and systems.polling.jobs.length is 0 {
+    deadline = systems.polling.nextSeconds
+  }
   loop let watch: view FolderWatch in systems.watches {
     let at: Float64 = watch.lastSeconds + relistSeconds
     if watch.changed and (deadline < 0.0 or at < deadline) {
@@ -57,7 +123,7 @@ func watchDeadline(systems: view FileBrowserSystems) ret Float64 {
   ret deadline
 }
 
-# One watch for each folder a column shows, the deepest columns' first
+# One watch for each folder a column shows; those that cannot be are looked at instead
 func setWatches(systems: mod FileBrowserSystems) {
   var wanted: List(String) = {}
   loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
@@ -82,13 +148,21 @@ func setWatches(systems: mod FileBrowserSystems) {
       systems.watches.removeAt(index: i)
     }
   }
+  systems.polling.folders.clear()
   loop let folder: view String in wanted {
-    if systems.watches.length >= watchedFolders {
-      ret
+    var watched: Bool = false
+    if systems.watches.length < watchedFolders {
+      var notify: FileNotify = FileNotify.createFileNotify()
+      watched = FileNotify.fileNotifyWatch(fileNotify: notify, path: folder)
+      if watched {
+        systems.watches.add(value: FolderWatch { folder: "{folder}", notify: own notify })
+      } else {
+        FileNotify.closeFileNotify(fileNotify: notify)
+      }
     }
-    var notify: FileNotify = FileNotify.createFileNotify()
-    let watched: Bool = FileNotify.fileNotifyWatch(fileNotify: notify, path: folder)
-    systems.watches.add(value: FolderWatch { folder: "{folder}", notify: own notify })
+    if watched is false {
+      systems.polling.folders.add(value: "{folder}")
+    }
   }
 }
 

@@ -107,6 +107,7 @@ func frame(
     uiSystems: app.uiSystems
     scenes: app.scenes
     keys: keys
+    windowFocused: true
     nowSeconds: app.input.nowSeconds
   )
   answerRequests(app: app)
@@ -122,6 +123,7 @@ func frame(
     world: app.world
     uiSystems: app.uiSystems
     scenes: app.scenes
+    res: app.resources
   )
   listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
   runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
@@ -797,7 +799,11 @@ func saved(app: mod App) {
     scenes: app.scenes
     host: nodeOf(world: app.world, nodeId: "Right")
     root: "{app.base}/root"
-    options: BrowserOptions { showPreview: false, multiple: false, columnWidth: 130.0 }
+    options: BrowserOptions {
+      showPreview: false
+      selection: ListSelectMode.single
+      columnWidth: 130.0
+    }
   )
   let restored: Bool = restoreFileBrowser(
     systems: app.files

@@ -252,15 +252,19 @@ A column's selection is a `ListSelection` on its `ListView` (§10), and its scro
 `ScrollState`: the general components, not copies of them. `ColumnEntries` is large, so it is always
 taken by `view` or `mod`, never copied, and moved in with `own`.
 
-Authored in a scene: only the host node, `"FileBrowser": { ... }` with the options of §4.1. It
-reaches `FileBrowserSystems` as any app component does (`world.pendingComponents` and
-`applyComponentInto`); an app can also call `openFileBrowser(...)` on a node.
+Authored in a scene: only the host node, `"FileBrowser": { "root": "~/Projects", ... }` with the options
+of §4.1. It reaches `FileBrowserSystems.authored` as any app component does (`world.pendingComponents`
+and `applyComponentInto`): `fileBrowserUpdate` takes it and opens the browser, and opens it anew when the
+component changes (case 1596). An app that reports unknown components before its first
+`fileBrowserUpdate` calls `applyFileBrowserComponents` before that. An app can also call
+`openFileBrowser(...)` on a node.
 
 ### 4.1 Options of a browser
 
-`order`, `foldersFirst`, `showHidden`, `selection` (`none`, `single`, `multiple`), `returnKey`,
-`allowOperations` (false: look and pick only), `allowAboveRoot`, `showBar`, `showSidebar`,
-`showPreview`, `openCountTint`, `columnWidth`, `rowHeight`, `mode` (§8).
+`order` (in a scene `orderBy`, `descending`, `foldersFirst`), `showHidden`, `extensions`, `selection`
+(`none`, `single`, `multiple`), `returnKey`, `allowAboveRoot`, `showBar`, `showPreview`,
+`openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9). To come: `allowOperations`
+(false: look and pick only; 7b), `showSidebar` and `mode` (§8; 7d).
 
 ### 4.2 Events
 
@@ -530,9 +534,10 @@ archives opened as folders (an app can, with `source: app`), several windows sha
   column no longer wants is dropped.
 - A folder below the root waits for the root's own listing, whose real path is its limit; a folder that
   is outside by its real path (a symlink) shows "This folder is outside the one shown here".
-- Widths are on `FileBrowser`, the large preview on `BrowserPreview`. The muted selection is the slot
-  `surfaceAlt`. A double click on a divider fits the names by a letter's usual width, not by measuring.
+- Widths are on `OpenBrowser` (an open browser; `FileBrowser` is the component of a scene), the large
+  preview on `BrowserPreview`. The muted selection is the slot `surfaceAlt`.
 - The scenes are `fileBrowser`, `fileColumn`, `fileRow`, `filePreview`, `fileLargePreview` and
   `fileTrailPart`, in the app's `SceneRegistry`.
-- Not yet: a browser written in a scene (`"FileBrowser": {...}`), and the check every 2 s of folders that
-  are not watched (more than 32, or a platform without notifications): `refreshFileBrowser` reads them.
+- The folders that are not watched are looked at on a thread (§7), so a disk that does not answer holds
+  nothing; a folder's time is taken before its listing reads it, so no change between the two is missed.
+  Case 1597.

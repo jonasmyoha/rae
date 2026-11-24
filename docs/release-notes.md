@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.56, 2026-11-24: file browsers in scenes, and folders without notifications
+
+- `"FileBrowser": { "root": "~/Projects", ... }` on a scene's node opens a file browser there, with its
+  options (docs/file-browser-design.md section 4.1). An app that reports unknown components before its
+  first `fileBrowserUpdate` calls `applyFileBrowserComponents` before that.
+- Folders that cannot be watched (more than 32 shown, or no notifications) are looked at on a thread every
+  2 s while the window has the focus, and when it gets it.
+- A double click on a column's divider measures the names.
+- `BrowserOptions.selection` (none, single, multiple) is instead of `multiple`, and `rowHeight` is new.
+  `fileBrowserUpdate` takes `windowFocused` (`Gpu2d.windowFocused()`, new), `fileBrowserRows` takes `res`.
+- Cases 1596, 1597.
+
 ## 0.4.55, 2026-11-24: the column file browser
 
 - `lib/ui/fileBrowser` (docs/file-browser-design.md): a file browser in columns that looks and changes

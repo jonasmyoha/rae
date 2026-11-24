@@ -29,7 +29,7 @@ func browserColumns(systems: view FileBrowserSystems, browser: view EntityId) re
   if componentHas(this: systems.browsers, entityId: browser) is false {
     ret List(EntityId) {}
   }
-  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
   ret mine.columns
 }
 
@@ -215,7 +215,7 @@ func entryOpensAsFolder(
 
 func browserOptions(systems: view FileBrowserSystems, browser: view EntityId) ret BrowserOptions {
   if componentHas(this: systems.browsers, entityId: browser) {
-    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
     ret mine.options
   }
   ret BrowserOptions {}
@@ -271,8 +271,11 @@ func openColumn(
     divider: column.divider
     width: width
   )
-  if options.multiple is false and componentHas(this: world.listSelections, entityId: column.list) {
-    componentMod(this: world.listSelections, entityId: column.list).mode = ListSelectMode.single
+  if componentHas(this: world.listSelections, entityId: column.list) {
+    componentMod(this: world.listSelections, entityId: column.list).mode = options.selection
+  }
+  if componentHas(this: world.listViews, entityId: column.list) {
+    componentMod(this: world.listViews, entityId: column.list).itemHeight = options.rowHeight
   }
   componentSet(
     this: systems.columnOfList
@@ -287,7 +290,7 @@ func openColumn(
   )
   componentSet(this: systems.columns, entityId: node, data: own column)
   componentSet(this: systems.entries, entityId: node, data: ColumnEntries {})
-  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
   mine.columns.add(value: node)
   mine.reveal = place
   systems.watchesStale = true
@@ -347,7 +350,7 @@ func dropColumnsFrom(
     if isAlive(world: world, entityId: column) {
       destroyEntitySubtree(world: world, uiSystems: uiSystems, root: column)
     }
-    let dropped: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    let dropped: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
     dropped.columns.removeAt(index: i)
     if dropped.openColumn is column {
       dropped.openAt = -1.0
@@ -435,7 +438,7 @@ func showColumnSelection(
     ret
   }
   if later and componentView(this: systems.columns, entityId: column).openChild is not name {
-    let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
     mine.openAt = systems.now + openDelaySeconds
     mine.openColumn = column
     ret
@@ -743,7 +746,7 @@ func openTrail(
     list: listOfColumn(systems: systems, column: last)
     keys: List(String) {}
   )
-  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
   mine.openAt = -1.0
   mine.reveal = parts.length
   if hadKeys {
@@ -896,7 +899,7 @@ func fileNavigationSystem(
   var changed: Bool = false
   loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
     let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
-    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
     let due: Bool = mine.openAt >= 0.0 and systems.now >= mine.openAt
     let column: EntityId = mine.openColumn
     if due {

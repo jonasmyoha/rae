@@ -309,6 +309,11 @@ int rae_g2d_window_visible(void) {
     return (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) ? 0 : 1;
 }
 
+/* Whether the window has the keyboard (the app is the one in front). */
+rae_Bool rae_ext_Gpu2d_windowFocused(void) {
+    return g_sdl_win && (SDL_GetWindowFlags(g_sdl_win) & SDL_WINDOW_INPUT_FOCUS) != 0;
+}
+
 /* ---- window MOVED, as an event flag ----------------------------------
  *
  * The mirror of the resize flag above, and that is all the C here does. An
