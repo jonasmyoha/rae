@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.61, 2026-11-24: a parameter moved on one path is freed on the others
+
+- An `own` or `copy` parameter that is moved, or dropped explicitly, on some paths of a function only is freed
+  on the others. The move was recorded for the whole function, and the paths that did not move it leaked.
+- The same for a local whose `own` String goes to an `own` parameter on one path (`ret take(text: own text)`
+  inside an `if`), and for a value stored with `rae_ext_rae_buf_set` on one path.
+- An `own` parameter of a generic struct (`own Box(String)`) is freed; it never was.
+- The AddressSanitizer gate runs programs with threads. Case 1605, also in that gate.
+
 ## 0.4.60, 2026-11-24: an owned local moved into an optional, and lists in generic types
 
 - `let maybe: opt Note = own note` compiles: it emitted C that the C compiler refused. An `own` String local

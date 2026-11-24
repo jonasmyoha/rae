@@ -699,6 +699,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, ") + ("); emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
         fprintf(out, ") * sizeof("); EMIT_ELEM_TYPE(); fprintf(out, ") )) = ");
         const AstExpr* val_expr = arg->next->next->value;
+        bool clear_flag = false;
         // Move-tracking: a bare local of heap-owning type stored into a
         // Buffer slot is consumed by the store — the buffer slot now
         // owns the heap. Skip the local's end-of-scope auto-drop.
@@ -712,7 +713,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                                           ctx->generic_args, (AstTypeRef*)vtr);
             if (vtr && !(vtr->is_view || vtr->is_mod)
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
-                mark_expr_moved_if_local(ctx, val_expr);
+                // Moved on this path only: the flag is the record of it
+                int li = local_index_by_name(ctx, val_expr->as.ident);
+                if (li >= 0 && ctx->local_drop_flag[li]) {
+                    clear_flag = true;
+                    fprintf(out, "(__rae_live_%.*s = 0, ", (int)val_expr->as.ident.len,
+                            val_expr->as.ident.data);
+                } else {
+                    mark_expr_moved_if_local(ctx, val_expr);
+                }
             }
         }
         bool target_is_any = (elem_t && elem_t->kind == TYPE_ANY)
@@ -749,6 +758,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             ctx->has_expected_type = had_exp;
             ctx->expected_type = saved_exp;
         }
+        if (clear_flag) fprintf(out, ")");
         return true;
     }
 
@@ -2117,8 +2127,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, " = (rae_String){NULL, 0, 0, 0}; __rae_mv%d; }))", mv_id);
                 // We bypassed emit_expr on the AST_EXPR_OWN node, so
                 // apply its move-mark here for the scope-exit
-                // implicit-drop suppression.
-                mark_expr_moved_if_local(ctx, (AstExpr*)move_src);
+                // implicit-drop suppression. A local moved on some paths
+                // only keeps its guarded drop: the String just emptied is
+                // nothing to free on this path.
+                mark_expr_moved_if_local(ctx, a->value);
             } else if (needs_addr && !needs_deref && p && p->type
                        && p->type->is_view && !p->type->is_mod
                        && !wrap_pool_take_arg && !wrap_deep_copy_arg

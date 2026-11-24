@@ -7,7 +7,8 @@
 # as capacity, so one element too far is a heap overflow), and fixtures whose
 # subject is that heap is freed exactly once (1236: list-literal elements are
 # copies; 1238: a move on a path that returns; 1603: an owned local moved into
-# an optional; 1604: lists inside generic types). Each is the
+# an optional; 1604: lists inside generic types; 1605: a parameter moved on one
+# path only). Each is the
 # fixture's own program — the C the compiler emits plus the runtime — built
 # with clang -fsanitize=address,undefined and run as `rae run` would, with the
 # case's config.cmd flags that change the C (`--float4-scalar`). A case fails
@@ -24,7 +25,7 @@ CC="${RAE_ASAN_CC:-clang}"
 TMP="$(mktemp -d -t rae_asan_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
-CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar 1236_list_literal_copies_places 1238_move_in_returning_branch 1603_own_into_optional 1604_generic_of_lists"
+CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar 1236_list_literal_copies_places 1238_move_in_returning_branch 1603_own_into_optional 1604_generic_of_lists 1605_own_parameter_moved_on_one_path"
 if [ -n "${RAE_ASAN_FILTER:-}" ]; then CASES="$RAE_ASAN_FILTER"; fi
 
 printf 'int main(void) { return 0; }\n' > "$TMP/probe.c"
@@ -59,7 +60,9 @@ for name in $CASES; do
     echo "FAIL: asan $name (ASan build failed)"; tail -5 "$work/cc.log" | sed 's/^/    /'
     failed=$((failed + 1)); continue
   fi
-  (cd "$dir" && ASAN_OPTIONS="detect_leaks=0" perl -e 'alarm shift; exec @ARGV' 120 "$work/app") \
+  # use_sigaltstack=0: a thread's alternate signal stack is the runtime's own
+  # (rae_thread_install_altstack); ASan unmapped it as its own at thread exit.
+  (cd "$dir" && ASAN_OPTIONS="detect_leaks=0:use_sigaltstack=0" perl -e 'alarm shift; exec @ARGV' 120 "$work/app") \
     > "$work/stdout" 2> "$work/stderr"
   rc=$?
   if grep -q "Sanitizer\|runtime error:" "$work/stderr"; then

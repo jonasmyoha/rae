@@ -809,6 +809,7 @@ static bool twin_emit_one(CompilerContext* ctx, const AstModule* module, TwinEnt
   char* body = NULL;
   size_t body_length = 0;
   FILE* body_out = open_memstream(&body, &body_length);
+  declare_param_live_flags(&tctx, func->body, body_out);
   fprintf(body_out, "  switch (__rae_frame->state) {\n  case 0: ;\n");
   if (func->body) {
     for (const AstStmt* stmt = func->body->first; stmt; stmt = stmt->next) emit_stmt(&tctx, stmt, body_out);

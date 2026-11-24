@@ -1,0 +1,263 @@
+# A parameter or local that is moved on one path only is freed on every other path, and once
+type Note {
+  name: String
+  parts: List(String)
+}
+
+type Box(T: type) {
+  value: T
+}
+
+type Holder {
+  text: String
+  note: opt Note = none
+}
+
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.id}")
+}
+
+func makeNote(n: view Int) ret Note {
+  ret Note { name: "note {n}", parts: List(String) { "part {n}" } }
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func takeNames(names: own List(String)) ret Int {
+  ret names.length
+}
+
+func takeNote(note: own Note) ret Int {
+  ret note.parts.length
+}
+
+func takeBox(box: own Box(String)) ret Int {
+  ret box.value.length()
+}
+
+func takeMaybe(note: opt own Note) ret Bool {
+  ret note is not none
+}
+
+func takeAny(T: type, value: own T, list: mod List(T)) {
+  list.add(value: own value)
+}
+
+func retText(text: own String, give: view Bool) ret Int {
+  if give {
+    ret takeText(text: own text)
+  }
+  ret 0
+}
+
+func retNames(names: own List(String), give: view Bool) ret Int {
+  if give {
+    ret takeNames(names: own names)
+  }
+  ret 0
+}
+
+func retNote(note: own Note, give: view Bool) ret Int {
+  if give {
+    ret takeNote(note: own note)
+  }
+  ret note.parts.length + 10
+}
+
+func retMaybe(note: opt own Note, give: view Bool) ret Bool {
+  if give {
+    ret takeMaybe(note: own note)
+  }
+  ret false
+}
+
+func retBox(box: own Box(String), give: view Bool) ret Int {
+  if give {
+    ret takeBox(box: own box)
+  }
+  ret box.value.length() + 10
+}
+
+func goesOn(text: own String, names: own List(String), give: view Bool) ret Int {
+  var sum: Int = 0
+  if give {
+    sum = takeText(text: own text)
+    sum = sum + takeNames(names: own names)
+  }
+  ret sum
+}
+
+func bareMove(
+  text: own String
+  names: own List(String)
+  give: view Bool
+  kept: mod List(String)
+) {
+  if give {
+    kept.add(value: text)
+    log("{takeNames(names: names)}")
+  }
+}
+
+func inElse(note: own Note, give: view Bool) ret Int {
+  if give {
+    ret 1
+  } else {
+    ret takeNote(note: own note)
+  }
+}
+
+func inMatch(note: own Note, kind: view Int) ret Int {
+  match kind {
+    case 1 {
+      ret takeNote(note: own note)
+    }
+    case 2 {
+      let given: Int = takeNote(note: own note)
+      log("given {given}")
+    }
+    default {
+      log("not given {note.name}")
+    }
+  }
+  ret 0
+}
+
+func inLoop(note: own Note, at: view Int) ret Int {
+  loop var i: Int = 0, i < 3, ++i {
+    if i is at {
+      ret takeNote(note: own note)
+    }
+  }
+  ret -1
+}
+
+func shortCircuit(text: own String, give: view Bool) ret Bool {
+  ret give and takeText(text: own text) > 0
+}
+
+func intoLiteral(text: own String, note: own Note, give: view Bool) ret Holder {
+  if give {
+    ret Holder { text: own text, note: own note }
+  }
+  ret Holder { text: "none {give}" }
+}
+
+func intoField(text: own String, holder: mod Holder, give: view Bool) {
+  if give {
+    holder.text = own text
+  }
+}
+
+func handedBack(text: own String, give: view Bool) ret String {
+  if give {
+    ret text
+  }
+  ret "other {give}"
+}
+
+func copied(note: copy Note, give: view Bool) ret Int {
+  if give {
+    ret takeNote(note: own note)
+  }
+  ret 0
+}
+
+func genericMove(
+  T: type
+  value: own T
+  list: mod List(T)
+  give: view Bool
+) ret Bool {
+  if give {
+    takeAny(T, value: own value, list: list)
+    ret true
+  }
+  ret false
+}
+
+func dropped(handle: own Handle, early: view Bool) {
+  if early {
+    handle.drop()
+    log("early")
+  }
+  log("end")
+}
+
+func localMove(give: view Bool) ret Int {
+  let text: String = "local {give}"
+  let note: Note = makeNote(n: 3)
+  if give {
+    ret takeText(text: own text) + takeNote(note: own note)
+  }
+  ret 0
+}
+
+# A resumable task: the move is remembered across the wait after it
+func inTask(note: own Note, give: copy Bool) ret Int {
+  var sum: Int = 0
+  sleep(ms: 1)
+  if give {
+    sum = takeNote(note: own note)
+  }
+  sleep(ms: 1)
+  ret sum
+}
+
+func main() {
+  loop var pass: Int = 0, pass < 2, ++pass {
+    let give: Bool = pass is 1
+    log("give {give}")
+    log("{retText(text: "text {give}", give: give)}")
+    log("{retNames(names: List(String) { "name {give}" }, give: give)}")
+    log("{retNote(note: makeNote(n: 1), give: give)}")
+    log("{retMaybe(note: makeNote(n: 2), give: give)}")
+    log("{retBox(box: Box(String) { value: "box {give}" }, give: give)}")
+    log("{goesOn(text: "goes {give}", names: List(String) { "on {give}" }, give: give)}")
+    var kept: List(String) = {}
+    let ownText: String = "bare {give}"
+    bareMove(
+      text: own ownText
+      names: List(String) { "b {give}" }
+      give: give
+      kept: kept
+    )
+    log("{kept}")
+    log("{inElse(note: makeNote(n: 4), give: give)}")
+    log("{shortCircuit(text: "short {give}", give: give)}")
+    var holder: Holder = intoLiteral(text: "literal {give}", note: makeNote(n: 5), give: give)
+    log("{holder}")
+    intoField(text: "field {give}", holder: holder, give: give)
+    log("{holder.text}")
+    log("{handedBack(text: "back {give}", give: give)}")
+    let mine: Note = makeNote(n: 6)
+    log("{copied(note: mine, give: give)} {mine.name}")
+    var notes: List(Note) = {}
+    log("{genericMove(
+      Note
+      value: makeNote(n: 7)
+      list: notes
+      give: give
+    )} {notes.length}")
+    log("{genericMove(
+      String
+      value: "generic {give}"
+      list: kept
+      give: give
+    )} {kept.length}")
+    dropped(handle: Handle { id: pass }, early: give)
+    log("{localMove(give: give)}")
+    let task: Task(Int) = spawn inTask(note: makeNote(n: 8), give: give)
+    log("{task.get()}")
+  }
+  loop var kind: Int = 0, kind < 3, ++kind {
+    log("{inMatch(note: makeNote(n: kind), kind: kind)}")
+  }
+  log("{inLoop(note: makeNote(n: 9), at: 1)} {inLoop(note: makeNote(n: 9), at: 5)}")
+}

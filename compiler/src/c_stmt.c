@@ -1132,45 +1132,14 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
       continue;
     }
     Str name = ctx->locals[idx];
-    if (type->is_opt) {
-      if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
-        fprintf(out, "  rae_drop_%s(&%.*s);\n",
-                rae_opt_type_name(ctx, type), (int)name.len, name.data);
-      else
-        fprintf(out, "  rae_any_drop(&%.*s);\n",
-                (int)name.len, name.data);
-      continue;
-    }
-    Str tbase = get_base_type_name(type);
-    if (str_eq_cstr(tbase, "String")) {
-      fprintf(out, "  rae_string_drop(&%.*s);\n",
-              (int)name.len, name.data);
-      continue;
-    }
-    if (is_drop_target_type(type)) {
-      const AstTypeRef* elem_type = type->generic_args;
-      if (!elem_type) continue;
-      // #889: inside a monomorphized generic function a `List(T)` local's
-      // element is the abstract `T`; substitute the enclosing type arguments so
-      // the drop is emitted for the concrete element (e.g. List(Int)), not the
-      // undeclared `rae_T`.
-      if (ctx->generic_params && ctx->generic_args)
-        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
-      Str loc_base = get_base_type_name(type);
-      const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
-      if (!drop_fd) continue;
-      register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
-      const char* drop_name =
-          rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
-      fprintf(out, "  %s(&%.*s);\n", drop_name,
-              (int)name.len, name.data);
-      continue;
-    }
-    if (type->generic_args) continue;
-    const char* struct_mangled = rae_mangle_type_specialized(
-        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-    fprintf(out, "  rae_drop_struct_%s(&%.*s);\n", struct_mangled,
-            (int)name.len, name.data);
+    char cname[256];
+    snprintf(cname, sizeof cname, "%.*s", (int)name.len, name.data);
+    // Moved on some paths only: released while the flag says the parameter
+    // still owns its value (declare_param_live_flags)
+    bool guarded = ctx->local_drop_flag[idx];
+    if (guarded) fprintf(out, "  if (__rae_live_%s) {\n", cname);
+    emit_drop_for_value(ctx, out, type, cname, true);
+    if (guarded) fprintf(out, "  }\n");
   }
   return true;
 }
@@ -1448,6 +1417,28 @@ bool rest_moves_name_conditionally(const AstStmt* rest, Str name) {
   for (const AstStmt* s = rest; s; s = s->next)
     if (stmt_moves_name(s, name, false)) return true;
   return false;
+}
+
+/* The live flags of the parameters that own their value (`own`, `copy`) and
+ * are moved, or dropped explicitly, on some paths of the body only: the same
+ * flag a `let` gets, declared before the body. Without it the move was
+ * recorded at compile time, and every path that did not move it leaked. */
+void declare_param_live_flags(CFuncContext* ctx, const AstBlock* body, FILE* out) {
+  if (!body || ctx->func_first_let_idx == (size_t)-1) return;
+  for (size_t i = 0; i < ctx->func_first_let_idx; i++) {
+    const AstTypeRef* type = ctx->local_type_refs[i];
+    if (!type || !(type->is_own || type->is_copy)) continue;
+    if (ctx->generic_params && ctx->generic_args)
+      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                 (AstTypeRef*)type);
+    Str name = ctx->locals[i];
+    if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) continue;
+    bool explicit_drop = type_has_user_drop(ctx->compiler_ctx, type)
+        && block_has_explicit_drop(body, name);
+    if (!explicit_drop && !rest_moves_name_conditionally(body->first, name)) continue;
+    ctx->local_drop_flag[i] = true;
+    fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)name.len, name.data);
+  }
 }
 
 int local_index_by_name(const CFuncContext* ctx, Str name) {
@@ -2411,17 +2402,6 @@ static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 // goes BEFORE the statement, its drop AFTER, so the value is released at the
 // end of the statement that made it. A `ret` writes the drops itself before
 // returning. Statements without temporaries come out byte-identical.
-// The local a `ret x` / `ret own x` hands back, or -1. Same LIFO name lookup
-// as mark_local_moved_by_name.
-static int returned_local_index(const CFuncContext* ctx, const AstStmt* stmt) {
-    if (stmt->kind != AST_STMT_RET || !stmt->as.ret_stmt.values) return -1;
-    const AstExpr* e = stmt->as.ret_stmt.values->value;
-    while (e && e->kind == AST_EXPR_OWN) e = e->as.unary.operand;
-    if (!e || e->kind != AST_EXPR_IDENT) return -1;
-    for (int i = (int)ctx->local_count - 1; i >= 0; i--)
-        if (str_eq(ctx->locals[i], e->as.ident)) return i;
-    return -1;
-}
 
 // String-pool temporaries (runtime_strings_core.c) are registered by exactly
 // two things: the runtime's String builders (interpolation, concat, str(),
@@ -2703,21 +2683,24 @@ static bool stmt_direct_exprs_may_pool(CFuncContext* ctx, const AstStmt* s) {
 
 bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
-    // `ret x` moves x out, but only on THAT path: the ret marks x moved so its
-    // own drop epilogue skips it, and the mark is undone once the statement
-    // is emitted. Anything emitted after it (the rest of an enclosing block,
-    // a later `ret`, the scope-exit drops) is only reached when this ret was
-    // NOT taken, where x still owns its heap. Left set, `if short { ret flat
-    // } ret "{flat.sub(...)}..."` never released `flat` on the second path
-    // (the editor's `truncated`, ~13 leaked Strings per hierarchy refresh).
-    int ret_local = returned_local_index(ctx, stmt);
-    bool ret_local_was_moved = ret_local >= 0 && ctx->local_moved[ret_local];
+    // A `ret` moves what it hands back (`ret x`, `ret take(text: own x)`,
+    // `ret Holder { text: own x }`), but only on THAT path: x is marked moved
+    // so the ret's own drop epilogue skips it, and the marks are undone once
+    // the statement is emitted. Anything emitted after it (the rest of an
+    // enclosing block, a later `ret`, the scope-exit drops) is only reached
+    // when this ret was NOT taken, where x still owns its heap. Left set,
+    // `if short { ret flat } ret "{flat.sub(...)}..."` never released `flat`
+    // on the second path (the editor's `truncated`, ~13 leaked Strings per
+    // hierarchy refresh).
+    bool is_ret = stmt->kind == AST_STMT_RET;
+    size_t ret_locals = is_ret ? ctx->local_count : 0;
+    bool moved_before[256];
+    if (is_ret) memcpy(moved_before, ctx->local_moved, ret_locals * sizeof(bool));
     // A resumable twin suspends at the statement's waits before it runs
     if (ctx->twin) c_twin_before_stmt(ctx, stmt, out);
     bool ok_ret = emit_stmt_body(ctx, stmt, out);
     if (ctx->twin) c_twin_after_stmt(ctx);
-    if (ret_local >= 0 && ret_local < (int)ctx->local_count)
-        ctx->local_moved[ret_local] = ret_local_was_moved;
+    if (is_ret) memcpy(ctx->local_moved, moved_before, ret_locals * sizeof(bool));
     return ok_ret;
 }
 

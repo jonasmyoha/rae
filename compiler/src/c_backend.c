@@ -2334,6 +2334,7 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
       }
   }
 
+  declare_param_live_flags(&tctx, f->body, out);
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
 
   // Emit any remaining defers at function end
@@ -2624,6 +2625,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
       if (instantiated) body_to_emit = instantiated;
   }
+  declare_param_live_flags(&tctx, body_to_emit, out);
   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
