@@ -1,0 +1,523 @@
+# The cache: what is wanted, what is being made, what is ready, and what is let go of (Types.rae).
+open Channel
+open Signal
+open collections/StringMap
+
+type ThumbnailCache {
+  settings: ThumbnailSettings
+  entries: List(ThumbnailEntry)
+  # key -> index of `entries`, and the indexes that are free
+  places: StringMap(Int)
+  free: List(Int)
+  workers: List(ThumbnailWorker)
+  results: Channel(ThumbnailResult)
+  running: Bool = false
+  frame: Int = 0
+  order: Int = 0
+  # What the GPU holds
+  readyBytes: Int = 0
+  readyCount: Int = 0
+  # What was given back in this frame (keys), and asked of the program
+  releases: List(String) = {}
+  asked: List(ThumbnailAsked) = {}
+  askedCount: Int = 0
+  # Pictures waiting for the GPU
+  madeCount: Int = 0
+  # For the checks: how many jobs were handed out, and how many entries dropped before they began
+  jobsSent: Int = 0
+  dropped: Int = 0
+}
+
+# A cache with its threads running
+func createThumbnails(settings: view ThumbnailSettings) ret ThumbnailCache {
+  var cache: ThumbnailCache = {
+    settings: settings
+    entries: {}
+    places: createStringMap(Int, cap: 256)
+    free: {}
+    workers: {}
+    results: createChannel(ThumbnailResult)
+    running: true
+  }
+  loop var i: Int = 0, i < cache.settings.threads, ++i {
+    let jobs: Channel(ThumbnailJob) = createChannel(ThumbnailJob)
+    let signal: Signal = createSignal()
+    let workerSettings: ThumbnailWorkerSettings = {
+      index: i
+      largestPixels: cache.settings.largestPixels
+      diskFolder: "{cache.settings.diskFolder}"
+      diskBytes: cache.settings.diskBytes
+    }
+    let results: Channel(ThumbnailResult) = cache.results
+    let task: Task(Int) = spawn thread thumbnailThread(
+      jobs: jobs
+      results: results
+      signal: signal
+      settings: workerSettings
+    )
+    cache.workers.add(value: ThumbnailWorker { jobs: jobs, signal: signal, task: own task })
+  }
+  ret cache
+}
+
+# Stop the threads and wait for each to end the picture it is at. A thread at a disk that never
+# answers never ends; a program that may meet one ends with Sys.exit instead.
+func stopThumbnails(cache: mod ThumbnailCache) {
+  if cache.running is false {
+    ret
+  }
+  cache.running = false
+  loop let worker: view ThumbnailWorker in cache.workers {
+    worker.jobs.channelSend(value: ThumbnailJob { kind: ThumbnailJobKind.stop })
+    worker.signal.post()
+  }
+  loop let worker: mod ThumbnailWorker in cache.workers {
+    if let task: view Task(Int) = worker.task {
+      let done: Int = task.get()
+    }
+  }
+  loop let worker: view ThumbnailWorker in cache.workers {
+    worker.jobs.freeChannel()
+    worker.signal.freeSignal()
+  }
+  cache.workers.clear()
+  cache.results.freeChannel()
+}
+
+# The key a request's picture has in the cache (and its name on the canvas)
+func thumbnailKey(request: view ThumbnailRequest) ret String {
+  ret "thumbnail|{request.path}|{request.fileSize}|{request.modifiedMs}|{request.pixels}"
+}
+
+func thumbnailState(cache: view ThumbnailCache, key: view String) ret ThumbnailState {
+  if let place: Int = cache.places.get(k: key) {
+    if let entry: view ThumbnailEntry = cache.entries.viewAt(index: place) {
+      ret entry.state
+    }
+  }
+  ret ThumbnailState.none
+}
+
+# A new frame: what the threads made since the last is taken in
+func beginThumbnails(cache: mod ThumbnailCache) {
+  cache.frame = cache.frame + 1
+  cache.order = 0
+  if cache.running is false {
+    ret
+  }
+  loop cache.results.pending() > 0 {
+    let result: ThumbnailResult = cache.results.receive()
+    if let worker: mod ThumbnailWorker = cache.workers.modAt(index: result.worker) {
+      worker.busy = worker.busy - 1
+    }
+    takeThumbnailResult(cache: cache, result: result)
+  }
+}
+
+func takeThumbnailResult(cache: mod ThumbnailCache, result: view ThumbnailResult) {
+  var place: Int = -1
+  if let found: Int = cache.places.get(k: result.key) {
+    place = found
+  }
+  if place < 0 {
+    ret
+  }
+  var made: Bool = false
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+    if entry.state is ThumbnailState.sent {
+      entry.worker = -1
+      if result.answer is ThumbnailAnswer.made {
+        entry.state = ThumbnailState.made
+        entry.pixels = result.pixels
+        made = true
+      } else if result.answer is ThumbnailAnswer.missing {
+        # nothing kept: the program is asked (its turn comes in endThumbnails)
+        entry.state = ThumbnailState.queued
+        entry.looked = true
+      } else {
+        entry.state = ThumbnailState.failed
+      }
+    }
+  }
+  if made {
+    cache.madeCount = cache.madeCount + 1
+  }
+}
+
+# A picture is wanted in this frame, `priority` 0 first (in view, then near it), in the order asked.
+# Its state now; when `ready` its key is an image of the canvas.
+func wantThumbnail(
+  cache: mod ThumbnailCache
+  key: view String
+  request: view ThumbnailRequest
+  priority: view Int
+) ret ThumbnailState {
+  var place: Int = -1
+  if let found: Int = cache.places.get(k: key) {
+    place = found
+  }
+  if place < 0 {
+    place = addThumbnail(cache: cache, key: key, request: request)
+  }
+  ret wantThumbnailAt(cache: cache, place: place, priority: priority)
+}
+
+# wantThumbnail for a picture the cache knows: no request is needed. `none` when it does not.
+func wantKnownThumbnail(
+  cache: mod ThumbnailCache
+  key: view String
+  priority: view Int
+) ret ThumbnailState {
+  if let place: Int = cache.places.get(k: key) {
+    ret wantThumbnailAt(cache: cache, place: place, priority: priority)
+  }
+  ret ThumbnailState.none
+}
+
+func wantThumbnailAt(
+  cache: mod ThumbnailCache
+  place: view Int
+  priority: view Int
+) ret ThumbnailState {
+  cache.order = cache.order + 1
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+    # wanted twice in a frame: the sooner
+    if entry.seenFrame is not cache.frame or priority < entry.priority {
+      entry.priority = priority
+      entry.order = cache.order
+    }
+    entry.seenFrame = cache.frame
+    ret entry.state
+  }
+  ret ThumbnailState.none
+}
+
+func addThumbnail(
+  cache: mod ThumbnailCache
+  key: view String
+  request: view ThumbnailRequest
+) ret Int {
+  let entry: ThumbnailEntry = { key: "{key}", request: request, state: ThumbnailState.queued }
+  var place: Int = cache.entries.length
+  if cache.free.length > 0 {
+    place = cache.free.pop()
+    cache.entries.set(index: place, value: own entry)
+  } else {
+    cache.entries.add(value: own entry)
+  }
+  cache.places.set(k: key, value: place)
+  ret place
+}
+
+# The entry gone (its picture on the GPU is the caller's to let go of)
+func dropThumbnail(cache: mod ThumbnailCache, place: view Int) {
+  var key: String = ""
+  if let entry: view ThumbnailEntry = cache.entries.viewAt(index: place) {
+    key = "{entry.key}"
+  }
+  cache.places.remove(k: key)
+  cache.entries.set(index: place, value: ThumbnailEntry {})
+  cache.free.add(value: place)
+}
+
+# The frame's wishes are known: what is no longer wanted and not made is dropped, work is handed out
+# by what is wanted first, and what was seen longest ago is let go of where the budget is exceeded
+func endThumbnails(cache: mod ThumbnailCache) {
+  loop var i: Int = 0, i < cache.entries.length, ++i {
+    dropUnwanted(cache: cache, place: i)
+  }
+  handOutThumbnails(cache: cache)
+  evictThumbnails(cache: cache)
+}
+
+func dropUnwanted(cache: mod ThumbnailCache, place: view Int) {
+  var state: ThumbnailState = ThumbnailState.none
+  var key: String = ""
+  var path: String = ""
+  var pixels: Int = 0
+  if let entry: view ThumbnailEntry = cache.entries.viewAt(index: place) {
+    if entry.seenFrame is cache.frame {
+      ret
+    }
+    state = entry.state
+    if state is ThumbnailState.asked {
+      key = "{entry.key}"
+      path = "{entry.request.path}"
+      pixels = entry.request.pixels
+    }
+  }
+  if state is ThumbnailState.queued {
+    cache.dropped = cache.dropped + 1
+    dropThumbnail(cache: cache, place: place)
+  } else if state is ThumbnailState.made {
+    # made and not wanted any more: the disk has it
+    cache.madeCount = cache.madeCount - 1
+    dropThumbnail(cache: cache, place: place)
+  } else if state is ThumbnailState.asked {
+    let canceled: ThumbnailAsked = { key: own key, path: own path, pixels: pixels, canceled: true }
+    cache.asked.add(value: own canceled)
+    cache.askedCount = cache.askedCount - 1
+    dropThumbnail(cache: cache, place: place)
+  }
+}
+
+# The queued entry wanted soonest (-1 none): lookups and files, or the ones to ask the program for
+func nextThumbnail(cache: view ThumbnailCache, forProgram: view Bool) ret Int {
+  var best: Int = -1
+  var bestPriority: Int = 0
+  var bestOrder: Int = 0
+  let hasDisk: Bool = cache.settings.diskFolder.length() > 0
+  loop var i: Int = 0, i < cache.entries.length, ++i {
+    if let entry: view ThumbnailEntry = cache.entries.viewAt(index: i) {
+      let program: Bool = entry.request.byProgram and (entry.looked or hasDisk is false)
+      if entry.state is ThumbnailState.queued and program is forProgram {
+        if best < 0 or entry.priority < bestPriority or (entry.priority is bestPriority and entry.order < bestOrder) {
+          best = i
+          bestPriority = entry.priority
+          bestOrder = entry.order
+        }
+      }
+    }
+  }
+  ret best
+}
+
+# The least busy thread that can take a job (-1 none): one at work and one waiting each
+func freeThumbnailWorker(cache: view ThumbnailCache) ret Int {
+  var best: Int = -1
+  var bestBusy: Int = 2
+  loop var i: Int = 0, i < cache.workers.length, ++i {
+    if let worker: view ThumbnailWorker = cache.workers.viewAt(index: i) {
+      if worker.busy < bestBusy {
+        best = i
+        bestBusy = worker.busy
+      }
+    }
+  }
+  ret best
+}
+
+func handOutThumbnails(cache: mod ThumbnailCache) {
+  if cache.running is false {
+    ret
+  }
+  loop true {
+    let place: Int = nextThumbnail(cache: cache, forProgram: false)
+    let index: Int = freeThumbnailWorker(cache: cache)
+    if place < 0 or index < 0 {
+      break
+    }
+    var job: ThumbnailJob = { kind: ThumbnailJobKind.make }
+    if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+      entry.state = ThumbnailState.sent
+      entry.worker = index
+      job.key = "{entry.key}"
+      job.request = entry.request
+      if entry.request.byProgram {
+        job.kind = ThumbnailJobKind.look
+      }
+    }
+    cache.jobsSent = cache.jobsSent + 1
+    if let worker: mod ThumbnailWorker = cache.workers.modAt(index: index) {
+      worker.busy = worker.busy + 1
+      worker.jobs.channelSend(value: own job)
+      worker.signal.post()
+    }
+  }
+  loop cache.askedCount < cache.settings.askedAtOnce {
+    let place: Int = nextThumbnail(cache: cache, forProgram: true)
+    if place < 0 {
+      break
+    }
+    var asked: ThumbnailAsked = { key: "", path: "", pixels: 0 }
+    if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+      entry.state = ThumbnailState.asked
+      asked.key = "{entry.key}"
+      asked.path = "{entry.request.path}"
+      asked.pixels = entry.request.pixels
+    }
+    cache.asked.add(value: own asked)
+    cache.askedCount = cache.askedCount + 1
+  }
+}
+
+# What the program is asked to make, or need not any more, since it was last taken
+func takeThumbnailsAsked(cache: mod ThumbnailCache) ret List(ThumbnailAsked) {
+  let asked: List(ThumbnailAsked) = cache.asked
+  cache.asked.clear()
+  ret asked
+}
+
+# The answer to a ThumbnailAsked: the picture. Ignored when it is not wanted any more. It is made
+# small
+# if it is larger than was asked.
+func setThumbnail(cache: mod ThumbnailCache, key: view String, pixels: own ThumbnailPixels) {
+  if pixels.width < 1 or pixels.height < 1 or pixels.bytes.length is not pixels.width * pixels.height * 4 {
+    failThumbnail(cache: cache, key: key)
+    ret
+  }
+  var place: Int = -1
+  if let found: Int = cache.places.get(k: key) {
+    place = found
+  }
+  var store: ThumbnailJob = { kind: ThumbnailJobKind.store }
+  var taken: Bool = false
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+    if entry.state is ThumbnailState.asked {
+      var small: ThumbnailPixels = {}
+      unsafe {
+        small = scaledDown(
+          rgba: pixels.bytes.data
+          width: pixels.width
+          height: pixels.height
+          longest: entry.request.pixels
+        )
+      }
+      entry.state = ThumbnailState.made
+      entry.pixels = small
+      store.request = entry.request
+      store.pixels = small
+      taken = true
+    }
+  }
+  if taken is false {
+    ret
+  }
+  cache.askedCount = cache.askedCount - 1
+  cache.madeCount = cache.madeCount + 1
+  if cache.settings.diskFolder.length() > 0 and cache.running {
+    if let worker: view ThumbnailWorker = cache.workers.viewAt(index: 0) {
+      worker.jobs.channelSend(value: own store)
+      worker.signal.post()
+    }
+  }
+}
+
+# The answer to a ThumbnailAsked: it cannot be made
+func failThumbnail(cache: mod ThumbnailCache, key: view String) {
+  var place: Int = -1
+  if let found: Int = cache.places.get(k: key) {
+    place = found
+  }
+  var failed: Bool = false
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+    if entry.state is ThumbnailState.asked {
+      entry.state = ThumbnailState.failed
+      failed = true
+    }
+  }
+  if failed {
+    cache.askedCount = cache.askedCount - 1
+  }
+}
+
+# ----- the GPU's side ------------------------------------------------------------
+
+# The made picture wanted soonest, taken out to be given to the GPU; none when there is none. Answer
+# with thumbnailUploaded.
+func takeThumbnailUpload(cache: mod ThumbnailCache) ret opt ThumbnailUpload {
+  if cache.madeCount is 0 {
+    ret none
+  }
+  var best: Int = -1
+  var bestPriority: Int = 0
+  var bestOrder: Int = 0
+  loop var i: Int = 0, i < cache.entries.length, ++i {
+    if let entry: view ThumbnailEntry = cache.entries.viewAt(index: i) {
+      if entry.state is ThumbnailState.made and (best < 0 or entry.priority < bestPriority or (entry.priority is bestPriority and entry.order < bestOrder)) {
+        best = i
+        bestPriority = entry.priority
+        bestOrder = entry.order
+      }
+    }
+  }
+  if best < 0 {
+    ret none
+  }
+  var upload: ThumbnailUpload = { key: "", pixels: {} }
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: best) {
+    upload.key = "{entry.key}"
+    upload.pixels = entry.pixels
+    entry.pixels.bytes = {}
+    # until thumbnailUploaded says how it went
+    entry.state = ThumbnailState.failed
+  }
+  cache.madeCount = cache.madeCount - 1
+  ret upload
+}
+
+# The upload of `key` was made, or could not be
+func thumbnailUploaded(cache: mod ThumbnailCache, key: view String, uploaded: view Bool) {
+  var place: Int = -1
+  if let found: Int = cache.places.get(k: key) {
+    place = found
+  }
+  var bytes: Int = 0
+  if let entry: mod ThumbnailEntry = cache.entries.modAt(index: place) {
+    if uploaded {
+      entry.state = ThumbnailState.ready
+      bytes = entry.pixels.width * entry.pixels.height * 4
+    }
+  }
+  if uploaded {
+    cache.readyBytes = cache.readyBytes + bytes
+    cache.readyCount = cache.readyCount + 1
+  }
+}
+
+# How many entries with no picture (failed) are remembered
+const failedRemembered: Int = 10000
+
+# Let go of what was seen longest ago, never of what this frame shows
+func evictThumbnails(cache: mod ThumbnailCache) {
+  loop cache.readyBytes > cache.settings.budgetBytes {
+    let place: Int = longestUnseen(cache: cache, state: ThumbnailState.ready)
+    if place < 0 {
+      break
+    }
+    var key: String = ""
+    var bytes: Int = 0
+    if let entry: view ThumbnailEntry = cache.entries.viewAt(index: place) {
+      key = "{entry.key}"
+      bytes = entry.pixels.width * entry.pixels.height * 4
+    }
+    cache.readyBytes = cache.readyBytes - bytes
+    cache.readyCount = cache.readyCount - 1
+    cache.releases.add(value: own key)
+    dropThumbnail(cache: cache, place: place)
+  }
+  if cache.places.length - cache.readyCount > failedRemembered {
+    let place: Int = longestUnseen(cache: cache, state: ThumbnailState.failed)
+    if place >= 0 {
+      dropThumbnail(cache: cache, place: place)
+    }
+  }
+}
+
+func longestUnseen(cache: view ThumbnailCache, state: view ThumbnailState) ret Int {
+  var best: Int = -1
+  var bestFrame: Int = cache.frame
+  loop var i: Int = 0, i < cache.entries.length, ++i {
+    if let entry: view ThumbnailEntry = cache.entries.viewAt(index: i) {
+      if entry.state is state and entry.seenFrame < bestFrame {
+        best = i
+        bestFrame = entry.seenFrame
+      }
+    }
+  }
+  ret best
+}
+
+# The keys of the pictures the GPU may let go of, since they were last taken
+func takeThumbnailReleases(cache: mod ThumbnailCache) ret List(String) {
+  let releases: List(String) = cache.releases
+  cache.releases.clear()
+  ret releases
+}
+
+# Is a picture waiting for the GPU (an event loop renders another frame)? One that is still being
+# made
+# wakes the loop itself.
+func thumbnailsWaiting(cache: view ThumbnailCache) ret Bool {
+  ret cache.madeCount > 0 or (cache.running and cache.results.pending() > 0)
+}

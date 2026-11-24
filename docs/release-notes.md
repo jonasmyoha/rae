@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.54, 2026-11-24: thumbnails
+
+- `lib/Thumbnails` and `ui/ThumbnailSystem`: small pictures of files, made on threads, with a memory
+  budget, a disk cache, and pictures a program makes itself (docs/ui-scene-format.md section 54).
+- `Gpu2d.releaseImageKey` and `Gpu2d.registerImageBytes`: an image of the canvas can be let go of. The
+  canvas finds an image by its key with a hash, not by looking through all of them.
+- A JPEG with something appended (a motion photo) is read; one cut short before its picture ends is
+  refused also when its EXIF thumbnail is whole.
+- Spot and point lights in the deferred frame (`lib/LocalLights`, since `cfa9af3b0`).
+- `lib/Gpu2dCanvas` is split (Boxes, Shutdown). Cases 1590, 1591, check `uiThumbnails`.
+
 ## 0.4.53, 2026-11-24: dividers and scrollbars
 
 - `Divider` and `ui/DividerSystem`: a line dragged to size a pane, with limits, the resize cursor, the

@@ -62,6 +62,34 @@ func registerImageRgba(
   ret handle
 }
 
+# Register an image from straight-alpha RGBA bytes (four a pixel, rows from the top) under `key`;
+# an image that had the key is released. The handle, 0 on failure.
+func registerImageBytes(
+  canvas: mod Gpu2dCanvas
+  key: copy String
+  bytes: view List(UInt8)
+  w: copy Int
+  h: copy Int
+) ret Int {
+  let handle: Int = canvasRegisterImageBytes(
+    canvas: canvas
+    bytes: bytes
+    width: w
+    height: h
+  )
+  if handle > 0 {
+    canvasReleaseImageKey(canvas: canvas, key: key)
+    canvasRegisterImageKey(canvas: canvas, key: key, handle: handle)
+  }
+  ret handle
+}
+
+# Let go of the image under `key`, and of the key: it is not drawn any more, and its memory on the
+# GPU is freed once the frames that drew it are done.
+func releaseImageKey(canvas: mod Gpu2dCanvas, key: view String) {
+  canvasReleaseImageKey(canvas: canvas, key: key)
+}
+
 func hasImageKey(canvas: view Gpu2dCanvas, key: view String) ret Bool {
   ret canvasHasImageKey(canvas: canvas, key: key)
 }

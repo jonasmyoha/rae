@@ -1,0 +1,306 @@
+# 2,000 pictures scrolled through and back (lib/Thumbnails, ui/ThumbnailSystem), decoded on threads,
+# given to the GPU a few a frame, with room for 60 of them: prints the worst frame, the worst of its
+# work and of the thumbnails' own share, and the memory along the way, which must level off. Exit 0
+# when it does,
+# every
+# picture in view came once the scrolling stopped, and no frame waited for a file.
+#
+#   perl -e 'alarm shift; exec @ARGV' 180 compiler/bin/rae run checks/uiThumbnails/Main.rae
+import Files
+import Gpu2d
+import Png
+import Sys
+import ui/Scene
+open app3d/UiShell
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Schedule
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Thumbnails
+open ui/Components
+open ui/Ecs
+open ui/ListViewSystem
+open ui/ListWindow
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/ThumbnailSystem
+open ui/UiSystems
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+const pictures: Int = 2000
+
+# Points a frame: the whole list in about 500 frames
+const scrollStep: Float = 416.0
+
+func pictureBytes(hue: view Int) ret List(UInt8) {
+  var pixels: List(Int) = {}
+  loop var y: Int = 0, y < 120, ++y {
+    loop var x: Int = 0, x < 160, ++x {
+      let red: Int = (hue * 37 + x) % 256
+      let green: Int = (hue * 91 + y * 2) % 256
+      let blue: Int = (hue * 53 + x + y) % 256
+      pixels.add(value: 255 * 16777216 + red * 65536 + green * 256 + blue)
+    }
+  }
+  let encoded: List(Int) = Png.encodePng(
+    pixels: pixels
+    width: 160
+    height: 120
+    hasAlpha: false
+  )
+  var bytes: List(UInt8) = {}
+  loop let byte: copy Int in encoded {
+    bytes.add(value: byte as UInt8)
+  }
+  ret bytes
+}
+
+func removeFolder(folder: view String) {
+  loop let entry: view Files.FileEntry in Files.readFolder(folder: folder).entries {
+    let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func fillRows(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  list: view EntityId
+  folder: view String
+) {
+  let wanted: ListRange = listWindowWanted(
+    world: world
+    uiSystems: uiSystems
+    list: list
+    count: pictures
+  )
+  if listWindowHas(
+    world: world
+    list: list
+    wanted: wanted
+    count: pictures
+  ) {
+    ret
+  }
+  var rows: List(ListViewRow) = {}
+  loop var i: Int = wanted.first, i < wanted.first + wanted.count, ++i {
+    rows.add(
+      value: ListViewRow {
+        keys: List(String) { "path", "name" }
+        values: List(String) { "{folder}/{i}.png", "Picture {i}" }
+      }
+    )
+  }
+  setListWindowRows(
+    world: world
+    list: list
+    count: pictures
+    first: wanted.first
+    rows: own rows
+  )
+}
+
+# How many shown nodes have their picture
+func picturesShown(world: view UiWorld) ret Int {
+  var shown: Int = 0
+  loop var i: Int = 0, i < componentCount(this: world.thumbnails), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.thumbnails, i: i)
+    if componentView(this: world.sprites, entityId: entityId).textureKey.startsWith(
+      prefix: "thumbnail|"
+    ) {
+      shown = shown + 1
+    }
+  }
+  ret shown
+}
+
+func main() ret Int {
+  var base: String = Sys.getEnv(name: "TMPDIR")
+  if base.length() is 0 {
+    base = "/tmp"
+  }
+  let folder: String = "{base}/rae-thumbnail-check-{nowNs()}"
+  let made: Bool = Sys.makeDir(path: folder)
+  loop var hue: Int = 0, hue < 40, ++hue {
+    let bytes: List(UInt8) = pictureBytes(hue: hue)
+    loop var i: Int = hue, i < pictures, i += 40 {
+      let written: Bool = Sys.writeFileBytes(path: "{folder}/{i}.png", bytes: bytes)
+    }
+  }
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI thumbnails check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiThumbnails/page.raescene")
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var scenes: SceneRegistry = createSceneRegistry()
+  let row: Scene = loadSceneFile(path: "checks/uiThumbnails/row.raescene")
+  registerScene(reg: scenes, key: "Row", scene: own row)
+  var list: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Files") {
+    list = id(v: raw)
+  }
+  var settings: ThumbnailSettings = {}
+  # 60 pictures of 256 pixels and less
+  settings.budgetBytes = 60 * 160 * 120 * 4
+  var cache: ThumbnailCache = createThumbnails(settings: settings)
+  var schedule: Schedule = createUiPipeline(world: world)
+  let floor: Float = designH.toFloat() - pictures.toFloat() * 104.0
+  var position: Float = 0.0
+  var direction: Float = -1.0
+  var turns: Int = 0
+  var frames: Int = 0
+  var stillFrames: Int = 0
+  var worstFrame: Float64 = 0.0
+  var worstWork: Float64 = 0.0
+  var worstOwn: Float64 = 0.0
+  var overBudget: Int = 0
+  var memory: List(Int) = {}
+  loop not Gpu2d.pollClose() and stillFrames < 240 {
+    let begun: Float64 = Gpu2d.nowSeconds()
+    if turns < 4 {
+      position = position + direction * scrollStep
+      if position <= floor or position >= 0.0 {
+        direction = -direction
+        turns = turns + 1
+        memory.add(value: Sys.processRssKb())
+        if position > 0.0 {
+          position = 0.0
+        }
+        if position < floor {
+          position = floor
+        }
+      }
+    } else {
+      stillFrames = stillFrames + 1
+    }
+    componentSet(
+      this: world.scrollStates
+      entityId: list
+      data: ScrollState { y: position, velocity: 0.0 }
+    )
+    fillRows(
+      world: world
+      uiSystems: uiSystems
+      list: list
+      folder: folder
+    )
+    listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    let thumbnailsBegun: Float64 = Gpu2d.nowSeconds()
+    let changed: Bool = thumbnailSystem(
+      world: world
+      uiSystems: uiSystems
+      cache: cache
+      canvas: canvas
+      pixelScale: Gpu2d.dpr()
+    )
+    let share: Float64 = Gpu2d.nowSeconds() - thumbnailsBegun
+    releaseDeadEntities(world: world, uiSystems: uiSystems)
+    var work: Float64 = Gpu2d.nowSeconds() - begun
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    let drawBegun: Float64 = Gpu2d.nowSeconds()
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    # beginFrame and endFrame wait for the display
+    work = work + Gpu2d.nowSeconds() - drawBegun
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+    let whole: Float64 = Gpu2d.nowSeconds() - begun
+    # the first frames make pipelines and load fonts
+    if frames > 30 {
+      if whole > worstFrame {
+        worstFrame = whole
+      }
+      if work > worstWork {
+        worstWork = work
+      }
+      if share > worstOwn {
+        worstOwn = share
+      }
+    }
+    if cache.readyBytes > settings.budgetBytes + 8 * 160 * 120 * 4 {
+      overBudget = overBudget + 1
+    }
+  }
+  let shown: Int = picturesShown(world: world)
+  let wantedShown: Int = componentCount(this: world.thumbnails)
+  log(
+    "frames {frames}, worst {worstFrame * 1000.0} ms with the waits for the display, {worstWork * 1000.0} ms of work, the thumbnails' own worst {worstOwn * 1000.0} ms"
+  )
+  log(
+    "jobs {cache.jobsSent}, dropped before they began {cache.dropped}, pictures on the GPU {cache.readyCount}, images on the canvas {canvasImageCount(
+      canvas: canvas
+    )}"
+  )
+  var line: String = ""
+  loop let kilobytes: copy Int in memory {
+    line = line.concat(other: " {kilobytes / 1024}")
+  }
+  log("memory at each turn (MB):{line}")
+  log("pictures shown at rest {shown} of {wantedShown}")
+  stopThumbnails(cache: cache)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  removeFolder(folder: folder)
+  let second: Int = memory.copyAtFallback(index: 1, fallback: 0)
+  let last: Int = memory.copyAtFallback(index: 3, fallback: 0)
+  var failed: Bool = false
+  if overBudget > 0 {
+    log("UI THUMBNAILS FAILED: over the budget in {overBudget} frames")
+    failed = true
+  }
+  if memory.length < 4 or last - second > 24 * 1024 {
+    log(
+      "UI THUMBNAILS FAILED: the memory grew by {(last - second) / 1024} MB between the second turn and the last"
+    )
+    failed = true
+  }
+  if shown < wantedShown {
+    log("UI THUMBNAILS FAILED: pictures are missing at rest")
+    failed = true
+  }
+  if worstOwn > 0.012 {
+    log("UI THUMBNAILS FAILED: the thumbnails took {worstOwn * 1000.0} ms of a frame")
+    failed = true
+  }
+  if failed {
+    ret 1
+  }
+  log("UI THUMBNAILS OK")
+  ret 0
+}

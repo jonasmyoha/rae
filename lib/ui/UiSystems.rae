@@ -322,6 +322,21 @@ type ScrollBarSystem {
   nextPage: Float64 = 0.0
 }
 
+# thumbnailSystem's memory of a node (ui/ThumbnailSystem): what it asks for, made again when its
+# Thumbnail's stamp or its size changed, and its Sprite's own tint while a picture is shown
+type ThumbnailNode {
+  stamp: Int = -1
+  key: String = ""
+  pixels: Int = 0
+  pictured: Bool = false
+  tint: RgbaColor
+  tintSlot: String = ""
+}
+
+type ThumbnailNodes {
+  nodes: ComponentTable(ThumbnailNode)
+}
+
 # touchStickSystem's output: each TouchStick node's state
 type TouchStickSystem {
   states: ComponentTable(TouchStickState)
@@ -340,6 +355,7 @@ type UiSystems {
   listSelection: ListSelectionSystem
   dividers: DividerSystem
   scrollBars: ScrollBarSystem
+  thumbnails: ThumbnailNodes
   # where the clickable nodes are (ui/HitIndex, kept by ui/InputSystem/HitIndexQuery)
   hitIndex: HitIndex
 }
@@ -394,6 +410,7 @@ func createUiSystems() ret UiSystems {
     }
     dividers: DividerSystem {}
     scrollBars: ScrollBarSystem { states: ComponentTable.create(ScrollBarState) }
+    thumbnails: ThumbnailNodes { nodes: ComponentTable.create(ThumbnailNode) }
     hitIndex: emptyHitIndex()
     textField: TextFieldSystem {
       caretLineEntityId: noEntity()
@@ -438,6 +455,7 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.listRows.rowsBound, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.seen, entityId: entityId)
   componentRemove(this: uiSystems.scrollBars.states, entityId: entityId)
+  componentRemove(this: uiSystems.thumbnails.nodes, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.rowsShown, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.authored, entityId: entityId)
   componentRemove(this: uiSystems.listRows.listsSeen, entityId: entityId)

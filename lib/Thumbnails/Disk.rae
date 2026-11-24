@@ -1,0 +1,162 @@
+# The disk cache of thumbnails: a file for each picture, named by the hash of what it is of (the
+# path, its size and modified time, and the size it was made for), so a changed file has another.
+# The
+# file has the key too, so two keys of one hash are not mixed up. Written whole under another name
+# first. Only the owner can read the folder. When it has grown past its cap, the files written
+# longest
+# ago go, until it is at four fifths of it.
+import Files
+import Sys
+open crypto/Sha1
+open collections/MergeSort
+
+# What the disk knows a picture by, "" when the file is not there
+func diskKey(request: view ThumbnailRequest) ret String {
+  let status: Files.PathStatus = Files.pathStatus(path: request.path, follow: true)
+  if status.found is false {
+    ret ""
+  }
+  ret "{request.path}|{status.size}|{status.modifiedWholeSeconds}.{status.modifiedNanoseconds}|{request.pixels}"
+}
+
+func diskPath(folder: view String, key: view String) ret String {
+  ret "{folder}/{hexText(bytes: sha1Text(text: key))}.thumb"
+}
+
+func addNumber(bytes: mod List(UInt8), number: view Int) {
+  bytes.add(value: (number % 256) as UInt8)
+  bytes.add(value: (number / 256 % 256) as UInt8)
+}
+
+func numberAt(bytes: view List(Int), at: view Int) ret Int {
+  ret bytes.copyAtFallback(index: at, fallback: 0) + bytes.copyAtFallback(
+    index: at + 1
+    fallback: 0
+  ) * 256
+}
+
+# The picture kept for `key`, none when there is none (or the file is broken)
+func readThumbnail(folder: view String, key: view String) ret opt ThumbnailPixels {
+  let bytes: List(Int) = Sys.readFileBytes(path: diskPath(folder: folder, key: key))
+  # "RTH1", the width, the height, the key's length, the key, the pixels
+  if bytes.length < 10 or bytes.copyAtFallback(index: 0, fallback: 0) is not 82 or bytes.copyAtFallback(
+    index: 3
+    fallback: 0
+  ) is not 49 {
+    ret none
+  }
+  let width: Int = numberAt(bytes: bytes, at: 4)
+  let height: Int = numberAt(bytes: bytes, at: 6)
+  let keyLength: Int = numberAt(bytes: bytes, at: 8)
+  if width < 1 or height < 1 or keyLength is not key.length() or bytes.length is not 10 + keyLength + width * height * 4 {
+    ret none
+  }
+  loop var i: Int = 0, i < keyLength, ++i {
+    if bytes.copyAtFallback(index: 10 + i, fallback: 0) is not key.byteAt(index: i) {
+      ret none
+    }
+  }
+  var pixels: ThumbnailPixels = { width: width, height: height }
+  loop var i: Int = 10 + keyLength, i < bytes.length, ++i {
+    pixels.bytes.add(value: bytes.copyAtFallback(index: i, fallback: 0) as UInt8)
+  }
+  ret pixels
+}
+
+# Keep a picture; false when it could not be written
+func writeThumbnail(
+  folder: view String
+  key: view String
+  pixels: view ThumbnailPixels
+  writer: view Int
+) ret Bool {
+  if key.length() is 0 or key.length() > 60000 or pixels.width > 60000 or pixels.height > 60000 {
+    ret false
+  }
+  if Files.pathStatus(path: folder, follow: true).found is false {
+    let parents: Bool = Sys.makeDir(path: parentOf(path: folder))
+    unsafe {
+      # 448: only the owner (0700)
+      let made: Int = Files.nativeMakeFolder(path: folder, mode: 448)
+    }
+  }
+  var bytes: List(UInt8) = List.create(UInt8, cap: 10 + key.length() + pixels.bytes.length)
+  let magic: String = "RTH1"
+  loop var i: Int = 0, i < 4, ++i {
+    bytes.add(value: magic.byteAt(index: i) as UInt8)
+  }
+  addNumber(bytes: bytes, number: pixels.width)
+  addNumber(bytes: bytes, number: pixels.height)
+  addNumber(bytes: bytes, number: key.length())
+  loop var i: Int = 0, i < key.length(), ++i {
+    bytes.add(value: key.byteAt(index: i) as UInt8)
+  }
+  loop let byte: copy UInt8 in pixels.bytes {
+    bytes.add(value: byte)
+  }
+  let path: String = diskPath(folder: folder, key: key)
+  let part: String = "{path}.{writer}.part"
+  if Sys.writeFileBytes(path: part, bytes: bytes) is false {
+    ret false
+  }
+  ret Sys.rename(oldPath: part, newPath: path)
+}
+
+func parentOf(path: view String) ret String {
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    if slash > 0 {
+      ret path.sub(start: 0, len: slash)
+    }
+  }
+  ret "/"
+}
+
+type KeptFile {
+  path: String
+  size: Int
+  modifiedSeconds: Float64
+}
+
+# Bring the folder under its cap; what it holds after
+func trimThumbnails(folder: view String, capBytes: view Int) ret Int {
+  let listing: Files.FolderListing = Files.readFolder(folder: folder)
+  var kept: List(KeptFile) = {}
+  var total: Int = 0
+  loop let entry: view Files.FileEntry in listing.entries {
+    let ours: Bool = entry.name.endsWith(suffix: ".thumb") or entry.name.endsWith(suffix: ".part")
+    if ours {
+      let path: String = "{folder}/{entry.name}"
+      let status: Files.PathStatus = Files.pathStatus(path: path, follow: false)
+      if status.found {
+        total = total + status.size
+        let file: KeptFile = {
+          path: own path
+          size: status.size
+          modifiedSeconds: status.modifiedSeconds
+        }
+        kept.add(value: own file)
+      }
+    }
+  }
+  if total <= capBytes {
+    ret total
+  }
+  let wanted: Int = capBytes / 5 * 4
+  var times: List(Float64) = {}
+  loop let file: view KeptFile in kept {
+    times.add(value: file.modifiedSeconds)
+  }
+  var order: List(Int) = indexOrder(count: times.length)
+  sortOrder(order: order, keys: times, descending: false)
+  loop let index: copy Int in order {
+    if total <= wanted {
+      break
+    }
+    if let file: view KeptFile = kept.viewAt(index: index) {
+      if Sys.delete(path: file.path) {
+        total = total - file.size
+      }
+    }
+  }
+  ret total
+}

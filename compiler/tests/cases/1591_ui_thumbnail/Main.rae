@@ -1,0 +1,125 @@
+# ui/ThumbnailSystem's side without a GPU: a list binds its rows' thumbnails, the rows in view are
+# asked for first and a hidden node not at all, a Sprite shows its icon in its own tint, then the
+# picture untinted, then the icon again when the row shows another file or the file changed.
+open ecs/ComponentTable
+open ecs/Entity
+open Thumbnails
+open ui/Components
+open ui/Ecs
+open ui/LayoutSystem
+open ui/ListViewSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ThumbnailComponents
+open ui/ThumbnailSystem
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  scenes: SceneRegistry
+  cache: ThumbnailCache
+  list: EntityId
+}
+
+func rows(app: mod App, first: view Int, modified: view Int) {
+  var data: ListViewData = { rows: {} }
+  loop var i: Int = first, i < first + 6, ++i {
+    data.rows.add(
+      value: ListViewRow {
+        keys: List(String) { "path", "modified", "byProgram" }
+        values: List(String) { "file{i}", "{modified}", "true" }
+      }
+    )
+  }
+  componentSet(this: app.world.listViewDatas, entityId: app.list, data: own data)
+}
+
+func frame(app: mod App, step: view String) {
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  beginThumbnails(cache: app.cache)
+  let changed: Bool = wantThumbnails(
+    world: app.world
+    uiSystems: app.uiSystems
+    cache: app.cache
+    pixelScale: 1.0
+  )
+  endThumbnails(cache: app.cache)
+  # what applyThumbnails does with a canvas
+  if let given: ThumbnailUpload = takeThumbnailUpload(cache: app.cache) {
+    thumbnailUploaded(cache: app.cache, key: given.key, uploaded: true)
+  }
+  var text: String = ""
+  let children: view Children = componentView(this: app.world.childrens, entityId: app.list)
+  loop let row: view EntityId in children.ids {
+    let sprite: view Sprite = componentView(this: app.world.sprites, entityId: row)
+    text = text.concat(other: " [{sprite.textureKey} {sprite.tintSlot}]")
+  }
+  log("{step}:{text}")
+}
+
+func main() {
+  var settings: ThumbnailSettings = { threads: 1 }
+  settings.askedAtOnce = 2
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    scenes: createSceneRegistry()
+    cache: createThumbnails(settings: settings)
+    list: noEntity()
+  }
+  let row: Scene = parseScene(source: embedText(file: "Row.raescene"))
+  registerScene(reg: app.scenes, key: "Row", scene: own row)
+  app.world.layoutW = 200.0
+  app.world.layoutH = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Files") {
+    app.list = nodeEntityId(world: app.world, index: raw)
+  }
+  rows(app: app, first: 0, modified: 1)
+  frame(app: app, step: "opened")
+  var asked: List(ThumbnailAsked) = takeThumbnailsAsked(cache: app.cache)
+  loop let question: view ThumbnailAsked in asked {
+    log("asked {question.path} at {question.pixels}")
+    var pixels: ThumbnailPixels = { width: 2, height: 1 }
+    loop var i: Int = 0, i < 8, ++i {
+      pixels.bytes.add(value: 255)
+    }
+    setThumbnail(cache: app.cache, key: question.key, pixels: own pixels)
+  }
+  frame(app: app, step: "answered")
+  frame(app: app, step: "one given to the GPU")
+  frame(app: app, step: "and the other")
+  componentSet(
+    this: app.world.scrollStates
+    entityId: app.list
+    data: ScrollState { y: -50.0, velocity: 0.0 }
+  )
+  frame(app: app, step: "scrolled by a row")
+  rows(app: app, first: 0, modified: 2)
+  frame(app: app, step: "the files changed")
+  log("ready {app.cache.readyCount}")
+  asked = takeThumbnailsAsked(cache: app.cache)
+  var canceled: Int = 0
+  loop let question: view ThumbnailAsked in asked {
+    if question.canceled {
+      canceled = canceled + 1
+    }
+  }
+  log("asked since {asked.length - canceled}, canceled {canceled}")
+  let hidden: String = thumbnailKey(request: ThumbnailRequest { path: "hidden.png", pixels: 64 })
+  log(
+    "the hidden one is wanted {thumbnailState(cache: app.cache, key: hidden) is not ThumbnailState.none}"
+  )
+  stopThumbnails(cache: app.cache)
+}

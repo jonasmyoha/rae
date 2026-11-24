@@ -1817,3 +1817,40 @@ axis among its siblings and below them, so it names none:
   An event loop renders while `scrollBarsSettling`.
 
 Case 1588, and check `uiPanes` for both.
+
+## 54. Thumbnails
+
+A node that shows a small picture of a file (`ui/ThumbnailSystem`, over `lib/Thumbnails`):
+
+```jsonc
+"Picture": { "Rect": {"x": 0, "y": 0, "w": 48, "h": 48},
+             "Sprite": {"textureKey": "mat:image", "scaleMode": "Fit", "tint": "textMuted"},
+             "Thumbnail": {"icon": "mat:image"} }
+```
+
+| field | default | |
+|---|---|---|
+| `path` | `""` | the file; usually bound by a list, as every field here can be |
+| `icon` | `""` | the Sprite's texture key until there is a picture, and for a file that has none |
+| `fileSize`, `modifiedMs` | `0` | what a changed file is known by: with another number it is another picture |
+| `pixels` | `0` | how long the picture's longer side may be; `0`: the node's on the screen, in steps of 32 |
+| `byProgram` | `false` | the program makes pictures of this kind |
+
+- The program keeps a `ThumbnailCache`, a resource (`createThumbnails(settings:)`), calls
+  `thumbnailSystem(world:, uiSystems:, cache:, canvas:, pixelScale:)` after the transforms, renders another
+  frame while `thumbnailsWaiting`, and ends with `stopThumbnails`.
+- PNG and JPEG are read, decoded and made small on the cache's threads (2): a frame never waits for a
+  file. What is in view is made first, rows near it next; what is scrolled away before it began is
+  dropped. A few finished pictures a frame are given to the GPU, within 2 ms.
+- The pictures take at most `budgetBytes` on the GPU (64 MB): then the one seen longest ago is let go of,
+  never one in view. `Gpu2d.releaseImageKey` lets any program do so; the GPU's frames that drew an image
+  are finished first.
+- A file that cannot be read, is cut short, is no picture or has more than `largestPixels` shows its icon
+  and is not tried again until its size or time changes.
+- With `diskFolder` the pictures are kept there between runs, by path, size and modified time, up to
+  `diskBytes` (256 MB; the ones written longest ago go). Only the owner can read the folder.
+- **The program's own kinds** (a video's frame, a sound's wave): `byProgram`. After `thumbnailSystem`,
+  `takeThumbnailsAsked` lists what is asked (a few at once, after a look at the disk) or `canceled`;
+  the program answers with `setThumbnail(cache:, key:, pixels:)` or `failThumbnail`.
+
+Cases 1590 (under ThreadSanitizer too) and 1591; `checks/uiThumbnails` scrolls 2,000 pictures.

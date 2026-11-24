@@ -3,7 +3,7 @@
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
-scrolling, dividers and scrollbars (steps 4 to 5c). The steps are the `[file browser ...]` tasks in
+scrolling, dividers, scrollbars and thumbnails (steps 4 to 6). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -398,7 +398,7 @@ None of these is about files; each is its own module with its own cases.
 | **dividers, scrollbars** | built (docs/ui-scene-format.md sections 52, 53) | `Divider` and `ScrollBar` components with a system each |
 | **text editing** | built (docs/ui-scene-format.md section 11) | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
 | **drags** | per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |
-| **images** | a registered image is never released | release behind in-flight frames; decode off the main thread; a budget. `lib/Gpu2dCanvas/Canvas.rae` has 999 lines, so it is split first |
+| **images** | built (docs/ui-scene-format.md section 54), was: a registered image is never released | release behind in-flight frames; decode off the main thread; a budget. `lib/Gpu2dCanvas/Canvas.rae` has 999 lines, so it is split first |
 | **sorting** | insertion sort, numbers only | §3 |
 
 ## 11. Operations

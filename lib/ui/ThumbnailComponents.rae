@@ -1,0 +1,19 @@
+# On a node with a Sprite: it shows a small picture of the file `path` (ui/ThumbnailSystem), and
+# `icon` (a Sprite's texture key, "mat:image") until there is one, and for a file that has none.
+#
+#     "Picture": { "Rect": {...}, "Sprite": {"textureKey": "mat:image", "scaleMode": "Fit", "tint":
+#     "textMuted"},
+#                  "Thumbnail": {"icon": "mat:image"} }
+#
+# A list binds `path`, `icon`, `fileSize`, `modifiedMs` and `byProgram` like any field. The size and
+# the modified time are what a changed file is known by. `pixels` is how long the picture's longer
+# side may be; 0: as long as the node's longer side on the screen. `byProgram`: the program makes
+# pictures of this kind (lib/Thumbnails ThumbnailAsked).
+type Thumbnail {
+  path: String = ""
+  icon: String = ""
+  fileSize: Int = 0
+  modifiedMs: Int = 0
+  pixels: Int = 0
+  byProgram: Bool = false
+}

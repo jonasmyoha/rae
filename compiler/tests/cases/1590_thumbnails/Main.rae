@@ -1,0 +1,371 @@
+# lib/Thumbnails with no GPU: pictures made small on threads, what is wanted first made first, what
+# is
+# not wanted dropped, a budget with the longest unseen let go of, broken, truncated and too large
+# files failing once, a changed file, the disk cache and its cap, and the program's own kinds. Runs
+# under ThreadSanitizer too.
+import Files
+import Png
+import Sys
+open Thumbnails
+
+# 16 x 16, red
+const jpegHex: String = "ffd8ffc00011080010001003012200021101031101ffc4001f0000010501010101010100000000000000000102030405060708090a0bffc400b5100002010303020403050504040000017d01020300041105122131410613516107227114328191a1082342b1c11552d1f02433627282090a161718191a25262728292a3435363738393a434445464748494a535455565758595a636465666768696a737475767778797a838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae1e2e3e4e5e6e7e8e9eaf1f2f3f4f5f6f7f8f9faffc4001f0100030101010101010101010000000000000102030405060708090a0bffc400b51100020102040403040705040400010277000102031104052131061241510761711322328108144291a1b1c109233352f0156272d10a162434e125f11718191a262728292a35363738393a434445464748494a535455565758595a636465666768696a737475767778797a82838485868788898a92939495969798999aa2a3a4a5a6a7a8a9aab2b3b4b5b6b7b8b9bac2c3c4c5c6c7c8c9cad2d3d4d5d6d7d8d9dae2e3e4e5e6e7e8e9eaf2f3f4f5f6f7f8f9faffdb0043000606060606060a06060a0e0a0a0a0e120e0e0e0e12171212121212171c1717171717171c1c1c1c1c1c1c1c22222222222227272727272c2c2c2c2c2c2c2c2c2cffdb0043010707070b0a0b130a0a132e1f1a1f2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2e2effdd00040001ffda000c03010002110311003f00e2a8a28af00fd6cfffd9"
+
+func hexValue(byte: view Int) ret Int {
+  if byte >= 97 {
+    ret byte - 87
+  }
+  ret byte - 48
+}
+
+func jpegBytes() ret List(UInt8) {
+  var bytes: List(UInt8) = {}
+  loop var i: Int = 0, i < jpegHex.length(), i += 2 {
+    bytes.add(
+      value: (hexValue(byte: jpegHex.byteAt(index: i)) * 16 + hexValue(
+        byte: jpegHex.byteAt(index: i + 1)
+      )) as UInt8
+    )
+  }
+  ret bytes
+}
+
+# A PNG: its left half red, its right half clear green
+func pngBytes(width: view Int, height: view Int) ret List(UInt8) {
+  var pixels: List(Int) = {}
+  loop var y: Int = 0, y < height, ++y {
+    loop var x: Int = 0, x < width, ++x {
+      if x < width / 2 {
+        pixels.add(value: 255 * 16777216 + 200 * 65536)
+      } else {
+        pixels.add(value: 255 * 256)
+      }
+    }
+  }
+  let encoded: List(Int) = Png.encodePng(
+    pixels: pixels
+    width: width
+    height: height
+    hasAlpha: true
+  )
+  var bytes: List(UInt8) = {}
+  loop let byte: copy Int in encoded {
+    bytes.add(value: byte as UInt8)
+  }
+  ret bytes
+}
+
+func write(path: view String, bytes: view List(UInt8)) {
+  let written: Bool = Sys.writeFileBytes(path: path, bytes: bytes)
+}
+
+func firstHalf(bytes: view List(UInt8)) ret List(UInt8) {
+  var half: List(UInt8) = {}
+  loop var i: Int = 0, i < bytes.length / 2, ++i {
+    half.add(value: bytes.copyAtFallback(index: i, fallback: 0))
+  }
+  ret half
+}
+
+func requestFor(path: view String, pixels: view Int) ret ThumbnailRequest {
+  ret ThumbnailRequest { path: "{path}", pixels: pixels }
+}
+
+func want(
+  cache: mod ThumbnailCache
+  request: view ThumbnailRequest
+  priority: view Int
+) ret ThumbnailState {
+  let key: String = thumbnailKey(request: request)
+  ret wantThumbnail(
+    cache: cache
+    key: key
+    request: request
+    priority: priority
+  )
+}
+
+# Frames wanting `requests` in order, until none of them is being made (10 s at most); how many went
+# to the "GPU"
+func settle(cache: mod ThumbnailCache, requests: view List(ThumbnailRequest)) ret Int {
+  let deadline: Int = nowNs() + 10000000000
+  var uploads: Int = 0
+  var busy: Bool = true
+  loop busy and nowNs() < deadline {
+    busy = false
+    beginThumbnails(cache: cache)
+    loop var i: Int = 0, i < requests.length, ++i {
+      if let request: view ThumbnailRequest = requests.viewAt(index: i) {
+        let state: ThumbnailState = want(cache: cache, request: request, priority: i)
+        busy = busy or state is ThumbnailState.queued or state is ThumbnailState.sent or state is ThumbnailState.made
+      }
+    }
+    endThumbnails(cache: cache)
+    if let upload: ThumbnailUpload = takeThumbnailUpload(cache: cache) {
+      thumbnailUploaded(cache: cache, key: upload.key, uploaded: true)
+      uploads = uploads + 1
+    }
+    sleep(ms: 1)
+  }
+  ret uploads
+}
+
+func stateName(state: view ThumbnailState) ret String {
+  if state is ThumbnailState.none {
+    ret "none"
+  }
+  if state is ThumbnailState.queued {
+    ret "queued"
+  }
+  if state is ThumbnailState.sent {
+    ret "sent"
+  }
+  if state is ThumbnailState.asked {
+    ret "asked"
+  }
+  if state is ThumbnailState.made {
+    ret "made"
+  }
+  if state is ThumbnailState.ready {
+    ret "ready"
+  }
+  ret "failed"
+}
+
+func states(cache: view ThumbnailCache, requests: view List(ThumbnailRequest)) ret String {
+  var text: String = ""
+  loop let request: view ThumbnailRequest in requests {
+    text = text.concat(
+      other: " {stateName(state: thumbnailState(cache: cache, key: thumbnailKey(request: request)))}"
+    )
+  }
+  ret text
+}
+
+func list(path: view String, count: view Int, pixels: view Int) ret List(ThumbnailRequest) {
+  var requests: List(ThumbnailRequest) = {}
+  loop var i: Int = 0, i < count, ++i {
+    requests.add(value: requestFor(path: "{path}/{i}.png", pixels: pixels))
+  }
+  ret requests
+}
+
+func small() ret ThumbnailSettings {
+  ret ThumbnailSettings { threads: 1 }
+}
+
+func scaling() {
+  # 8 x 4, the left half red, the right half clear green, to 4 x 2
+  var rgba: List(UInt8) = {}
+  loop var i: Int = 0, i < 32, ++i {
+    if i % 8 < 3 {
+      rgba.add(value: 200)
+      rgba.add(value: 0)
+      rgba.add(value: 0)
+      rgba.add(value: 255)
+    } else {
+      rgba.add(value: 0)
+      rgba.add(value: 255)
+      rgba.add(value: 0)
+      rgba.add(value: 0)
+    }
+  }
+  var pixels: ThumbnailPixels = {}
+  unsafe {
+    pixels = scaledDown(
+      rgba: rgba.data
+      width: 8
+      height: 4
+      longest: 4
+    )
+  }
+  var row: String = ""
+  loop var i: Int = 0, i < 16, ++i {
+    row = row.concat(other: " {pixels.bytes.copyAtFallback(index: i, fallback: 0)}")
+  }
+  log("scaled {pixels.width}x{pixels.height}:{row}")
+  let tall: PictureSize = fittedSize(width: 10, height: 5000, longest: 100)
+  let least: PictureSize = fittedSize(width: 30, height: 20, longest: 100)
+  log("fitted {tall.width}x{tall.height} {least.width}x{least.height}")
+}
+
+func main() {
+  scaling()
+  var base: String = Sys.getEnv(name: "TMPDIR")
+  if base.length() is 0 {
+    base = "/tmp"
+  }
+  let folder: String = "{base}/rae-thumbnails-{nowNs()}"
+  let disk: String = "{folder}/kept"
+  let made: Bool = Sys.makeDir(path: folder)
+  loop var i: Int = 0, i < 12, ++i {
+    write(path: "{folder}/{i}.png", bytes: pngBytes(width: 96, height: 48))
+  }
+
+  # wanted first, made first; what is not wanted any more and has not begun is dropped
+  var cache: ThumbnailCache = createThumbnails(settings: small())
+  beginThumbnails(cache: cache)
+  loop var i: Int = 0, i < 12, ++i {
+    let state: ThumbnailState = want(
+      cache: cache
+      request: requestFor(path: "{folder}/{i}.png", pixels: 32)
+      priority: 12 - i
+    )
+  }
+  endThumbnails(cache: cache)
+  log("handed out:{states(cache: cache, requests: list(path: folder, count: 12, pixels: 32))}")
+  beginThumbnails(cache: cache)
+  let one: ThumbnailState = want(
+    cache: cache
+    request: requestFor(path: "{folder}/11.png", pixels: 32)
+    priority: 0
+  )
+  endThumbnails(cache: cache)
+  log("scrolled away: dropped {cache.dropped}")
+  let wanted: List(ThumbnailRequest) = list(path: folder, count: 4, pixels: 32)
+  log("uploads {settle(cache: cache, requests: wanted)},{states(cache: cache, requests: wanted)}")
+  log(
+    "ready {cache.readyCount} of {cache.readyBytes} bytes, made for nothing {cache.jobsSent - cache.readyCount}"
+  )
+  let jobs: Int = cache.jobsSent
+  let again: Int = settle(cache: cache, requests: wanted)
+  log("again: uploads {again}, jobs {cache.jobsSent - jobs}")
+  stopThumbnails(cache: cache)
+
+  # a budget of five: the ones seen longest ago go, never one in view
+  var tight: ThumbnailSettings = small()
+  tight.budgetBytes = 5 * 32 * 16 * 4
+  var budget: ThumbnailCache = createThumbnails(settings: tight)
+  var released: String = ""
+  loop var start: Int = 0, start < 9, start += 2 {
+    var window: List(ThumbnailRequest) = {}
+    loop var i: Int = start, i < start + 3, ++i {
+      window.add(value: requestFor(path: "{folder}/{i}.png", pixels: 32))
+    }
+    let uploads: Int = settle(cache: budget, requests: window)
+    beginThumbnails(cache: budget)
+    loop let request: view ThumbnailRequest in window {
+      let state: ThumbnailState = want(cache: budget, request: request, priority: 0)
+    }
+    endThumbnails(cache: budget)
+    released = ""
+    loop let key: view String in takeThumbnailReleases(cache: budget) {
+      let name: String = key.sub(start: 10 + folder.length() + 1, len: 1)
+      released = released.concat(other: " {name}")
+    }
+    log("from {start}: ready {budget.readyCount}, let go of{released}")
+  }
+  stopThumbnails(cache: budget)
+
+  # what cannot be read fails, and is not tried again
+  write(path: "{folder}/cut.png", bytes: firstHalf(bytes: pngBytes(width: 96, height: 48)))
+  write(path: "{folder}/whole.jpg", bytes: jpegBytes())
+  write(path: "{folder}/cut.jpg", bytes: firstHalf(bytes: jpegBytes()))
+  var trailing: List(UInt8) = jpegBytes()
+  loop var i: Int = 0, i < 500, ++i {
+    trailing.add(value: 7)
+  }
+  write(path: "{folder}/trailing.jpg", bytes: trailing)
+  let text: Bool = Sys.writeFile(path: "{folder}/text.png", content: "not a picture")
+  write(path: "{folder}/large.png", bytes: pngBytes(width: 200, height: 200))
+  var limited: ThumbnailSettings = small()
+  limited.largestPixels = 30000
+  var broken: ThumbnailCache = createThumbnails(settings: limited)
+  let names: List(String) = {
+    "cut.png"
+    "whole.jpg"
+    "cut.jpg"
+    "trailing.jpg"
+    "text.png"
+    "gone.png"
+    "large.png"
+  }
+  var files: List(ThumbnailRequest) = {}
+  loop let name: view String in names {
+    files.add(value: requestFor(path: "{folder}/{name}", pixels: 32))
+  }
+  let uploads: Int = settle(cache: broken, requests: files)
+  log("files: {names.join(sep: " ")}")
+  log("      {states(cache: broken, requests: files)}")
+  let tried: Int = broken.jobsSent
+  loop var i: Int = 0, i < 20, ++i {
+    let more: Int = settle(cache: broken, requests: files)
+  }
+  log("tried again {broken.jobsSent - tried}")
+  stopThumbnails(cache: broken)
+
+  # a changed file is another picture; the disk cache has each, and answers the next run
+  var keeping: ThumbnailSettings = small()
+  keeping.diskFolder = "{disk}"
+  var first: ThumbnailCache = createThumbnails(settings: keeping)
+  var request: ThumbnailRequest = { path: "{folder}/0.png", fileSize: 1, modifiedMs: 1, pixels: 32 }
+  let firstUploads: Int = settle(cache: first, requests: List(ThumbnailRequest) { request })
+  write(path: "{folder}/0.png", bytes: pngBytes(width: 48, height: 96))
+  let same: Int = settle(cache: first, requests: List(ThumbnailRequest) { request })
+  request.modifiedMs = 2
+  let changed: Int = settle(cache: first, requests: List(ThumbnailRequest) { request })
+  log(
+    "first {firstUploads}, the same request {same}, the file changed {changed}, kept on disk {Files.readFolder(
+      folder: disk
+    ).entries.length}"
+  )
+  stopThumbnails(cache: first)
+  var second: ThumbnailCache = createThumbnails(settings: keeping)
+  request.byProgram = true
+  let byProgram: List(ThumbnailRequest) = { request }
+  let fromDisk: Int = settle(cache: second, requests: byProgram)
+  log("from the disk {fromDisk}, asked {takeThumbnailsAsked(cache: second).length}")
+
+  # the program's own kinds: asked after the disk, answered, failed, canceled
+  var videos: List(ThumbnailRequest) = {}
+  loop var i: Int = 0, i < 3, ++i {
+    write(path: "{folder}/{i}.video", bytes: jpegBytes())
+    videos.add(value: ThumbnailRequest { path: "{folder}/{i}.video", pixels: 8, byProgram: true })
+  }
+  let unmade: Int = settle(cache: second, requests: videos)
+  let asked: List(ThumbnailAsked) = takeThumbnailsAsked(cache: second)
+  log("asked {asked.length},{states(cache: second, requests: videos)}")
+  var number: Int = 0
+  loop let question: view ThumbnailAsked in asked {
+    if number is 0 {
+      var pixels: ThumbnailPixels = { width: 32, height: 16 }
+      loop var i: Int = 0, i < 32 * 16 * 4, ++i {
+        pixels.bytes.add(value: 255)
+      }
+      setThumbnail(cache: second, key: question.key, pixels: own pixels)
+    } else if number is 1 {
+      failThumbnail(cache: second, key: question.key)
+    }
+    number = number + 1
+  }
+  let answered: Int = settle(cache: second, requests: videos)
+  log("answered: uploads {answered},{states(cache: second, requests: videos)}")
+  let empty: List(ThumbnailRequest) = {}
+  let nothing: Int = settle(cache: second, requests: empty)
+  let canceled: List(ThumbnailAsked) = takeThumbnailsAsked(cache: second)
+  if let question: view ThumbnailAsked = canceled.viewAt(index: 0) {
+    log("not wanted any more: {canceled.length}, canceled {question.canceled}")
+    setThumbnail(
+      cache: second
+      key: question.key
+      pixels: ThumbnailPixels { width: 1, height: 1, bytes: List(UInt8) { 1, 2, 3, 4 } }
+    )
+  }
+  log("a late answer: waiting {thumbnailsWaiting(cache: second)}, asked still {second.askedCount}")
+  stopThumbnails(cache: second)
+  log("kept on disk {Files.readFolder(folder: disk).entries.length}")
+
+  # the disk cache's cap: the ones written longest ago go
+  let before: Int = trimThumbnails(folder: disk, capBytes: 1000000)
+  let after: Int = trimThumbnails(folder: disk, capBytes: before - 1)
+  log(
+    "under its cap {after <= (before - 1) / 5 * 4}, kept {Files.readFolder(folder: disk).entries.length > 0}"
+  )
+  loop let path: view String in List(String) { disk, folder } {
+    loop let entry: view Files.FileEntry in Files.readFolder(folder: path).entries {
+      let gone: Bool = Sys.delete(path: "{path}/{entry.name}")
+    }
+    let gone: Bool = Sys.delete(path: path)
+  }
+  log("cleaned up {Files.pathStatus(path: folder, follow: true).found is false}")
+}

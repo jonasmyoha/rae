@@ -1,0 +1,135 @@
+# One thread of the thumbnails: it waits for a job, reads and makes the picture (or looks for a kept
+# one, or keeps one), and answers over the cache's channel. Nothing here is shared with another
+# thread.
+import ui/EventLoop
+open Channel
+open Signal
+
+func nativeDecode(
+  path: String
+  maxPixels: Int
+  width: mod Int
+  height: mod Int
+) blocking unsafe extern("rae_ext_Thumbnails_decode") ret Buffer(UInt8)
+
+func nativeFree(rgba: Buffer(UInt8)) unsafe extern("rae_ext_Thumbnails_free")
+
+# How many pictures a thread keeps before it looks at the folder's size again
+const storesBetweenTrims: Int = 64
+
+func thumbnailThread(
+  jobs: own Channel(ThumbnailJob)
+  results: own Channel(ThumbnailResult)
+  signal: own Signal
+  settings: own ThumbnailWorkerSettings
+) ret Int {
+  var done: Int = 0
+  var stored: Int = 0
+  loop true {
+    if jobs.pending() is 0 {
+      signal.wait()
+      continue
+    }
+    let job: ThumbnailJob = jobs.receive()
+    if job.kind is ThumbnailJobKind.stop {
+      ret done
+    }
+    if job.kind is ThumbnailJobKind.store {
+      stored = keepPicture(
+        settings: settings
+        request: job.request
+        pixels: job.pixels
+        stored: stored
+      )
+      continue
+    }
+    var result: ThumbnailResult = {
+      key: "{job.key}"
+      worker: settings.index
+      answer: ThumbnailAnswer.missing
+    }
+    let key: String = diskKey(request: job.request)
+    var kept: Bool = false
+    if key.length() > 0 and settings.diskFolder.length() > 0 {
+      if let pixels: ThumbnailPixels = readThumbnail(folder: settings.diskFolder, key: key) {
+        result.pixels = pixels
+        result.answer = ThumbnailAnswer.made
+        kept = true
+      }
+    }
+    if kept is false and job.kind is ThumbnailJobKind.make {
+      result.pixels = decodedPicture(request: job.request, largestPixels: settings.largestPixels)
+      result.answer = ThumbnailAnswer.failed
+      if result.pixels.width > 0 {
+        result.answer = ThumbnailAnswer.made
+        if settings.diskFolder.length() > 0 and key.length() > 0 {
+          if writeThumbnail(
+            folder: settings.diskFolder
+            key: key
+            pixels: result.pixels
+            writer: settings.index
+          ) {
+            stored = trimSometimes(settings: settings, stored: stored)
+          }
+        }
+      }
+    }
+    done = done + 1
+    results.channelSend(value: own result)
+    EventLoop.wake()
+  }
+  ret done
+}
+
+# The file decoded and made small; a width of 0 when it cannot be
+func decodedPicture(request: view ThumbnailRequest, largestPixels: view Int) ret ThumbnailPixels {
+  var pixels: ThumbnailPixels = {}
+  var width: Int = 0
+  var height: Int = 0
+  unsafe {
+    let rgba: Buffer(UInt8) = nativeDecode(
+      path: request.path
+      maxPixels: largestPixels
+      width: width
+      height: height
+    )
+    if width > 0 and height > 0 {
+      pixels = scaledDown(
+        rgba: rgba
+        width: width
+        height: height
+        longest: request.pixels
+      )
+      nativeFree(rgba: rgba)
+    }
+  }
+  ret pixels
+}
+
+# A picture the program made kept on the disk; how many were kept since the folder was last looked
+# at
+func keepPicture(
+  settings: view ThumbnailWorkerSettings
+  request: view ThumbnailRequest
+  pixels: view ThumbnailPixels
+  stored: view Int
+) ret Int {
+  let key: String = diskKey(request: request)
+  if key.length() > 0 and settings.diskFolder.length() > 0 and writeThumbnail(
+    folder: settings.diskFolder
+    key: key
+    pixels: pixels
+    writer: settings.index
+  ) {
+    ret trimSometimes(settings: settings, stored: stored)
+  }
+  ret stored
+}
+
+# The first picture kept and every so many after it look at the folder's size
+func trimSometimes(settings: view ThumbnailWorkerSettings, stored: view Int) ret Int {
+  if stored % storesBetweenTrims is 0 {
+    let total: Int = trimThumbnails(folder: settings.diskFolder, capBytes: settings.diskBytes)
+  }
+  ret stored + 1
+}

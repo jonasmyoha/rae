@@ -39,6 +39,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `perfHud` | the perf HUD (`ui/PerfHud`) over a frame loop that keeps the pool's workers busy: frames in its graph, a bar for the main thread and each worker, the save button's `.raeperf` reads back, and closing it ends its capture |
 | `uiPanes` | dividers and scrollbars: a pane sized by its divider, a list scrolled by its thumb, a strip with a track; a picture |
 | `uiTextField` | a focused text field wider than its place, scrolled to its caret with a part selected; a picture |
+| `uiThumbnails` | 2,000 pictures scrolled through and back: the worst frame, its work, and the memory, which must level off |
 | `uiTimeline` | the `Timeline` chart from a scene (three lanes, spans, marks, one selected), painted and compared with its `reference.png`; the rules are in case 1472 |
 | `uiFlameHistogram` | the `FlameGraph` and `Histogram` charts, painted and compared with its `reference.png`; the rules are in case 1473 |
 | `uiLineTable` | the `LineGraph` and `StatTable` charts, painted and compared with its `reference.png`; the rules are in case 1474 |

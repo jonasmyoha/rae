@@ -1,0 +1,132 @@
+# lib/Thumbnails — small pictures of files, for lists and previews (docs/file-browser-design.md §9,
+# §10;
+# docs/ui-scene-format.md "Thumbnails" for the UI side, ui/ThumbnailSystem). No UI and no GPU here.
+#
+#   var cache: ThumbnailCache = createThumbnails(settings: ThumbnailSettings { diskFolder: "..." })
+#   each frame:
+#     beginThumbnails(cache: cache)                      # takes what the threads made
+#     ... wantThumbnail(cache: cache, request: ...)      # for each picture in view
+#     endThumbnails(cache: cache)                        # drops what is not wanted, hands out work
+#     takeThumbnailUploads / takeThumbnailReleases       # what to give the GPU, and to let go of
+#   stopThumbnails(cache: cache)
+#
+# The files are read, decoded and made small on the cache's own threads, so that a frame never waits
+# for a disk. What is wanted first is worked on first; what is not wanted any more and has not
+# begun is
+# dropped. A picture is kept until the budget is used and it is the one seen longest ago. A file
+# that
+# cannot be read is remembered as failed and not tried again until it changes.
+#
+# A kind of file the program makes pictures of itself (`byProgram`: a video, a sound) is asked for
+# with a
+# ThumbnailAsked and answered with setThumbnail or failThumbnail.
+open Channel
+open Signal
+
+# A picture wanted: the file, what it is known to be like (so that a changed file is another
+# picture;
+# 0: not known), and how long its longer side may be
+type ThumbnailRequest {
+  path: String = ""
+  fileSize: Int = 0
+  modifiedMs: Int = 0
+  pixels: Int = 64
+  byProgram: Bool = false
+}
+
+type ThumbnailSettings {
+  # How many threads make pictures
+  threads: Int = 2
+  # What the pictures may take on the GPU
+  budgetBytes: Int = 67108864
+  # How many pictures are given to the GPU in a frame, and for how long (the first one always is)
+  uploadsPerFrame: Int = 8
+  uploadSeconds: Float64 = 0.002
+  # How many ThumbnailAsked may be unanswered at once
+  askedAtOnce: Int = 4
+  # A picture of more pixels than this is not decoded (it fails)
+  largestPixels: Int = 120000000
+  # Where made pictures are kept ("": nowhere), and how much they may take there
+  diskFolder: String = ""
+  diskBytes: Int = 268435456
+}
+
+enum ThumbnailState {
+  none
+  queued
+  sent
+  asked
+  made
+  ready
+  failed
+}
+
+# The program is asked to make a picture (or, `canceled`, need not any more)
+type ThumbnailAsked {
+  key: String
+  path: String
+  pixels: Int
+  canceled: Bool = false
+}
+
+# A picture as bytes: straight-alpha RGBA, four a pixel, rows from the top
+type ThumbnailPixels {
+  width: Int = 0
+  height: Int = 0
+  bytes: List(UInt8) = {}
+}
+
+# One to give the GPU, under its key
+type ThumbnailUpload {
+  key: String
+  pixels: ThumbnailPixels
+}
+
+type ThumbnailEntry {
+  key: String = ""
+  request: ThumbnailRequest = {}
+  state: ThumbnailState = ThumbnailState.none
+  # Wanted in this frame: how soon (0 first), and where in the frame's order
+  priority: Int = 0
+  order: Int = 0
+  seenFrame: Int = -1
+  # The program was asked before the disk was looked at
+  looked: Bool = false
+  worker: Int = -1
+  pixels: ThumbnailPixels = {}
+}
+
+# ----- between the cache and its threads ---------------------------------------
+enum ThumbnailJobKind { make, look, store, stop }
+
+type ThumbnailJob {
+  kind: ThumbnailJobKind
+  key: String = ""
+  request: ThumbnailRequest = {}
+  pixels: ThumbnailPixels = {}
+}
+
+enum ThumbnailAnswer { made, missing, failed }
+
+type ThumbnailResult {
+  key: String
+  worker: Int
+  answer: ThumbnailAnswer
+  pixels: ThumbnailPixels = {}
+}
+
+# What a thread needs to know
+type ThumbnailWorkerSettings {
+  index: Int
+  largestPixels: Int
+  diskFolder: String
+  diskBytes: Int
+}
+
+type ThumbnailWorker {
+  jobs: Channel(ThumbnailJob)
+  signal: Signal
+  task: opt Task(Int)
+  # Jobs sent whose answer has not come
+  busy: Int = 0
+}

@@ -1,0 +1,334 @@
+# Thumbnails on nodes (docs/ui-scene-format.md "Thumbnails"). The program keeps a ThumbnailCache
+# (lib/Thumbnails), a resource, and once a frame, after the transforms:
+#
+#   let changed: Bool = thumbnailSystem(
+#     world: world  uiSystems: uiSystems  cache: cache  canvas: canvas  pixelScale: Gpu2d.dpr()
+#   )
+#
+# It asks for the picture of every Thumbnail that is shown, those in view first, gives the GPU a few
+# finished ones a frame, and lets go of what the cache let go of. A picture that is made wakes the
+# event loop; a program that sleeps between frames renders another while thumbnailsWaiting. A
+# program with kinds of its own answers takeThumbnailsAsked after it.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Thumbnails
+open ui/AnimationSystem
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/ThumbnailComponents
+open ui/Transform
+open ui/UiSystems
+
+# Textures of a size in steps, so that a resize does not ask for a picture of every size
+const thumbnailSteps: Int = 32
+
+# True when a node shows another picture than before, or a picture came to be ready (the next frame
+# shows it)
+func thumbnailSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  cache: mod ThumbnailCache
+  canvas: mod Gpu2dCanvas
+  pixelScale: view Float
+) ret Bool {
+  beginThumbnails(cache: cache)
+  var changed: Bool = wantThumbnails(
+    world: world
+    uiSystems: uiSystems
+    cache: cache
+    pixelScale: pixelScale
+  )
+  endThumbnails(cache: cache)
+  let uploaded: Int = applyThumbnails(cache: cache, canvas: canvas)
+  ret changed or uploaded > 0
+}
+
+# The cache's frame on the canvas: what it let go of, and a few finished pictures (for as long as
+# its
+# settings say; the first one always). How many were given.
+func applyThumbnails(cache: mod ThumbnailCache, canvas: mod Gpu2dCanvas) ret Int {
+  let releases: List(String) = takeThumbnailReleases(cache: cache)
+  loop let key: view String in releases {
+    Gpu2d.releaseImageKey(canvas: canvas, key: key)
+  }
+  let begun: Int = nowNs()
+  var given: Int = 0
+  loop var i: Int = 0, i < cache.settings.uploadsPerFrame, ++i {
+    if i > 0 and (nowNs() - begun) as Float64 > cache.settings.uploadSeconds * 1000000000.0 {
+      break
+    }
+    if let upload: ThumbnailUpload = takeThumbnailUpload(cache: cache) {
+      let handle: Int = Gpu2d.registerImageBytes(
+        canvas: canvas
+        key: upload.key
+        bytes: upload.pixels.bytes
+        w: upload.pixels.width
+        h: upload.pixels.height
+      )
+      thumbnailUploaded(cache: cache, key: upload.key, uploaded: handle > 0)
+      given = given + 1
+    } else {
+      break
+    }
+  }
+  ret given
+}
+
+# Every shown Thumbnail's picture wanted, and its Sprite
+func wantThumbnails(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  cache: mod ThumbnailCache
+  pixelScale: view Float
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.thumbnails), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.thumbnails, i: i)
+    if componentHas(this: world.sprites, entityId: entityId) and shownInTree(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+    ) {
+      changed = wantNodeThumbnail(
+        world: world
+        uiSystems: uiSystems
+        cache: cache
+        pixelScale: pixelScale
+        entityId: entityId
+      ) or changed
+    }
+  }
+  ret changed
+}
+
+func wantNodeThumbnail(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  cache: mod ThumbnailCache
+  pixelScale: view Float
+  entityId: view EntityId
+) ret Bool {
+  let rect: WorldRect = nodeRect(uiSystems: uiSystems, entityId: entityId)
+  noteThumbnail(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    pixels: thumbnailPixels(
+      world: world
+      entityId: entityId
+      rect: rect
+      pixelScale: pixelScale
+    )
+  )
+  let key: String = noteKey(uiSystems: uiSystems, entityId: entityId)
+  var state: ThumbnailState = ThumbnailState.none
+  if key.length() > 0 {
+    var priority: Int = 1
+    if inView(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      rect: rect
+    ) {
+      priority = 0
+    }
+    state = wantKnownThumbnail(cache: cache, key: key, priority: priority)
+    if state is ThumbnailState.none {
+      state = wantThumbnail(
+        cache: cache
+        key: key
+        request: requestOf(world: world, uiSystems: uiSystems, entityId: entityId)
+        priority: priority
+      )
+    }
+  }
+  ret showThumbnail(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    key: key
+    ready: state is ThumbnailState.ready
+  )
+}
+
+# The key noted for the node ("" while it has no path)
+func noteKey(uiSystems: view UiSystems, entityId: view EntityId) ret String {
+  ret "{componentView(this: uiSystems.thumbnails.nodes, entityId: entityId).key}"
+}
+
+func requestOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret ThumbnailRequest {
+  let thumbnail: view Thumbnail = componentView(this: world.thumbnails, entityId: entityId)
+  ret ThumbnailRequest {
+    path: "{thumbnail.path}"
+    fileSize: thumbnail.fileSize
+    modifiedMs: thumbnail.modifiedMs
+    pixels: componentView(this: uiSystems.thumbnails.nodes, entityId: entityId).pixels
+    byProgram: thumbnail.byProgram
+  }
+}
+
+func nodeRect(uiSystems: view UiSystems, entityId: view EntityId) ret WorldRect {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: entityId) and componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  ) {
+    let wt: view WorldTransform2D = componentView(
+      this: uiSystems.transform2d.worldTransforms
+      entityId: entityId
+    )
+    let cr: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    ret worldRectOf(wt: wt, cr: cr)
+  }
+  ret WorldRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }
+}
+
+# How long the picture's longer side may be
+func thumbnailPixels(
+  world: view UiWorld
+  entityId: view EntityId
+  rect: view WorldRect
+  pixelScale: view Float
+) ret Int {
+  let wanted: Int = componentView(this: world.thumbnails, entityId: entityId).pixels
+  if wanted > 0 {
+    ret wanted
+  }
+  var side: Float = rect.w
+  if rect.h > side {
+    side = rect.h
+  }
+  let steps: Int = (side * pixelScale / thumbnailSteps.toFloat() + 0.99).toInt()
+  if steps < 1 {
+    ret thumbnailSteps
+  }
+  if steps > 64 {
+    ret 64 * thumbnailSteps
+  }
+  ret steps * thumbnailSteps
+}
+
+# The node's request and key, made again only when its Thumbnail or its size changed (a String a
+# node
+# a frame otherwise)
+func noteThumbnail(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  pixels: view Int
+) {
+  let stamp: Int = componentModStamp(this: world.thumbnails, entityId: entityId)
+  if componentHas(this: uiSystems.thumbnails.nodes, entityId: entityId) {
+    let note: view ThumbnailNode = componentView(
+      this: uiSystems.thumbnails.nodes
+      entityId: entityId
+    )
+    if note.stamp is stamp and note.pixels is pixels {
+      ret
+    }
+  }
+  var note: ThumbnailNode = {}
+  if let before: ThumbnailNode = componentCopy(this: uiSystems.thumbnails.nodes, entityId: entityId) {
+    note = before
+  }
+  let thumbnail: view Thumbnail = componentView(this: world.thumbnails, entityId: entityId)
+  note.stamp = stamp
+  note.pixels = pixels
+  note.key = ""
+  if thumbnail.path.length() > 0 {
+    note.key = thumbnailKey(
+      request: ThumbnailRequest {
+        path: "{thumbnail.path}"
+        fileSize: thumbnail.fileSize
+        modifiedMs: thumbnail.modifiedMs
+        pixels: pixels
+      }
+    )
+  }
+  componentSet(this: uiSystems.thumbnails.nodes, entityId: entityId, data: own note)
+}
+
+# Is any of the node in the window and not cut off? (A row beyond is wanted too, but later.)
+func inView(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  rect: view WorldRect
+) ret Bool {
+  if rect.x + rect.w <= 0.0 or rect.y + rect.h <= 0.0 or rect.x >= world.layoutW or rect.y >= world.layoutH {
+    ret false
+  }
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret true
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+    if componentHas(this: world.overflows, entityId: at) and componentView(
+      this: world.overflows
+      entityId: at
+    ).mode is OverflowMode.clip {
+      let clip: WorldRect = nodeRect(uiSystems: uiSystems, entityId: at)
+      if rect.x + rect.w <= clip.x or rect.y + rect.h <= clip.y or rect.x >= clip.x + clip.w or rect.y >= clip.y + clip.h {
+        ret false
+      }
+    }
+  }
+  ret true
+}
+
+# The Sprite: the picture, untinted, when it is ready, else the icon in the Sprite's own tint
+func showThumbnail(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+  key: view String
+  ready: view Bool
+) ret Bool {
+  if ready {
+    if componentView(this: world.sprites, entityId: entityId).textureKey is key {
+      ret false
+    }
+    let before: Sprite = spriteOf(world: world, entityId: entityId)
+    let note: mod ThumbnailNode = componentMod(this: uiSystems.thumbnails.nodes, entityId: entityId)
+    if note.pictured is false {
+      note.pictured = true
+      note.tint = before.tint
+      note.tintSlot = "{before.tintSlot}"
+    }
+    let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
+    sprite.textureKey = "{key}"
+    sprite.tint = RgbaColor { r: 255, g: 255, b: 255, a: 255 }
+    sprite.tintSlot = ""
+    ret true
+  }
+  let icon: String = "{componentView(this: world.thumbnails, entityId: entityId).icon}"
+  if componentView(this: world.sprites, entityId: entityId).textureKey is icon {
+    ret false
+  }
+  let sprite: mod Sprite = componentMod(this: world.sprites, entityId: entityId)
+  sprite.textureKey = icon
+  let note: mod ThumbnailNode = componentMod(this: uiSystems.thumbnails.nodes, entityId: entityId)
+  if note.pictured {
+    note.pictured = false
+    sprite.tint = note.tint
+    sprite.tintSlot = "{note.tintSlot}"
+  }
+  ret true
+}
+
+func spriteOf(world: view UiWorld, entityId: view EntityId) ret Sprite {
+  if let sprite: Sprite = componentCopy(this: world.sprites, entityId: entityId) {
+    ret sprite
+  }
+  ret Sprite.default()
+}

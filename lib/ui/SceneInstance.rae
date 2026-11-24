@@ -44,6 +44,7 @@ open ui/SceneBundles
 open ui/BundleApply
 open ui/UiSystems
 open ui/ClickTargets
+open ui/ThumbnailFields
 open ui/IconCheck
 open ui/ScenePolicy
 open ui/AnimationSystem
@@ -818,6 +819,15 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     if override.fieldName is "radius" {
       cur.radius = override.valueString.toFloat()
     }
+    ret
+  }
+  if override.componentName is "Thumbnail" {
+    setThumbnailField(
+      world: world
+      entityId: entityId
+      fieldName: override.fieldName
+      value: override.valueString
+    )
     ret
   }
   let gradientKey: String = "GradientFill"

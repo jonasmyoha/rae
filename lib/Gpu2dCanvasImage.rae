@@ -8,6 +8,7 @@
 # before text (Gpu2dCanvasFrame drives the flush).
 import String
 import Math
+open collections/StringMap
 open webgpu/Webgpu
 open webgpu/Context
 open gpu/GpuResources
@@ -55,9 +56,18 @@ func registerImageTexture(
   height: copy Int
 ) ret Int {
   if let textureView: TextureViewId = createTextureView(resources: resources, texture: texture) {
-    canvas.images.add(
-      value: { texture: texture, textureView: textureView, width: width, height: height }
-    )
+    let image: Gpu2dImage = {
+      texture: texture
+      textureView: textureView
+      width: width
+      height: height
+    }
+    if canvas.imagesFree.length > 0 {
+      let handle: Int = canvas.imagesFree.pop()
+      canvas.images.set(index: handle - 1, value: image)
+      ret handle
+    }
+    canvas.images.add(value: image)
     ret canvas.images.length
   }
   retireTexture(resources: resources, id: texture)
@@ -162,33 +172,130 @@ func canvasRegisterImageRgba(
   ret handle
 }
 
+# Register an image from straight-alpha RGBA bytes (four a pixel, rows from the top). Returns a
+# 1-based handle, 0 on failure.
+func canvasRegisterImageBytes(
+  canvas: mod Gpu2dCanvas
+  bytes: view List(UInt8)
+  width: copy Int
+  height: copy Int
+) ret Int {
+  if width <= 0 or height <= 0 or bytes.length is not width * height * 4 {
+    ret 0
+  }
+  ensureBoxResources(canvas: canvas)
+  var handle: Int = 0
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let texture: TextureId = createTexture(
+      resources: resources
+      width: width
+      height: height
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+    ) {
+      if writeTexture(
+        resources: resources
+        texture: texture
+        bytes: bytes
+        bytesPerRow: width * 4
+      ) {
+        handle = registerImageTexture(
+          canvas: canvas
+          resources: resources
+          texture: texture
+          width: width
+          height: height
+        )
+      } else {
+        retireTexture(resources: resources, id: texture)
+      }
+    }
+  }
+  ret handle
+}
+
+# Let go of an image: no draw finds it from here on, and its texture is freed when the GPU is done
+# with the frames that drew it. A frame that is being drawn keeps it to its end (what it queued
+# before this is still drawn). The handle may be another image's after that.
+func canvasReleaseImage(canvas: mod Gpu2dCanvas, handle: copy Int) {
+  if canvasImageLive(canvas: canvas, handle: handle) is false {
+    ret
+  }
+  loop let waiting: copy Int in canvas.imagesReleasing {
+    if waiting is handle {
+      ret
+    }
+  }
+  canvas.imagesReleasing.add(value: handle)
+  if not canvasFrameActive(canvas: canvas) and canvas.imageCommandHandles.length is 0 {
+    canvasReleaseImages(canvas: canvas)
+  }
+}
+
+# The image registered under `key` let go of, and the key with it
+func canvasReleaseImageKey(canvas: mod Gpu2dCanvas, key: view String) {
+  let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
+  canvas.imageKeys.remove(k: key)
+  if handle > 0 {
+    canvasReleaseImage(canvas: canvas, handle: handle)
+  }
+}
+
+# Free what canvasReleaseImage let go of, between two frames (its submission holds what it drew).
+# The bind groups made for it go too: one that outlived its texture would refuse the next
+# submission.
+func canvasReleaseImages(canvas: mod Gpu2dCanvas) {
+  if canvas.imagesReleasing.length is 0 {
+    ret
+  }
+  if let resources: mod GpuResources = canvas.gpuResources {
+    loop let handle: copy Int in canvas.imagesReleasing {
+      loop var i: Int = 0, i < canvas.imageBindHandles.length, ++i {
+        if canvas.imageBindHandles.copyAtFallback(index: i, fallback: 0) is handle {
+          retireBindGroup(
+            resources: resources
+            id: canvas.imageBinds.copyAtFallback(index: i, fallback: noBindGroupId())
+          )
+          canvas.imageBinds.set(index: i, value: noBindGroupId())
+          canvas.imageBindHandles.set(index: i, value: 0)
+        }
+      }
+      if let image: Gpu2dImage = canvas.images.copyAt(index: handle - 1) {
+        retireTextureView(resources: resources, id: image.textureView)
+        retireTexture(resources: resources, id: image.texture)
+      }
+      let gone: Gpu2dImage = {
+        texture: noTextureId()
+        textureView: noTextureViewId()
+        width: 0
+        height: 0
+      }
+      canvas.images.set(index: handle - 1, value: gone)
+      canvas.imagesFree.add(value: handle)
+    }
+  }
+  canvas.imagesReleasing.clear()
+}
+
+# Is there an image under `handle` (not let go of)?
+func canvasImageLive(canvas: view Gpu2dCanvas, handle: copy Int) ret Bool {
+  if let image: view Gpu2dImage = canvas.images.viewAt(index: handle - 1) {
+    ret image.width > 0
+  }
+  ret false
+}
+
 # Name -> handle registry. Re-registering a key updates it.
 func canvasRegisterImageKey(canvas: mod Gpu2dCanvas, key: copy String, handle: copy Int) {
   if handle <= 0 {
     ret
   }
-  loop var i: Int = 0, i < canvas.imageKeys.length, ++i {
-    if let existing: String = canvas.imageKeys.copyAt(index: i) {
-      if existing is key {
-        canvas.imageKeyHandles.set(index: i, value: handle)
-        ret
-      }
-    }
-  }
-  canvas.imageKeys.add(value: key)
-  canvas.imageKeyHandles.add(value: handle)
+  canvas.imageKeys.set(k: key, value: handle)
 }
 
 func canvasImageHandleForKey(canvas: view Gpu2dCanvas, key: view String) ret Int {
-  loop var i: Int = 0, i < canvas.imageKeys.length, ++i {
-    # read in place: a copy of each key was a String per key per image drawn
-    if let existing: view String = canvas.imageKeys.viewAt(index: i) {
-      if existing is key {
-        if let handle: Int = canvas.imageKeyHandles.copyAt(index: i) {
-          ret handle
-        }
-      }
-    }
+  if let handle: Int = canvas.imageKeys.get(k: key) {
+    ret handle
   }
   ret 0
 }
@@ -207,7 +314,7 @@ func canvasHasImageKey(canvas: view Gpu2dCanvas, key: view String) ret Bool {
 }
 
 func canvasImageCount(canvas: view Gpu2dCanvas) ret Int {
-  ret canvas.images.length
+  ret canvas.images.length - canvas.imagesFree.length
 }
 
 func tintChannel(color: view Int, shift: view Int) ret Float {
@@ -312,7 +419,7 @@ func queueImageEx(
   tiled: copy Bool
 ) {
   canvasKeepOrder(canvas: canvas, level: 1, atlas: -1)
-  if handle < 1 or handle > canvas.images.length {
+  if canvasImageLive(canvas: canvas, handle: handle) is false {
     ret
   }
   var drawX: Float = x

@@ -3,6 +3,7 @@
 open ui/Ecs
 import ui/Components
 open ui/ClickTargets
+open ui/ThumbnailFields
 open ui/SceneInstance
 open ecs/Entity
 open ecs/ComponentTable
@@ -164,6 +165,16 @@ func listViewSceneBindingCurrent(
       ret cur.kind is kind
     }
     ret true
+  }
+  if binding.componentName is "Thumbnail" {
+    if componentHas(this: world.thumbnails, entityId: entityId) is false {
+      ret true
+    }
+    ret thumbnailFieldIs(
+      thumbnail: componentView(this: world.thumbnails, entityId: entityId)
+      fieldName: binding.fieldName
+      value: value
+    )
   }
   let gradientName: String = "GradientFill"
   if binding.componentName is gradientName {

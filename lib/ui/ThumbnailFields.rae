@@ -1,0 +1,57 @@
+# A Thumbnail's fields written from text (ui/ThumbnailComponents).
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Ecs
+open ui/ThumbnailComponents
+
+# Set one field of the Thumbnail on `entityId` by its authored name, from text: what a list's
+# binding
+# and a scene-instance override write
+func setThumbnailField(
+  world: mod UiWorld
+  entityId: view EntityId
+  fieldName: view String
+  value: view String
+) {
+  if componentHas(this: world.thumbnails, entityId: entityId) is false {
+    ret
+  }
+  let thumbnail: mod Thumbnail = componentMod(this: world.thumbnails, entityId: entityId)
+  if fieldName is "path" {
+    thumbnail.path = "{value}"
+  } else if fieldName is "icon" {
+    thumbnail.icon = "{value}"
+  } else if fieldName is "fileSize" {
+    thumbnail.fileSize = value.toInt()
+  } else if fieldName is "modifiedMs" {
+    thumbnail.modifiedMs = value.toInt()
+  } else if fieldName is "pixels" {
+    thumbnail.pixels = value.toInt()
+  } else if fieldName is "byProgram" {
+    thumbnail.byProgram = value is "true"
+  }
+}
+
+# Is that field already so?
+func thumbnailFieldIs(
+  thumbnail: view Thumbnail
+  fieldName: view String
+  value: view String
+) ret Bool {
+  if fieldName is "path" {
+    ret thumbnail.path is value
+  }
+  if fieldName is "icon" {
+    ret thumbnail.icon is value
+  }
+  if fieldName is "fileSize" {
+    ret thumbnail.fileSize is value.toInt()
+  }
+  if fieldName is "modifiedMs" {
+    ret thumbnail.modifiedMs is value.toInt()
+  }
+  if fieldName is "pixels" {
+    ret thumbnail.pixels is value.toInt()
+  }
+  ret thumbnail.byProgram is (value is "true")
+}

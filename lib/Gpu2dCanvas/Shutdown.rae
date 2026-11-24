@@ -1,0 +1,81 @@
+# Everything the canvas made on the GPU, given back (Canvas.rae).
+import String
+import Math
+open collections/StringMap
+open webgpu/Webgpu
+open webgpu/Context
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open gpu/FramePacer
+open gpu/Surface
+open Gpu2dCanvasFrame
+open Gpu2dBindCache
+open Gpu2dCanvasTiming
+open Gpu2dCanvasImage
+open Gpu2dCanvasClip
+open Gpu2dCanvasBackdrop
+open Gpu2dCanvasCache
+
+func canvasShutdown(canvas: mod Gpu2dCanvas) {
+  if let resources: mod GpuResources = canvas.gpuResources {
+    drainSubmissions(inFlight: canvas.inFlight, resources: resources)
+    canvas2dTimingShutdown(timing: canvas.gpuTiming, resources: resources)
+    retireOffscreen(canvas: canvas, resources: resources)
+    retireBuffer(resources: resources, id: canvas.viewport)
+    retireBindGroupIds(resources: resources, list: canvas.frameBinds)
+    canvas.frameBinds.clear()
+    gpu2dBindCacheShutdown(cache: canvas.bindCache, resources: resources)
+    retireBufferIds(resources: resources, list: canvas.clipUniforms)
+    canvas.clipUniforms.clear()
+    retireBufferIds(resources: resources, list: canvas.frameBuffers)
+    canvas.frameBuffers.clear()
+    canvas.frameCapacities.clear()
+    retireRenderPipeline(resources: resources, id: canvas.pipeline)
+    retireBindGroupIds(resources: resources, list: canvas.imageBinds)
+    canvas.imageBinds.clear()
+    canvas.imageBindHandles.clear()
+    retireBufferIds(resources: resources, list: canvas.imageUniforms)
+    canvas.imageUniforms.clear()
+    loop var i: Int = 0, i < canvas.images.length, ++i {
+      if let image: Gpu2dImage = canvas.images.copyAt(index: i) {
+        retireTextureView(resources: resources, id: image.textureView)
+        retireTexture(resources: resources, id: image.texture)
+      }
+    }
+    canvas.images.clear()
+    canvas.imageKeys = createStringMap(Int, cap: 64)
+    canvas.imagesFree.clear()
+    canvas.imagesReleasing.clear()
+    clearImageQueue(canvas: canvas)
+    retireSampler(resources: resources, id: canvas.imageSampler)
+    backdropShutdown(backdrop: canvas.backdrop, resources: resources)
+    retireRenderPipeline(resources: resources, id: canvas.imagePipeline)
+    loop var ai: Int = 0, ai < canvas.textAtlases.length, ++ai {
+      if var retired: Gpu2dTextAtlas = canvas.textAtlases.copyAt(index: ai) {
+        retireBufferIds(resources: resources, list: retired.buffers)
+        retireTextureView(resources: resources, id: retired.textureView)
+        retireTexture(resources: resources, id: retired.texture)
+      }
+    }
+    canvas.textAtlases.clear()
+    retireRenderPipeline(resources: resources, id: canvas.textPipeline)
+    shutdown(resources: resources)
+  }
+  canvas.gpuResources = none
+  canvas.pipeline = noRenderPipelineId()
+  canvas.viewport = noBufferId()
+  canvas.recording = none
+  canvas.pipeMade = false
+  canvas.flushIndex = 0
+  canvas.clipCursor = 0
+  canvas.imagePipeMade = false
+  canvas.imagePipeline = noRenderPipelineId()
+  canvas.imageSampler = noSamplerId()
+  canvas.imageDrawCursor = 0
+  canvas.textPipeMade = false
+  canvas.textPipeline = noRenderPipelineId()
+}
