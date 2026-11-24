@@ -1,0 +1,166 @@
+# Moves in generic functions that leave the value usable, or that no path follows
+type Note {
+  name: String
+  parts: List(String)
+}
+
+func makeNote(n: view Int) ret Note {
+  ret Note { name: "note {n}", parts: { "part {n}" } }
+}
+
+func keep(T: type, value: own T, list: mod List(T)) {
+  list.add(value: own value)
+}
+
+func twice(T: type, value: own T, list: mod List(T)) {
+  list.add(value: own value)
+  list.add(value: own value)
+}
+
+func returning(
+  T: type
+  value: own T
+  list: mod List(T)
+  early: view Bool
+) ret Int {
+  if early {
+    keep(T, value: own value, list: list)
+    ret list.length
+  }
+  keep(T, value: own value, list: list)
+  ret list.length + 10
+}
+
+func branches(
+  T: type
+  value: own T
+  first: mod List(T)
+  second: mod List(T)
+  one: view Bool
+) {
+  if one {
+    keep(T, value: own value, list: first)
+  } else {
+    keep(T, value: own value, list: second)
+  }
+}
+
+func assignedAgain(
+  T: type
+  value: own T
+  next: own T
+  list: mod List(T)
+) {
+  var held: T = own value
+  list.add(value: own held)
+  held = own next
+  list.add(value: own held)
+}
+
+func copies(T: type, value: view T, list: mod List(T)) {
+  keep(T, value: value, list: list)
+  keep(T, value: value, list: list)
+}
+
+func fromElements(T: type, values: view List(T), list: mod List(T)) {
+  loop let value: T in values {
+    keep(T, value: own value, list: list)
+  }
+  loop let value: view T in values {
+    keep(T, value: value, list: list)
+    keep(T, value: value, list: list)
+  }
+}
+
+# The element bound by `if let`: a copy is the binding's own, a view is the list's
+func firstTwice(T: type, values: view List(T), list: mod List(T)) {
+  if let value: T = values.copyAt(index: 0) {
+    keep(T, value: own value, list: list)
+  }
+  if let value: view T = values.viewAt(index: 0) {
+    keep(T, value: value, list: list)
+  }
+}
+
+func changeAll(T: type, values: mod List(T), next: view T) {
+  loop let value: mod T in values {
+    value = next
+  }
+}
+
+func atEnd(T: type, value: own T, list: mod List(T)) {
+  loop var i: Int = 0, i < 5, ++i {
+    if i is 2 {
+      keep(T, value: own value, list: list)
+      ret
+    }
+  }
+}
+
+func main() {
+  var texts: List(String) = {}
+  log("{returning(
+    String
+    value: "a {1}"
+    list: texts
+    early: true
+  )}")
+  log("{returning(
+    String
+    value: "b {2}"
+    list: texts
+    early: false
+  )}")
+  var others: List(String) = {}
+  branches(
+    String
+    value: "c {3}"
+    first: texts
+    second: others
+    one: true
+  )
+  branches(
+    String
+    value: "d {4}"
+    first: texts
+    second: others
+    one: false
+  )
+  assignedAgain(
+    String
+    value: "e {5}"
+    next: "f {6}"
+    list: texts
+  )
+  let viewed: String = "g {7}"
+  copies(String, value: viewed, list: texts)
+  fromElements(String, values: others, list: texts)
+  atEnd(String, value: "h {8}", list: texts)
+  firstTwice(String, values: others, list: texts)
+  changeAll(String, values: others, next: "i {9}")
+  log("{viewed} {texts} {others}")
+  var notes: List(Note) = {}
+  log("{returning(
+    Note
+    value: makeNote(n: 1)
+    list: notes
+    early: true
+  )}")
+  assignedAgain(value: makeNote(n: 2), next: makeNote(n: 3), list: notes)
+  let note: Note = makeNote(n: 4)
+  copies(Note, value: note, list: notes)
+  let more: List(Note) = { makeNote(n: 5) }
+  fromElements(Note, values: more, list: notes)
+  firstTwice(Note, values: more, list: notes)
+  changeAll(Note, values: notes, next: makeNote(n: 6))
+  loop let held: view Note in notes {
+    log("{held.name} {held.parts.length}")
+  }
+  var numbers: List(Int) = {}
+  twice(Int, value: 4, list: numbers)
+  twice(value: 5, list: numbers)
+  log("{numbers}")
+  firstTwice(Int, values: numbers, list: numbers)
+  changeAll(Int, values: numbers, next: 8)
+  log("{numbers}")
+}

@@ -1020,9 +1020,11 @@ typedef struct LifecycleFlow {
     Str hook_names[128]; bool hook_owned[128]; int hook_count;
     // the type arguments, when the body is a generic template checked for one
     // specialization (sema_check_specialization_drops): nothing in it has a
-    // resolved type, so names are judged by their declared types
+    // resolved type, so names are judged by their declared types, and the
+    // arguments that move a local are those the emission recorded
     const AstIdentifierPart* generic_params;
     const AstTypeRef* generic_args;
+    const AstExpr* const* moved_values; size_t moved_value_count;
     // the destructor call of the statement at hand that consumes its local
     const AstExpr* consuming_drop;
     // (line, column) already reported, so a second loop pass stays quiet
@@ -1216,30 +1218,35 @@ static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
 /* After a statement's own uses are checked: every argument sema marked as
  * moving a local (sema_check_own_args) takes that name out of play for the
  * statements that follow. Walks into nested calls too. */
-static void flow_sweep_moves_args(DroppedSet* set, const AstCallArg* a);
-static void flow_sweep_moves(DroppedSet* set, const AstExpr* e) {
+static bool flow_specialization_moves(const LifecycleFlow* flow, const AstExpr* value) {
+    for (size_t i = 0; i < flow->moved_value_count; i++)
+        if (flow->moved_values[i] == value) return true;
+    return false;
+}
+static void flow_sweep_moves_args(const LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a);
+static void flow_sweep_moves(const LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
     if (!e) return;
     switch (e->kind) {
-        case AST_EXPR_CALL: flow_sweep_moves(set, e->as.call.callee); flow_sweep_moves_args(set, e->as.call.args); break;
-        case AST_EXPR_METHOD_CALL: flow_sweep_moves(set, e->as.method_call.object); flow_sweep_moves_args(set, e->as.method_call.args); break;
-        case AST_EXPR_BINARY: flow_sweep_moves(set, e->as.binary.lhs); flow_sweep_moves(set, e->as.binary.rhs); break;
-        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX: flow_sweep_moves(set, e->as.unary.operand); break;
-        case AST_EXPR_CAST: flow_sweep_moves(set, e->as.cast.operand); break;
-        case AST_EXPR_MEMBER: flow_sweep_moves(set, e->as.member.object); break;
-        case AST_EXPR_INDEX: flow_sweep_moves(set, e->as.index.target); flow_sweep_moves(set, e->as.index.index); break;
+        case AST_EXPR_CALL: flow_sweep_moves(flow, set, e->as.call.callee); flow_sweep_moves_args(flow, set, e->as.call.args); break;
+        case AST_EXPR_METHOD_CALL: flow_sweep_moves(flow, set, e->as.method_call.object); flow_sweep_moves_args(flow, set, e->as.method_call.args); break;
+        case AST_EXPR_BINARY: flow_sweep_moves(flow, set, e->as.binary.lhs); flow_sweep_moves(flow, set, e->as.binary.rhs); break;
+        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX: flow_sweep_moves(flow, set, e->as.unary.operand); break;
+        case AST_EXPR_CAST: flow_sweep_moves(flow, set, e->as.cast.operand); break;
+        case AST_EXPR_MEMBER: flow_sweep_moves(flow, set, e->as.member.object); break;
+        case AST_EXPR_INDEX: flow_sweep_moves(flow, set, e->as.index.target); flow_sweep_moves(flow, set, e->as.index.index); break;
         case AST_EXPR_OBJECT:
-            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) flow_sweep_moves(set, f->value);
+            for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) flow_sweep_moves(flow, set, f->value);
             break;
         case AST_EXPR_INTERP:
-            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) flow_sweep_moves(set, p->value);
+            for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) flow_sweep_moves(flow, set, p->value);
             break;
         default: break;
     }
 }
-static void flow_sweep_moves_args(DroppedSet* set, const AstCallArg* a) {
+static void flow_sweep_moves_args(const LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a) {
     for (; a; a = a->next) {
-        flow_sweep_moves(set, a->value);
-        if (a->moves_local && a->value) {
+        flow_sweep_moves(flow, set, a->value);
+        if (a->value && (a->moves_local || flow_specialization_moves(flow, a->value))) {
             const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
             if (moved && moved->kind == AST_EXPR_IDENT) moved_add(set, moved->as.ident);
         }
@@ -1277,19 +1284,19 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
         case AST_STMT_LET:
             flow_sweep_create(flow, s->as.let_stmt.value);
             flow_check_expr(flow, s->as.let_stmt.value, set, s->line, s->column);
-            flow_sweep_moves(set, s->as.let_stmt.value);
+            flow_sweep_moves(flow, set, s->as.let_stmt.value);
             dropped_remove(set, s->as.let_stmt.name);   /* a new binding is live */
             flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
             break;
         case AST_STMT_DESTRUCT:
             flow_sweep_create(flow, s->as.destruct_stmt.call);
             flow_check_expr(flow, s->as.destruct_stmt.call, set, s->line, s->column);
-            flow_sweep_moves(set, s->as.destruct_stmt.call);
+            flow_sweep_moves(flow, set, s->as.destruct_stmt.call);
             break;
         case AST_STMT_ASSIGN: {
             flow_sweep_create(flow, s->as.assign_stmt.value);
             flow_check_expr(flow, s->as.assign_stmt.value, set, s->line, s->column);
-            flow_sweep_moves(set, s->as.assign_stmt.value);
+            flow_sweep_moves(flow, set, s->as.assign_stmt.value);
             const AstExpr* t = s->as.assign_stmt.target;
             if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialized */
             else flow_check_expr(flow, t, set, s->line, s->column);
@@ -1305,7 +1312,7 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             flow->consuming_drop = NULL;
             flow_check_expr(flow, e, set, s->line, s->column);   /* dropping twice is a use */
             if (target) dropped_add(set, target->as.ident);
-            flow_sweep_moves(set, e);
+            flow_sweep_moves(flow, set, e);
             break;
         }
         case AST_STMT_RET:
@@ -1396,19 +1403,20 @@ static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, co
     flow_function(&flow, fd, fd->body);
 }
 
-/* The same check of explicit drops for one specialization of a generic
- * function (c_backend.c emits it from the template, whose body sema has not
- * analyzed for these arguments): a destructor call on a borrowed name, and a
- * use after a drop. True when it reported an error. */
-bool sema_check_specialization_drops(CompilerContext* ctx, const AstModule* module, const char* file,
-                                     const AstFuncDecl* fd, const AstBlock* body,
-                                     const AstIdentifierPart* generic_params, const AstTypeRef* generic_args) {
-    if (!body || !generic_params || !generic_args) return false;
+/* The same check for one specialization of a generic function: c_backend.c
+ * emits it from the template, whose body sema has not analyzed for these
+ * arguments. `moved_values` are the argument values the emission found to
+ * move a local into an `own` parameter. */
+void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* module, const char* file,
+                                    const AstFuncDecl* fd, const AstBlock* body,
+                                    const AstIdentifierPart* generic_params, const AstTypeRef* generic_args,
+                                    const AstExpr* const* moved_values, size_t moved_value_count) {
+    if (!body || !generic_params || !generic_args) return;
     LifecycleFlow flow = {0};
     flow.ctx = ctx; flow.module = (AstModule*)module; flow.file = file;
     flow.generic_params = generic_params; flow.generic_args = generic_args;
+    flow.moved_values = moved_values; flow.moved_value_count = moved_value_count;
     flow_function(&flow, fd, body);
-    return flow.reported_count > 0;
 }
 
 // Defined further down (near the statement analyzer); used earlier by the

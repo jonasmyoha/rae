@@ -94,6 +94,11 @@ typedef struct {
   // reassignment release it only while the flag is set, so a drop inside one
   // branch is exactly-once on every path (sema forbids using it meanwhile).
   bool local_drop_flag[256];
+  // The argument values that moved a local into an `own` parameter while a
+  // specialization was emitted (sema_check_specialization_flow).
+  const AstExpr** moved_values;
+  size_t moved_value_count;
+  size_t moved_value_cap;
   size_t local_count;
   // Stage 7 early-return cleanup: the index in `locals[]` after which
   // entries are this function's `let` bindings (i.e. NOT parameters).

@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.64, 2026-11-24: moves are checked in generic functions
+
+- Breaking: a use of a value after it was moved into an `own` parameter is an error in a generic function too,
+  judged by the concrete type (an Int has nothing to move). It was accepted, and the program freed the value
+  twice.
+- In a generic function `loop let value: T in values` and `if let value: T = values.copyAt(...)` copy the
+  element when `T` owns heap; they shared it with the list, and both freed it. The `view T` forms compile for a
+  String.
+- Cases 1610 and 1611; 1611 is in the AddressSanitizer gate.
+
 ## 0.4.63, 2026-11-24: a destructor run by hand runs once
 
 - Breaking: an explicit drop of a value the function does not own is an error: a field

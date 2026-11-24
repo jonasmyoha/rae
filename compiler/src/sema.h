@@ -26,9 +26,10 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);
 /* A written-form type ref for a resolved type (`List(Int)`, with its generic
  * arguments), for code that needs the spelling, not just the TypeInfo */
 AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
-bool sema_check_specialization_drops(CompilerContext* ctx, const AstModule* module, const char* file,
-                                     const AstFuncDecl* fd, const AstBlock* body,
-                                     const AstIdentifierPart* generic_params, const AstTypeRef* generic_args);
+void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* module, const char* file,
+                                    const AstFuncDecl* fd, const AstBlock* body,
+                                    const AstIdentifierPart* generic_params, const AstTypeRef* generic_args,
+                                    const AstExpr* const* moved_values, size_t moved_value_count);
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 
 // #773 compile-time field reflection through a generic world parameter. When a

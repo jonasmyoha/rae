@@ -1,0 +1,60 @@
+# A value moved in a generic function is gone after it, whether the call writes its type arguments
+# or they are inferred; for a type that owns nothing there is nothing to move
+type Note {
+  name: String
+  parts: List(String)
+}
+
+func keep(T: type, value: own T, list: mod List(T)) {
+  list.add(value: own value)
+}
+
+func twice(T: type, value: own T, list: mod List(T)) {
+  keep(T, value: own value, list: list)
+  keep(T, value: own value, list: list)  # ERROR: moved above
+}
+
+func twiceInferred(T: type, value: own T, list: mod List(T)) {
+  list.add(value: own value)
+  list.add(value: own value)  # ERROR
+}
+
+func bare(T: type, value: own T, list: mod List(T)) {
+  keep(T, value: value, list: list)
+  log("{list.length}")
+  keep(T, value: value, list: list)  # ERROR: a bare local moves too
+}
+
+func local(T: type, value: own T, list: mod List(T)) {
+  var held: T = own value
+  if list.length is 0 {
+    list.add(value: own held)
+  }
+  list.add(value: own held)  # ERROR: moved on one path
+}
+
+func inLoop(T: type, value: own T, list: mod List(T)) {
+  loop var i: Int = 0, i < 2, ++i {
+    list.add(value: own value)  # ERROR: the next pass moves it again
+  }
+}
+
+func wholeList(T: type, values: own List(T), lists: mod List(List(T))) {
+  lists.add(value: own values)
+  log("{values.length}")  # ERROR
+}
+
+func main() {
+  var texts: List(String) = {}
+  twice(String, value: "a", list: texts)
+  twiceInferred(value: "b", list: texts)
+  bare(String, value: "c", list: texts)
+  local(String, value: "d", list: texts)
+  var notes: List(Note) = {}
+  inLoop(Note, value: Note { name: "e", parts: {} }, list: notes)
+  var lists: List(List(Int)) = {}
+  wholeList(Int, values: List(Int) { 1 }, lists: lists)
+  var numbers: List(Int) = {}
+  twice(Int, value: 1, list: numbers)
+  inLoop(Int, value: 2, list: numbers)
+}

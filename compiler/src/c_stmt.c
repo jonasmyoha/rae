@@ -157,7 +157,11 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
     fprintf(out, "    if ((uint64_t)__rae_index%d < (uint64_t)__rae_list%d->length) {\n      ",
             fast_id, fast_id);
 
+  // In a specialization the binding's `T` is the concrete type: as `T` a
+  // String was bound bit for bit (not copied), a `view T` as a plain pointer
   const AstTypeRef* element_type = binding->as.let_stmt.type;
+  if (ctx->generic_params && ctx->generic_args)
+    element_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, element_type);
   AstTypeRef value_type = *element_type;
   value_type.is_opt = false;
   value_type.is_view = false;
@@ -2063,6 +2067,12 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "  /* invalid collection loop; rejected by sema */\n");
             return true;
         }
+        // In a specialization the element's `T` is the concrete type: as `T`
+        // a value was bound bit for bit (the list freed it too), and a `view
+        // T` of a String as a plain pointer.
+        if (ctx->generic_params && ctx->generic_args)
+            binding_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                               binding_type);
 
         int loop_id = ctx->temp_counter++;
         AstTypeRef collection_value_type = *collection_type;
