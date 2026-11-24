@@ -6832,19 +6832,19 @@ static bool sema_check_redundant_literal_cast(const AstExpr* e, const TypeInfo* 
     return false;
 }
 
-/* Every integer literal element of a `{ ... }` / `List(T) { ... }` literal
- * must fit the list's element type. */
-static void sema_check_collection_literal_ints(const AstExpr* e, const TypeInfo* list_type) {
+static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* errFile);
+/* Every element of a `{ ... }` / `List(T) { ... }` literal is a value of the
+ * list's element type. */
+static void sema_check_collection_literal(const AstExpr* e, const TypeInfo* list_type) {
     if (!e || e->kind != AST_EXPR_COLLECTION_LITERAL || !list_type) return;
     if (list_type->kind != TYPE_STRUCT && list_type->kind != TYPE_GENERIC_INST) return;
     if (list_type->as.structure.generic_count != 1 || !list_type->as.structure.generic_args) return;
     if (list_type->name.len < 4 || memcmp(list_type->name.data, "List", 4) != 0) return;
-    const TypeInfo* element = list_type->as.structure.generic_args[0];
     for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
-        if (el->value) {
-            sema_check_int_literal_fits(el->value, element);
-            sema_check_redundant_literal_cast(el->value, element);
-        }
+        if (el->value)
+            sema_check_literal_part(list_type->as.structure.generic_args[0], el->value,
+                                    s_current_decl_origin ? s_current_decl_origin
+                                    : (s_current_module ? s_current_module->file_path : NULL));
 }
 
 /* See through `view T` / `mod T` for the numeric-conversion check.
@@ -7174,6 +7174,40 @@ static TypeInfo* sema_type_qualifier_type(CompilerContext* ctx, AstModule* modul
  * flagged, not missing ones. Called for BOTH the RHS-typed form (`Rect { ... }`,
  * from AST_EXPR_OBJECT) and the bare-brace form (`let r: Rect = { ... }`, from
  * ensure_type_match where the type comes from context). */
+static bool sema_report_type_mismatch(TypeInfo* expected, AstExpr* expr);
+static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectField* fields,
+                                             size_t litLine, size_t litCol, const char* errFile);
+/* The value of one field of a struct literal, or one element of a list
+ * literal, against the type it has there: an integer literal must fit, and a
+ * value that can never be of that type is refused. A value for an `opt T` is
+ * of type T. A bare literal inside gets the type too, so that a `create` in
+ * `{ value: { value: create(...) } }` resolves. */
+static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* errFile) {
+    if (!want || !value) return;
+    TypeInfo* got = value->resolved_type;
+    TypeInfo* type = sema_strip_ref(want);
+    if (type && type->kind == TYPE_OPT && (!got || got->kind != TYPE_OPT)) {
+        type = type->as.opt.base;
+        /* nothing to check, and `5 as UInt8` says the payload's type: an
+         * optional gives a literal none */
+        if (got && got == type) return;
+    }
+    if (!type) return;
+    if (value->kind == AST_EXPR_OBJECT && !value->as.object_literal.type) {
+        sema_check_object_literal_fields(type, value->as.object_literal.fields, value->line, value->column, errFile);
+    } else if (value->kind == AST_EXPR_COLLECTION_LITERAL && !value->as.collection.type) {
+        sema_check_collection_literal(value, type);
+    } else if (got && got->kind == TYPE_OPT && type->kind != TYPE_OPT && type->kind != TYPE_ANY
+               && type->kind != TYPE_GENERIC_PARAM && value->kind != AST_EXPR_NONE) {
+        diag_error(errFile, (int)value->line, (int)value->column, "optional not unwrapped — use `if let`");
+        if (s_current_module) s_current_module->had_error = true;
+    } else if (got) {
+        sema_report_type_mismatch(type, value);
+    } else if (sema_check_int_literal_fits(value, type)) {
+        sema_check_redundant_literal_cast(value, type);
+    }
+}
+
 static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectField* fields,
                                              size_t litLine, size_t litCol, const char* errFile) {
     if (structType && structType->kind == TYPE_REF) structType = structType->as.ref.base;
@@ -7214,23 +7248,14 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
             AstTypeRef* field_type = tf ? tf->type : NULL;
             if (field_type && inst_args)
                 field_type = substitute_type_ref(s_lifecycle_ctx, td->generic_params, inst_args, field_type);
-            /* An integer literal must fit the field it initializes */
+            /* The value must be one of the field's type */
             if (field_type && f->value && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
-                sema_check_int_literal_fits(f->value, sema_strip_ref(ft));
-                sema_check_redundant_literal_cast(f->value, sema_strip_ref(ft));
+                sema_check_literal_part(ft, f->value, errFile);
             }
             if (field_type && sema_is_pending_create(f->value) && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
                 TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
                 if (ft) sema_resolve_create(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, f->value, ft);
-            }
-            /* A nested bare literal gets the field's (substituted) type, so a
-             * `create` inside `{ value: { value: create(...) } }` resolves too. */
-            if (field_type && f->value && f->value->kind == AST_EXPR_OBJECT && !f->value->as.object_literal.type
-                && s_lifecycle_ctx && s_lifecycle_symbols && s_current_module) {
-                TypeInfo* ft = sema_resolve_type_internal(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, field_type);
-                if (ft) sema_check_object_literal_fields(ft, f->value->as.object_literal.fields,
-                                                         f->value->line, f->value->column, errFile);
             }
             if (tf && tf->type && s_lifecycle_symbols && sema_expr_copies_place(f->value)
                 && sema_typeref_holds_task(s_lifecycle_symbols, tf->type, 0)) {
@@ -7299,6 +7324,105 @@ static bool sema_expr_is_f32_value(const AstExpr* e) {
     return t && t->kind == TYPE_FLOAT;
 }
 
+/* Is `expr`, whose type is known, of a type that can never land in a place of
+ * type `expected`? Reported, as the C compiler would otherwise do it with a .c
+ * line: a binding, an argument, a return (ensure_type_match) and the field of
+ * a struct literal. True when it reported. */
+static bool sema_report_type_mismatch(TypeInfo* expected, AstExpr* expr) {
+    if (!expected || !expr || !expr->resolved_type) return false;
+    /* HARD ERROR on implicit numeric conversion (both widening and
+     * narrowing). Silently narrowing a Float64 epoch to f32 destroyed
+     * animation timing and FPS in the gpu3d examples; a warning would not
+     * have stopped it. Literals are exempt: they are materialized directly
+     * in the destination type, not converted. */
+    TypeInfo* want_num = sema_strip_ref(expected);
+    TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
+    if (!sema_check_int_literal_fits(expr, want_num)) return true;
+    if (!sema_check_redundant_literal_cast(expr, want_num)) return true;
+    if (want_num && got_num &&
+        sema_is_numeric_kind(want_num->kind) &&
+        sema_is_numeric_kind(got_num->kind) &&
+        want_num->kind != got_num->kind &&
+        expr->kind != AST_EXPR_CAST &&
+        !sema_is_numeric_literal(expr)) {
+        char buf[240];
+        snprintf(buf, sizeof(buf),
+            "cannot implicitly convert %s to %s; Rae has no implicit numeric conversions - write `value as %s`",
+            sema_numeric_name(got_num->kind),
+            sema_numeric_name(want_num->kind),
+            sema_numeric_name(want_num->kind));
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return true;
+    }
+    /* #959: a SCALAR-KIND mismatch (String into Int, Bool into String, ...) is
+     * as certain a C error as the numeric one above, and until now only gcc
+     * reported it, with a .c line. Both sides must be fully resolved scalars
+     * of different kinds; numeric pairs were judged above (they may be
+     * literals), and anything unresolved / generic / Any / opt stays with the
+     * existing rules. This is what makes `fieldSet` "checked per unrolled
+     * field": the write unrolls to an ordinary assignment and lands here. */
+    if (want_num && got_num && want_num->kind != got_num->kind
+        && sema_is_scalar_kind(want_num->kind) && sema_is_scalar_kind(got_num->kind)
+        && !(sema_is_numeric_kind(want_num->kind) && sema_is_numeric_kind(got_num->kind))
+        && expr->kind != AST_EXPR_CAST) {
+        char buf[240];
+        snprintf(buf, sizeof(buf), "type mismatch: expected %s, got %s",
+                 sema_scalar_name(want_num->kind), sema_scalar_name(got_num->kind));
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return true;
+    }
+    /* Distinct user structs (including different generic specializations, which
+     * intern to different TypeInfo) are not assignable/convertible. Catch it
+     * here so the diagnostic names the .rae site instead of letting the C
+     * compiler flag the generated code with a .c line (#414). Types are
+     * interned, so pointer inequality after stripping refs IS a real struct
+     * mismatch. Names are required non-empty to skip unresolved placeholders. */
+    TypeInfo* want_s = sema_strip_ref(expected);
+    TypeInfo* got_s = sema_strip_ref(expr->resolved_type);
+    if (want_s && got_s && want_s != got_s
+        && want_s->kind == TYPE_STRUCT && got_s->kind == TYPE_STRUCT
+        && want_s->name.len > 0 && got_s->name.len > 0) {
+        char buf[240];
+        snprintf(buf, sizeof(buf),
+            "cannot convert %.*s to %.*s; they are different types",
+            (int)got_s->name.len, got_s->name.data,
+            (int)want_s->name.len, want_s->name.data);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return true;
+    }
+    /* #1006: a named STRUCT (e.g. a `List(Int)` specialization) against a
+     * resolved SCALAR is as certain a C error as struct-vs-struct above, and
+     * until now only gcc caught it (a `List(Int)` field passed to a scalar
+     * `view Int` decoder arm). Fire on either direction; Any / opt / pending
+     * create were handled earlier, numeric and scalar-scalar just above. */
+    if (want_s && got_s && want_s != got_s
+        && ((want_s->kind == TYPE_STRUCT && want_s->name.len > 0 && sema_is_scalar_kind(got_s->kind))
+            || (got_s->kind == TYPE_STRUCT && got_s->name.len > 0 && sema_is_scalar_kind(want_s->kind)))) {
+        char wbuf[128]; char gbuf[128];
+        if (want_s->kind == TYPE_STRUCT)
+            snprintf(wbuf, sizeof(wbuf), "%.*s", (int)want_s->name.len, want_s->name.data);
+        else
+            snprintf(wbuf, sizeof(wbuf), "%s", sema_scalar_name(want_s->kind));
+        if (got_s->kind == TYPE_STRUCT)
+            snprintf(gbuf, sizeof(gbuf), "%.*s", (int)got_s->name.len, got_s->name.data);
+        else
+            snprintf(gbuf, sizeof(gbuf), "%s", sema_scalar_name(got_s->kind));
+        char buf[300];
+        snprintf(buf, sizeof(buf), "cannot convert %s to %s; they are different types", gbuf, wbuf);
+        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
+        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
+        if (s_current_module) s_current_module->had_error = true;
+        return true;
+    }
+    return false;
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
     {
@@ -7334,7 +7458,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
      * below return early); its integer elements must fit the destination's
      * element type. A typed one is checked at its own analysis. */
     if (expr->kind == AST_EXPR_COLLECTION_LITERAL && !expr->as.collection.type)
-        sema_check_collection_literal_ints(expr, sema_strip_ref(expected));
+        sema_check_collection_literal(expr, sema_strip_ref(expected));
     /* #880: a pending `create(...)` takes its constructor from the expected type. */
     if (sema_is_pending_create(expr) && s_lifecycle_symbols && s_current_module) {
         if (!sema_resolve_create(ctx, s_current_module, s_lifecycle_symbols, expr, expected)) return;
@@ -7362,96 +7486,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         return;
     }
     if (!expr->resolved_type) return;
-    /* HARD ERROR on implicit numeric conversion (both widening and
-     * narrowing). Silently narrowing a Float64 epoch to f32 destroyed
-     * animation timing and FPS in the gpu3d examples; a warning would not
-     * have stopped it. Literals are exempt: they are materialized directly
-     * in the destination type, not converted. */
-    TypeInfo* want_num = sema_strip_ref(expected);
-    TypeInfo* got_num = sema_strip_ref(expr->resolved_type);
-    if (!sema_check_int_literal_fits(expr, want_num)) return;
-    if (!sema_check_redundant_literal_cast(expr, want_num)) return;
-    if (want_num && got_num &&
-        sema_is_numeric_kind(want_num->kind) &&
-        sema_is_numeric_kind(got_num->kind) &&
-        want_num->kind != got_num->kind &&
-        expr->kind != AST_EXPR_CAST &&
-        !sema_is_numeric_literal(expr)) {
-        char buf[240];
-        snprintf(buf, sizeof(buf),
-            "cannot implicitly convert %s to %s; Rae has no implicit numeric conversions - write `value as %s`",
-            sema_numeric_name(got_num->kind),
-            sema_numeric_name(want_num->kind),
-            sema_numeric_name(want_num->kind));
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
-        if (s_current_module) s_current_module->had_error = true;
-        return;
-    }
-    /* #959: a SCALAR-KIND mismatch (String into Int, Bool into String, ...) is
-     * as certain a C error as the numeric one above, and until now only gcc
-     * reported it, with a .c line. Both sides must be fully resolved scalars
-     * of different kinds; numeric pairs were judged above (they may be
-     * literals), and anything unresolved / generic / Any / opt stays with the
-     * existing rules. This is what makes `fieldSet` "checked per unrolled
-     * field": the write unrolls to an ordinary assignment and lands here. */
-    if (want_num && got_num && want_num->kind != got_num->kind
-        && sema_is_scalar_kind(want_num->kind) && sema_is_scalar_kind(got_num->kind)
-        && !(sema_is_numeric_kind(want_num->kind) && sema_is_numeric_kind(got_num->kind))
-        && expr->kind != AST_EXPR_CAST) {
-        char buf[240];
-        snprintf(buf, sizeof(buf), "type mismatch: expected %s, got %s",
-                 sema_scalar_name(want_num->kind), sema_scalar_name(got_num->kind));
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
-        if (s_current_module) s_current_module->had_error = true;
-        return;
-    }
-    /* Distinct user structs (including different generic specializations, which
-     * intern to different TypeInfo) are not assignable/convertible. Catch it
-     * here so the diagnostic names the .rae site instead of letting the C
-     * compiler flag the generated code with a .c line (#414). Types are
-     * interned, so pointer inequality after stripping refs IS a real struct
-     * mismatch. Names are required non-empty to skip unresolved placeholders. */
-    TypeInfo* want_s = sema_strip_ref(expected);
-    TypeInfo* got_s = sema_strip_ref(expr->resolved_type);
-    if (want_s && got_s && want_s != got_s
-        && want_s->kind == TYPE_STRUCT && got_s->kind == TYPE_STRUCT
-        && want_s->name.len > 0 && got_s->name.len > 0) {
-        char buf[240];
-        snprintf(buf, sizeof(buf),
-            "cannot convert %.*s to %.*s; they are different types",
-            (int)got_s->name.len, got_s->name.data,
-            (int)want_s->name.len, want_s->name.data);
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
-        if (s_current_module) s_current_module->had_error = true;
-        return;
-    }
-    /* #1006: a named STRUCT (e.g. a `List(Int)` specialization) against a
-     * resolved SCALAR is as certain a C error as struct-vs-struct above, and
-     * until now only gcc caught it (a `List(Int)` field passed to a scalar
-     * `view Int` decoder arm). Fire on either direction; Any / opt / pending
-     * create were handled earlier, numeric and scalar-scalar just above. */
-    if (want_s && got_s && want_s != got_s
-        && ((want_s->kind == TYPE_STRUCT && want_s->name.len > 0 && sema_is_scalar_kind(got_s->kind))
-            || (got_s->kind == TYPE_STRUCT && got_s->name.len > 0 && sema_is_scalar_kind(want_s->kind)))) {
-        char wbuf[128]; char gbuf[128];
-        if (want_s->kind == TYPE_STRUCT)
-            snprintf(wbuf, sizeof(wbuf), "%.*s", (int)want_s->name.len, want_s->name.data);
-        else
-            snprintf(wbuf, sizeof(wbuf), "%s", sema_scalar_name(want_s->kind));
-        if (got_s->kind == TYPE_STRUCT)
-            snprintf(gbuf, sizeof(gbuf), "%.*s", (int)got_s->name.len, got_s->name.data);
-        else
-            snprintf(gbuf, sizeof(gbuf), "%s", sema_scalar_name(got_s->kind));
-        char buf[300];
-        snprintf(buf, sizeof(buf), "cannot convert %s to %s; they are different types", gbuf, wbuf);
-        const char* err_file = s_current_decl_origin ? s_current_decl_origin : NULL;
-        diag_error(err_file, (int)expr->line, (int)expr->column, buf);
-        if (s_current_module) s_current_module->had_error = true;
-        return;
-    }
+    if (sema_report_type_mismatch(expected, expr)) return;
     if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY) {
         // #898: implicit boxing into Any at a ret / assignment / Any argument
         // erases the value's type, hiding raw Ptr storage exactly as an
@@ -9765,7 +9800,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
              * inner call to the component-wise multiply). */
             for (AstCollectionElement* el = expr->as.collection.elements; el; el = el->next)
                 if (el->value) sema_analyze_expr(ctx, module, symbols, el->value, true);
-            if (expr->as.collection.type) sema_check_collection_literal_ints(expr, expr->resolved_type);
+            if (expr->as.collection.type) sema_check_collection_literal(expr, expr->resolved_type);
             break;
         case AST_EXPR_LIST:
             for (AstExprList* item = expr->as.list; item; item = item->next)

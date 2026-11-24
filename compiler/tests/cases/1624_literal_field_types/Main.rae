@@ -1,0 +1,49 @@
+# The value of a struct literal's field is checked against the field's type
+type Inner {
+  x: Int
+}
+
+type Box(T: type) {
+  value: T
+}
+
+type All {
+  count: Int = 0
+  size: Float = 0.0
+  time: Float64 = 0.0
+  name: String = ""
+  flag: Bool = false
+  maybe: opt Int = none
+  list: List(Int)
+  inner: Inner = { x: 1 }
+}
+
+func makeAll(name: view String) ret All {
+  ret All { count: name, list: {} }  # ERROR
+}
+
+func main() {
+  let number: Int = 1
+  let size: Float = 1.5
+  let optional: opt Int = 3
+  let fine: All = {
+    count: number
+    size: 2
+    time: 1
+    maybe: number
+    list: { 1 }
+    inner: { x: number }
+  }
+  let wrongText: All = { count: "page", list: {} }  # ERROR
+  let wrongNumber: All = { size: number, list: {} }  # ERROR
+  let wrongWidth: All = { time: size, list: {} }  # ERROR
+  let wrongName: All = { name: 5, list: {} }  # ERROR
+  let wrongFlag: All = { flag: "true", list: {} }  # ERROR
+  let wrongMaybe: All = { maybe: "some", list: {} }  # ERROR
+  let wrongList: All = { list: List(String) { "a" } }  # ERROR
+  let wrongInner: All = { list: {}, inner: 4 }  # ERROR
+  let wrongNested: All = { list: {}, inner: { x: "deep" } }  # ERROR
+  let notUnwrapped: All = { count: optional, list: {} }  # ERROR
+  let wrongBox: Box(Int) = { value: "text" }  # ERROR
+  let inList: List(Inner) = { { x: "element" } }  # ERROR
+}

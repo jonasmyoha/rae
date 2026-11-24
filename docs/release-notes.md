@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.68, 2026-11-24: values in literals are checked, and `when` beside a function's name
+
+- Breaking: the value of a struct literal's field, and an element of a list literal, is checked against its type
+  as a binding is: `{ layer: "page" }` for an Int is an error, and so are an Int for a Float, a Float for a
+  Float64 and an optional that was not unwrapped. Only the C compiler refused some, and the numbers were
+  converted silently.
+- A program's function named like a value of Target (`func os(...)`) no longer breaks `when`. An error in a
+  const that a `when` reads is reported in the const's file.
+- 106_mobile_ui reads the time of a played track as a Float64; as a Float it was off by up to a minute.
+- Cases 1622 to 1624.
+
 ## 0.4.67, 2026-11-24: `own` for a parameter that borrows
 
 - Breaking: `own x` for a `view` or `mod` parameter is an error ("remove 'own'"), as it already was for a `copy`

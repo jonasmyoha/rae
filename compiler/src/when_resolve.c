@@ -36,6 +36,7 @@ typedef struct {
   Str enum_member;
   /* VALUE_ERROR / VALUE_MISSING: what is wrong, and where */
   char message[320];
+  const char* file;          /* the file of `line`: a const's own, else the `when`'s (NULL) */
   size_t line;
   size_t column;
 } WhenValue;
@@ -85,21 +86,24 @@ static WhenValue evaluate_const_decl(WhenResolver* resolver, const AstDecl* decl
   WhenValue value = evaluate(resolver, decl->as.let_decl.value);
   resolver->depth--;
   resolver->file = saved;
+  /* What is wrong is in the const: its line is a line of the const's file */
+  if ((value.kind == VALUE_ERROR || value.kind == VALUE_MISSING) && !value.file) value.file = decl->origin_file;
   return value;
 }
 
 /* A bare name: a module-level const of this file, or the one visible
- * elsewhere. Target's names are written qualified (`Target.isApple`). */
+ * elsewhere. Target's names are written qualified (`Target.isApple`). A
+ * function of the name is named only when there is no such const: one of
+ * another module, `func os(...)` in the program, does not hide Target's own. */
 static WhenValue evaluate_name(WhenResolver* resolver, const AstExpr* expr) {
   Str name = expr->as.ident;
   const AstDecl* same_file = NULL;
   const AstDecl* elsewhere = NULL;
   size_t elsewhere_count = 0;
   bool only_target = false;
+  bool is_function = false;
   for (const AstDecl* decl = resolver->merged->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_FUNC && str_eq(decl->as.func_decl.name, name)) {
-      return value_error(expr, VALUE_ERROR, "'%.*s' is a function; a `when` condition cannot call or name one", name);
-    }
+    if (decl->kind == AST_DECL_FUNC && str_eq(decl->as.func_decl.name, name)) is_function = true;
     if (decl->kind != AST_DECL_GLOBAL_LET || !str_eq(decl->as.let_decl.name, name)) continue;
     if (resolver->file && decl->origin_file && strcmp(resolver->file, decl->origin_file) == 0) {
       same_file = decl;
@@ -112,6 +116,9 @@ static WhenValue evaluate_name(WhenResolver* resolver, const AstExpr* expr) {
   }
   if (same_file) return evaluate_const_decl(resolver, same_file, expr);
   if (elsewhere_count == 1) return evaluate_const_decl(resolver, elsewhere, expr);
+  if (is_function && elsewhere_count == 0) {
+    return value_error(expr, VALUE_ERROR, "'%.*s' is a function; a `when` condition cannot call or name one", name);
+  }
   if (elsewhere_count > 1) {
     return value_error(expr, VALUE_ERROR, "'%.*s' is declared in more than one module: qualify it (`Module.%.*s`)", name);
   }
@@ -252,6 +259,7 @@ static WhenValue evaluate(WhenResolver* resolver, const AstExpr* expr) {
 static void report(WhenResolver* resolver, const char* file, const WhenValue* value) {
   char message[400];
   snprintf(message, sizeof message, "`when` needs a compile-time Bool: %s", value->message);
+  if (value->file) file = value->file;
   diag_error(file ? file : "<unknown>", (int)value->line, (int)value->column, message);
   resolver->had_error = true;
 }

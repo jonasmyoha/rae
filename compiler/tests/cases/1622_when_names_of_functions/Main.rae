@@ -1,0 +1,37 @@
+# A program's functions may have the names of Target's values: the `when`s of the program and of the
+# lib modules it imports still read Target's own
+open crypto/Sha1
+
+func os(index: view Int) ret Int {
+  ret index
+}
+
+func arch() ret String {
+  ret "an arch"
+}
+
+func simd() ret Int {
+  ret 2
+}
+
+func isApple() ret String {
+  ret "a fruit"
+}
+
+func isUnix() ret Bool {
+  ret false
+}
+
+func main() {
+  when Target.os is Os.web {
+    log("web")
+  } else {
+    log("not web")
+  }
+  when Target.isNative and Target.isUnix {
+    log("native")
+  }
+  log("{os(index: 1)} {arch()} {simd()} {isApple()} {isUnix()} {Target.isNative}")
+  let digest: List(UInt8) = sha1(bytes: List(UInt8) { 97, 98, 99 })
+  log("{digest.length}")
+}

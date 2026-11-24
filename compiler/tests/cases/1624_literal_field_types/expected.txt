@@ -1,0 +1,39 @@
+tests/cases/1624_literal_field_types/Main.rae:22:20: type mismatch: expected Int, got String
+    22 |   ret All { count: name, list: {} }  # ERROR
+       |                    ^~~~
+tests/cases/1624_literal_field_types/Main.rae:37:33: type mismatch: expected Int, got String
+    37 |   let wrongText: All = { count: "page", list: {} }  # ERROR
+       |                                 ^~~~
+tests/cases/1624_literal_field_types/Main.rae:38:34: cannot implicitly convert Int to Float; Rae has no implicit numeric conversions - write `value as Float`
+    38 |   let wrongNumber: All = { size: number, list: {} }  # ERROR
+       |                                  ^~~~
+tests/cases/1624_literal_field_types/Main.rae:39:33: cannot implicitly convert Float to Float64; Rae has no implicit numeric conversions - write `value as Float64`
+    39 |   let wrongWidth: All = { time: size, list: {} }  # ERROR
+       |                                 ^~~~
+tests/cases/1624_literal_field_types/Main.rae:40:32: type mismatch: expected String, got Int
+    40 |   let wrongName: All = { name: 5, list: {} }  # ERROR
+       |                                ^~~~
+tests/cases/1624_literal_field_types/Main.rae:41:32: type mismatch: expected Bool, got String
+    41 |   let wrongFlag: All = { flag: "true", list: {} }  # ERROR
+       |                                ^~~~
+tests/cases/1624_literal_field_types/Main.rae:42:34: type mismatch: expected Int, got String
+    42 |   let wrongMaybe: All = { maybe: "some", list: {} }  # ERROR
+       |                                  ^~~~
+tests/cases/1624_literal_field_types/Main.rae:43:45: cannot convert List_String to List_int64_t; they are different types
+    43 |   let wrongList: All = { list: List(String) { "a" } }  # ERROR
+       |                                             ^~~~
+tests/cases/1624_literal_field_types/Main.rae:44:44: cannot convert Int to Inner; they are different types
+    44 |   let wrongInner: All = { list: {}, inner: 4 }  # ERROR
+       |                                            ^~~~
+tests/cases/1624_literal_field_types/Main.rae:45:50: type mismatch: expected Int, got String
+    45 |   let wrongNested: All = { list: {}, inner: { x: "deep" } }  # ERROR
+       |                                                  ^~~~
+tests/cases/1624_literal_field_types/Main.rae:46:36: optional not unwrapped — use `if let`
+    46 |   let notUnwrapped: All = { count: optional, list: {} }  # ERROR
+       |                                    ^~~~
+tests/cases/1624_literal_field_types/Main.rae:47:37: type mismatch: expected Int, got String
+    47 |   let wrongBox: Box(Int) = { value: "text" }  # ERROR
+       |                                     ^~~~
+tests/cases/1624_literal_field_types/Main.rae:48:36: type mismatch: expected Int, got String
+    48 |   let inList: List(Inner) = { { x: "element" } }  # ERROR
+       |                                    ^~~~
