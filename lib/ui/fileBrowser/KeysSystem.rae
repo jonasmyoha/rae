@@ -17,6 +17,7 @@ open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/PreviewSystem
 open ui/fileBrowser/SelectionSystem
 open ui/textFieldSystem/TextFieldSystem
@@ -26,15 +27,27 @@ func browserKeysFromDevice() ret BrowserKeys {
     ret BrowserKeys {
       space: Sdl3.isKeyPressed(key: Keys.keySpace)
       escape: Sdl3.isKeyPressed(key: Keys.keyEscape)
+      confirm: Sdl3.isKeyPressed(key: Keys.keyEnter) or Sdl3.isKeyPressed(key: Keys.keyKeypadEnter)
     }
   }
   let shift: Bool = Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift)
+  let alt: Bool = Sdl3.isKeyDown(key: Keys.keyLAlt) or Sdl3.isKeyDown(key: Keys.keyRAlt)
+  let paste: Bool = Sdl3.isKeyPressed(key: Keys.keyV)
+  let undo: Bool = Sdl3.isKeyPressed(key: Keys.keyZ)
   ret BrowserKeys {
     open: Sdl3.isKeyPressed(key: Keys.keyO) or Sdl3.isKeyPressed(key: Keys.keyDown)
     parent: Sdl3.isKeyPressed(key: Keys.keyUp)
     back: Sdl3.isKeyPressed(key: Keys.keyLeftBracket)
     forward: Sdl3.isKeyPressed(key: Keys.keyRightBracket)
     hidden: shift and Sdl3.isKeyPressed(key: Keys.keyPeriod)
+    newFolder: shift and Sdl3.isKeyPressed(key: Keys.keyN)
+    duplicate: shift is false and Sdl3.isKeyPressed(key: Keys.keyD)
+    copyFiles: Sdl3.isKeyPressed(key: Keys.keyC)
+    paste: paste and alt is false
+    pasteMove: paste and alt
+    trash: Sdl3.isKeyPressed(key: Keys.keyBackspace)
+    undo: undo and shift is false
+    redo: undo and shift
   }
 }
 
@@ -45,6 +58,8 @@ func fileKeysSystem(
   scenes: view SceneRegistry
   keys: view BrowserKeys
 ) ret Bool {
+  # (before Escape ends a path field, so that it does nothing else)
+  let column: EntityId = columnWithKeys(systems: systems, world: world, uiSystems: uiSystems)
   var changed: Bool = stepBarClicks(
     systems: systems
     world: world
@@ -58,11 +73,21 @@ func fileKeysSystem(
     scenes: scenes
     escape: keys.escape
   ) or changed
-  if not (keys.open or keys.parent or keys.back or keys.forward or keys.hidden or keys.space or keys.escape) {
+  if isNone(this: column) or componentHas(this: systems.columns, entityId: column) is false or keysTaken(
+    world: world
+    uiSystems: uiSystems
+  ) {
     ret changed
   }
-  let column: EntityId = columnWithKeys(systems: systems, world: world, uiSystems: uiSystems)
-  if isNone(this: column) {
+  if stepOperationKeys(
+    systems: systems
+    world: world
+    column: column
+    keys: keys
+  ) {
+    ret true
+  }
+  if not (keys.open or keys.parent or keys.back or keys.forward or keys.hidden or keys.space or keys.escape) {
     ret changed
   }
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
@@ -128,6 +153,32 @@ func fileKeysSystem(
         )
       }
     }
+  }
+  ret true
+}
+
+# The keys that change something on the disk; true when one was pressed
+func stepOperationKeys(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  column: view EntityId
+  keys: view BrowserKeys
+) ret Bool {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  if keys.newFolder {
+    newFolderIn(systems: systems, column: column)
+  } else if keys.duplicate {
+    duplicateSelection(systems: systems, world: world, column: column)
+  } else if keys.copyFiles {
+    copySelection(systems: systems, world: world, column: column)
+  } else if keys.paste or keys.pasteMove {
+    pasteInto(systems: systems, column: column, asMove: keys.pasteMove)
+  } else if keys.trash {
+    trashSelection(systems: systems, world: world, column: column)
+  } else if keys.undo or keys.redo {
+    undoOperation(systems: systems, browser: browser, redo: keys.redo)
+  } else {
+    ret false
   }
   ret true
 }
@@ -317,13 +368,4 @@ func stepPathFields(
     changed = true
   }
   ret changed
-}
-
-func actionSent(world: view UiWorld, actionId: view String) ret Bool {
-  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
-    if eventAt(UiAction, this: world.uiActions, i: i).actionId is actionId {
-      ret true
-    }
-  }
-  ret false
 }

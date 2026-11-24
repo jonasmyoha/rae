@@ -1,0 +1,493 @@
+# The file browser's operations by scripted input in a temporary folder, with a trash of its own: a
+# new
+# folder and its name, renames (the name without its extension, Escape, a name that cannot be, the
+# focus
+# lost), an open folder renamed, duplicate, copy and paste, paste as a move, the conflict dialog
+# and all
+# its answers, trash, no trash, undo and redo, the menu and the app's items, two browsers, progress
+# with
+# a stop, what does not work, allowOperations: false, and a source of the app's own.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func setFolder(app: mod App, folder: view String) {
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: folder
+  )
+  settle(app: app)
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.left)
+}
+
+func naming(app: mod App) {
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "notes.txt"
+  )
+  press(app: app, keys: BrowserKeys { newFolder: true })
+  show(app: app, step: "a new folder: {editing(app: app)}")
+  typeName(app: app, text: "Music")
+  show(app: app, step: "its name: {editing(app: app)}")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "notes.txt"
+  )
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  log("Return: {editing(app: app)}")
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape: {editing(app: app)}")
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  typeName(app: app, text: "a/b")
+  log("a name that cannot be: {editing(app: app)}")
+  typeName(app: app, text: "words.txt")
+  show(app: app, step: "another")
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  typeText(app: app, text: "lines", enter: false)
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Music"
+  )
+  show(app: app, step: "a click elsewhere: {editing(app: app)}")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Film"
+  )
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  log("a folder with a dot: {editing(app: app)}")
+  typeName(app: app, text: "lines.txt")
+  log("a name that is taken: {question(app: app)}")
+  answer(app: app, button: "Stop")
+  show(app: app, step: "stopped")
+  setFolder(app: app, folder: "{app.base}/root/Film/Cuts")
+  clickAt(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Film"
+    )
+    listKeys: ListSelectionKeys {}
+  )
+  setFolder(app: app, folder: "{app.base}/root/Film/Cuts")
+  let first: EntityId = columnAt(systems: app.files, browser: app.left, place: 0)
+  renameIn(
+    systems: app.files
+    column: first
+    name: "Film"
+    newName: "Movies"
+  )
+  settle(app: app)
+  show(
+    app: app
+    step: "an open folder renamed: {browserFolder(systems: app.files, browser: app.left).sub(
+      start: app.base.length()
+      len: 40
+    )}"
+  )
+  press(app: app, keys: BrowserKeys { undo: true })
+  show(app: app, step: "undone")
+}
+
+func copying(app: mod App) {
+  setFolder(app: app, folder: "{app.base}/root")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "lines.txt"
+  )
+  press(app: app, keys: BrowserKeys { duplicate: true })
+  show(app: app, step: "duplicate")
+  pickMore(
+    app: app
+    browser: app.left
+    place: 0
+    name: "lines.txt"
+  )
+  press(app: app, keys: BrowserKeys { copyFiles: true })
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Music"
+  )
+  setFolder(app: app, folder: "{app.base}/root/Music")
+  press(app: app, keys: BrowserKeys { paste: true })
+  show(app: app, step: "copied into Music")
+  press(app: app, keys: BrowserKeys { paste: true })
+  log("again: {question(app: app)}")
+  answer(app: app, button: "Keep")
+  log("the next: {question(app: app)}")
+  answer(app: app, button: "Skip")
+  show(app: app, step: "kept, skipped: {question(app: app)}")
+  press(app: app, keys: BrowserKeys { paste: true })
+  press(app: app, keys: BrowserKeys { confirm: true })
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Return, then Escape: {question(app: app)}")
+  writeFile(path: "{app.base}/root/lines.txt", text: "newer")
+  press(app: app, keys: BrowserKeys { paste: true })
+  answer(app: app, button: "All")
+  answer(app: app, button: "Replace")
+  show(app: app, step: "all replaced: {question(app: app)}")
+  log("   trash: {diskText(folder: "{app.base}/trash")}")
+  if let text: String = Sys.readFile(path: "{app.base}/root/Music/lines.txt") {
+    log("   Music/lines.txt is {text}")
+  }
+  press(app: app, keys: BrowserKeys { undo: true })
+  show(app: app, step: "undone")
+  if let text: String = Sys.readFile(path: "{app.base}/root/Music/lines.txt") {
+    log("   Music/lines.txt is {text}")
+  }
+  press(app: app, keys: BrowserKeys { redo: true })
+  show(app: app, step: "redone")
+  if let text: String = Sys.readFile(path: "{app.base}/root/Music/lines.txt") {
+    log("   Music/lines.txt is {text}")
+  }
+  pick(
+    app: app
+    browser: app.left
+    place: 1
+    name: "lines.txt"
+  )
+  press(app: app, keys: BrowserKeys { copyFiles: true })
+  setFolder(app: app, folder: "{app.base}/root/Film")
+  press(app: app, keys: BrowserKeys { pasteMove: true })
+  show(app: app, step: "moved, clipboard {app.files.operations.clipboard.length}")
+  press(app: app, keys: BrowserKeys { undo: true })
+  show(app: app, step: "undone")
+}
+
+func trashing(app: mod App) {
+  setFolder(app: app, folder: "{app.base}/root")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "lines copy.txt"
+  )
+  press(app: app, keys: BrowserKeys { trash: true })
+  show(app: app, step: "to the trash")
+  press(app: app, keys: BrowserKeys { undo: true })
+  show(app: app, step: "back")
+  app.files.operations.rules.trashFolder = ""
+  app.files.operations.rules.onlyIn = "{app.base}"
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "lines copy.txt"
+  )
+  press(app: app, keys: BrowserKeys { trash: true })
+  log("no trash: {question(app: app)}")
+  press(app: app, keys: BrowserKeys { confirm: true })
+  log("Return does not delete: {question(app: app)}")
+  answer(app: app, button: "Stop")
+  show(app: app, step: "left: {question(app: app)}")
+  press(app: app, keys: BrowserKeys { trash: true })
+  answer(app: app, button: "Replace")
+  show(app: app, step: "deleted")
+  app.files.operations.rules.trashFolder = "{app.base}/trash"
+}
+
+func menus(app: mod App) {
+  app.files.menuItems.add(
+    value: BrowserMenuItem { id: "play", text: "Play", extensions: List(String) { "wav" } }
+  )
+  app.files.menuItems.add(
+    value: BrowserMenuItem { id: "zip", text: "Compress", folders: true, several: true }
+  )
+  app.files.menuItems.add(
+    value: BrowserMenuItem { id: "here", text: "Import Here", files: false, background: true }
+  )
+  app.files.operations.clipboard.clear()
+  let x: Float = rowX(app: app, browser: app.left, place: 0)
+  secondaryAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "door.wav"
+    )
+  )
+  log("a file:{menuText(app: app)}")
+  chooseItem(app: app, id: "copy")
+  log("copied {app.files.operations.clipboard.length}, {editing(app: app)}")
+  secondaryAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "door.wav"
+    )
+  )
+  chooseItem(app: app, id: "app.play")
+  show(app: app, step: "Play")
+  secondaryAt(app: app, x: x, y: 330.0)
+  log("empty space:{menuText(app: app)}")
+  chooseItem(app: app, id: "paste")
+  show(app: app, step: "pasted beside itself")
+  secondaryAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Music"
+    )
+  )
+  log("a folder:{menuText(app: app)}")
+  chooseItem(app: app, id: "rename")
+  log("Rename: {editing(app: app)}")
+  press(app: app, keys: BrowserKeys { escape: true })
+  var options: BrowserOptions = browserOptions(systems: app.files, browser: app.left)
+  options.allowOperations = false
+  setBrowserOptions(
+    systems: app.files
+    world: app.world
+    browser: app.left
+    options: options
+  )
+  settle(app: app)
+  secondaryAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "door.wav"
+    )
+  )
+  log("look only, a file:{menuText(app: app)}")
+  closeMenu(world: app.world, uiSystems: app.uiSystems)
+  let before: String = diskText(folder: "{app.base}/root")
+  press(app: app, keys: BrowserKeys { newFolder: true })
+  press(app: app, keys: BrowserKeys { duplicate: true })
+  press(app: app, keys: BrowserKeys { paste: true })
+  press(app: app, keys: BrowserKeys { pasteMove: true })
+  press(app: app, keys: BrowserKeys { trash: true })
+  press(app: app, keys: BrowserKeys { undo: true })
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  log("nothing changed {diskText(folder: "{app.base}/root") is before}, {editing(app: app)}")
+  options.allowOperations = true
+  setBrowserOptions(
+    systems: app.files
+    world: app.world
+    browser: app.left
+    options: options
+  )
+  settle(app: app)
+}
+
+func rowTextOf(app: view App) ret String {
+  var text: String = "{componentCount(this: app.files.operationRows)} rows"
+  loop var i: Int = 0, i < componentCount(this: app.files.operationRows), ++i {
+    let row: EntityId = componentEntityAt(this: app.files.operationRows, i: i)
+    let label: EntityId = nodeIn(world: app.world, root: row, nodeId: "FileOperationText")
+    text = "{text}, {componentView(this: app.world.texts, entityId: label).text}"
+  }
+  ret text
+}
+
+func stopButton(app: view App) ret EntityId {
+  if componentCount(this: app.files.operationRows) is 0 {
+    ret noEntity()
+  }
+  let row: EntityId = componentEntityAt(this: app.files.operationRows, i: 0)
+  ret componentView(this: app.files.operationRows, entityId: row).stop
+}
+
+func progress(app: mod App) {
+  # a folder into itself
+  setFolder(app: app, folder: "{app.base}/root")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Music"
+  )
+  press(app: app, keys: BrowserKeys { copyFiles: true })
+  setFolder(app: app, folder: "{app.base}/root/Music")
+  press(app: app, keys: BrowserKeys { pasteMove: true })
+  log("into itself: {rowTextOf(app: app)}")
+  clickNode(app: app, entityId: stopButton(app: app))
+  log("read: {rowTextOf(app: app)}")
+  app.lines.clear()
+
+  # a long one, stopped
+  makeFolder(path: "{app.base}/many")
+  makeFolder(path: "{app.base}/many/all")
+  loop var i: Int = 0, i < 4000, ++i {
+    writeFile(path: "{app.base}/many/all/{i}", text: "x")
+  }
+  app.files.operations.clipboard = List(String) { "{app.base}/many/all" }
+  app.step = 0.3
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys { paste: true }
+    text: emptyText()
+    menuKeys: MenuKeys {}
+  )
+  loop var i: Int = 0, i < 4 and componentCount(this: app.files.operationRows) is 0, ++i {
+    idle(app: app)
+  }
+  let needs: Bool = componentCount(this: app.files.operationRows) is 1
+  log("a row {needs}: {rowTextOf(app: app).sub(start: 0, len: 19)}")
+  idle(app: app)
+  let stop: EntityId = stopButton(app: app)
+  clickNode(app: app, entityId: stop)
+  app.step = 0.02
+  settle(app: app)
+  show(app: app, step: "stopped: {rowTextOf(app: app)}")
+  log(
+    "   left over: {Files.copyLeftovers(folder: "{app.base}/root/Music", olderThanSeconds: 0.0).length}"
+  )
+}
+
+func twoBrowsers(app: mod App) {
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "{app.base}/other"
+    options: BrowserOptions { showPreview: false }
+  )
+  settle(app: app)
+  setFolder(app: app, folder: "{app.base}/root")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "door.wav"
+  )
+  press(app: app, keys: BrowserKeys { copyFiles: true })
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.right)
+  press(app: app, keys: BrowserKeys { paste: true })
+  show(app: app, step: "from the left to the right")
+  log("   other: {diskText(folder: "{app.base}/other")}")
+  closeFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: app.right
+  )
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "/own"
+    options: BrowserOptions { source: BrowserSource.app }
+  )
+  settle(app: app)
+  pick(
+    app: app
+    browser: app.right
+    place: 0
+    name: "clip"
+  )
+  app.lines.clear()
+  press(app: app, keys: BrowserKeys { trash: true })
+  press(app: app, keys: BrowserKeys { newFolder: true })
+  press(app: app, keys: BrowserKeys { paste: true })
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  typeName(app: app, text: "cut")
+  show(app: app, step: "a source of the app's own")
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-operations-{nowNs()}"
+  makeFolder(path: base)
+  loop let folder: view String in List(String) {
+    "trash"
+    "other"
+    "root"
+    "root/Film"
+    "root/Film/Cuts"
+  } {
+    makeFolder(path: "{base}/{folder}")
+  }
+  writeFile(path: "{base}/root/notes.txt", text: "old")
+  writeFile(path: "{base}/root/door.wav", text: "1234")
+  var app: App = makeApp(base: base)
+  app.files.operations.rules = OperationRules { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  settle(app: app)
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.left)
+  naming(app: app)
+  copying(app: app)
+  trashing(app: app)
+  menus(app: app)
+  progress(app: app)
+  twoBrowsers(app: app)
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

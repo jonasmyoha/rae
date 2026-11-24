@@ -8,12 +8,14 @@
 #
 # or, in a scene, `"Files": { "FileBrowser": { "root": "~/Projects" } }` (FileBrowserComponents).
 #
-# Each frame, after updateUiInput, dividerSystem, scrollBarSystem, keyFocusSystem, the text fields
+# Each frame, after updateUiInput, menuSystem, dividerSystem, scrollBarSystem, keyFocusSystem, the
+# text fields
 # and
 # listSelectionSystem: fileBrowserUpdate; then updateScrollRoots and scrollToRowSystem;
 # fileBrowserRows; listViewSystem and the rest. The app reads the events (files.folderOpened,
-# fileActivated, selectionChanged, entriesRequested) after fileBrowserUpdate. At the end:
-# closeFileBrowsers.
+# fileActivated, selectionChanged, entriesRequested, operationDone and more) after
+# fileBrowserUpdate. At the end:
+# closeFileBrowsers. Escape ends an edit or a dialog of a browser without quitting the program.
 open collections/StringMap
 open ecs/ComponentTable
 open ecs/Entity
@@ -22,6 +24,7 @@ open ecs/hierarchySystem/HierarchySystem
 open ui/BindingComponents
 open ui/Components
 open ui/Ecs
+open ui/InputSystem
 open ui/KeyFocusSystem
 open ui/Registry
 open ui/RenderSystem
@@ -33,11 +36,15 @@ open ui/fileBrowser/ChromeSystem
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileMenuSystem
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/KeysSystem
 open ui/fileBrowser/ListingSystem
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationRowsSystem
+open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/PreviewSystem
+open ui/fileBrowser/RenameSystem
 open ui/fileBrowser/RowsSystem
 open ui/fileBrowser/SelectionSystem
 open ui/fileBrowser/WatchSystem
@@ -51,6 +58,9 @@ func registerFileBrowserScenes(scenes: mod SceneRegistry) {
     "filePreview"
     "fileLargePreview"
     "fileTrailPart"
+    "fileRename"
+    "fileOperation"
+    "fileQuestion"
   }
   loop let name: view String in names {
     if sceneRegistryHas(reg: scenes, key: name) is false {
@@ -85,6 +95,7 @@ func openFileBrowser(
   browser.back = nodeIn(world: world, root: scene, nodeId: "FileBrowserBack")
   browser.forward = nodeIn(world: world, root: scene, nodeId: "FileBrowserForward")
   browser.trail = nodeIn(world: world, root: scene, nodeId: "FileBrowserTrail")
+  browser.operations = nodeIn(world: world, root: scene, nodeId: "FileBrowserOperations")
   browser.pathBox = nodeIn(world: world, root: scene, nodeId: "FileBrowserPath")
   browser.pathField = nodeIn(world: world, root: scene, nodeId: "FileBrowserPathField")
   browser.strip = nodeIn(world: world, root: scene, nodeId: "FileBrowserStrip")
@@ -151,14 +162,18 @@ func fileBrowserUpdate(
   uiSystems: mod UiSystems
   scenes: view SceneRegistry
   keys: view BrowserKeys
+  input: view UiInput
   windowFocused: view Bool
-  nowSeconds: view Float64
 ) ret Bool {
   frameAdvance(this: systems.folderOpened)
   frameAdvance(this: systems.fileActivated)
   frameAdvance(this: systems.selectionChanged)
   frameAdvance(this: systems.entriesRequested)
-  systems.now = nowSeconds
+  frameAdvance(this: systems.operationAsked)
+  frameAdvance(this: systems.operationDone)
+  frameAdvance(this: systems.operationRequested)
+  frameAdvance(this: systems.browserMenuChosen)
+  systems.now = input.nowSeconds
   closeDeadBrowsers(systems: systems, world: world, uiSystems: uiSystems)
   applyFileBrowserComponents(systems: systems, world: world)
   var changed: Bool = openAuthoredBrowsers(
@@ -180,18 +195,41 @@ func fileBrowserUpdate(
     scenes: scenes
     keys: keys
   ) or changed
+  changed = fileMenuSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    input: input
+  ) or changed
   changed = fileNavigationSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
   ) or changed
+  changed = fileOperationsSystem(systems: systems, world: world) or changed
   changed = fileWatchSystem(systems: systems, windowFocused: windowFocused) or changed
   changed = fileListingSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
+  ) or changed
+  # after the keys and the listings: Escape ends only the edit, and a new folder is there
+  changed = fileRenameSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    escape: keys.escape
+  ) or changed
+  changed = fileOperationRowsSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: keys
   ) or changed
   changed = filePreviewSystem(
     systems: systems
@@ -217,6 +255,13 @@ func fileBrowserRows(
     scenes: scenes
     res: res
   )
+  loop var i: Int = 0, i < componentCount(this: systems.renames), ++i {
+    placeRename(
+      systems: systems
+      world: world
+      column: componentEntityAt(this: systems.renames, i: i)
+    )
+  }
   ret fileRowsSystem(systems: systems, world: world, uiSystems: uiSystems) or around
 }
 
@@ -227,6 +272,7 @@ func fileBrowserDeadline(systems: view FileBrowserSystems) ret Float64 {
     first: watchDeadline(systems: systems)
     second: listingDeadline(systems: systems)
   )
+  deadline = earlier(first: deadline, second: operationDeadline(systems: systems))
   loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
     let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
     deadline = earlier(
@@ -274,6 +320,7 @@ func authoredOptions(authored: view FileBrowser) ret BrowserOptions {
     selection: authored.selection
     returnKey: authored.returnKey
     allowAboveRoot: authored.allowAboveRoot
+    allowOperations: authored.allowOperations
     showBar: authored.showBar
     showPreview: authored.showPreview
     openCountTint: authored.openCountTint
@@ -593,7 +640,8 @@ func closeDeadBrowsers(
   }
 }
 
-# Close every browser and end what runs for them. False when a disk has not answered in a second:
+# Close every browser and end what runs for them (operations are canceled). False when a disk has
+# not answered in a second:
 # the app then ends with Sys.exit, which waits for nothing.
 func closeFileBrowsers(
   systems: mod FileBrowserSystems
@@ -608,7 +656,9 @@ func closeFileBrowsers(
       browser: componentEntityAt(this: systems.browsers, i: 0)
     )
   }
+  closeQuestion(systems: systems, world: world, uiSystems: uiSystems)
+  let ended: Bool = stopOperations(systems: systems, waitMs: 1000)
   closeWatches(systems: systems)
   let polled: Bool = stopPolling(systems: systems, waitMs: 1000)
-  ret stopFileListings(systems: systems, waitMs: 1000) and polled
+  ret stopFileListings(systems: systems, waitMs: 1000) and polled and ended
 }

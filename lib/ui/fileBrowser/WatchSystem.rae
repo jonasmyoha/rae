@@ -83,11 +83,18 @@ func pollFolders(systems: mod FileBrowserSystems, windowFocused: view Bool) ret 
     ret changed
   }
   systems.polling.nextSeconds = systems.now + pollSeconds
-  let task: Task(Int) = spawn thread folderStampsThread(
-    answers: systems.polling.answers
-    folders: systems.polling.folders
-  )
-  systems.polling.jobs.add(value: FolderJob { generation: 0, task: own task })
+  when Target.isNative {
+    let task: Task(Int) = spawn thread folderStampsThread(
+      answers: systems.polling.answers
+      folders: systems.polling.folders
+    )
+    systems.polling.jobs.add(value: FolderJob { generation: 0, task: own task })
+  } else {
+    let count: Int = folderStampsThread(
+      answers: systems.polling.answers
+      folders: systems.polling.folders
+    )
+  }
   ret changed
 }
 

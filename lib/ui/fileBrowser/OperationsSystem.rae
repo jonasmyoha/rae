@@ -1,0 +1,820 @@
+# Operations on files (docs/file-browser-design.md §11): what the keys, the menu and the rename ask
+# for, run on threads (two at once, the others wait), what came of them shown at once, and undo.
+import Files
+open Channel
+open Signal
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationThread
+
+const operationsAtOnce: Int = 2
+
+# Operations that can be undone
+const undoKept: Int = 100
+
+const newFolderName: String = "untitled folder"
+
+# ----- what is asked for ----------------------------------------------------------------------
+
+# May the browser change anything?
+func mayOperate(systems: view FileBrowserSystems, browser: view EntityId) ret Bool {
+  ret browserOptions(systems: systems, browser: browser).allowOperations
+}
+
+# The rules of a browser's operations: what is put somewhere is put inside its root
+func rulesOf(systems: view FileBrowserSystems, browser: view EntityId) ret OperationRules {
+  var rules: OperationRules = systems.operations.rules
+  if componentHas(this: systems.browsers, entityId: browser) {
+    let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
+    if mine.options.allowAboveRoot is false {
+      rules.placeIn = "{mine.root}"
+    }
+  }
+  ret rules
+}
+
+# The operation of a browser that the program's entries are its own: the program is told
+func sendRequest(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  kind: copy OperationKind
+  paths: view List(String)
+  folder: view String
+  name: view String
+) ret Bool {
+  if browserOptions(systems: systems, browser: browser).source is BrowserSource.disk {
+    ret false
+  }
+  let request: OperationRequested = {
+    browser: browser
+    kind: kind
+    paths: paths
+    folder: "{folder}"
+    name: "{name}"
+  }
+  eventSend(this: systems.operationRequested, value: own request)
+  ret true
+}
+
+# Run `operation` for `browser`. What it makes in `folder` is selected there. The operation's
+# number.
+func runOperation(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+  operation: own FileOperation
+) ret Int {
+  systems.operations.lastNumber = systems.operations.lastNumber + 1
+  let number: Int = systems.operations.lastNumber
+  let count: Int = operation.items.length
+  let kind: OperationKind = operation.kind
+  if count is 0 {
+    ret number
+  }
+  let job: OperationJob = {
+    number: number
+    browser: browser
+    kind: kind
+    count: count
+    folder: "{folder}"
+    operation: own operation
+    commands: createChannel(OperationCommand)
+    signal: createSignal()
+  }
+  systems.operations.jobs.add(value: own job)
+  startOperations(systems: systems)
+  ret number
+}
+
+func newFolderIn(systems: mod FileBrowserSystems, column: view EntityId) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  if mayOperate(systems: systems, browser: browser) is false or sendRequest(
+    systems: systems
+    browser: browser
+    kind: OperationKind.newFolder
+    paths: List(String) {}
+    folder: folder
+    name: newFolderName
+  ) {
+    ret
+  }
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: folder
+    operation: Files.newFolder(
+      folder: folder
+      name: newFolderName
+      rules: rulesOf(systems: systems, browser: browser)
+    )
+  )
+}
+
+func renameIn(
+  systems: mod FileBrowserSystems
+  column: view EntityId
+  name: view String
+  newName: view String
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  let path: String = pathIn(folder: folder, name: name)
+  if mayOperate(systems: systems, browser: browser) is false or sendRequest(
+    systems: systems
+    browser: browser
+    kind: OperationKind.rename
+    paths: List(String) { "{path}" }
+    folder: folder
+    name: newName
+  ) {
+    ret
+  }
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: folder
+    operation: Files.renameFile(
+      source: path
+      name: newName
+      rules: rulesOf(systems: systems, browser: browser)
+    )
+  )
+}
+
+# The paths selected in a column
+func pathsInColumn(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+) ret List(String) {
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  var paths: List(String) = {}
+  loop let name: view String in names {
+    paths.add(value: pathIn(folder: folder, name: name))
+  }
+  ret paths
+}
+
+func duplicateSelection(
+  systems: mod FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  let paths: List(String) = pathsInColumn(systems: systems, world: world, column: column)
+  if mayOperate(systems: systems, browser: browser) is false or paths.length is 0 or sendRequest(
+    systems: systems
+    browser: browser
+    kind: OperationKind.duplicate
+    paths: paths
+    folder: folder
+    name: ""
+  ) {
+    ret
+  }
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: folder
+    operation: Files.duplicateFiles(
+      sources: paths
+      rules: rulesOf(systems: systems, browser: browser)
+    )
+  )
+}
+
+# The selection goes on the browsers' clipboard (also where nothing may be changed: another browser
+# may take it)
+func copySelection(systems: mod FileBrowserSystems, world: view UiWorld, column: view EntityId) {
+  let paths: List(String) = pathsInColumn(systems: systems, world: world, column: column)
+  if paths.length > 0 {
+    systems.operations.clipboard = own paths
+  }
+}
+
+# What is on the clipboard is copied into the column's folder, or moved there
+func pasteInto(systems: mod FileBrowserSystems, column: view EntityId, asMove: view Bool) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  let paths: List(String) = systems.operations.clipboard
+  var kind: OperationKind = OperationKind.copy
+  if asMove {
+    kind = OperationKind.move
+  }
+  if mayOperate(systems: systems, browser: browser) is false or paths.length is 0 or sendRequest(
+    systems: systems
+    browser: browser
+    kind: kind
+    paths: paths
+    folder: folder
+    name: ""
+  ) {
+    ret
+  }
+  let rules: OperationRules = rulesOf(systems: systems, browser: browser)
+  var operation: FileOperation = Files.copyFiles(sources: paths, folder: folder, rules: rules)
+  if asMove {
+    operation = Files.moveFiles(sources: paths, folder: folder, rules: rules)
+    systems.operations.clipboard.clear()
+  }
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: folder
+    operation: own operation
+  )
+}
+
+func trashSelection(systems: mod FileBrowserSystems, world: view UiWorld, column: view EntityId) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let paths: List(String) = pathsInColumn(systems: systems, world: world, column: column)
+  if mayOperate(systems: systems, browser: browser) is false or paths.length is 0 or sendRequest(
+    systems: systems
+    browser: browser
+    kind: OperationKind.trash
+    paths: paths
+    folder: folderOfColumn(systems: systems, column: column)
+    name: ""
+  ) {
+    ret
+  }
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: ""
+    operation: Files.trashFiles(sources: paths, rules: rulesOf(systems: systems, browser: browser))
+  )
+}
+
+# Undo the last operation, or redo the last undone one
+func undoOperation(systems: mod FileBrowserSystems, browser: view EntityId, redo: view Bool) {
+  if mayOperate(systems: systems, browser: browser) is false {
+    ret
+  }
+  var steps: List(UndoStep) = {}
+  if redo {
+    let last: Int = systems.operations.redo.length - 1
+    if let record: view UndoRecord = systems.operations.redo.viewAt(index: last) {
+      steps = record.steps
+    }
+    if steps.length > 0 {
+      systems.operations.redo.removeAt(index: last)
+    }
+  } else {
+    let last: Int = systems.operations.undo.length - 1
+    if let record: view UndoRecord = systems.operations.undo.viewAt(index: last) {
+      steps = record.steps
+    }
+    if steps.length > 0 {
+      systems.operations.undo.removeAt(index: last)
+    }
+  }
+  if steps.length is 0 {
+    ret
+  }
+  # the paths are the operations' own, in the trash too: no root to be held to
+  let number: Int = runOperation(
+    systems: systems
+    browser: browser
+    folder: ""
+    operation: Files.undoFiles(steps: steps, rules: systems.operations.rules)
+  )
+  if let job: mod OperationJob = systems.operations.jobs.modAt(
+    index: systems.operations.jobs.length - 1
+  ) {
+    job.undoing = redo is false
+    job.redoing = redo
+  }
+}
+
+# ----- between ------------------------------------------------------------------------------------
+func operationIndex(systems: view FileBrowserSystems, number: view Int) ret Int {
+  loop var i: Int = 0, i < systems.operations.jobs.length, ++i {
+    if let job: view OperationJob = systems.operations.jobs.viewAt(index: i) {
+      if job.number is number {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# Stop an operation: what it did stays done. One that waits is not begun; a notice goes.
+func cancelFileOperation(systems: mod FileBrowserSystems, number: view Int) {
+  let index: Int = operationIndex(systems: systems, number: number)
+  var ended: Bool = false
+  if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {
+    ended = job.state is OperationJobState.waiting or job.state is OperationJobState.notice or job.state is OperationJobState.deleting
+    if ended is false {
+      job.commands.channelSend(value: OperationCommand {})
+      job.signal.post()
+      job.state = OperationJobState.running
+    }
+  }
+  if ended {
+    dropJob(systems: systems, index: index)
+  }
+}
+
+# Answer an operation that asks (the browser's own dialog, or the program). For one that has no
+# trash, `replace` deletes for good and anything else leaves it.
+func answerOperation(
+  systems: mod FileBrowserSystems
+  number: view Int
+  answer: view ConflictAnswer
+  forAll: view Bool
+) {
+  let index: Int = operationIndex(systems: systems, number: number)
+  var paths: List(String) = {}
+  var browser: EntityId = noEntity()
+  var deleting: Bool = false
+  if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {
+    if job.state is OperationJobState.asking {
+      job.state = OperationJobState.running
+      job.commands.channelSend(
+        value: OperationCommand {
+          kind: OperationCommandKind.answer
+          answer: answer
+          forAll: forAll
+        }
+      )
+      job.signal.post()
+    } else if job.state is OperationJobState.deleting {
+      deleting = true
+      browser = job.browser
+      paths = job.paths
+    }
+  }
+  if deleting is false {
+    ret
+  }
+  dropJob(systems: systems, index: index)
+  if answer is ConflictAnswer.replace {
+    let deleted: Int = runOperation(
+      systems: systems
+      browser: browser
+      folder: ""
+      operation: Files.deleteFiles(
+        sources: paths
+        rules: rulesOf(systems: systems, browser: browser)
+      )
+    )
+  }
+}
+
+# Its thread has ended or was never begun
+func dropJob(systems: mod FileBrowserSystems, index: view Int) {
+  if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {
+    if let task: view Task(Int) = job.task {
+      let count: Int = task.get()
+    }
+    job.commands.freeChannel()
+    job.signal.freeSignal()
+  }
+  systems.operations.jobs.removeAt(index: index)
+}
+
+func startOperations(systems: mod FileBrowserSystems) {
+  var running: Int = 0
+  loop let job: view OperationJob in systems.operations.jobs {
+    if job.state is OperationJobState.running or job.state is OperationJobState.asking {
+      running = running + 1
+    }
+  }
+  loop let job: mod OperationJob in systems.operations.jobs {
+    if job.state is OperationJobState.waiting and running < operationsAtOnce {
+      running = running + 1
+      job.state = OperationJobState.running
+      job.startedSeconds = systems.now
+      when Target.isNative {
+        let task: Task(Int) = spawn thread operationThread(
+          updates: systems.operations.updates
+          commands: job.commands
+          signal: job.signal
+          number: job.number
+          operation: job.operation
+        )
+        job.task = own task
+      } else {
+        # a browser build has no threads, and no disk of the user's
+        job.state = OperationJobState.notice
+        job.message = "Files cannot be changed here"
+      }
+    }
+  }
+}
+
+# ----- what came of them
+# ----------------------------------------------------------------------------
+
+# One frame: what the threads sent; true when something changed
+func fileOperationsSystem(systems: mod FileBrowserSystems, world: mod UiWorld) ret Bool {
+  var changed: Bool = false
+  loop systems.operations.updates.pending() > 0 {
+    let update: OperationUpdate = systems.operations.updates.receive()
+    takeUpdate(systems: systems, world: world, update: update)
+    changed = true
+  }
+  if changed {
+    startOperations(systems: systems)
+  }
+  ret changed
+}
+
+func takeUpdate(systems: mod FileBrowserSystems, world: mod UiWorld, update: view OperationUpdate) {
+  let index: Int = operationIndex(systems: systems, number: update.number)
+  var browser: EntityId = noEntity()
+  var kind: OperationKind = OperationKind.copy
+  if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {
+    job.index = update.index
+    job.bytesDone = update.bytesDone
+    job.bytesTotal = update.bytesTotal
+    browser = job.browser
+    kind = job.kind
+    if update.kind is OperationUpdateKind.asking {
+      job.state = OperationJobState.asking
+      job.source = "{update.source}"
+      job.target = "{update.target}"
+    }
+  }
+  if update.kind is OperationUpdateKind.asking {
+    let asked: OperationAsked = {
+      browser: browser
+      number: update.number
+      kind: kind
+      source: "{update.source}"
+      target: "{update.target}"
+    }
+    eventSend(this: systems.operationAsked, value: own asked)
+  } else if update.kind is OperationUpdateKind.done {
+    finishOperation(
+      systems: systems
+      world: world
+      index: index
+      update: update
+    )
+  }
+}
+
+func finishOperation(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  index: view Int
+  update: view OperationUpdate
+) {
+  var browser: EntityId = noEntity()
+  var folder: String = ""
+  var kind: OperationKind = OperationKind.copy
+  var undoing: Bool = false
+  var redoing: Bool = false
+  if let job: view OperationJob = systems.operations.jobs.viewAt(index: index) {
+    browser = job.browser
+    folder = "{job.folder}"
+    kind = job.kind
+    undoing = job.undoing
+    redoing = job.redoing
+  }
+  loop let step: view UndoStep in update.undo {
+    if step.kind is UndoKind.moved {
+      followRename(
+        systems: systems
+        world: world
+        from: step.from
+        to: step.to
+      )
+    }
+  }
+  var noTrash: List(String) = {}
+  var failed: Int = 0
+  var failure: OperationError = OperationError.none
+  var failedPath: String = ""
+  loop let result: view ItemResult in update.results {
+    staleFolder(systems: systems, folder: parentPath(path: result.source))
+    if result.target.length() > 0 {
+      staleFolder(systems: systems, folder: parentPath(path: result.target))
+    }
+    if result.outcome is ItemOutcome.failed {
+      if result.error is OperationError.noTrash {
+        noTrash.add(value: "{result.source}")
+      } else {
+        failed = failed + 1
+        failure = result.error
+        failedPath = "{result.source}"
+      }
+    }
+  }
+  loop let step: view UndoStep in update.undo {
+    staleFolder(systems: systems, folder: parentPath(path: step.from))
+    staleFolder(systems: systems, folder: parentPath(path: step.to))
+  }
+  keepUndo(
+    systems: systems
+    update: update
+    undoing: undoing
+    redoing: redoing
+  )
+  selectMade(
+    systems: systems
+    world: world
+    browser: browser
+    folder: folder
+    kind: kind
+    update: update
+  )
+  let done: OperationDone = {
+    browser: browser
+    number: update.number
+    kind: kind
+    results: update.results
+    undone: undoing or redoing
+  }
+  eventSend(this: systems.operationDone, value: own done)
+  # the job ends, or stays as a notice, or as a question
+  if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {
+    job.state = OperationJobState.notice
+    if noTrash.length > 0 {
+      job.state = OperationJobState.deleting
+      job.paths = noTrash
+    } else if failed > 0 {
+      job.message = failureText(
+        kind: kind
+        count: failed
+        error: failure
+        path: failedPath
+      )
+    }
+  }
+  if noTrash.length > 0 {
+    let asked: OperationAsked = {
+      browser: browser
+      number: update.number
+      kind: OperationKind.delete
+      source: noTrash.copyAtFallback(index: 0, fallback: "")
+    }
+    eventSend(this: systems.operationAsked, value: own asked)
+  } else if failed is 0 {
+    dropJob(systems: systems, index: index)
+  }
+}
+
+# Every column that shows `folder` is read again, without waiting for the OS's notice
+func staleFolder(systems: mod FileBrowserSystems, folder: view String) {
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+    if mine.folder is folder or mine.realFolder is folder {
+      mine.stale = true
+    }
+  }
+}
+
+func keepUndo(
+  systems: mod FileBrowserSystems
+  update: view OperationUpdate
+  undoing: view Bool
+  redoing: view Bool
+) {
+  if update.undo.length is 0 {
+    ret
+  }
+  let record: UndoRecord = { steps: update.undo }
+  if undoing {
+    systems.operations.redo.add(value: own record)
+    ret
+  }
+  if redoing is false {
+    systems.operations.redo.clear()
+  }
+  systems.operations.undo.add(value: own record)
+  if systems.operations.undo.length > undoKept {
+    systems.operations.undo.removeAt(index: 0)
+  }
+}
+
+# What was made in the folder asked for is selected there, and what an undo brought back; a new
+# folder's name is then edited
+func selectMade(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+  folder: view String
+  kind: copy OperationKind
+  update: view OperationUpdate
+) {
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    let here: String = folderOfColumn(systems: systems, column: column)
+    var names: List(String) = {}
+    loop let result: view ItemResult in update.results {
+      if result.outcome is ItemOutcome.done and result.target.length() > 0 and parentPath(
+        path: result.target
+      ) is here {
+        names.add(value: lastPart(path: result.target))
+      }
+    }
+    let left: Bool = kind is OperationKind.rename and leftSince(
+      systems: systems
+      world: world
+      column: column
+      update: update
+    )
+    if names.length > 0 and left is false and (here is folder or kind is OperationKind.undo) {
+      let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+      if kind is OperationKind.newFolder {
+        mine.wantRename = names.copyAtFallback(index: 0, fallback: "")
+      }
+      mine.wantSelected = names
+    }
+  }
+}
+
+# Was something else selected while the name was edited (a click elsewhere ended the edit)?
+func leftSince(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+  update: view OperationUpdate
+) ret Bool {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  if selectedCount(world: world, list: list) is 0 {
+    ret false
+  }
+  let name: String = firstSelectedName(world: world, list: list)
+  loop let result: view ItemResult in update.results {
+    # (a listing that saw the new name first may have it selected)
+    if lastPart(path: result.source) is name or lastPart(path: result.target) is name {
+      ret false
+    }
+  }
+  ret true
+}
+
+# An open folder that a browser renamed is shown on by its new name: the columns, the parent's open
+# row, and where the browser was
+func followRename(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  from: view String
+  to: view String
+) {
+  if parentPath(path: from) is not parentPath(path: to) {
+    ret
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+    if pathInside(folder: from, path: mine.folder) {
+      mine.folder = movedPath(path: mine.folder, from: from, to: to)
+      # what is still being read is of the old path
+      mine.generation = 0
+      mine.stale = true
+      systems.watchesStale = true
+    } else if mine.folder is parentPath(path: from) and mine.openChild is lastPart(path: from) {
+      mine.openChild = lastPart(path: to)
+      mine.wantSelected = List(String) { lastPart(path: to) }
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.history), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.history, i: i)
+    let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+    loop var at: Int = 0, at < history.folders.length, ++at {
+      let folder: String = history.folders.copyAtFallback(index: at, fallback: "")
+      if pathInside(folder: from, path: folder) {
+        history.folders.set(index: at, value: movedPath(path: folder, from: from, to: to))
+      }
+    }
+  }
+}
+
+func movedPath(path: view String, from: view String, to: view String) ret String {
+  if path is from {
+    ret "{to}"
+  }
+  ret "{to}{path.sub(start: from.length(), len: path.length() - from.length())}"
+}
+
+# ----- in words
+# --------------------------------------------------------------------------------------
+func itemsText(count: view Int) ret String {
+  if count is 1 {
+    ret "1 item"
+  }
+  ret "{count} items"
+}
+
+func operationText(kind: view OperationKind) ret String {
+  if kind is OperationKind.newFolder {
+    ret "Make a folder"
+  }
+  if kind is OperationKind.rename {
+    ret "Rename"
+  }
+  if kind is OperationKind.move {
+    ret "Move"
+  }
+  if kind is OperationKind.duplicate {
+    ret "Duplicate"
+  }
+  if kind is OperationKind.trash {
+    ret "Move to Trash"
+  }
+  if kind is OperationKind.delete {
+    ret "Delete"
+  }
+  if kind is OperationKind.undo {
+    ret "Undo"
+  }
+  ret "Copy"
+}
+
+func errorText(error: view OperationError) ret String {
+  if error is OperationError.notFound {
+    ret "it is not there any more"
+  }
+  if error is OperationError.noPermission {
+    ret "no permission"
+  }
+  if error is OperationError.noSpace {
+    ret "the disk is full"
+  }
+  if error is OperationError.exists {
+    ret "something of that name is there"
+  }
+  if error is OperationError.badName {
+    ret "that name cannot be used"
+  }
+  if error is OperationError.intoItself {
+    ret "a folder cannot go into itself"
+  }
+  if error is OperationError.changed {
+    ret "it was changed since"
+  }
+  if error is OperationError.protected {
+    ret "the system needs it"
+  }
+  if error is OperationError.notCopyable {
+    ret "it cannot be copied"
+  }
+  if error is OperationError.outside {
+    ret "it is outside the folder shown here"
+  }
+  ret "it did not work"
+}
+
+func failureText(
+  kind: view OperationKind
+  count: view Int
+  error: view OperationError
+  path: view String
+) ret String {
+  var what: String = "\"{lastPart(path: path)}\""
+  if count > 1 {
+    what = itemsText(count: count)
+  }
+  ret "{operationText(kind: kind)} {what}: {errorText(error: error)}"
+}
+
+# ----- the end
+# ------------------------------------------------------------------------------------------
+
+# Cancel what runs and wait for its threads to end; false when one has not in `waitMs`
+func stopOperations(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  loop var i: Int = systems.operations.jobs.length - 1, i >= 0, --i {
+    var number: Int = 0
+    if let job: view OperationJob = systems.operations.jobs.viewAt(index: i) {
+      number = job.number
+    }
+    cancelFileOperation(systems: systems, number: number)
+  }
+  loop var i: Int = 0, i < waitMs and systems.operations.jobs.length > 0, ++i {
+    loop systems.operations.updates.pending() > 0 {
+      let update: OperationUpdate = systems.operations.updates.receive()
+      if update.kind is OperationUpdateKind.done {
+        dropJob(systems: systems, index: operationIndex(systems: systems, number: update.number))
+      }
+    }
+    if systems.operations.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.operations.jobs.length > 0 {
+    ret false
+  }
+  systems.operations.updates.freeChannel()
+  ret true
+}

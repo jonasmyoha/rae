@@ -63,6 +63,12 @@ func keyHolder(world: view UiWorld, uiSystems: view UiSystems) ret EntityId {
   ret entityId
 }
 
+# Were this frame's keys a menu's or a text field's, though it is over now (the Return that chose an
+# item or ended the field)? Ask it, beside keyHolder, before acting on a key.
+func keysTaken(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  ret world.menu.tookKeys or uiSystems.textField.tookKeys
+}
+
 # The TakesKeys node that gets the keys of `entityId`: itself, or its nearest ancestor that takes
 # them
 func keysOwner(

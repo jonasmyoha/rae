@@ -84,7 +84,10 @@ func stepListKeys(
   now: view Float64
 ) {
   let holder: EntityId = keyHolder(world: world, uiSystems: uiSystems)
-  if isNone(this: holder) or componentHas(this: world.takesKeys, entityId: holder) is false {
+  if isNone(this: holder) or componentHas(this: world.takesKeys, entityId: holder) is false or keysTaken(
+    world: world
+    uiSystems: uiSystems
+  ) {
     ret
   }
   loop let list: view EntityId in lists {

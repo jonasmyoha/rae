@@ -5,6 +5,7 @@
 import FileNotify
 import Files
 open Channel
+open Signal
 open collections/StringMap
 open ecs/ComponentTable
 open ecs/Entity
@@ -12,6 +13,7 @@ open ecs/Event
 open ui/SelectionComponents
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FolderListing
+open ui/fileBrowser/OperationThread
 
 enum BrowserSource { disk, app }
 
@@ -26,6 +28,8 @@ type BrowserOptions {
   returnKey: BrowserReturnKey = BrowserReturnKey.rename
   # May it go above its root
   allowAboveRoot: Bool = false
+  # false: look and pick only
+  allowOperations: Bool = true
   showBar: Bool = true
   showPreview: Bool = true
   # Files opened often get a tint (the app's counts, countOpened)
@@ -55,6 +59,7 @@ type FileBrowser {
   selection: ListSelectMode = ListSelectMode.multiple
   returnKey: BrowserReturnKey = BrowserReturnKey.rename
   allowAboveRoot: Bool = false
+  allowOperations: Bool = true
   showBar: Bool = true
   showPreview: Bool = true
   openCountTint: Bool = false
@@ -87,6 +92,8 @@ type OpenBrowser {
   back: EntityId = noEntity()
   forward: EntityId = noEntity()
   trail: EntityId = noEntity()
+  # what its operations' rows are in
+  operations: EntityId = noEntity()
   pathBox: EntityId = noEntity()
   pathField: EntityId = noEntity()
   # The action the path field sends on Return
@@ -141,6 +148,8 @@ type FileColumn {
   openChild: String = ""
   wantSelected: List(String) = {}
   wantFirst: Bool = false
+  # the entry whose name is to be edited when the rows come
+  wantRename: String = ""
   wantScroll: Float = 0.0
   # Counts up with each change of its entries; what the rows were made from
   entriesStamp: Int = 0
@@ -254,6 +263,111 @@ type FolderPolling {
   nextSeconds: Float64 = 0.0
 }
 
+# ----- operations ------------------------------------------------------------------
+enum OperationJobState {
+  waiting
+  running
+  # in the way of something: an answer is needed
+  asking
+  # what it was to trash has no trash: delete for good?
+  deleting
+  # over, with something to be told
+  notice
+}
+
+type OperationJob {
+  number: Int
+  # who asked, and the folder what it makes is selected in ("" none)
+  browser: EntityId
+  folder: String
+  kind: OperationKind
+  # its items
+  count: Int
+  operation: FileOperation
+  state: OperationJobState = OperationJobState.waiting
+  undoing: Bool = false
+  redoing: Bool = false
+  startedSeconds: Float64 = 0.0
+  # how far it is
+  index: Int = 0
+  bytesDone: Int = 0
+  bytesTotal: Int = 0
+  # asking: what would be put there, and what has the name
+  source: String = ""
+  target: String = ""
+  # deleting: what has no trash
+  paths: List(String) = {}
+  # notice
+  message: String = ""
+  commands: Channel(OperationCommand)
+  signal: Signal
+  task: opt Task(Int) = none
+}
+
+# What undoes one operation
+type UndoRecord {
+  steps: List(UndoStep) = {}
+}
+
+# The dialog of the operation that asks
+type OperationQuestion {
+  node: EntityId = noEntity()
+  number: Int = 0
+  # what it asks
+  asked: String = ""
+  # the answer is for all of its items
+  forAll: Bool = false
+  # whether Escape quit the program before it
+  escapeQuit: Bool = true
+}
+
+type FileOperations {
+  # What every operation is held to (an app's own trash folder, a limit)
+  rules: OperationRules
+  updates: Channel(OperationUpdate)
+  jobs: List(OperationJob) = {}
+  lastNumber: Int = 0
+  # the last is the newest
+  undo: List(UndoRecord) = {}
+  redo: List(UndoRecord) = {}
+  # what was copied last
+  clipboard: List(String) = {}
+  question: OperationQuestion = {}
+}
+
+# A row at the bottom of a browser: an operation's progress, or what did not work
+type OperationRow {
+  number: Int
+  stop: EntityId
+  shown: String = ""
+}
+
+# A name being edited, on its column
+type RenameEdit {
+  name: String
+  node: EntityId
+  field: EntityId
+  # what the field sends on Return
+  action: String
+}
+
+# An item an app adds to the context menu, where it fits: one file or folder (`extensions`
+# lowercase,
+# without dots, none for any), several of them, or a column's empty space. Choosing it sends
+# BrowserMenuChosen.
+type BrowserMenuItem {
+  id: String = ""
+  text: String = ""
+  icon: String = ""
+  shortcut: String = ""
+  enabled: Bool = true
+  files: Bool = true
+  folders: Bool = false
+  extensions: List(String) = {}
+  several: Bool = false
+  background: Bool = false
+}
+
 # ----- events --------------------------------------------------------------------
 
 # The deepest column's folder
@@ -278,6 +392,42 @@ type EntriesRequested {
   folder: String
 }
 
+# An operation needs an answer (answerOperation): a name is taken, or (kind delete) what was to be
+# trashed has no trash. The browser asks by a dialog; a program may answer instead.
+type OperationAsked {
+  browser: EntityId
+  number: Int
+  kind: OperationKind
+  source: String = ""
+  target: String = ""
+}
+
+# An operation is over: what came of each of its items. `undone`: it was an undo or a redo.
+type OperationDone {
+  browser: EntityId
+  number: Int
+  kind: OperationKind
+  results: List(ItemResult) = {}
+  undone: Bool = false
+}
+
+# A browser with the `app` source asks the program for an operation
+type OperationRequested {
+  browser: EntityId
+  kind: OperationKind
+  paths: List(String) = {}
+  folder: String = ""
+  name: String = ""
+}
+
+# One of the app's own menu items was chosen
+type BrowserMenuChosen {
+  browser: EntityId
+  itemId: String
+  folder: String
+  paths: List(String) = {}
+}
+
 type FileBrowserSystems {
   authored: AuthoredBrowsers
   browsers: ComponentTable(OpenBrowser)
@@ -288,6 +438,8 @@ type FileBrowserSystems {
   trailParts: ComponentTable(TrailPart)
   columnOfList: ComponentTable(ListOfColumn)
   buttons: ComponentTable(ButtonOfBrowser)
+  renames: ComponentTable(RenameEdit)
+  operationRows: ComponentTable(OperationRow)
   # resources, shared by every browser of the app
   listing: ListingJobs
   watches: List(FolderWatch) = {}
@@ -296,6 +448,12 @@ type FileBrowserSystems {
   watchesStale: Bool = false
   browsersMade: Int = 0
   kinds: List(FileKind)
+  # the app's own items of the context menu
+  menuItems: List(BrowserMenuItem) = {}
+  operations: FileOperations
+  # Escape is the edited name's, and what it did before
+  escapeHeld: Bool = false
+  escapeQuit: Bool = true
   openCounts: StringMap(Int)
   openCountsStamp: Int = 0
   now: Float64 = 0.0
@@ -303,6 +461,10 @@ type FileBrowserSystems {
   fileActivated: EventQueue(FileActivated)
   selectionChanged: EventQueue(SelectionChanged)
   entriesRequested: EventQueue(EntriesRequested)
+  operationAsked: EventQueue(OperationAsked)
+  operationDone: EventQueue(OperationDone)
+  operationRequested: EventQueue(OperationRequested)
+  browserMenuChosen: EventQueue(BrowserMenuChosen)
 }
 
 func createFileBrowsers() ret FileBrowserSystems {
@@ -317,6 +479,12 @@ func createFileBrowsers() ret FileBrowserSystems {
     trailParts: ComponentTable.create(TrailPart)
     columnOfList: ComponentTable.create(ListOfColumn)
     buttons: ComponentTable.create(ButtonOfBrowser)
+    renames: ComponentTable.create(RenameEdit)
+    operationRows: ComponentTable.create(OperationRow)
+    operations: FileOperations {
+      rules: Files.operationRules()
+      updates: createChannel(OperationUpdate)
+    }
     listing: ListingJobs { answers: createChannel(FolderAnswer) }
     kinds: defaultFileKinds()
     openCounts: createStringMap(Int, cap: 64)
@@ -324,6 +492,10 @@ func createFileBrowsers() ret FileBrowserSystems {
     fileActivated: createEventQueue(FileActivated)
     selectionChanged: createEventQueue(SelectionChanged)
     entriesRequested: createEventQueue(EntriesRequested)
+    operationAsked: createEventQueue(OperationAsked)
+    operationDone: createEventQueue(OperationDone)
+    operationRequested: createEventQueue(OperationRequested)
+    browserMenuChosen: createEventQueue(BrowserMenuChosen)
   }
 }
 
@@ -338,6 +510,17 @@ type BrowserKeys {
   hidden: Bool = false
   space: Bool = false
   escape: Bool = false
+  # Return: the answer of the dialog that changes nothing
+  confirm: Bool = false
+  # Cmd with Shift and N, D, C, V, Alt and V, Backspace, Z, Shift and Z
+  newFolder: Bool = false
+  duplicate: Bool = false
+  copyFiles: Bool = false
+  paste: Bool = false
+  pasteMove: Bool = false
+  trash: Bool = false
+  undo: Bool = false
+  redo: Bool = false
 }
 
 # What an app saves of a browser (fileBrowserState), and gives back (restoreFileBrowser)

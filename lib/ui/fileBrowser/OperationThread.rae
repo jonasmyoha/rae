@@ -1,0 +1,114 @@
+# The thread of one operation on files (docs/file-browser-design.md §11): it steps lib/Files'
+# operation, sends how far it is, and takes a cancel or an answer between two steps. It knows no UI.
+import Files
+import ui/EventLoop
+open Channel
+open Signal
+
+# How often it says how far it is
+const progressMs: Int = 100
+
+enum OperationCommandKind { cancel, answer }
+
+type OperationCommand {
+  kind: OperationCommandKind = OperationCommandKind.cancel
+  answer: ConflictAnswer = ConflictAnswer.skip
+  forAll: Bool = false
+}
+
+enum OperationUpdateKind { progress, asking, done }
+
+type OperationUpdate {
+  number: Int = 0
+  kind: OperationUpdateKind = OperationUpdateKind.progress
+  # Items begun, and bytes of all of them (a total of 0 when it is not known)
+  index: Int = 0
+  bytesDone: Int = 0
+  bytesTotal: Int = 0
+  # asking: what would be put there, and what has the name
+  source: String = ""
+  target: String = ""
+  # done
+  results: List(ItemResult) = {}
+  undo: List(UndoStep) = {}
+}
+
+# How many bytes it will write, where that can be said
+func bytesOfOperation(operation: view FileOperation) ret Int {
+  if operation.kind is not OperationKind.copy and operation.kind is not OperationKind.duplicate {
+    ret 0
+  }
+  var paths: List(String) = {}
+  loop let item: view OperationItem in operation.items {
+    paths.add(value: "{item.source}")
+  }
+  ret Files.measureFiles(paths: paths)
+}
+
+func operationThread(
+  updates: own Channel(OperationUpdate)
+  commands: own Channel(OperationCommand)
+  signal: own Signal
+  number: copy Int
+  operation: own FileOperation
+) ret Int {
+  var running: FileOperation = own operation
+  let total: Int = bytesOfOperation(operation: running)
+  var told: Int = nowMs()
+  var asked: Bool = false
+  loop running.state is not OperationState.done {
+    loop commands.pending() > 0 {
+      let command: OperationCommand = commands.receive()
+      asked = false
+      if command.kind is OperationCommandKind.cancel {
+        Files.cancelOperation(operation: running)
+      } else {
+        Files.answerConflict(operation: running, answer: command.answer, forAll: command.forAll)
+      }
+    }
+    if running.state is OperationState.asking {
+      if asked is false {
+        asked = true
+        let question: OperationUpdate = {
+          number: number
+          kind: OperationUpdateKind.asking
+          index: running.index
+          bytesDone: running.bytesDone
+          bytesTotal: total
+          source: running.conflict.source
+          target: running.conflict.target
+        }
+        updates.channelSend(value: own question)
+        EventLoop.wake()
+      }
+      if commands.pending() is 0 {
+        signal.wait()
+      }
+      continue
+    }
+    Files.stepOperation(operation: running)
+    if nowMs() - told >= progressMs {
+      told = nowMs()
+      let progress: OperationUpdate = {
+        number: number
+        index: running.index
+        bytesDone: running.bytesDone
+        bytesTotal: total
+      }
+      updates.channelSend(value: own progress)
+      EventLoop.wake()
+    }
+  }
+  let done: OperationUpdate = {
+    number: number
+    kind: OperationUpdateKind.done
+    index: running.index
+    bytesDone: running.bytesDone
+    bytesTotal: total
+    results: running.results
+    undo: running.undo
+  }
+  updates.channelSend(value: own done)
+  EventLoop.wake()
+  ret running.results.length
+}

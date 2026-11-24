@@ -1,0 +1,449 @@
+# What an operation shows (docs/file-browser-design.md §11): a row at the bottom of the browser that
+# asked for it, once it has run for half a second, with how far it is and a button that stops it, or
+# with what did not work; and the question of one that asks, over everything.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/SceneInstance
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/OperationsSystem
+
+# A quicker operation shows no row
+const rowSeconds: Float64 = 0.5
+
+func fileOperationRowsSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: view BrowserKeys
+) ret Bool {
+  var changed: Bool = takeRowClicks(systems: systems, world: world)
+  changed = stepQuestion(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: keys
+  ) or changed
+  changed = dropRows(systems: systems, world: world, uiSystems: uiSystems) or changed
+  loop var i: Int = 0, i < systems.operations.jobs.length, ++i {
+    changed = showRow(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      index: i
+    ) or changed
+  }
+  ret changed
+}
+
+# When a running operation's row is to show, or listings are to go on without it (below 0: none
+# waits)
+func operationDeadline(systems: view FileBrowserSystems) ret Float64 {
+  var deadline: Float64 = -1.0
+  loop let job: view OperationJob in systems.operations.jobs {
+    var at: Float64 = job.startedSeconds + rowSeconds
+    if at <= systems.now {
+      # listings that wait for it go on then (ListingSystem renameSeconds)
+      at = at + rowSeconds
+    }
+    if job.state is OperationJobState.running and at > systems.now and (deadline < 0.0 or at < deadline) {
+      deadline = at
+    }
+  }
+  ret deadline
+}
+
+# ----- rows -------------------------------------------------------------------------------
+func rowOfJob(systems: view FileBrowserSystems, number: view Int) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: systems.operationRows), ++i {
+    let row: EntityId = componentEntityAt(this: systems.operationRows, i: i)
+    if componentView(this: systems.operationRows, entityId: row).number is number {
+      ret row
+    }
+  }
+  ret noEntity()
+}
+
+# Rows of operations that ended
+func dropRows(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = componentCount(this: systems.operationRows) - 1, i >= 0, --i {
+    let row: EntityId = componentEntityAt(this: systems.operationRows, i: i)
+    let number: Int = componentView(this: systems.operationRows, entityId: row).number
+    let alive: Bool = isAlive(world: world, entityId: row)
+    if alive is false or operationIndex(systems: systems, number: number) < 0 {
+      componentRemove(this: systems.operationRows, entityId: row)
+      if alive {
+        destroyEntitySubtree(world: world, uiSystems: uiSystems, root: row)
+      }
+      changed = true
+    }
+  }
+  ret changed
+}
+
+func rowText(job: view OperationJob) ret String {
+  if job.state is OperationJobState.notice {
+    ret "{job.message}"
+  }
+  let text: String = "{operationText(kind: job.kind)} {itemsText(count: job.count)}"
+  if job.bytesTotal > 0 {
+    ret "{text}, {sizeText(bytes: job.bytesDone)} of {sizeText(bytes: job.bytesTotal)}"
+  }
+  ret text
+}
+
+# How far it is, 0 to 1
+func rowFraction(job: view OperationJob) ret Float {
+  var part: Float64 = 0.0
+  if job.bytesTotal > 0 {
+    part = (job.bytesDone as Float64) / (job.bytesTotal as Float64)
+  } else if job.count > 0 {
+    part = (job.index as Float64) / (job.count as Float64)
+  }
+  if part > 1.0 {
+    part = 1.0
+  }
+  ret part as Float
+}
+
+func showRow(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  index: view Int
+) ret Bool {
+  var text: String = ""
+  var part: Float = 0.0
+  var number: Int = 0
+  var browser: EntityId = noEntity()
+  var notice: Bool = false
+  var due: Bool = false
+  if let job: view OperationJob = systems.operations.jobs.viewAt(index: index) {
+    text = rowText(job: job)
+    part = rowFraction(job: job)
+    number = job.number
+    browser = job.browser
+    notice = job.state is OperationJobState.notice
+    due = notice or (job.state is OperationJobState.running and systems.now - job.startedSeconds >= rowSeconds)
+  }
+  var row: EntityId = rowOfJob(systems: systems, number: number)
+  if isNone(this: row) {
+    if due is false or componentHas(this: systems.browsers, entityId: browser) is false {
+      ret false
+    }
+    row = mountFileScene(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      key: "fileOperation"
+      parent: componentView(this: systems.browsers, entityId: browser).operations
+    )
+    if isNone(this: row) {
+      ret false
+    }
+    componentSet(
+      this: systems.operationRows
+      entityId: row
+      data: OperationRow {
+        number: number
+        stop: nodeIn(world: world, root: row, nodeId: "FileOperationStop")
+      }
+    )
+  }
+  let shown: String = "{text}|{part}|{flagOf(on: notice)}"
+  if componentView(this: systems.operationRows, entityId: row).shown is shown {
+    ret false
+  }
+  componentMod(this: systems.operationRows, entityId: row).shown = own shown
+  setNodeText(
+    world: world
+    entityId: nodeIn(world: world, root: row, nodeId: "FileOperationText")
+    text: text
+  )
+  let track: EntityId = nodeIn(world: world, root: row, nodeId: "FileOperationTrack")
+  showNode(world: world, entityId: track, shown: notice is false)
+  let bar: EntityId = nodeIn(world: world, root: row, nodeId: "FileOperationBar")
+  if componentHas(this: world.rects, entityId: track) and componentHas(
+    this: world.rects
+    entityId: bar
+  ) {
+    let width: Float = componentView(this: world.rects, entityId: track).size.x * part
+    componentMod(this: world.rects, entityId: bar).size.x = width
+  }
+  ret true
+}
+
+func flagOf(on: view Bool) ret Int {
+  if on {
+    ret 1
+  }
+  ret 0
+}
+
+# The buttons of the rows: stop it, or be done with its notice
+func takeRowClicks(systems: mod FileBrowserSystems, world: view UiWorld) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    var number: Int = -1
+    loop var at: Int = 0, at < componentCount(this: systems.operationRows), ++at {
+      let row: EntityId = componentEntityAt(this: systems.operationRows, i: at)
+      let mine: view OperationRow = componentView(this: systems.operationRows, entityId: row)
+      if isNone(this: action.entityId) is false and mine.stop is action.entityId {
+        number = mine.number
+      }
+    }
+    if number >= 0 {
+      cancelFileOperation(systems: systems, number: number)
+      changed = true
+    }
+  }
+  ret changed
+}
+
+# ----- the question ---------------------------------------------------------------------------
+
+# The first operation that asks (0 none)
+func askingNumber(systems: view FileBrowserSystems) ret Int {
+  loop let job: view OperationJob in systems.operations.jobs {
+    if job.state is OperationJobState.asking or job.state is OperationJobState.deleting {
+      ret job.number
+    }
+  }
+  ret 0
+}
+
+func stepQuestion(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: view BrowserKeys
+) ret Bool {
+  var changed: Bool = false
+  if isNone(this: systems.operations.question.node) is false {
+    changed = takeAnswer(systems: systems, world: world, keys: keys)
+  }
+  let asking: Int = askingNumber(systems: systems)
+  var asked: String = ""
+  if let job: view OperationJob = systems.operations.jobs.viewAt(
+    index: operationIndex(systems: systems, number: asking)
+  ) {
+    asked = "{asking}|{job.target}|{job.index}"
+  }
+  if systems.operations.question.asked is not asked {
+    changed = true
+    closeQuestion(systems: systems, world: world, uiSystems: uiSystems)
+    if asking > 0 {
+      openQuestion(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        number: asking
+      )
+      systems.operations.question.asked = own asked
+    }
+  }
+  let node: EntityId = systems.operations.question.node
+  if isNone(this: node) is false and componentHas(this: world.rects, entityId: node) {
+    let size: Vec2 = componentView(this: world.rects, entityId: node).size
+    if size.x is not world.layoutW or size.y is not world.layoutH {
+      let rect: mod Rect = componentMod(this: world.rects, entityId: node)
+      rect.size.x = world.layoutW
+      rect.size.y = world.layoutH
+    }
+  }
+  ret changed
+}
+
+func closeQuestion(systems: mod FileBrowserSystems, world: mod UiWorld, uiSystems: mod UiSystems) {
+  let node: EntityId = systems.operations.question.node
+  if isNone(this: node) is false and isAlive(world: world, entityId: node) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  if isNone(this: node) is false {
+    Gpu2d.setEscapeQuits(on: systems.operations.question.escapeQuit)
+  }
+  systems.operations.question = OperationQuestion {}
+}
+
+func questionNode(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  name: view String
+) ret EntityId {
+  ret nodeIn(world: world, root: systems.operations.question.node, nodeId: "FileQuestion{name}")
+}
+
+func openQuestion(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  number: view Int
+) {
+  var node: EntityId = noEntity()
+  if let index: Int = sceneRegistryIndex(reg: scenes, key: "fileQuestion") {
+    let overrides: List(SceneOverride) = emptyOverrides()
+    node = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: sceneRegistryGet(reg: scenes, idx: index)
+      overrides: overrides
+    )
+  }
+  if isNone(this: node) {
+    ret
+  }
+  componentSet(this: world.layerTags, entityId: node, data: LayerTag { id: "dialog", z: 900 })
+  systems.operations.question = OperationQuestion {
+    node: node
+    number: number
+    escapeQuit: Gpu2d.escapeQuits()
+  }
+  Gpu2d.setEscapeQuits(on: false)
+  var title: String = ""
+  var detail: String = ""
+  var deleting: Bool = false
+  var more: Bool = false
+  if let job: view OperationJob = systems.operations.jobs.viewAt(
+    index: operationIndex(systems: systems, number: number)
+  ) {
+    deleting = job.state is OperationJobState.deleting
+    if deleting {
+      title = "This disk has no trash"
+      detail = "Delete {itemsText(count: job.paths.length)} for good? It cannot be undone."
+      if job.paths.length is 1 {
+        detail = "Delete \"{lastPart(path: job.paths.copyAtFallback(index: 0, fallback: ""))}\" for good? It cannot be undone."
+      }
+    } else {
+      title = "\"{lastPart(path: job.target)}\" is already in \"{lastPart(
+        path: parentPath(path: job.target)
+      )}\""
+      detail = "Replace moves the old one to the trash first."
+      more = job.count - job.index > 1
+    }
+  }
+  setNodeText(
+    world: world
+    entityId: questionNode(systems: systems, world: world, name: "Title")
+    text: title
+  )
+  setNodeText(
+    world: world
+    entityId: questionNode(systems: systems, world: world, name: "Detail")
+    text: detail
+  )
+  showNode(
+    world: world
+    entityId: questionNode(systems: systems, world: world, name: "All")
+    shown: more
+  )
+  showNode(
+    world: world
+    entityId: questionNode(systems: systems, world: world, name: "Skip")
+    shown: deleting is false
+  )
+  showNode(
+    world: world
+    entityId: questionNode(systems: systems, world: world, name: "Keep")
+    shown: deleting is false
+  )
+  if deleting {
+    setNodeText(
+      world: world
+      entityId: questionNode(systems: systems, world: world, name: "StopText")
+      text: "Cancel"
+    )
+    setNodeText(
+      world: world
+      entityId: questionNode(systems: systems, world: world, name: "ReplaceText")
+      text: "Delete"
+    )
+  }
+}
+
+# The dialog's buttons; Escape stops, Return keeps both (which changes nothing that is there)
+func takeAnswer(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  keys: view BrowserKeys
+) ret Bool {
+  let number: Int = systems.operations.question.number
+  var deleting: Bool = false
+  if let job: view OperationJob = systems.operations.jobs.viewAt(
+    index: operationIndex(systems: systems, number: number)
+  ) {
+    deleting = job.state is OperationJobState.deleting
+  }
+  var stop: Bool = keys.escape
+  var answered: Bool = false
+  var answer: ConflictAnswer = ConflictAnswer.skip
+  if keys.confirm and deleting is false {
+    answered = true
+    answer = ConflictAnswer.keepBoth
+  }
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if isNone(this: action.entityId) {
+      continue
+    }
+    if action.entityId is questionNode(systems: systems, world: world, name: "Stop") {
+      stop = true
+    } else if action.entityId is questionNode(systems: systems, world: world, name: "Skip") {
+      answered = true
+    } else if action.entityId is questionNode(systems: systems, world: world, name: "Keep") {
+      answered = true
+      answer = ConflictAnswer.keepBoth
+    } else if action.entityId is questionNode(systems: systems, world: world, name: "Replace") {
+      answered = true
+      answer = ConflictAnswer.replace
+    } else if action.entityId is questionNode(systems: systems, world: world, name: "All") {
+      toggleForAll(systems: systems, world: world)
+    }
+  }
+  if stop {
+    cancelFileOperation(systems: systems, number: number)
+    ret true
+  }
+  if answered {
+    let forAll: Bool = systems.operations.question.forAll
+    answerOperation(
+      systems: systems
+      number: number
+      answer: answer
+      forAll: forAll
+    )
+  }
+  ret answered
+}
+
+func toggleForAll(systems: mod FileBrowserSystems, world: mod UiWorld) {
+  let on: Bool = systems.operations.question.forAll is false
+  systems.operations.question.forAll = on
+  var icon: String = "mat:check_box_outline_blank"
+  if on {
+    icon = "mat:check_box"
+  }
+  let box: EntityId = questionNode(systems: systems, world: world, name: "AllBox")
+  if componentHas(this: world.sprites, entityId: box) {
+    componentMod(this: world.sprites, entityId: box).textureKey = own icon
+  }
+}

@@ -32,7 +32,7 @@ func fileListingSystem(
   scenes: view SceneRegistry
 ) ret Bool {
   var changed: Bool = false
-  loop systems.listing.answers.pending() > 0 {
+  loop systems.listing.answers.pending() > 0 and renaming(systems: systems) is false {
     var answer: FolderAnswer = systems.listing.answers.receive()
     if answer.finished {
       finishJob(systems: systems, generation: answer.generation)
@@ -57,6 +57,22 @@ func fileListingSystem(
   changed = dropGoneColumns(systems: systems, world: world, uiSystems: uiSystems) or changed
   startListings(systems: systems)
   ret changed
+}
+
+# How long answers wait for a rename, a move or an undo of ours that runs
+const renameSeconds: Float64 = 1.0
+
+# Is something being given another name by us? What a listing found meanwhile (an open folder that
+# is
+# gone) waits until we know the new one.
+func renaming(systems: view FileBrowserSystems) ret Bool {
+  loop let job: view OperationJob in systems.operations.jobs {
+    let renames: Bool = job.kind is OperationKind.rename or job.kind is OperationKind.move or job.kind is OperationKind.undo
+    if renames and job.state is OperationJobState.running and systems.now - job.startedSeconds < renameSeconds {
+      ret true
+    }
+  }
+  ret false
 }
 
 # The listing has sent its last answer: its thread is at its end, so dropping its task does not wait
@@ -92,6 +108,10 @@ func takeAnswer(
   answer: own FolderAnswer
 ) {
   let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  if mine.stale and mine.wantSelected.length > 0 {
+    # read before what is to be selected was made: the next reading, which is due, has it
+    ret
+  }
   mine.realFolder = "{answer.realFolder}"
   mine.modified = answer.modified
   if answer.outside or answer.error is not ListError.none {
@@ -386,11 +406,16 @@ func startListings(systems: mod FileBrowserSystems) {
     }
     systems.listing.waiting.removeAt(index: i)
     let generation: Int = request.generation
-    let task: Task(Int) = spawn thread listFolderThread(
-      answers: systems.listing.answers
-      request: own request
-    )
-    systems.listing.jobs.add(value: FolderJob { generation: generation, task: own task })
+    when Target.isNative {
+      let task: Task(Int) = spawn thread listFolderThread(
+        answers: systems.listing.answers
+        request: own request
+      )
+      systems.listing.jobs.add(value: FolderJob { generation: generation, task: own task })
+    } else {
+      # a browser build has no threads
+      let count: Int = listFolderThread(answers: systems.listing.answers, request: own request)
+    }
   }
 }
 

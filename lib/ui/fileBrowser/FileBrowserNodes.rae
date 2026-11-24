@@ -2,6 +2,7 @@
 import Gpu2d
 open ecs/ComponentTable
 open ecs/Entity
+open ecs/Event
 open ecs/hierarchySystem/HierarchySystem
 open ui/Components
 open ui/Ecs
@@ -130,4 +131,14 @@ func dropLargePreview(
   preview.large = noEntity()
   preview.largeShown = ""
   Gpu2d.setEscapeQuits(on: preview.escapeQuit)
+}
+
+# Was the action `actionId` sent this frame?
+func actionSent(world: view UiWorld, actionId: view String) ret Bool {
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    if eventAt(UiAction, this: world.uiActions, i: i).actionId is actionId {
+      ret true
+    }
+  }
+  ret false
 }

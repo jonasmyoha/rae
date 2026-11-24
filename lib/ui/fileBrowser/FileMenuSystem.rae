@@ -1,0 +1,308 @@
+# The context menu of a row and of a column's empty space (docs/file-browser-design.md §11), with
+# the
+# items an app adds (FileBrowserSystems.menuItems).
+import Files
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/ListSelectionSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/RenameSystem
+open ui/fileBrowser/SelectionSystem
+
+const browserMenuId: String = "fileBrowser"
+
+# In front of the ids of the app's items
+const appItemPrefix: String = "app."
+
+func fileMenuSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  input: view UiInput
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(MenuEvent, this: world.menuEvents), ++i {
+    let event: MenuEvent = eventAt(MenuEvent, this: world.menuEvents, i: i)
+    if event.kind is MenuEventKind.chosen and event.menuId is browserMenuId and componentHas(
+      this: systems.columns
+      entityId: event.owner
+    ) {
+      chooseMenuItem(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: event.owner
+        itemId: event.itemId
+      )
+      changed = true
+    }
+  }
+  var column: EntityId = noEntity()
+  var onRow: Bool = false
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if action.actionId is "fileBrowser.rowMenu" {
+      let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: action.entityId)
+      column = columnOfEvent(systems: systems, list: row.list)
+      onRow = true
+    } else if action.actionId is "fileBrowser.columnMenu" {
+      column = columnOfBody(systems: systems, body: action.entityId)
+    }
+  }
+  if isNone(this: column) {
+    ret changed
+  }
+  let items: List(MenuItem) = menuItemsOf(
+    systems: systems
+    world: world
+    column: column
+    onRow: onRow
+  )
+  if items.length > 0 {
+    openMenu(
+      world: world
+      uiSystems: uiSystems
+      request: MenuRequest {
+        id: "{browserMenuId}"
+        owner: column
+        items: own items
+        x: input.pointer.x
+        y: input.pointer.y
+        touch: input.pointer.kind is InputKind.touch
+      }
+    )
+  }
+  ret true
+}
+
+func columnOfBody(systems: view FileBrowserSystems, body: view EntityId) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    if componentView(this: systems.columns, entityId: column).body is body {
+      ret column
+    }
+  }
+  ret noEntity()
+}
+
+# "Cmd C" on a Mac, "Ctrl C" elsewhere
+func shortcutText(key: view String) ret String {
+  when Target.isApple {
+    ret "Cmd {key}"
+  } else {
+    ret "Ctrl {key}"
+  }
+}
+
+func addSeparator(items: mod List(MenuItem)) {
+  if items.length > 0 {
+    items.add(value: MenuItem { separator: true })
+  }
+}
+
+func menuItemsOf(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+  onRow: view Bool
+) ret List(MenuItem) {
+  var items: List(MenuItem) = {}
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let operate: Bool = mayOperate(systems: systems, browser: browser)
+  let count: Int = selectedCount(world: world, list: listOfColumn(systems: systems, column: column))
+  if onRow {
+    items.add(value: MenuItem { id: "open", text: "Open", shortcut: shortcutText(key: "O") })
+  }
+  if operate {
+    addSeparator(items: items)
+    items.add(
+      value: MenuItem {
+        id: "newFolder"
+        text: "New Folder"
+        icon: "mat:create_new_folder"
+        shortcut: shortcutText(key: "Shift N")
+      }
+    )
+  }
+  if operate and onRow {
+    addSeparator(items: items)
+    items.add(value: MenuItem { id: "rename", text: "Rename", enabled: count is 1 })
+    items.add(
+      value: MenuItem { id: "duplicate", text: "Duplicate", shortcut: shortcutText(key: "D") }
+    )
+  }
+  if onRow {
+    addSeparator(items: items)
+    items.add(value: MenuItem { id: "copy", text: "Copy", shortcut: shortcutText(key: "C") })
+  }
+  if operate {
+    if onRow is false {
+      addSeparator(items: items)
+    }
+    let held: Int = systems.operations.clipboard.length
+    var paste: String = "Paste"
+    if held > 0 {
+      paste = "Paste {itemsText(count: held)}"
+    }
+    items.add(
+      value: MenuItem {
+        id: "paste"
+        text: own paste
+        shortcut: shortcutText(key: "V")
+        enabled: held > 0
+      }
+    )
+    items.add(
+      value: MenuItem {
+        id: "pasteMove"
+        text: "Move Here"
+        shortcut: shortcutText(key: "Alt V")
+        enabled: held > 0
+      }
+    )
+  }
+  if operate and onRow {
+    addSeparator(items: items)
+    items.add(
+      value: MenuItem {
+        id: "trash"
+        text: "Move to Trash"
+        icon: "mat:delete"
+        shortcut: shortcutText(key: "Backspace")
+      }
+    )
+  }
+  addAppItems(
+    systems: systems
+    world: world
+    column: column
+    onRow: onRow
+    items: items
+  )
+  ret items
+}
+
+# The app's items that fit what is selected
+func addAppItems(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+  onRow: view Bool
+  items: mod List(MenuItem)
+) {
+  var first: Bool = true
+  loop let item: view BrowserMenuItem in systems.menuItems {
+    if menuItemFits(
+      systems: systems
+      world: world
+      column: column
+      onRow: onRow
+      item: item
+    ) {
+      if first {
+        addSeparator(items: items)
+        first = false
+      }
+      items.add(value: MenuItem {
+        id: "{appItemPrefix}{item.id}"
+        text: "{item.text}"
+        icon: "{item.icon}"
+        shortcut: "{item.shortcut}"
+        enabled: item.enabled
+      })
+    }
+  }
+}
+
+func menuItemFits(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+  onRow: view Bool
+  item: view BrowserMenuItem
+) ret Bool {
+  if onRow is false {
+    ret item.background
+  }
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  if names.length is 0 or (names.length > 1 and item.several is false) {
+    ret false
+  }
+  loop let name: view String in names {
+    let folder: Bool = entryOpensAsFolder(systems: systems, column: column, name: name)
+    if (folder and item.folders is false) or (folder is false and item.files is false) {
+      ret false
+    }
+    if folder is false and item.extensions.length > 0 and item.extensions.contains(
+      value: Files.extensionOf(name: name)
+    ) is false {
+      ret false
+    }
+  }
+  ret true
+}
+
+func chooseMenuItem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  itemId: view String
+) {
+  if itemId is "open" {
+    activateSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if itemId is "newFolder" {
+    newFolderIn(systems: systems, column: column)
+  } else if itemId is "rename" {
+    renameSelected(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if itemId is "duplicate" {
+    duplicateSelection(systems: systems, world: world, column: column)
+  } else if itemId is "copy" {
+    copySelection(systems: systems, world: world, column: column)
+  } else if itemId is "paste" or itemId is "pasteMove" {
+    pasteInto(systems: systems, column: column, asMove: itemId is "pasteMove")
+  } else if itemId is "trash" {
+    trashSelection(systems: systems, world: world, column: column)
+  } else if itemId.startsWith(prefix: appItemPrefix) {
+    let event: BrowserMenuChosen = {
+      browser: componentView(this: systems.columns, entityId: column).browser
+      itemId: itemId.sub(
+        start: appItemPrefix.length()
+        len: itemId.length() - appItemPrefix.length()
+      )
+      folder: folderOfColumn(systems: systems, column: column)
+      paths: pathsInColumn(systems: systems, world: world, column: column)
+    }
+    eventSend(this: systems.browserMenuChosen, value: own event)
+  }
+}

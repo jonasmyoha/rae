@@ -12,6 +12,7 @@ open ui/UiSystems
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/RenameSystem
 
 func fileSelectionSystem(
   systems: mod FileBrowserSystems
@@ -87,7 +88,15 @@ func takeListEvent(
       scenes: scenes
       column: column
     )
-  } else if event.byKey is false or returnOpens(systems: systems, column: column) {
+  } else if event.byKey and returnOpens(systems: systems, column: column) is false {
+    renameSelected(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else {
     activateSelection(
       systems: systems
       world: world

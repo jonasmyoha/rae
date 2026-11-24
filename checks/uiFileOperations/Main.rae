@@ -1,0 +1,244 @@
+# What the operations of a file browser show (lib/ui/fileBrowser), painted: a name being edited, an
+# operation's progress, one that did not work, and the question of one that asks. Nothing is done on
+# the disk.
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/operations.bmp \
+#     compiler/bin/rae run checks/uiFileOperations/Main.rae
+#
+# RAE_CHECK_QUESTION=off leaves the question out. The behavior is checked in
+# compiler/tests/cases/1598_file_browser_operations. Exit 0 when it drew.
+import Files
+import Gpu2d
+import Sys
+import ui/Scene
+open Channel
+open Signal
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/Schedule
+open Gpu2dCanvas
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/OperationThread
+open ui/fileBrowser/RenameSystem
+open ui/textFieldSystem/TextFieldSystem
+
+const designW: Int = 900
+
+const designH: Int = 600
+
+# A job that no thread runs
+func addJob(files: mod FileBrowserSystems, browser: view EntityId, job: own OperationJob) {
+  files.operations.lastNumber = files.operations.lastNumber + 1
+  var added: OperationJob = own job
+  added.number = files.operations.lastNumber
+  added.browser = browser
+  files.operations.jobs.add(value: own added)
+}
+
+func emptyJob(
+  kind: copy OperationKind
+  state: copy OperationJobState
+  count: copy Int
+) ret OperationJob {
+  ret OperationJob {
+    number: 0
+    browser: noEntity()
+    folder: ""
+    kind: kind
+    count: count
+    operation: Files.createOperation(kind: kind, rules: Files.operationRules())
+    state: state
+    commands: createChannel(OperationCommand)
+    signal: createSignal()
+  }
+}
+
+func addJobs(files: mod FileBrowserSystems, browser: view EntityId) {
+  var copying: OperationJob = emptyJob(
+    kind: OperationKind.copy
+    state: OperationJobState.running
+    count: 3
+  )
+  copying.bytesDone = 31000000
+  copying.bytesTotal = 82000000
+  copying.startedSeconds = -10.0
+  addJob(files: files, browser: browser, job: own copying)
+  var failed: OperationJob = emptyJob(
+    kind: OperationKind.move
+    state: OperationJobState.notice
+    count: 1
+  )
+  failed.message = failureText(
+    kind: OperationKind.move
+    count: 1
+    error: OperationError.intoItself
+    path: "/Projects/Film"
+  )
+  addJob(files: files, browser: browser, job: own failed)
+  if Sys.getEnv(name: "RAE_CHECK_QUESTION") is not "off" {
+    var asking: OperationJob = emptyJob(
+      kind: OperationKind.copy
+      state: OperationJobState.asking
+      count: 3
+    )
+    asking.target = "/Projects/Film/rain on a tin roof, recorded at night.wav"
+    addJob(files: files, browser: browser, job: own asking)
+  }
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI file operations check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "../../../checks/uiFileOperations/ThemeDark.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiFileOperations/page.raescene")
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var scenes: SceneRegistry = createSceneRegistry()
+  registerFileBrowserScenes(scenes: scenes)
+  var files: FileBrowserSystems = createFileBrowsers()
+  var host: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Host") {
+    host = id(v: raw)
+  }
+  let browser: EntityId = openFileBrowser(
+    systems: files
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    host: host
+    root: "/Projects"
+    options: BrowserOptions { source: BrowserSource.app }
+  )
+  addJobs(files: files, browser: browser)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var input: UiInput = createUiInput()
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    input.nowSeconds = frames as Float64 * 0.016
+    let typed: Bool = textFieldSystem(
+      world: world
+      textFieldSystem: uiSystems.textField
+      actions: world.uiActions
+      input: TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+      now: input.nowSeconds
+    )
+    let changed: Bool = fileBrowserUpdate(
+      systems: files
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      keys: BrowserKeys {}
+      input: input
+      windowFocused: true
+    )
+    loop var i: Int = 0, i < eventCount(EntriesRequested, this: files.entriesRequested), ++i {
+      let wanted: EntriesRequested = eventAt(EntriesRequested, this: files.entriesRequested, i: i)
+      var entries: List(FileEntry) = {}
+      loop let name: view String in List(String) { "Archive", "Film", "Sounds" } {
+        entries.add(value: FileEntry { name: "{name}", kind: EntryKind.folder })
+      }
+      entries.add(value: FileEntry { name: "cover.png", kind: EntryKind.file })
+      entries.add(value: FileEntry { name: "the notes of it.txt", kind: EntryKind.file })
+      setColumnEntries(
+        systems: files
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: wanted.browser
+        folder: wanted.folder
+        entries: own entries
+      )
+    }
+    if frames is 2 {
+      let column: EntityId = columnAt(systems: files, browser: browser, place: 0)
+      setListSelection(
+        world: world
+        list: listOfColumn(systems: files, column: column)
+        keys: List(String) { "the notes of it.txt" }
+      )
+      renameSelected(
+        systems: files
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: column
+      )
+    }
+    listSelectionSystem(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      keys: ListSelectionKeys {}
+    )
+    let rows: Bool = fileBrowserRows(
+      systems: files
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      res: gpuUi
+    )
+    listViewSystem(world: world, uiSystems: uiSystems, scenes: scenes)
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.5
+      g: 0.5
+      b: 0.5
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let editing: Int = componentCount(this: files.renames)
+  # no thread runs the jobs
+  loop files.operations.jobs.length > 0 {
+    dropJob(systems: files, index: 0)
+  }
+  let ended: Bool = closeFileBrowsers(systems: files, world: world, uiSystems: uiSystems)
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if editing is not 1 or ended is false {
+    log("UI FILE OPERATIONS FAILED: {editing} edits")
+    ret 1
+  }
+  log("UI FILE OPERATIONS OK")
+  ret 0
+}

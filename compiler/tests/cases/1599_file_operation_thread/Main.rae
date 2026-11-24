@@ -1,0 +1,194 @@
+# The file browser's operation thread (lib/ui/fileBrowser/OperationThread): a copy that asks and
+# takes
+# its answers, one that is canceled while it asks, two at once, and a folder that nothing may be put
+# outside of while the sources are elsewhere (OperationRules.placeIn). Under ThreadSanitizer too.
+import Files
+import Sys
+open Channel
+open Signal
+open ui/fileBrowser/OperationThread
+
+type Running {
+  commands: Channel(OperationCommand)
+  signal: Signal
+  task: Task(Int)
+}
+
+func begin(
+  updates: view Channel(OperationUpdate)
+  number: copy Int
+  operation: own FileOperation
+) ret Running {
+  let commands: Channel(OperationCommand) = createChannel(OperationCommand)
+  let signal: Signal = createSignal()
+  let task: Task(Int) = spawn thread operationThread(
+    updates: updates
+    commands: commands
+    signal: signal
+    number: number
+    operation: own operation
+  )
+  ret Running { commands: commands, signal: signal, task: own task }
+}
+
+func command(running: view Running, sent: own OperationCommand) {
+  running.commands.channelSend(value: own sent)
+  running.signal.post()
+}
+
+func finish(running: view Running) {
+  let count: Int = running.task.get()
+  running.commands.freeChannel()
+  running.signal.freeSignal()
+}
+
+# The next update that is no progress
+func next(updates: view Channel(OperationUpdate)) ret OperationUpdate {
+  loop var i: Int = 0, i < 20000, ++i {
+    if updates.pending() > 0 {
+      let update: OperationUpdate = updates.receive()
+      if update.kind is not OperationUpdateKind.progress {
+        ret update
+      }
+    } else {
+      sleep(ms: 1)
+    }
+  }
+  log("no update came")
+  ret OperationUpdate {}
+}
+
+func show(update: view OperationUpdate) {
+  var text: String = "{update.kind}"
+  if update.kind is OperationUpdateKind.asking {
+    text = "{text} {Files.nameOf(path: update.source)}, total {update.bytesTotal}"
+  }
+  loop let result: view ItemResult in update.results {
+    text = "{text} {Files.nameOf(path: result.target)} {result.outcome} {result.error}"
+  }
+  log("{update.number}: {text}, {update.undo.length} to undo")
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-operation-thread-{nowNs()}"
+  var made: Bool = Sys.makeDir(path: base)
+  loop let folder: view String in List(String) { "from", "to", "other" } {
+    made = Sys.makeDir(path: "{base}/{folder}")
+  }
+  var sources: List(String) = {}
+  loop let name: view String in List(String) { "a", "b", "c" } {
+    let first: Bool = Sys.writeFile(path: "{base}/from/{name}", content: "new {name}")
+    let second: Bool = Sys.writeFile(path: "{base}/to/{name}", content: "old")
+    sources.add(value: "{base}/from/{name}")
+  }
+  var rules: OperationRules = { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  let updates: Channel(OperationUpdate) = createChannel(OperationUpdate)
+
+  # asked, answered: kept both, then replaced for the rest
+  let copying: Running = begin(
+    updates: updates
+    number: 1
+    operation: Files.copyFiles(sources: sources, folder: "{base}/to", rules: rules)
+  )
+  show(update: next(updates: updates))
+  command(
+    running: copying
+    sent: OperationCommand { kind: OperationCommandKind.answer, answer: ConflictAnswer.keepBoth }
+  )
+  show(update: next(updates: updates))
+  command(
+    running: copying
+    sent: OperationCommand {
+      kind: OperationCommandKind.answer
+      answer: ConflictAnswer.replace
+      forAll: true
+    }
+  )
+  show(update: next(updates: updates))
+  finish(running: copying)
+
+  # canceled while it asks
+  let stopped: Running = begin(
+    updates: updates
+    number: 2
+    operation: Files.copyFiles(sources: sources, folder: "{base}/to", rules: rules)
+  )
+  show(update: next(updates: updates))
+  command(running: stopped, sent: OperationCommand {})
+  show(update: next(updates: updates))
+  finish(running: stopped)
+
+  # two at once
+  let one: Running = begin(
+    updates: updates
+    number: 3
+    operation: Files.copyFiles(sources: sources, folder: "{base}/other", rules: rules)
+  )
+  show(update: next(updates: updates))
+  let two: Running = begin(
+    updates: updates
+    number: 4
+    operation: Files.duplicateFiles(sources: sources, rules: rules)
+  )
+  let three: Running = begin(
+    updates: updates
+    number: 5
+    operation: Files.newFolder(folder: "{base}/other", name: "made", rules: rules)
+  )
+  var earlier: OperationUpdate = next(updates: updates)
+  var later: OperationUpdate = next(updates: updates)
+  if earlier.number > later.number {
+    show(update: later)
+    show(update: earlier)
+  } else {
+    show(update: earlier)
+    show(update: later)
+  }
+  finish(running: one)
+  finish(running: two)
+  finish(running: three)
+
+  # put only in "to", though what is copied comes from "from"
+  rules.placeIn = "{base}/to"
+  let inside: Running = begin(
+    updates: updates
+    number: 6
+    operation: Files.newFolder(folder: "{base}/to", name: "in", rules: rules)
+  )
+  show(update: next(updates: updates))
+  let outside: Running = begin(
+    updates: updates
+    number: 7
+    operation: Files.copyFiles(sources: sources, folder: "{base}/other/made", rules: rules)
+  )
+  show(update: next(updates: updates))
+  let from: Running = begin(
+    updates: updates
+    number: 8
+    operation: Files.copyFiles(sources: sources, folder: "{base}/to/in", rules: rules)
+  )
+  show(update: next(updates: updates))
+  finish(running: inside)
+  finish(running: outside)
+  finish(running: from)
+  updates.freeChannel()
+  removeTree(folder: base)
+}

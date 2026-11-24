@@ -4,6 +4,23 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.57, 2026-11-24: the file browser's operations
+
+- A file browser makes folders, renames in place (the name selected without its extension), duplicates,
+  copies, pastes, moves and trashes, by its keys and its context menu, with undo and redo
+  (docs/file-browser-design.md section 11 and 18). A taken name asks by a dialog; a disk without a trash
+  asks before it deletes; progress and failures are rows at the bottom, with a stop. What it changed shows
+  at once, an open folder it renamed stays open.
+- `BrowserOptions.allowOperations: false` turns all of it off. It is on by default, so **a browser of
+  0.4.55 or 0.4.56 now changes the disk unless it says so.**
+- `FileBrowserSystems.menuItems` are an app's own menu items. Events: `operationAsked`, `operationDone`,
+  `operationRequested` (a source of the app's own), `browserMenuChosen`.
+- `OperationRules.placeIn`: nothing is put outside a folder, though sources may be elsewhere.
+- `fileBrowserUpdate` takes `input` (the UiInput) instead of `nowSeconds`; call `menuSystem` too.
+- The Return that ends a text field or chooses a menu item is not also the list's (`keysTaken`,
+  ui/KeyFocusSystem). Escape in a path field no longer clears the selection too.
+- Cases 1598, 1599, check `uiFileOperations`.
+
 ## 0.4.56, 2026-11-24: file browsers in scenes, and folders without notifications
 
 - `"FileBrowser": { "root": "~/Projects", ... }` on a scene's node opens a file browser there, with its

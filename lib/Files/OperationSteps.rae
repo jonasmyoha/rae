@@ -132,6 +132,12 @@ func refusalOf(operation: view FileOperation, item: view OperationItem) ret Oper
       ret OperationError.outside
     }
   }
+  if places and operation.rules.placeIn.length() > 0 and not isWithin(
+    path: target
+    root: operation.rules.placeIn
+  ) {
+    ret OperationError.outside
+  }
   if item.action is ItemAction.makeFolder {
     ret OperationError.none
   }

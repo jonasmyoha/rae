@@ -1,0 +1,133 @@
+diagnostics 0
+a new folder: edits "untitled folder", selected "untitled folder"
+   done newFolder: >untitled folder done
+   root: Film untitled folder door.wav notes.txt [untitled folder]
+   untitled folder:  []
+its name: no edit
+   done rename: untitled folder>Music done
+   root: Film Music door.wav notes.txt [Music]
+   Music:  []
+Return: edits "notes.txt", selected "notes"
+Escape: no edit
+   root: Film Music door.wav notes.txt [notes.txt]
+a name that cannot be: edits "a/b.txt", selected "a/b.txt"
+another
+   done rename: notes.txt>words.txt done
+   root: Film Music door.wav words.txt [words.txt]
+a click elsewhere: no edit
+   done rename: words.txt>lines.txt done
+   root: Film Music door.wav lines.txt [Music]
+   Music:  []
+a folder with a dot: edits "Film", selected "Film"
+a name that is taken: "lines.txt" is already in "root"
+stopped
+   asks rename: Film > lines.txt
+   done rename: Film> canceled
+   root: Film Music door.wav lines.txt [Film]
+   Film: Cuts []
+an open folder renamed: /root/Movies/Cuts
+   done rename: Film>Movies done
+   root: Movies Music door.wav lines.txt [Movies]
+   Movies: Cuts [Cuts]
+   Cuts:  []
+undone
+   done undo: Movies>Film done
+   root: Film Music door.wav lines.txt [Film]
+   Film: Cuts [Cuts]
+   Cuts:  []
+duplicate
+   done duplicate: lines.txt>lines copy.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [lines copy.txt]
+copied into Music
+   done copy: lines copy.txt>lines copy.txt done lines.txt>lines.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy.txt lines.txt [lines copy.txt lines.txt]
+again: "lines copy.txt" is already in "Music"
+the next: "lines.txt" is already in "Music"
+kept, skipped: no question
+   asks copy: lines copy.txt > lines copy.txt
+   asks copy: lines.txt > lines.txt
+   done copy: lines copy.txt>lines copy 2.txt done lines.txt> skipped
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy 2.txt lines copy.txt lines.txt [lines copy 2.txt]
+Return, then Escape: no question
+   asks copy: lines copy.txt > lines copy.txt
+   asks copy: lines.txt > lines.txt
+   done copy: lines copy.txt>lines copy 3.txt done lines.txt> canceled
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy 2.txt lines copy 3.txt lines copy.txt lines.txt [lines copy 3.txt]
+all replaced: no question
+   asks copy: lines copy.txt > lines copy.txt
+   done copy: lines copy.txt>lines copy.txt done lines.txt>lines.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy 2.txt lines copy 3.txt lines copy.txt lines.txt [lines copy.txt lines.txt]
+   trash: files(lines copy.txt lines.txt) info(lines copy.txt.trashinfo lines.txt.trashinfo)
+   Music/lines.txt is newer
+undone
+   done undo: lines.txt> done lines.txt>lines.txt done lines copy.txt> done lines copy.txt>lines copy.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy 2.txt lines copy 3.txt lines copy.txt lines.txt [lines copy.txt lines.txt]
+   Music/lines.txt is old
+redone
+   done undo: lines copy.txt> done lines copy 2.txt>lines copy.txt done lines.txt> done lines 2.txt>lines.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Music]
+   Music: lines copy 2.txt lines copy 3.txt lines copy.txt lines.txt [lines copy.txt lines.txt]
+   Music/lines.txt is newer
+moved, clipboard 0
+   done move: lines.txt>lines.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Film]
+   Film: Cuts lines.txt [lines.txt]
+undone
+   done undo: lines.txt>lines.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [Film]
+   Film: Cuts [Cuts]
+   Cuts:  []
+to the trash
+   done trash: lines copy.txt> done
+   root: Film Music door.wav lines.txt [lines.txt]
+back
+   done undo: lines copy 2.txt>lines copy.txt done
+   root: Film Music door.wav lines copy.txt lines.txt [lines copy.txt]
+no trash: This disk has no trash
+Return does not delete: This disk has no trash
+left: no question
+   done trash: lines copy.txt> failed (noTrash)
+   asks delete: lines copy.txt > 
+   root: Film Music door.wav lines copy.txt lines.txt [lines copy.txt]
+deleted
+   done trash: lines copy.txt> failed (noTrash)
+   asks delete: lines copy.txt > 
+   done delete: lines copy.txt> done
+   root: Film Music door.wav lines.txt [lines.txt]
+a file: Open, | New Folder, | Rename, Duplicate, | Copy, (Paste), (Move Here), | Move to Trash, | Play, Compress,
+copied 1, no edit
+Play
+   chosen play: 1 paths
+   root: Film Music door.wav lines.txt [door.wav]
+empty space: New Folder, | Paste 1 item, Move Here, | Import Here,
+pasted beside itself
+   done copy: door.wav>door copy.wav done
+   root: Film Music door copy.wav door.wav lines.txt [door copy.wav]
+a folder: Open, | New Folder, | Rename, Duplicate, | Copy, Paste 1 item, Move Here, | Move to Trash, | Compress,
+Rename: edits "Music", selected "Music"
+look only, a file: Open, | Copy, | Play, Compress,
+nothing changed true, no edit
+into itself: 1 rows, Move "Music": a folder cannot go into itself
+read: 0 rows
+a row true: 1 rows, Copy 1 item
+stopped: 0 rows
+   done copy: all> canceled
+   root: Film Music door copy.wav door.wav lines.txt [Music]
+   Music: lines copy 2.txt lines copy 3.txt lines copy.txt lines.txt []
+   left over: 0
+from the left to the right
+   done copy: door.wav>door.wav done
+   root: Film Music door copy.wav door.wav lines.txt [door.wav]
+   other: door.wav
+a source of the app's own
+   requested trash in /own: 1 paths 
+   requested newFolder in /own: 0 paths untitled folder
+   requested copy in /own: 1 paths 
+   requested rename in /own: 1 paths cut
+   root: Film Music door copy.wav door.wav lines.txt [door.wav]
+ended true

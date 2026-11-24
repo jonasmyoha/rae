@@ -3,9 +3,9 @@
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
-scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), and step 7, the column browser that
-changes nothing on disk: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the
-text below is in §18). The steps are the `[file browser ...]` tasks in
+scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, and 7b,
+its operations: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
+is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -263,8 +263,8 @@ component changes (case 1596). An app that reports unknown components before its
 
 `order` (in a scene `orderBy`, `descending`, `foldersFirst`), `showHidden`, `extensions`, `selection`
 (`none`, `single`, `multiple`), `returnKey`, `allowAboveRoot`, `showBar`, `showPreview`,
-`openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9). To come: `allowOperations`
-(false: look and pick only; 7b), `showSidebar` and `mode` (§8; 7d).
+`openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9), `allowOperations` (false: look
+and pick only). To come: `showSidebar` and `mode` (§8; 7d).
 
 ### 4.2 Events
 
@@ -541,3 +541,17 @@ archives opened as folders (an app can, with `source: app`), several windows sha
 - The folders that are not watched are looked at on a thread (§7), so a disk that does not answer holds
   nothing; a folder's time is taken before its listing reads it, so no change between the two is missed.
   Case 1597.
+
+Step 7b:
+
+- The thread of an operation is `OperationThread` (no UI, under ThreadSanitizer, case 1599); the jobs, the
+  undo list and the clipboard are `FileBrowserSystems.operations`, whose `rules` an app may set (its own
+  trash folder). The question and the rows are `OperationRowsSystem`, the menu is `FileMenuSystem`.
+- The root limit holds what is put (`OperationRules.placeIn`), not where it comes from: a paste takes what
+  another browser copied.
+- The dialog: Escape stops the operation, Return keeps both. Nothing that deletes has a key.
+- A paste as a move takes the paths off the clipboard. There is no cut. The clipboard is the browsers'
+  own, not the system's.
+- While a rename, a move or an undo of ours runs (for a second at most), what a listing found waits, so an
+  open folder is not taken for gone before its new name is known.
+- The bytes of a copy are measured before it begins; a cancel waits for that.

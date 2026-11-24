@@ -1,0 +1,302 @@
+# A name edited in its row (docs/file-browser-design.md §5, §11): a text field over the row, with
+# the
+# name selected without its extension. Return or the focus lost renames, Escape does not.
+import Files
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/ScrollRootSystem
+open ui/ScrollToRow
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/textFieldSystem/TextFieldSystem
+
+# Where in a row its name begins, and how much wider than the name the field is at its left
+const renameLeft: Float = 24.0
+
+# Edit the name of the one row selected in `column`
+func renameSelected(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  if selectedCount(world: world, list: list) is not 1 {
+    ret
+  }
+  beginRename(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+    name: firstSelectedName(world: world, list: list)
+  )
+}
+
+func beginRename(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  name: view String
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let index: Int = entryIndex(systems: systems, column: column, name: name)
+  if mayOperate(systems: systems, browser: browser) is false or index < 0 {
+    ret
+  }
+  endRename(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    column: column
+  )
+  let node: EntityId = mountFileScene(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    key: "fileRename"
+    parent: componentView(this: systems.columns, entityId: column).body
+  )
+  let field: EntityId = nodeIn(world: world, root: node, nodeId: "FileRenameField")
+  if componentHas(this: world.textFields, entityId: field) is false {
+    ret
+  }
+  let edit: RenameEdit = {
+    name: "{name}"
+    node: node
+    field: field
+    action: "fileBrowser.rename.{field.index}.{field.generation}"
+  }
+  let text: mod TextField = componentMod(this: world.textFields, entityId: field)
+  text.text = "{name}"
+  text.actionId = "{edit.action}"
+  componentSet(this: systems.renames, entityId: column, data: own edit)
+  if systems.escapeHeld is false {
+    # Escape ends the edit, not the program
+    systems.escapeHeld = true
+    systems.escapeQuit = Gpu2d.escapeQuits()
+    Gpu2d.setEscapeQuits(on: false)
+  }
+  selectName(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    column: column
+    name: name
+  )
+  requestScrollToRow(
+    world: world
+    listEntity: listOfColumn(systems: systems, column: column)
+    index: index
+    place: ScrollRowPlace.nearest
+  )
+  placeRename(systems: systems, world: world, column: column)
+}
+
+# The field has the focus, with the name selected without its extension (a folder has none)
+func selectName(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  column: view EntityId
+  name: view String
+) {
+  var folder: Bool = false
+  if let entry: FileEntry = entryOfColumn(systems: systems, column: column, name: name) {
+    folder = Files.isFolder(entry: entry)
+  }
+  let focused: Bool = setTextFieldSelection(
+    world: world
+    textFieldSystem: uiSystems.textField
+    entityId: componentView(this: systems.renames, entityId: column).field
+    start: 0
+    end: Files.stemLength(name: name, isFolder: folder)
+  )
+}
+
+# The field goes
+func endRename(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  column: view EntityId
+) {
+  if componentHas(this: systems.renames, entityId: column) is false {
+    ret
+  }
+  let node: EntityId = componentView(this: systems.renames, entityId: column).node
+  let field: EntityId = componentView(this: systems.renames, entityId: column).field
+  if focusedTextFieldEntityId(world: world) is field {
+    let left: Bool = focusTextField(world: world, entityId: noEntity())
+  }
+  if isAlive(world: world, entityId: node) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  componentRemove(this: systems.renames, entityId: column)
+}
+
+# Where the row is now: the field is over its name
+func placeRename(systems: view FileBrowserSystems, world: mod UiWorld, column: view EntityId) {
+  let edit: view RenameEdit = componentView(this: systems.renames, entityId: column)
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  let node: EntityId = edit.node
+  let index: Int = entryIndex(systems: systems, column: column, name: edit.name)
+  if index < 0 or componentHas(this: world.rects, entityId: node) is false or componentHas(
+    this: world.listViews
+    entityId: mine.list
+  ) is false {
+    ret
+  }
+  let height: Float = componentView(this: world.listViews, entityId: mine.list).itemHeight
+  var scroll: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: mine.list) {
+    scroll = componentView(this: world.scrollStates, entityId: mine.list).y
+  }
+  let top: Float = index.toFloat() * height + scroll
+  let width: Float = componentView(this: world.rects, entityId: mine.body).size.x - renameLeft - 8.0
+  if componentView(this: world.rects, entityId: node).size.x is not width {
+    componentMod(this: world.rects, entityId: node).size.x = width
+  }
+  let offset: Offset = { delta: Vec2 { x: renameLeft, y: top } }
+  if componentHas(this: world.offsets, entityId: node) is false or componentView(
+    this: world.offsets
+    entityId: node
+  ).delta.y is not top {
+    componentSet(this: world.offsets, entityId: node, data: offset)
+  }
+}
+
+# One frame: the fields that end, and the ones that are to begin (a new folder's)
+func fileRenameSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  escape: view Bool
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = componentCount(this: systems.renames) - 1, i >= 0, --i {
+    let column: EntityId = componentEntityAt(this: systems.renames, i: i)
+    changed = stepRename(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      column: column
+      escape: escape
+    ) or changed
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    let wanted: String = "{componentView(this: systems.columns, entityId: column).wantRename}"
+    if wanted.length() > 0 and entryIndex(systems: systems, column: column, name: wanted) >= 0 {
+      componentMod(this: systems.columns, entityId: column).wantRename = ""
+      beginRename(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: column
+        name: wanted
+      )
+      changed = true
+    }
+  }
+  if systems.escapeHeld and componentCount(this: systems.renames) is 0 {
+    systems.escapeHeld = false
+    Gpu2d.setEscapeQuits(on: systems.escapeQuit)
+  }
+  ret changed
+}
+
+func stepRename(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  column: view EntityId
+  escape: view Bool
+) ret Bool {
+  let edit: view RenameEdit = componentView(this: systems.renames, entityId: column)
+  let field: EntityId = edit.field
+  let name: String = "{edit.name}"
+  let node: EntityId = edit.node
+  let entered: Bool = actionSent(world: world, actionId: edit.action)
+  let there: Bool = componentHas(this: systems.columns, entityId: column) and entryIndex(
+    systems: systems
+    column: column
+    name: name
+  ) >= 0 and componentHas(this: world.textFields, entityId: field)
+  let focused: Bool = there and focusedTextFieldEntityId(world: world) is field
+  if there and focused and escape is false and entered is false {
+    ret false
+  }
+  var wanted: String = "{name}"
+  if there and escape is false {
+    wanted = "{componentView(this: world.textFields, entityId: field).text}"
+  }
+  let problem: NameError = Files.checkName(name: wanted)
+  if problem is not NameError.none and entered {
+    # still to be edited, with what is wrong under it
+    let error: EntityId = nodeIn(world: world, root: node, nodeId: "FileRenameError")
+    setNodeText(world: world, entityId: error, text: nameErrorText(error: problem))
+    showNode(world: world, entityId: error, shown: true)
+    let again: Bool = setTextFieldSelection(
+      world: world
+      textFieldSystem: uiSystems.textField
+      entityId: field
+      start: 0
+      end: wanted.length()
+    )
+    ret true
+  }
+  endRename(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    column: column
+  )
+  if there is false {
+    ret true
+  }
+  if entered or escape {
+    setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: column).body)
+  }
+  if problem is NameError.none and wanted is not name {
+    renameIn(
+      systems: systems
+      column: column
+      name: name
+      newName: wanted
+    )
+  }
+  ret true
+}
+
+func nameErrorText(error: view NameError) ret String {
+  if error is NameError.empty {
+    ret "A name is needed"
+  }
+  if error is NameError.separator {
+    ret "A name has no /"
+  }
+  if error is NameError.tooLong {
+    ret "The name is too long"
+  }
+  ret "That name cannot be used"
+}
