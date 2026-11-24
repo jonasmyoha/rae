@@ -3523,7 +3523,17 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               fprintf(out, "  rae_jout_text(&__out, \"\\\"%.*s\\\": [\");\n", nl, nd);
               fprintf(out, "  for (int64_t __k = 0; __k < this->%.*s.length; __k++) {\n", nl, nd);
               fprintf(out, "    if (__k) rae_jout_text(&__out, \", \");\n");
-              fprintf(out, "    %s __e; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__e);\n", em, nl, nd, em);
+              if (elem->is_opt) {
+                  // an optional element: its value, or null
+                  AstTypeRef payload = *elem;
+                  payload.is_opt = false; payload.next = NULL; payload.resolved_type = NULL;
+                  const char* pm = rae_mangle_type_specialized(ctx, NULL, NULL, &payload);
+                  fprintf(out, "    %s __o; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__o);\n", em, nl, nd, em);
+                  fprintf(out, "    if (!__o.has) { rae_jout_text(&__out, \"null\"); continue; }\n");
+                  fprintf(out, "    %s __e = __o.value;\n", pm);
+              } else {
+                  fprintf(out, "    %s __e; rae_ext_rae_buf_get(this->%.*s.data, __k, sizeof(%s), &__e);\n", em, nl, nd, em);
+              }
               if (esm) {
                   fprintf(out, "    { rae_String __ej = rae_toJson_%s_(&__e); rae_jout_put(&__out, (const char*)__ej.data, __ej.len); }\n", esm);
               } else if (eString) {
@@ -3636,18 +3646,27 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               fprintf(out, "    __r.%.*s.data = rae_ext_rae_buf_alloc(__cap, sizeof(%s)); __r.%.*s.cap = __cap; __r.%.*s.length = __n;\n", nl, nd, em, nl, nd, nl, nd);
               fprintf(out, "    int64_t __it = rae_jscan_first(json, __v);\n");
               fprintf(out, "    for (int64_t __k = 0; __k < __n; __k++, __it = rae_jscan_next(json, __it)) {\n");
-              fprintf(out, "      %s __ev;\n", em);
+              AstTypeRef payload = *elem;
+              payload.is_opt = false; payload.next = NULL; payload.resolved_type = NULL;
+              const char* pm = elem->is_opt ? rae_mangle_type_specialized(ctx, NULL, NULL, &payload) : em;
+              fprintf(out, "      %s __ev = {0};\n", pm);
+              // an optional element is read when it is not null
+              if (elem->is_opt) fprintf(out, "      bool __has = !rae_jscan_is_null(json, __it);\n      if (__has) {\n");
               if (esm) {
                   fprintf(out, "      __ev = rae_fromJsonAt_%s_(json, __it);\n", esm);
               } else if (eFloat) {
-                  fprintf(out, "      __ev = (%s)rae_jscan_float(json, __it);\n", em);
+                  fprintf(out, "      __ev = (%s)rae_jscan_float(json, __it);\n", pm);
               } else if (eBool) {
                   fprintf(out, "      __ev = rae_jscan_bool(json, __it);\n");
               } else if (eString) {
                   fprintf(out, "      __ev = rae_jscan_string(json, __it);\n");
               } else {
-                  fprintf(out, "      __ev = (%s)rae_jscan_int(json, __it);\n", em);
+                  fprintf(out, "      __ev = (%s)rae_jscan_int(json, __it);\n", pm);
               }
+              if (elem->is_opt) {
+                  fprintf(out, "      }\n      %s __ov = { .has = __has, .value = __ev };\n", em);
+                  fprintf(out, "      rae_ext_rae_buf_set(__r.%.*s.data, __k, sizeof(%s), &__ov);\n", nl, nd, em);
+              } else
               fprintf(out, "      rae_ext_rae_buf_set(__r.%.*s.data, __k, sizeof(%s), &__ev);\n", nl, nd, em);
               fprintf(out, "    }\n  }\n");
               }

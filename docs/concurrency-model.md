@@ -131,7 +131,8 @@ let image: Image = task.get()
   `removeLast`, `swapRemove`, `set`, `truncate` and `clear` (0.4.72, fixture 1631).
   So a `Task` is a unique handle: copying one, or a value that holds one,
   from a place is a compile error ("cannot copy 'List(Task(Int))' ... it holds
-  a Task"); `own` moves it. Fixtures 1431, 1432.
+  a Task"); `own` moves it. A loop over a list of them is over views. Fixtures
+  1431, 1432, 1639.
 - Explicit detachment is a later, deliberately-conspicuous operation:
   ```rae
   detach spawn telemetryWorker(channel: own channel)

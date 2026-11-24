@@ -1,0 +1,27 @@
+tests/cases/1639_list_of_optionals_rejected/Main.rae:8:25: 'contains' compares the elements, and two optionals are not compared: loop over the list ('loop let element: opt view T in list') and compare what is there with 'if let'
+     8 |   log("{numbers.contains(value: 1)}")  # ERROR
+       |                         ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:9:38: 'indexOf' compares the elements, and two optionals are not compared: loop over the list ('loop let element: opt view T in list') and compare what is there with 'if let'
+     9 |   if let index: Int = numbers.indexOf(value: 1) {
+       |                                      ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:13:15: 'sort' compares the elements, and two optionals are not compared: loop over the list ('loop let element: opt view T in list') and compare what is there with 'if let'
+    13 |   numbers.sort()  # ERROR
+       |               ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:16:12: cannot copy 'opt Task(Int)' in a loop (loop over views of them): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    16 |   loop let task: opt Task(Int) in optionals {
+       |            ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:20:12: cannot copy 'Task(Int)' in a loop (loop over views of them): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    20 |   loop let task: Task(Int) in tasks {
+       |            ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:24:53: cannot copy this value out of a List (use 'viewAt'/'modAt'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    24 |   let first: opt Task(Int) = optionals.copyAtDefault(index: 0)  # ERROR
+       |                                                     ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:25:46: cannot copy this value out of a List (use 'viewAt'/'modAt'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    25 |   let second: Task(Int) = tasks.copyAtDefault(index: 0)  # ERROR
+       |                                              ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:26:54: cannot copy this value out of a List (use 'viewAt'/'modAt'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    26 |   let third: opt Task(Int) = optionals.copyAtFallback(index: 0, fallback: none)  # ERROR
+       |                                                      ^~~~
+tests/cases/1639_list_of_optionals_rejected/Main.rae:27:3: cannot copy 'opt Task(Int)' out of a List with 'copyAt' (use 'viewAt'/'modAt'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    27 |   let fourth: opt Task(Int) = optionals.copyAt(index: 0)  # ERROR
+       |   ^~~~

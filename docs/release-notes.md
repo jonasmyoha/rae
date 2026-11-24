@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.75, 2026-11-25: reading a list of optionals
+
+- A `List(opt T)` can be read: `viewAt`, `modAt`, `copyAt`, `copyAtFallback`, `copyAtDefault`, `pop`, a loop over
+  views, mods or copies, a struct's JSON, and generic functions. They crashed, gave a wrong value (a 7 was read as
+  1) or were errors of the C compiler. A row that is `none` reads as a row that is not there (docs/collections.md).
+- `contains`, `indexOf`, `sort` and `sortDesc` of such a list are errors.
+- Breaking: a loop that copies tasks (`loop let task: Task(Int) in tasks`), and `copyAtDefault` or `copyAtFallback`
+  of a list that holds tasks, are errors: the task was joined and freed twice. Loop over `view Task(Int)`.
+- Cases 1637, 1638 (under ThreadSanitizer too) and 1639.
+
 ## 0.4.74, 2026-11-24: an optional Task
 
 - An `opt Task(T)` works as a binding, an assignment, a return, an argument and in a list, from `spawn`, a call or

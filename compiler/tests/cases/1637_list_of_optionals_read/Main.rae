@@ -1,0 +1,203 @@
+# Reading a List(opt T). Rae has no optional of an optional: a row that is `none` reads as one that
+# is
+# not there, and `length` says how many rows there are. By viewAt, modAt, copyAt and the two total
+# reads, by a loop (view, mod, copy), pop, swap, JSON, and inside generic functions. Nothing leaks.
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+  size: Int = 0
+}
+
+type Shelf {
+  notes: List(opt Note)
+  texts: List(opt String)
+  counts: List(opt Int)
+  sizes: List(opt Float)
+  flags: List(opt Bool)
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!", size: text.length() }
+}
+
+func textOf(note: opt view Note) ret String {
+  if let there: view Note = note {
+    ret "{there.text}"
+  }
+  ret "none"
+}
+
+func allOf(notes: view List(opt Note)) ret String {
+  var text: String = ""
+  loop let note: opt view Note in notes {
+    text = "{text} {textOf(note: note)}"
+  }
+  ret text
+}
+
+func grow(notes: mod List(opt Note)) {
+  loop let note: opt mod Note in notes {
+    if let there: mod Note = note {
+      there.text = "{there.text}+"
+      there.size = there.size + 1
+    }
+  }
+  if let last: mod Note = notes.modAt(index: notes.length - 1) {
+    last.text = "last {last.text}"
+  }
+}
+
+func present(T: type, list: view List(T)) ret Int {
+  var count: Int = 0
+  loop var i: Int = 0, i < list.length + 1, ++i {
+    if let there: view T = list.viewAt(index: i) {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func firstOr(T: type, list: view List(T), other: copy T) ret T {
+  if let first: T = list.copyAt(index: 0) {
+    ret first
+  }
+  ret other
+}
+
+func made() ret List(opt String) {
+  ret List(opt String) { "made", none }
+}
+
+func structs() {
+  var notes: List(opt Note) = { noteOf(text: "a"), none, noteOf(text: "c") }
+  log("notes:{allOf(notes: notes)}")
+  loop var i: Int = 0, i < 4, ++i {
+    if let note: view Note = notes.viewAt(index: i) {
+      log("{i}: {note.text} {note.size}")
+    } else {
+      log("{i}: none, a row {i < notes.length}")
+    }
+  }
+  grow(notes: notes)
+  log("grown:{allOf(notes: notes)}")
+  if let note: Note = notes.copyAt(index: 2) {
+    notes.set(index: 2, value: none)
+    log("copied {note.text}, then set to none:{allOf(notes: notes)}")
+  }
+  let first: opt view Note = notes.viewAt(index: 0)
+  log("bound: {textOf(note: first)}")
+  let copied: opt Note = notes.copyAt(index: 0)
+  let missing: opt Note = notes.copyAt(index: 9)
+  let instead: opt Note = notes.copyAtFallback(index: 1, fallback: noteOf(text: "instead"))
+  let empty: opt Note = notes.copyAtDefault(index: 1)
+  log(
+    "copies: {textOf(note: copied)} {textOf(note: missing)} {textOf(note: instead)} {textOf(
+      note: empty
+    )}"
+  )
+  var kept: List(opt Note) = {}
+  loop let note: opt Note in notes {
+    kept.add(value: note)
+  }
+  loop var note: opt Note in notes {
+    note = noteOf(text: "var")
+  }
+  let all: List(opt Note) = kept
+  kept.swap(i: 0, j: 1)
+  kept.insert(index: 0, value: noteOf(text: "new"))
+  log("kept:{allOf(notes: kept)}, notes:{allOf(notes: notes)}, copy:{allOf(notes: all)}")
+  kept.swapRemove(index: 0)
+  kept.reverse()
+  log("changed:{allOf(notes: kept)}")
+  loop kept.length > 0 {
+    let note: opt Note = kept.pop()
+    log("popped {textOf(note: note)}")
+  }
+  let nothing: opt Note = kept.pop()
+  log("popped of an empty one: {textOf(note: nothing)}")
+}
+
+func values() {
+  var numbers: List(opt Int) = { 7, none, 0 }
+  loop let number: opt view Int in numbers {
+    if let there: view Int = number {
+      log("number {there}")
+    } else {
+      log("no number")
+    }
+  }
+  if let number: mod Int = numbers.modAt(index: 0) {
+    number = 8
+  }
+  if let number: Int = numbers.copyAt(index: 0) {
+    log("now {number}")
+  }
+  loop let text: opt view String in made() {
+    if let there: view String = text {
+      log("text {there}")
+    } else {
+      log("no text")
+    }
+  }
+  var texts: List(opt String) = { "x {numbers.length}", none }
+  loop let text: opt String in texts {
+    if let there: view String = text {
+      log("copy {there}")
+    }
+  }
+  if let text: mod String = texts.modAt(index: 0) {
+    text = "y {text}"
+  }
+  let text: opt String = texts.copyAt(index: 0)
+  if let there: view String = text {
+    log(there)
+  }
+  let kinds: List(opt Kind) = { Kind.large, none, Kind.small }
+  loop let kind: opt view Kind in kinds {
+    if let there: view Kind = kind {
+      log("a large one {there is Kind.large}")
+    } else {
+      log("no kind")
+    }
+  }
+  var lists: List(opt List(Int)) = { List(Int) { 1, 2 }, none }
+  if let list: mod List(Int) = lists.modAt(index: 0) {
+    list.add(value: 3)
+  }
+  loop let list: opt view List(Int) in lists {
+    if let there: view List(Int) = list {
+      log("list of {there.length}")
+    } else {
+      log("no list")
+    }
+  }
+  log("present: {present(list: numbers)} {present(list: texts)} {present(list: lists)}")
+  let other: opt Int = firstOr(list: numbers, other: 5)
+  if let there: view Int = other {
+    log("first {there}")
+  }
+}
+
+func json() {
+  let shelf: Shelf = {
+    notes: { noteOf(text: "a"), none }
+    texts: { "t", none }
+    counts: { 1, none }
+    sizes: { none, 1.5 }
+    flags: { true, none, false }
+  }
+  let text: String = shelf.toJson()
+  log(text)
+  let read: Shelf = Shelf.fromJson(json: text)
+  log(
+    "read:{allOf(notes: read.notes)}, {read.texts.length} {read.counts.length} {read.flags.length}"
+  )
+  log("the same: {read.toJson() is text}")
+}
+
+func main() {
+  structs()
+  values()
+  json()
+}

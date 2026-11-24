@@ -6220,6 +6220,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                                         "collection loop binding type must match the collection's element type");
                              module->had_error = true;
                          }
+                         if (!binding->as.let_stmt.type->is_view && !binding->as.let_stmt.type->is_mod
+                             && sema_typeinfo_holds_task(symbols, element_type, 0)) {
+                             sema_report_task_copy(module, sema_diag_file(module), binding->line, binding->column,
+                                                   binding->as.let_stmt.type, "in a loop (loop over views of them)");
+                         }
                          if (binding->as.let_stmt.type->is_mod
                              && collection && collection->resolved_type
                              && collection->resolved_type->kind == TYPE_REF
@@ -7990,9 +7995,48 @@ static void sema_check_void_value(AstModule* module, const AstExpr* expr) {
     module->had_error = true;
 }
 
+/* What a List's elements cannot do: a Task has no copy, and optionals are not
+ * compared (a `none` row reads as a row that is not there). */
+static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const AstExpr* expr) {
+    Str name = {0};
+    const AstExpr* receiver = NULL;
+    if (expr->kind == AST_EXPR_METHOD_CALL) {
+        name = expr->as.method_call.method_name;
+        receiver = expr->as.method_call.object;
+    } else if (expr->kind == AST_EXPR_CALL && expr->as.call.callee
+               && expr->as.call.callee->kind == AST_EXPR_IDENT && expr->as.call.args) {
+        name = expr->as.call.callee->as.ident;
+        receiver = expr->as.call.args->value;
+    }
+    if (!receiver) return;
+    bool copies = str_eq_cstr(name, "copyAtDefault") || str_eq_cstr(name, "copyAtFallback");
+    bool compares = str_eq_cstr(name, "contains") || str_eq_cstr(name, "indexOf")
+        || str_eq_cstr(name, "sort") || str_eq_cstr(name, "sortDesc");
+    if (!copies && !compares) return;
+    TypeInfo* list = receiver->resolved_type;
+    while (list && list->kind == TYPE_REF) list = list->as.ref.base;
+    if (!sema_struct_template_is(list, "List") || list->as.structure.generic_count != 1) return;
+    const TypeInfo* element = list->as.structure.generic_args[0];
+    const char* file = s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module);
+    if (copies && sema_typeinfo_holds_task(symbols, element, 0)) {
+        sema_report_task_copy(module, file, expr->line, expr->column, NULL,
+                              "out of a List (use 'viewAt'/'modAt')");
+    }
+    if (compares && element && element->kind == TYPE_OPT) {
+        char message[240];
+        snprintf(message, sizeof message,
+                 "'%.*s' compares the elements, and two optionals are not compared: loop over the list "
+                 "('loop let element: opt view T in list') and compare what is there with 'if let'",
+                 (int)name.len, name.data);
+        diag_error(file, (int)expr->line, (int)expr->column, message);
+        if (module) module->had_error = true;
+    }
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
+    sema_check_list_call(module, symbols, expr);
     sema_check_unnarrowed_opt(module, expr);
     sema_check_void_value(module, expr);
 }

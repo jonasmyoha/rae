@@ -1,0 +1,57 @@
+# Reading a List(opt Task(Int)): by views, by mod (a task put in another's place joins that one),
+# and
+# taken out by pop. Nothing copies a task. Under ThreadSanitizer too.
+open Atomic
+
+func work(finished: own Atomic(Int), number: copy Int) ret Int {
+  sleep(ms: 5)
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret number
+}
+
+func started(finished: view Atomic(Int), number: copy Int) ret Task(Int) {
+  ret spawn thread work(finished: finished, number: number)
+}
+
+func resultOf(task: opt view Task(Int)) ret Int {
+  if let there: view Task(Int) = task {
+    ret there.get()
+  }
+  ret -1
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  var tasks: List(opt Task(Int)) = {}
+  loop var i: Int = 0, i < 4, ++i {
+    tasks.add(value: started(finished: finished, number: i))
+    tasks.add(value: none)
+  }
+  loop let task: opt view Task(Int) in tasks {
+    log("looped {resultOf(task: task)}")
+  }
+  loop var i: Int = 0, i < 9, ++i {
+    if let task: view Task(Int) = tasks.viewAt(index: i) {
+      log("{i}: {task.get()}")
+    }
+  }
+  log("missing {resultOf(task: tasks.viewAt(index: 1))} {resultOf(task: tasks.viewAt(index: 99))}")
+  if let task: mod Task(Int) = tasks.modAt(index: 0) {
+    task = started(finished: finished, number: 10)
+  }
+  loop let task: opt mod Task(Int) in tasks {
+    if let there: mod Task(Int) = task {
+      if there.get() is 1 {
+        there = started(finished: finished, number: 11)
+      }
+    }
+  }
+  loop tasks.length > 0 {
+    let task: opt Task(Int) = tasks.pop()
+    log("popped {resultOf(task: task)}")
+  }
+  let nothing: opt Task(Int) = tasks.pop()
+  log("popped of an empty one: {resultOf(task: nothing)}")
+  log("finished {finished.load()} of 6")
+  finished.freeAtomic()
+}

@@ -51,6 +51,25 @@ func main() {
 `{ }` is the empty map (`var names: StringMap(Int) = {}`), and `create(cap: n)` one with room for
 `n`. A `{ }` literal with elements is only ever a List.
 
+## A list of optionals
+
+Rae has no optional of an optional, so in a `List(opt T)` a row that is `none` reads as a row that is not
+there: `viewAt`, `modAt` and `copyAt` answer `none` for both, and `length` (with the index) says which it is.
+`pop` of an empty list and of a `none` row both answer `none`. A loop has every row:
+
+```rae
+var notes: List(opt Note) = { noteOf(text: "a"), none }
+loop let note: opt view Note in notes {
+  if let there: view Note = note {
+    log(there.text)
+  }
+}
+```
+
+`opt mod Note` writes into the rows that hold something, `opt Note` copies each. A row becomes `none`, or holds
+something again, by `set`. `contains`, `indexOf` and `sort` compare, and two optionals are not compared: they are
+errors on such a list. In JSON a `none` row is `null`. (Fixtures 1635, 1637, 1638, 1639.)
+
 ## Why maps are not in core
 
 They pass none of the "core" tests: the compiler has no built-in knowledge of
