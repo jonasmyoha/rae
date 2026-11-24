@@ -250,6 +250,8 @@ struct AstExpr {
       // `spawn thread f(...)` (docs/realtime-language-design.md §6.6.1): this
       // spawn always starts its own OS thread, never a pool task
       bool spawn_thread;
+      // `own x` of a local that owns heap (sema): x is gone after it
+      bool moves_local;
     } unary;
     /* `value as Type`. Rae has NO implicit numeric conversions, so every
      * change of numeric representation is one of these nodes. */

@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.65, 2026-11-24: `own x` moves wherever it stands
+
+- Breaking: after `own x` of a local that owns heap (or a Task) a use of x is an error wherever the `own`
+  stands: a binding, an assignment, a field, a list element, a `match` arm, a condition. Only an argument of an
+  `own` parameter was checked; the others were accepted and freed the value twice. Two moves in one statement
+  are an error as well. The same in generic functions, for the concrete type.
+- A name bound in a block, a loop or an `if let` ends with it: moving it says nothing about an outer value of
+  that name.
+- A list handed to a generic `own T` parameter (`lists.add(value: own names)`) counts as moved.
+- A value moved or dropped before `break` or `continue` is usable in the rest of the pass; it is gone after the
+  loop, or at its next pass.
+- `own text` of a `mod text: String` compiles.
+- Cases 1612 to 1616; 1613 and 1615 are in the AddressSanitizer gate.
+
 ## 0.4.64, 2026-11-24: moves are checked in generic functions
 
 - Breaking: a use of a value after it was moved into an `own` parameter is an error in a generic function too,

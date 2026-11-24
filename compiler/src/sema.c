@@ -972,33 +972,35 @@ static bool sema_create_was_attempted(const AstExpr* e);
 //     on every path.
 
 /* Names that are "gone" on some path into a point: released by
- * `x.drop()`, or MOVED into an `own T` parameter. `moved[i]` says which, so
+ * `x.drop()`, MOVED into an `own T` parameter, or moved by `own x` anywhere
+ * else (a binding, a field, an element). `how[i]` says which, so
  * the diagnostic can say what happened to the value. */
-/* `unreachable`: the path ended (a `ret`), so what it dropped or moved
- * reaches nothing after it: an `if` branch that returns does not poison the
- * code after the `if`, nor the next pass of a loop. */
-typedef struct DroppedSet { Str names[64]; bool moved[64]; int count; bool unreachable; } DroppedSet;
+/* `unreachable`: the path ended (a `ret`, `break` or `continue`), so what it
+ * dropped or moved reaches nothing after it: an `if` branch that returns does
+ * not poison the code after the `if`, nor the next pass of a loop. What a
+ * `break` or `continue` had gone meets the code after the loop, or its next
+ * pass (FlowLoop). */
+typedef enum { GONE_DROPPED = 0, GONE_INTO_PARAMETER, GONE_BY_OWN } GoneKind;
+typedef struct DroppedSet { Str names[64]; GoneKind how[64]; int count; bool unreachable; } DroppedSet;
 
 static bool dropped_has(const DroppedSet* set, Str name) {
     for (int i = 0; i < set->count; i++) if (str_eq(set->names[i], name)) return true;
     return false;
 }
-static void dropped_add(DroppedSet* set, Str name) {
+static void gone_add(DroppedSet* set, Str name, GoneKind how) {
     if (dropped_has(set, name) || set->count >= 64) return;
-    set->moved[set->count] = false;
+    set->how[set->count] = how;
     set->names[set->count++] = name;
 }
-static void moved_add(DroppedSet* set, Str name) {
-    if (dropped_has(set, name) || set->count >= 64) return;
-    set->moved[set->count] = true;
-    set->names[set->count++] = name;
+static void dropped_add(DroppedSet* set, Str name) {
+    gone_add(set, name, GONE_DROPPED);
 }
 static void dropped_remove(DroppedSet* set, Str name) {
     for (int i = 0; i < set->count; i++) {
         if (str_eq(set->names[i], name)) {
             --set->count;
             set->names[i] = set->names[set->count];
-            set->moved[i] = set->moved[set->count];
+            set->how[i] = set->how[set->count];
             return;
         }
     }
@@ -1007,9 +1009,20 @@ static void dropped_union(DroppedSet* into, const DroppedSet* from) {
     if (from->unreachable) return;
     if (into->unreachable) { *into = *from; return; }
     for (int i = 0; i < from->count; i++) {
-        if (from->moved[i]) moved_add(into, from->names[i]); else dropped_add(into, from->names[i]);
+        gone_add(into, from->names[i], from->how[i]);
     }
 }
+
+/* The scopes the walk is in, innermost first: a block (whose `let` names end
+ * with it), or one binding of an `if let`; `loop` marks a loop's body. */
+typedef struct FlowLoop { DroppedSet breaks; DroppedSet continues; } FlowLoop;
+typedef struct FlowScope {
+    struct FlowScope* parent;
+    const DroppedSet* outer;     /* what was gone when the scope began */
+    const AstBlock* block;
+    Str name;
+    FlowLoop* loop;
+} FlowScope;
 
 typedef struct LifecycleFlow {
     CompilerContext* ctx;
@@ -1027,6 +1040,9 @@ typedef struct LifecycleFlow {
     const AstExpr* const* moved_values; size_t moved_value_count;
     // the destructor call of the statement at hand that consumes its local
     const AstExpr* consuming_drop;
+    FlowScope* scope;
+    // what was gone before the statement whose moves are being collected
+    const DroppedSet* statement_start;
     // (line, column) already reported, so a second loop pass stays quiet
     size_t reported_lines[64]; size_t reported_cols[64]; int reported_count;
 } LifecycleFlow;
@@ -1120,13 +1136,14 @@ static void flow_report(LifecycleFlow* flow, size_t line, size_t col, const char
     diag_error(flow->file, (int)line, (int)col, text);
     flow->module->had_error = true;
 }
-static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const DroppedSet* set, size_t line, size_t col) {
-    if (!e) return;
-    for (int i = 0; i < set->count; i++) {
-        if (!sema_expr_mentions_ident(e, set->names[i])) continue;
-        Str name = set->names[i];
+static void flow_report_gone(LifecycleFlow* flow, Str name, GoneKind how, size_t line, size_t col) {
         char buf[300];
-        if (set->moved[i]) {
+        if (how == GONE_BY_OWN) {
+            snprintf(buf, sizeof buf,
+                     "use of moved value '%.*s': 'own %.*s' moved it on a path reaching here; assign '%.*s' a "
+                     "new value before using it again, or leave out that 'own' to copy it",
+                     (int)name.len, name.data, (int)name.len, name.data, (int)name.len, name.data);
+        } else if (how == GONE_INTO_PARAMETER) {
             snprintf(buf, sizeof buf,
                      "use of moved value '%.*s': it was passed to a parameter declared 'own' on a path "
                      "reaching here, so the callee owns it now; assign '%.*s' a new value before using it "
@@ -1138,7 +1155,13 @@ static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const Dropped
                      "reaching here; assign it a new value before using it again",
                      (int)name.len, name.data, (int)name.len, name.data);
         }
-        flow_report(flow, e->line ? e->line : line, e->line ? e->column : col, buf);
+        flow_report(flow, line, col, buf);
+}
+static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const DroppedSet* set, size_t line, size_t col) {
+    if (!e) return;
+    for (int i = 0; i < set->count; i++) {
+        if (!sema_expr_mentions_ident(e, set->names[i])) continue;
+        flow_report_gone(flow, set->names[i], set->how[i], e->line ? e->line : line, e->line ? e->column : col);
     }
 }
 /* A destructor call that does not consume an owned local: the owner of the
@@ -1216,44 +1239,111 @@ static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
 }
 
 /* After a statement's own uses are checked: every argument sema marked as
- * moving a local (sema_check_own_args) takes that name out of play for the
- * statements that follow. Walks into nested calls too. */
+ * moving a local (sema_check_own_args), and every `own x` of a local that
+ * owns heap, takes that name out of play for the statements that follow.
+ * Walks into nested calls too. A name moved twice in one statement is an
+ * error here: the check before it saw the name still live. */
 static bool flow_specialization_moves(const LifecycleFlow* flow, const AstExpr* value) {
     for (size_t i = 0; i < flow->moved_value_count; i++)
         if (flow->moved_values[i] == value) return true;
     return false;
 }
-static void flow_sweep_moves_args(const LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a);
-static void flow_sweep_moves(const LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
+static void flow_move_name(LifecycleFlow* flow, DroppedSet* set, const AstExpr* moved, GoneKind how) {
+    if (!moved || moved->kind != AST_EXPR_IDENT) return;
+    Str name = moved->as.ident;
+    if (dropped_has(set, name) && !dropped_has(flow->statement_start, name))
+        flow_report_gone(flow, name, how, moved->line, moved->column);
+    gone_add(set, name, how);
+}
+static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e);
+static void flow_sweep_moves_args(LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a) {
+    for (; a; a = a->next) {
+        const AstExpr* value = a->value;
+        if (value && (a->moves_local || flow_specialization_moves(flow, value))) {
+            const AstExpr* moved = value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
+            flow_move_name(flow, set, moved, GONE_INTO_PARAMETER);
+        } else {
+            flow_sweep_moves(flow, set, value);
+        }
+    }
+}
+static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
     if (!e) return;
     switch (e->kind) {
         case AST_EXPR_CALL: flow_sweep_moves(flow, set, e->as.call.callee); flow_sweep_moves_args(flow, set, e->as.call.args); break;
         case AST_EXPR_METHOD_CALL: flow_sweep_moves(flow, set, e->as.method_call.object); flow_sweep_moves_args(flow, set, e->as.method_call.args); break;
         case AST_EXPR_BINARY: flow_sweep_moves(flow, set, e->as.binary.lhs); flow_sweep_moves(flow, set, e->as.binary.rhs); break;
-        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX: flow_sweep_moves(flow, set, e->as.unary.operand); break;
+        case AST_EXPR_OWN:
+            if (e->as.unary.moves_local || flow_specialization_moves(flow, e))
+                flow_move_name(flow, set, e->as.unary.operand, GONE_BY_OWN);
+            else flow_sweep_moves(flow, set, e->as.unary.operand);
+            break;
+        case AST_EXPR_UNARY: case AST_EXPR_BOX: case AST_EXPR_UNBOX: flow_sweep_moves(flow, set, e->as.unary.operand); break;
         case AST_EXPR_CAST: flow_sweep_moves(flow, set, e->as.cast.operand); break;
         case AST_EXPR_MEMBER: flow_sweep_moves(flow, set, e->as.member.object); break;
         case AST_EXPR_INDEX: flow_sweep_moves(flow, set, e->as.index.target); flow_sweep_moves(flow, set, e->as.index.index); break;
         case AST_EXPR_OBJECT:
             for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) flow_sweep_moves(flow, set, f->value);
             break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            for (const AstCollectionElement* c = e->as.collection.elements; c; c = c->next) flow_sweep_moves(flow, set, c->value);
+            break;
+        case AST_EXPR_LIST:
+            for (const AstExprList* l = e->as.list; l; l = l->next) flow_sweep_moves(flow, set, l->value);
+            break;
         case AST_EXPR_INTERP:
             for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) flow_sweep_moves(flow, set, p->value);
             break;
+        case AST_EXPR_MATCH: {
+            flow_sweep_moves(flow, set, e->as.match_expr.subject);
+            DroppedSet merged = *set;
+            for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next) {
+                DroppedSet arm_set = *set;
+                flow_sweep_moves(flow, &arm_set, arm->value);
+                dropped_union(&merged, &arm_set);
+            }
+            *set = merged;
+            break;
+        }
         default: break;
     }
 }
-static void flow_sweep_moves_args(const LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a) {
-    for (; a; a = a->next) {
-        flow_sweep_moves(flow, set, a->value);
-        if (a->value && (a->moves_local || flow_specialization_moves(flow, a->value))) {
-            const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
-            if (moved && moved->kind == AST_EXPR_IDENT) moved_add(set, moved->as.ident);
-        }
+/* What one statement's expression `e` moves */
+static void flow_move(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
+    DroppedSet start = *set;
+    flow->statement_start = &start;
+    flow_sweep_moves(flow, set, e);
+    flow->statement_start = NULL;
+}
+/* A name bound inside a construct ends with it: what happened to it says
+ * nothing about an outer one of the same name. */
+static void flow_end_name(DroppedSet* set, const DroppedSet* outer, Str name) {
+    if (name.len == 0) return;
+    dropped_remove(set, name);
+    for (int i = 0; i < outer->count; i++)
+        if (str_eq(outer->names[i], name)) gone_add(set, name, outer->how[i]);
+}
+
+static void flow_end_scope(DroppedSet* set, const FlowScope* scope) {
+    flow_end_name(set, scope->outer, scope->name);
+    for (const AstStmt* s = scope->block ? scope->block->first : NULL; s; s = s->next)
+        if (s->kind == AST_STMT_LET) flow_end_name(set, scope->outer, s->as.let_stmt.name);
+}
+/* `break` / `continue`: the path goes on after the loop, or at its next pass,
+ * without the names of the scopes it leaves. */
+static void flow_jump(LifecycleFlow* flow, DroppedSet* set, bool is_break) {
+    DroppedSet left = *set;
+    const FlowScope* scope = flow->scope;
+    for (; scope && !scope->loop; scope = scope->parent) flow_end_scope(&left, scope);
+    if (scope) {
+        flow_end_scope(&left, scope);
+        dropped_union(is_break ? &scope->loop->breaks : &scope->loop->continues, &left);
     }
+    set->unreachable = true;
 }
 
 static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
+static void flow_body(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set, FlowLoop* loop);
 static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set);
 /* The names a statement's own blocks bind end with it, so that one hiding an
  * outer name leaves it as it was. */
@@ -1274,7 +1364,15 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
         for (int i = 0; i < flow->hook_count; i++)
             if (str_eq(flow->hook_names[i], s->as.loop_stmt.main_loop_state)) flow->hook_owned[i] = false;
     }
+    DroppedSet outer = *set;
+    const AstStmt* binding = s->kind == AST_STMT_IF ? s->as.if_stmt.binding
+        : s->kind == AST_STMT_LOOP ? s->as.loop_stmt.init : NULL;
+    FlowScope scope = { .parent = flow->scope, .outer = &outer };
+    if (binding && binding->kind == AST_STMT_LET) scope.name = binding->as.let_stmt.name;
+    flow->scope = &scope;
     flow_stmt_inner(flow, s, set);
+    flow->scope = scope.parent;
+    flow_end_scope(set, &scope);
     memcpy(flow->hook_names, saved_names, sizeof saved_names);
     memcpy(flow->hook_owned, saved_owned, sizeof saved_owned);
     flow->hook_count = saved_count;
@@ -1284,19 +1382,19 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
         case AST_STMT_LET:
             flow_sweep_create(flow, s->as.let_stmt.value);
             flow_check_expr(flow, s->as.let_stmt.value, set, s->line, s->column);
-            flow_sweep_moves(flow, set, s->as.let_stmt.value);
+            flow_move(flow, set, s->as.let_stmt.value);
             dropped_remove(set, s->as.let_stmt.name);   /* a new binding is live */
             flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
             break;
         case AST_STMT_DESTRUCT:
             flow_sweep_create(flow, s->as.destruct_stmt.call);
             flow_check_expr(flow, s->as.destruct_stmt.call, set, s->line, s->column);
-            flow_sweep_moves(flow, set, s->as.destruct_stmt.call);
+            flow_move(flow, set, s->as.destruct_stmt.call);
             break;
         case AST_STMT_ASSIGN: {
             flow_sweep_create(flow, s->as.assign_stmt.value);
             flow_check_expr(flow, s->as.assign_stmt.value, set, s->line, s->column);
-            flow_sweep_moves(flow, set, s->as.assign_stmt.value);
+            flow_move(flow, set, s->as.assign_stmt.value);
             const AstExpr* t = s->as.assign_stmt.target;
             if (t && t->kind == AST_EXPR_IDENT) dropped_remove(set, t->as.ident);   /* reinitialized */
             else flow_check_expr(flow, t, set, s->line, s->column);
@@ -1312,7 +1410,7 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             flow->consuming_drop = NULL;
             flow_check_expr(flow, e, set, s->line, s->column);   /* dropping twice is a use */
             if (target) dropped_add(set, target->as.ident);
-            flow_sweep_moves(flow, set, e);
+            flow_move(flow, set, e);
             break;
         }
         case AST_STMT_RET:
@@ -1326,6 +1424,7 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             if (s->as.if_stmt.binding) flow_stmt(flow, s->as.if_stmt.binding, set);
             flow_sweep_create(flow, s->as.if_stmt.condition);
             flow_check_expr(flow, s->as.if_stmt.condition, set, s->line, s->column);
+            flow_move(flow, set, s->as.if_stmt.condition);
             DroppedSet then_set = *set; DroppedSet else_set = *set;
             flow_block(flow, s->as.if_stmt.then_block, &then_set);
             flow_block(flow, s->as.if_stmt.else_block, &else_set);
@@ -1337,13 +1436,19 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             flow_sweep_create(flow, s->as.loop_stmt.condition);
             flow_sweep_create(flow, s->as.loop_stmt.increment);
             flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
+            if (!s->as.loop_stmt.is_range) flow_move(flow, set, s->as.loop_stmt.condition);
             DroppedSet body_set = *set;
-            flow_block(flow, s->as.loop_stmt.body, &body_set);
+            FlowLoop loop = {0};
+            loop.breaks.unreachable = loop.continues.unreachable = true;   /* none yet */
+            flow_body(flow, s->as.loop_stmt.body, &body_set, &loop);
+            dropped_union(&body_set, &loop.continues);
             if (!body_set.unreachable)
                 flow_check_expr(flow, s->as.loop_stmt.increment, &body_set, s->line, s->column);
             dropped_union(set, &body_set);
-            /* second iteration: what the first one dropped meets the top of the body */
-            flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
+            /* second iteration: what the first one dropped meets the top of the
+             * body, and the condition (a collection is evaluated once) */
+            if (!s->as.loop_stmt.is_range)
+                flow_check_expr(flow, s->as.loop_stmt.condition, set, s->line, s->column);
             DroppedSet again = *set;
             /* ...except a collection loop's binding (`loop let x: T in xs`),
              * which is a fresh value on every pass: moving it on one pass
@@ -1351,13 +1456,17 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             if (s->as.loop_stmt.is_range && s->as.loop_stmt.init
                 && s->as.loop_stmt.init->kind == AST_STMT_LET)
                 dropped_remove(&again, s->as.loop_stmt.init->as.let_stmt.name);
-            flow_block(flow, s->as.loop_stmt.body, &again);
+            flow_body(flow, s->as.loop_stmt.body, &again, &loop);
             dropped_union(set, &again);
+            dropped_union(set, &loop.continues);
+            dropped_union(set, &loop.breaks);
+            if (s->as.loop_stmt.is_range) flow_move(flow, set, s->as.loop_stmt.condition);
             break;
         }
         case AST_STMT_MATCH: {
             flow_sweep_create(flow, s->as.match_stmt.subject);
             flow_check_expr(flow, s->as.match_stmt.subject, set, s->line, s->column);
+            flow_move(flow, set, s->as.match_stmt.subject);
             DroppedSet merged = *set;
             merged.unreachable = false;
             for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
@@ -1368,6 +1477,8 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             *set = merged;
             break;
         }
+        case AST_STMT_BREAK: flow_jump(flow, set, true); break;
+        case AST_STMT_CONTINUE: flow_jump(flow, set, false); break;
         case AST_STMT_DEFER: {
             DroppedSet defer_set = *set;
             flow_block(flow, s->as.defer_stmt.block, &defer_set);
@@ -1380,8 +1491,16 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
     }
 }
 static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set) {
+    flow_body(flow, block, set, NULL);
+}
+static void flow_body(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set, FlowLoop* loop) {
+    DroppedSet outer = *set;
+    FlowScope scope = { .parent = flow->scope, .outer = &outer, .block = block, .loop = loop };
+    flow->scope = &scope;
     for (const AstStmt* s = block ? block->first : NULL; s && !set->unreachable; s = s->next)
         flow_stmt(flow, s, set);
+    flow->scope = scope.parent;
+    flow_end_scope(set, &scope);
 }
 
 static void flow_function(LifecycleFlow* flow, const AstFuncDecl* fd, const AstBlock* body) {
@@ -1494,6 +1613,7 @@ static TypeInfo* sema_resolve_decl_type(CompilerContext* ctx, AstModule* module,
 }
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
+static bool sema_own_moves_local(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* operand);
 static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symbols, const AstExpr* call);
 static void sema_reject_view_to_mod(AstModule* module, SymbolTable* symbols, const AstParam* p, const AstExpr* value);
 static bool expr_roots_in_let(SymbolTable* symbols, const AstExpr* e, Str* base);
@@ -9582,6 +9702,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             // adds the move-tracking + use-after-move check.
             sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
             if (expr->as.unary.operand) expr->resolved_type = expr->as.unary.operand->resolved_type;
+            expr->as.unary.moves_local = sema_own_moves_local(ctx, module, symbols, expr->as.unary.operand);
             break;
         case AST_EXPR_OBJECT: {
             if (expr->as.object_literal.type) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->as.object_literal.type);
@@ -10438,6 +10559,35 @@ static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symb
     }
 }
 
+/* Is `sym` a local that owns its value? A reference binding, a borrowed
+ * parameter and a global are not: what they name is copied, not moved. */
+static bool sema_symbol_owns_value(const Symbol* sym) {
+    if (!sym || sym->is_non_owning || sym->scope_depth <= 0) return false;
+    if (sym->bind_kind == BIND_READONLY_REF) return false;
+    if (!sym->type) return true;
+    if (sym->type->kind == TYPE_REF) return false;
+    return !(sym->type->kind == TYPE_OPT && sym->type->as.opt.base && sym->type->as.opt.base->kind == TYPE_REF);
+}
+
+/* Does a value of `type` free something when it is dropped? The type is
+ * spelled with its arguments: a List's element type alone says whether the
+ * List is one, and it has no drop without it. */
+static bool sema_type_frees_heap(CompilerContext* ctx, AstModule* module, TypeInfo* type) {
+    while (type && (type->kind == TYPE_REF || type->kind == TYPE_OPT))
+        type = type->kind == TYPE_REF ? type->as.ref.base : type->as.opt.base;
+    return type && type_needs_cascade_drop(ctx, module, sema_type_ref_of(ctx, type), 0);
+}
+
+/* Does `own operand` move a local: one that owns a value something frees (heap,
+ * or a Task)? Anything else is a plain value, or a place the move empties. */
+static bool sema_own_moves_local(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                 const AstExpr* operand) {
+    if (!operand || operand->kind != AST_EXPR_IDENT || !operand->resolved_type) return false;
+    if (!sema_symbol_owns_value(symbol_table_lookup(symbols, operand->as.ident))) return false;
+    TypeInfo* type = operand->resolved_type;
+    return type->kind == TYPE_TASK || sema_type_frees_heap(ctx, module, type);
+}
+
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                 const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver) {
     if (!fd || !module) return;
@@ -10490,10 +10640,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
         if (p->type && p->type->is_own) {
             owns_heap = type_needs_cascade_drop(ctx, module, p->type, 0);
             if (!owns_heap && a->value && a->value->resolved_type) {
-                AstTypeRef argtr = {0};
-                argtr.resolved_type = a->value->resolved_type;
-                if (argtr.resolved_type->kind == TYPE_REF) argtr.resolved_type = argtr.resolved_type->as.ref.base;
-                owns_heap = type_needs_cascade_drop(ctx, module, &argtr, 0);
+                owns_heap = sema_type_frees_heap(ctx, module, a->value->resolved_type);
             }
         }
         /* The move itself (docs/ownership-model.md "Function-call rule"):
@@ -10506,13 +10653,9 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
             const AstExpr* moved = a->value->kind == AST_EXPR_OWN ? a->value->as.unary.operand : a->value;
             if (moved && moved->kind == AST_EXPR_IDENT) {
                 Symbol* sym = symbol_table_lookup(symbols, moved->as.ident);
-                bool is_alias = sym && ((sym->type && (sym->type->kind == TYPE_REF
-                        || (sym->type->kind == TYPE_OPT && sym->type->as.opt.base
-                            && sym->type->as.opt.base->kind == TYPE_REF)))
-                    || sym->bind_kind == BIND_READONLY_REF);
                 /* An alias handed to `own` is COPIED (the codegen's
                  * own_takes_copy), so it is not consumed. */
-                if (sym && !sym->is_non_owning && !is_alias && sym->scope_depth > 0) a->moves_local = true;
+                if (sema_symbol_owns_value(sym)) a->moves_local = true;
                 if (sym && sym->lent_line > 0) {
                     s_let_root_lent_line = sym->lent_line;
                     char action[200];
@@ -10530,6 +10673,7 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
          * callee takes a copy and `x` stays — so the word is wrong there. */
         if (p->type && p->type->is_copy && a->value && a->value->kind == AST_EXPR_OWN) {
             const AstExpr* moved = a->value->as.unary.operand;
+            a->value->as.unary.moves_local = false;   /* this error is enough */
             char buf[320];
             if (moved && moved->kind == AST_EXPR_IDENT)
                 snprintf(buf, sizeof buf,

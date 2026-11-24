@@ -1,0 +1,132 @@
+# `own x` of a local that owns heap moves it, wherever it stands: x is gone after it
+type Holder {
+  text: String
+  names: List(String)
+}
+
+type Both {
+  first: String
+  second: String
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func takeBoth(first: own String, second: own String) ret Int {
+  ret first.length() + second.length()
+}
+
+func binding(text: own String) {
+  let kept: String = own text
+  let other: String = own text  # ERROR
+  log("{kept} {other}")
+}
+
+func readAfter(names: own List(String)) {
+  let kept: List(String) = own names
+  log("{names.length} {kept.length}")  # ERROR
+}
+
+func literal(text: own String, names: own List(String)) {
+  let holder: Holder = { text: own text, names: own names }
+  log("{holder.text}")
+  log(text)  # ERROR
+  log("{names.length}")  # ERROR
+}
+
+func optional(text: own String) {
+  let kept: opt String = own text
+  log("{kept is none} {text}")  # ERROR
+}
+
+func assignment(text: own String) {
+  var kept: String = "a"
+  kept = own text
+  kept = own text  # ERROR
+  log(kept)
+}
+
+func intoField(text: own String, holder: mod Holder) {
+  holder.text = own text
+  log(text)  # ERROR
+}
+
+func element(text: own String) {
+  let texts: List(String) = { own text, "b" }
+  log("{texts} {text}")  # ERROR
+}
+
+func onePath(text: own String, flag: view Bool) {
+  var kept: String = "a"
+  if flag {
+    kept = own text
+  }
+  log("{kept} {text}")  # ERROR: moved when flag
+}
+
+func nextPass(text: own String) {
+  var kept: String = "a"
+  loop var i: Int = 0, i < 2, ++i {
+    kept = own text  # ERROR: the next pass moves it again
+  }
+  log(kept)
+}
+
+func twiceAtOnce(text: own String) {
+  let both: Both = { first: own text, second: own text }  # ERROR
+  log(both.first)
+}
+
+func twoArguments(text: own String) {
+  log("{takeBoth(first: own text, second: own text)}")  # ERROR
+}
+
+func inCondition(text: own String) {
+  if takeText(text: own text) > 0 {
+    log(text)  # ERROR
+  }
+}
+
+func thenArgument(text: own String) {
+  let kept: String = own text
+  log("{takeText(text: own text)} {kept}")  # ERROR
+}
+
+func wholeList(names: own List(String)) {
+  var lists: List(List(String)) = {}
+  lists.add(value: own names)
+  log("{names.length}")  # ERROR
+}
+
+func wholeNumbers(numbers: own List(Int)) {
+  let kept: List(Int) = own numbers
+  log("{numbers.length} {kept.length}")  # ERROR
+}
+
+func task() {
+  let first: Task(Int) = spawn takeText(text: "t")
+  let second: Task(Int) = own first
+  let third: Task(Int) = own first  # ERROR
+  log("{second.get()} {third.get()}")
+}
+
+func main() {
+  binding(text: "a")
+  readAfter(names: List(String) { "a" })
+  literal(text: "a", names: {})
+  optional(text: "a")
+  assignment(text: "a")
+  var holder: Holder = { text: "a", names: {} }
+  intoField(text: "b", holder: holder)
+  element(text: "a")
+  onePath(text: "a", flag: true)
+  nextPass(text: "a")
+  twiceAtOnce(text: "a")
+  twoArguments(text: "a")
+  inCondition(text: "a")
+  thenArgument(text: "a")
+  wholeList(names: {})
+  wholeNumbers(numbers: {})
+  task()
+}

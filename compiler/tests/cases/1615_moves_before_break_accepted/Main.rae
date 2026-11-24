@@ -1,0 +1,112 @@
+# A value moved or dropped before `break` or `continue` reaches nothing after it in the pass
+type Handle {
+  name: String
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.name}")
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func dropped() {
+  loop var i: Int = 0, i < 4, ++i {
+    var handle: Handle = { name: "handle {i}" }
+    if i is 0 {
+      handle.drop()
+      continue
+    }
+    if i is 1 {
+      handle.drop()
+      break
+    }
+    log(handle.name)
+  }
+}
+
+func moved() ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < 4, ++i {
+    let text: String = "text {i}"
+    if i is 0 {
+      total = total + takeText(text: own text)
+      continue
+    }
+    if i is 3 {
+      total = total + takeText(text: own text)
+      break
+    }
+    total = total + text.length()
+  }
+  ret total
+}
+
+# The outer value is moved once, by the pass that leaves the loop
+func once(text: own String) ret Int {
+  loop var i: Int = 0, i < 4, ++i {
+    if i is 2 {
+      let kept: String = own text
+      log(kept)
+      break
+    }
+    log("{i} {text}")
+  }
+  ret 1
+}
+
+# Moved, and given a new value before the next pass
+func refilled(text: own String) {
+  var held: String = own text
+  loop var i: Int = 0, i < 3, ++i {
+    if i < 2 {
+      log("{takeText(text: own held)}")
+      held = "refilled {i}"
+      continue
+    }
+    log(held)
+  }
+}
+
+# A name of the body hides nothing outside of it
+func hidden(text: own String) {
+  loop var i: Int = 0, i < 2, ++i {
+    let text: String = "inner {i}"
+    if i is 1 {
+      let kept: String = own text
+      log(kept)
+      break
+    }
+  }
+  log(text)
+}
+
+func nested() {
+  let outer: List(String) = { "a {1}", "b {2}" }
+  loop let text: String in outer {
+    loop var i: Int = 0, i < 3, ++i {
+      let inner: String = "{text} {i}"
+      if i is 1 {
+        let kept: String = own inner
+        log(kept)
+        break
+      }
+      log(inner)
+    }
+    if text is "a 1" {
+      let kept: String = own text
+      log(kept)
+      continue
+    }
+    log(text)
+  }
+}
+
+func main() {
+  dropped()
+  log("{moved()} {once(text: "once {1}")}")
+  refilled(text: "start {1}")
+  hidden(text: "outer {1}")
+  nested()
+}

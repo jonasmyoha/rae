@@ -94,8 +94,8 @@ typedef struct {
   // reassignment release it only while the flag is set, so a drop inside one
   // branch is exactly-once on every path (sema forbids using it meanwhile).
   bool local_drop_flag[256];
-  // The argument values that moved a local into an `own` parameter while a
-  // specialization was emitted (sema_check_specialization_flow).
+  // The values that moved a local (an argument of an `own` parameter, `own x`
+  // anywhere) while a specialization was emitted (sema_check_specialization_flow).
   const AstExpr** moved_values;
   size_t moved_value_count;
   size_t moved_value_cap;
@@ -387,6 +387,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
+void c_record_moved_local(CFuncContext* ctx, const AstExpr* value);
 bool rest_moves_name_conditionally(const AstStmt* rest, Str name);
 void declare_param_live_flags(CFuncContext* ctx, const AstBlock* body, FILE* out);
 int local_index_by_name(const CFuncContext* ctx, Str name);

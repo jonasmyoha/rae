@@ -1,0 +1,40 @@
+# `own x` in a generic function, for a type argument that owns heap
+type Holder(T: type) {
+  value: T
+}
+
+func binding(T: type, value: own T) {
+  let kept: T = own value
+  let other: T = own value  # ERROR
+}
+
+func literal(T: type, value: own T, list: mod List(T)) {
+  let holder: Holder(T) = { value: own value }
+  list.add(value: own value)  # ERROR
+}
+
+func assignment(T: type, value: own T, list: mod List(T)) {
+  var kept: T = own value
+  if list.length is 0 {
+    list.add(value: own kept)
+  } else {
+    let other: T = own kept
+  }
+  list.add(value: own kept)  # ERROR
+}
+
+func wholeList(T: type, values: own List(T)) {
+  let kept: List(T) = own values
+  log("{values.length}")  # ERROR
+}
+
+func main() {
+  binding(String, value: "a")
+  binding(Int, value: 1)
+  var texts: List(String) = {}
+  literal(String, value: "b", list: texts)
+  assignment(value: "c", list: texts)
+  var numbers: List(Int) = {}
+  assignment(value: 2, list: numbers)
+  wholeList(Int, values: List(Int) { 1 })
+}

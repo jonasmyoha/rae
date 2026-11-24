@@ -1,0 +1,21 @@
+tests/cases/1616_moves_before_break_rejected/Main.rae:21:6: use of moved value 'text': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'text' a new value before using it again, or pass a copy (`"{text}"`, or a `copy T` parameter) if the caller needs it
+    21 |   log(text)  # ERROR: moved before the break
+       |      ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:26:8: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    26 |     log(text)  # ERROR: moved by the pass before
+       |        ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:28:26: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    28 |       let kept: String = own text
+       |                          ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:42:6: use of 'handle' after 'handle.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    42 |   log("{handle.id}")  # ERROR: dropped before the break
+       |      ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:47:22: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    47 |     if text.length() > 0 {
+       |                      ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:49:26: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    49 |       let kept: String = own text
+       |                          ^~~~
+tests/cases/1616_moves_before_break_rejected/Main.rae:60:28: use of moved value 'text': 'own text' moved it on a path reaching here; assign 'text' a new value before using it again, or leave out that 'own' to copy it
+    60 |         let kept: String = own text  # ERROR: the next pass of the outer loop
+       |                            ^~~~

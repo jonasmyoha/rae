@@ -397,12 +397,12 @@ static void exclusive_access_check(CFuncContext* ctx, const AstExpr* expr, const
     }
 }
 
-/* In a specialization: a local (bare, or `own x`) handed to the `own`
- * parameter `param` is moved. Recorded for the use-after-move check of the
- * body, which sema has not analyzed for these type arguments; the same rule
- * as its sema_check_own_args (an alias or a borrow is copied, not moved). */
-static void record_moved_argument(CFuncContext* ctx, const AstParam* param, const AstExpr* value) {
-  if (!ctx->generic_params || !param || !param->type || !param->type->is_own || !value) return;
+/* In a specialization: `value` (a bare local, or `own x`) moves a local that
+ * owns its value. Recorded for the use-after-move check of the body, which
+ * sema has not analyzed for these type arguments; the same rule as its
+ * sema_own_moves_local (an alias or a borrow is not moved). */
+void c_record_moved_local(CFuncContext* ctx, const AstExpr* value) {
+  if (!ctx->generic_params || !value) return;
   const AstExpr* moved = value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
   if (!moved || moved->kind != AST_EXPR_IDENT) return;
   int local = local_index_by_name(ctx, moved->as.ident);
@@ -413,7 +413,9 @@ static void record_moved_argument(CFuncContext* ctx, const AstParam* param, cons
   if (is_param && !type->is_own && !type->is_copy) return;
   if (ctx->generic_args)
     type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
-  if (type->is_view || type->is_mod || !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return;
+  if (type->is_view || type->is_mod) return;
+  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)
+      && !str_eq_cstr(get_base_type_name(type), "Task")) return;
   if (ctx->moved_value_count == ctx->moved_value_cap) {
     ctx->moved_value_cap = ctx->moved_value_cap ? ctx->moved_value_cap * 2 : 16;
     ctx->moved_values = realloc(ctx->moved_values, ctx->moved_value_cap * sizeof *ctx->moved_values);
@@ -1524,7 +1526,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // loadImageKey(k) leaked one string per call). An extern that
             // genuinely consumes its arg must opt in with `own`.
             bool param_consumes = !(fd->is_extern) || p->type->is_own;
-            record_moved_argument(ctx, p, a->value);
+            if (p && p->type && p->type->is_own) c_record_moved_local(ctx, a->value);
             bool close_live_flag = false;
             if (param_consumes
                 && p && p->type && !(p->type->is_view || p->type->is_mod)

@@ -1,0 +1,73 @@
+# ...but it is gone after the loop it broke out of, and at the next pass
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.id}")
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func afterBreak(text: own String) {
+  loop var i: Int = 0, i < 2, ++i {
+    if i is 1 {
+      log("{takeText(text: own text)}")
+      break
+    }
+  }
+  log(text)  # ERROR: moved before the break
+}
+
+func afterContinue(text: own String) {
+  loop var i: Int = 0, i < 2, ++i {
+    log(text)  # ERROR: moved by the pass before
+    if i is 0 {
+      let kept: String = own text
+      continue
+    }
+  }
+}
+
+func dropped() {
+  var handle: Handle = { id: 1 }
+  loop var i: Int = 0, i < 2, ++i {
+    if i is 1 {
+      handle.drop()
+      break
+    }
+  }
+  log("{handle.id}")  # ERROR: dropped before the break
+}
+
+func endless(text: own String) {
+  loop true {
+    if text.length() > 0 {
+      # ERROR: the next pass
+      let kept: String = own text
+      continue
+    }
+    break
+  }
+}
+
+func inner(text: own String) {
+  loop var i: Int = 0, i < 2, ++i {
+    loop var j: Int = 0, j < 2, ++j {
+      if j is 1 {
+        let kept: String = own text  # ERROR: the next pass of the outer loop
+        break
+      }
+    }
+  }
+}
+
+func main() {
+  afterBreak(text: "a")
+  afterContinue(text: "a")
+  dropped()
+  endless(text: "a")
+  inner(text: "a")
+}

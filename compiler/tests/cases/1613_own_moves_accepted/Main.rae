@@ -1,0 +1,164 @@
+# `own x` forms that leave nothing to use: assigned again, another path, another binding of the name
+type Holder {
+  text: String
+  names: List(String)
+}
+
+func makeText(n: view Int) ret String {
+  ret "text {n}"
+}
+
+func takeText(text: own String) ret Int {
+  ret text.length()
+}
+
+func swap(first: own String, second: own String) {
+  var left: String = own first
+  var right: String = own second
+  var temporary: String = own left
+  left = own right
+  right = own temporary
+  log("{left} {right}")
+  # the moved one gets a new value
+  temporary = "new {1}"
+  log(temporary)
+}
+
+func swapFields(one: mod Holder, two: mod Holder) {
+  var temporary: String = own one.text
+  one.text = own two.text
+  two.text = own temporary
+}
+
+func paths(text: own String, flag: view Bool) ret String {
+  if flag {
+    let kept: String = own text
+    ret kept
+  }
+  var other: String = own text
+  other = "{other} kept"
+  ret other
+}
+
+func branches(text: own String, flag: view Bool, holder: mod Holder) {
+  if flag {
+    holder.text = own text
+  } else {
+    holder.names.add(value: own text)
+  }
+}
+
+# Only one arm runs
+func arms(text: own String, kind: view Int) ret Int {
+  let chosen: Int = match kind { case 1 => takeText(text: own text), case 2 => takeText(
+    text: own text
+  ) + 10, default => 0 }
+  ret chosen
+}
+
+# An inner binding of the same name is another value
+func shadowed(flag: view Bool) {
+  let text: String = "outer {flag}"
+  if flag {
+    let text: String = "inner {flag}"
+    let kept: String = own text
+    log(kept)
+  }
+  loop let text: String in List(String) { "element {1}", "element {2}" } {
+    let kept: String = own text
+    log(kept)
+  }
+  if let text: String = maybeText(n: 3) {
+    log("{takeText(text: own text)}")
+  }
+  log(text)
+}
+
+func maybeText(n: view Int) ret opt String {
+  ret "maybe {n}"
+}
+
+# A borrow is not moved: `own` of a `mod` place empties it, a view is copied
+func throughMod(text: mod String) {
+  let kept: String = own text
+  log("{kept} [{text}]")
+  text = "filled {2}"
+}
+
+func numbers(count: own Int) ret Int {
+  let first: Int = own count
+  let second: Int = own count
+  ret first + second
+}
+
+func eachPass() ret Int {
+  var total: Int = 0
+  var held: String = "held {0}"
+  loop var i: Int = 0, i < 3, ++i {
+    let kept: String = own held
+    total = total + kept.length()
+    held = makeText(n: i)
+  }
+  ret total + held.length()
+}
+
+func literals() {
+  let text: String = makeText(n: 4)
+  let names: List(String) = { own text, "b {5}" }
+  let holder: Holder = { text: "holder {6}", names: own names }
+  let holders: List(Holder) = { own holder }
+  log("{holders}")
+}
+
+func generic(
+  T: type
+  value: own T
+  next: own T
+  list: mod List(T)
+) {
+  var held: T = own value
+  list.add(value: held)
+  held = own next
+  let kept: T = own held
+  list.add(value: own kept)
+}
+
+func genericNumbers(T: type, value: own T) ret T {
+  let first: T = own value
+  let second: T = own value
+  ret first + second
+}
+
+func tasks() {
+  let first: Task(Int) = spawn takeText(text: "task {7}")
+  let second: Task(Int) = own first
+  log("{second.get()}")
+}
+
+func main() {
+  swap(first: "left {1}", second: "right {2}")
+  var one: Holder = { text: "one {1}", names: {} }
+  var two: Holder = { text: "two {2}", names: {} }
+  swapFields(one: one, two: two)
+  log("{one.text} {two.text}")
+  log("{paths(text: "a {1}", flag: true)} {paths(text: "b {2}", flag: false)}")
+  branches(text: "c {3}", flag: true, holder: one)
+  branches(text: "d {4}", flag: false, holder: one)
+  log("{one}")
+  log("{arms(text: "e {5}", kind: 1)} {arms(text: "f {6}", kind: 3)}")
+  shadowed(flag: true)
+  var place: String = "place {1}"
+  throughMod(text: place)
+  log(place)
+  log("{numbers(count: 4)} {eachPass()}")
+  literals()
+  var texts: List(String) = {}
+  generic(
+    String
+    value: "g {1}"
+    next: "h {2}"
+    list: texts
+  )
+  log("{texts} {genericNumbers(Int, value: 5)}")
+  tasks()
+}

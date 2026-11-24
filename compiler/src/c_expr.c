@@ -1829,6 +1829,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     emit_type_ref_as_c_type(ctx, &value_type, out, false);
                     fprintf(out, "* __rae_mvp%d = ", mvn);
                     emit_expr(ctx, place, out, PREC_LOWEST, false, true);
+                    /* a `mod String` is a wrapper around the pointer */
+                    if (c_primitive_ref_has_wrapper(get_base_type_name(ptr))) fprintf(out, ".ptr");
                     fprintf(out, "; ");
                     emit_type_ref_as_c_type(ctx, &value_type, out, false);
                     fprintf(out, " __rae_mv%d = *__rae_mvp%d; memset(__rae_mvp%d, 0, sizeof(*__rae_mvp%d)); __rae_mv%d; }))",
@@ -1838,6 +1840,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
         }
         {
+            c_record_moved_local(ctx, expr);
             // A local moved on some paths only clears its live flag as the
             // move is evaluated (#55453128); every other local is marked moved.
             const AstExpr* moved = expr->as.unary.operand;
