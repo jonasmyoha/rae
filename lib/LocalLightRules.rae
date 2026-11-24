@@ -1,0 +1,79 @@
+# LocalLightRules — the spot and point lights of a frame as plain values
+# (lib/LocalLights draws them): the sphere a light's reach fits in, and which
+# lights a frame draws when there are more than it can. Pure, tested by case
+# 1587.
+import Math
+open Vec3
+open Scene3d
+
+# A light that lights what is near it: a spot when `outerCosine` is over -1
+# (the cone's half-angle), else a point light. `color` is its intensity in
+# candela (what it sends along its middle), `range` where it has faded to
+# nothing (m). It casts no shadow.
+type LocalLight {
+  position: Vec3
+  direction: Vec3 = Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+  color: Vec3 = Vec3.create(x: 1000.0, y: 1000.0, z: 1000.0)
+  range: Float = 10.0
+  # the cone's edge, and from where inward it is full
+  outerCosine: Float = -1.0
+  innerCosine: Float = -1.0
+}
+
+# A sphere
+type LocalLightBounds {
+  center: Vec3
+  radius: Float
+}
+
+# The most lights a frame draws (local_lights.wgsl)
+const localLightsMost: Int = 32
+
+# The smallest sphere round all a light reaches
+func localLightBounds(light: view LocalLight) ret LocalLightBounds {
+  let cosine: Float = light.outerCosine
+  if cosine <= 0.0 {
+    ret LocalLightBounds { center: light.position, radius: light.range }
+  }
+  # a narrow cone: the sphere through its tip and its far rim; a wide one: its far rim's
+  var along: Float = light.range * cosine
+  var radius: Float = light.range * Math.sqrt(x: Math.max(a: 1.0 - cosine * cosine, b: 0.0))
+  if cosine > 0.70711 {
+    radius = light.range / (2.0 * cosine)
+    along = radius
+  }
+  ret LocalLightBounds {
+    center: Vec3.vadd(a: light.position, b: Vec3.vscale(a: light.direction, s: along))
+    radius: radius
+  }
+}
+
+# How far from the eye a light's reach begins (m; negative inside it)
+func localLightDistance(light: view LocalLight, eye: view Vec3) ret Float {
+  let bounds: LocalLightBounds = localLightBounds(light: light)
+  ret Vec3.vlen(a: Vec3.vsub(a: bounds.center, b: eye)) - bounds.radius
+}
+
+# The lights a frame draws: all of them, or the localLightsMost whose reach begins nearest to the
+# eye
+func localLightsChosen(lights: view List(LocalLight), eye: view Vec3) ret List(LocalLight) {
+  var chosen: List(LocalLight) = {}
+  var distances: List(Float) = {}
+  loop let light: view LocalLight in lights {
+    let distance: Float = localLightDistance(light: light, eye: eye)
+    var at: Int = chosen.length
+    loop at > 0 and distances.copyAtFallback(index: at - 1, fallback: 0.0) > distance {
+      at = at - 1
+    }
+    if at >= localLightsMost {
+      continue
+    }
+    chosen.insert(index: at, value: light)
+    distances.insert(index: at, value: distance)
+    if chosen.length > localLightsMost {
+      chosen.removeAt(index: chosen.length - 1)
+      distances.removeAt(index: distances.length - 1)
+    }
+  }
+  ret chosen
+}

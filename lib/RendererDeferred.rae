@@ -53,6 +53,8 @@ open RendererDeferredShadow
 open Sky
 open CloudTier
 open CloudBakeRules
+open LocalLights
+open LocalLightRules
 open Shadow3d
 open ShadowMaps
 open ShadowMapsRecords
@@ -634,6 +636,13 @@ func renderDeferredPassWith(
       light: light
       sky: sky
     )
+    localLightsPass(
+      localLights: renderer.passes.localLights
+      resources: resources
+      targets: renderer.passes.targets
+      gbuffer: renderer.passes.gbuffer
+      camera: camera
+    )
   }
   if tag is RenderTag.taa {
     taaPass(
@@ -870,6 +879,12 @@ func setCloudTier(renderer: mod DeferredRenderer, tier: view CloudTier) {
 # The volumetric tier's march steps: more is smoother and dearer
 func setCloudSteps(renderer: mod DeferredRenderer, steps: view Int) {
   renderer.cloudSteps = steps
+}
+
+# The frame's spot and point lights (lib/LocalLights), kept until set again;
+# an empty list: none
+func setLocalLights(renderer: mod DeferredRenderer, lights: own List(LocalLight)) {
+  renderer.passes.localLights.lights = own lights
 }
 
 # The volumetric clouds from a baked map of the sky, baked again now and then

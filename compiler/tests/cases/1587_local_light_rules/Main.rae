@@ -1,0 +1,36 @@
+# The local lights' rules (lib/LocalLightRules): the sphere a point light, a
+# narrow and a wide cone fit in, and the lights a frame keeps when there are
+# more than it draws: those whose reach begins nearest to the eye, in order.
+import Vec3
+open LocalLightRules
+open Scene3d
+
+func main() {
+  let origin: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  let lamp: LocalLight = { position: origin, range: 8.0 }
+  let point: LocalLightBounds = localLightBounds(light: lamp)
+  log("point: {point.center.x} radius {point.radius}")
+  let head: LocalLight = { position: origin, range: 40.0, outerCosine: 0.8, innerCosine: 0.9 }
+  let narrow: LocalLightBounds = localLightBounds(light: head)
+  log("narrow cone: {narrow.center.x} radius {narrow.radius}")
+  let flood: LocalLight = { position: origin, range: 10.0, outerCosine: 0.6, innerCosine: 0.7 }
+  let wide: LocalLightBounds = localLightBounds(light: flood)
+  log("wide cone: {wide.center.x} radius {wide.radius}")
+  var lights: List(LocalLight) = {}
+  loop var i: Int = 0, i < 40, ++i {
+    lights.add(
+      value: LocalLight {
+        position: Vec3.create(x: 400.0 - (i * 10).toFloat(), y: 0.0, z: 0.0)
+        range: 5.0
+      }
+    )
+  }
+  let chosen: List(LocalLight) = localLightsChosen(lights: lights, eye: origin)
+  let nearest: LocalLight = chosen.copyAtFallback(index: 0, fallback: lamp)
+  let last: LocalLight = chosen.copyAtFallback(index: chosen.length - 1, fallback: lamp)
+  log(
+    "of {lights.length}: {chosen.length}, the nearest at {nearest.position.x} m, the last at {last.position.x} m"
+  )
+  let few: List(LocalLight) = localLightsChosen(lights: { head, lamp }, eye: origin)
+  log("two: {few.length}")
+}

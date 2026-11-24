@@ -13,6 +13,7 @@ open Gbuffer
 open ShadowMaps
 open Shadow3d
 open ForwardMain
+open LocalLights
 
 # The Rae-side deferred-pass caches, aggregated. Fields hold each pass's "have I
 # built the pipeline/bind, and at which target generation" state — one struct so
@@ -38,6 +39,8 @@ type RenderPasses {
   # and the lighting pass
   forward: ForwardMainCache
   forwardMain: Bool
+  # The frame's spot and point lights (LocalLights)
+  localLights: LocalLights = LocalLights {}
 }
 
 func createRenderPasses() ret RenderPasses {

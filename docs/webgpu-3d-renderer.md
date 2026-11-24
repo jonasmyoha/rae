@@ -170,6 +170,14 @@ spans.
 
 - **Lighting** — clustered forward; PBR metal/rough (or a cheaper mobile lit
   model as a tier). Punctual lights (dir/point/spot) + image-based ambient.
+  - Built (2026-11-24): **local lights** in the deferred renderer, spots and
+    points in candela (`lib/LocalLights`, `setLocalLights`; rules in
+    `lib/LocalLightRules`, case 1587). One additive pass after the sun's
+    lighting draws a quad a light over the screen rectangle of its reach and
+    shades the G-buffer there; no pass without lights. At most 32 a frame, the
+    nearest to the eye. No shadows; water, glass, particles and the forward
+    renderer do not see them. Four headlights and backlights of a car filling
+    the view cost about 0.05 ms on a Mac at 2560 x 1600.
 - **Shadows** — cascaded shadow maps for the sun; atlas for local lights; PCF
   soft edges. Mobile tier: one cascade or baked.
 - **Antialiasing** — primary target **MSAA** in the forward pass (cheap-ish on

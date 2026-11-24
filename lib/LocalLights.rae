@@ -1,0 +1,221 @@
+# LocalLights — spot and point lights over the deferred frame (rules in
+# lib/LocalLightRules): headlights, lamps, a fire. An app sets the frame's
+# lights (setLocalLights, RendererDeferred) in candela; right after the sun's
+# lighting one additive pass draws a quad a light over the screen rectangle of
+# its reach and shades the G-buffer's surfaces there (lib/local_lights.wgsl). A
+# frame without lights has no pass and costs nothing.
+#
+# They cast no shadows, and what is drawn forward over the lit frame (water,
+# glass, particles) does not see them. The forward renderer has none.
+import Math
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuRenderPass
+open gpu/GpuIds
+open gpu/GpuTextures
+open gpu/GpuArgs
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open Vec3
+open Scene3d
+open Gbuffer
+open GbufferResources
+open GbufferPasses
+open GbufferTargets
+open GbufferFullscreen
+open LocalLightRules
+
+# A light's record in the uniform (floats), as local_lights.wgsl LocalLightU
+const localLightFloats: Int = 16
+
+type LocalLights {
+  # The frame's lights, as the app set them, and how many the last pass drew
+  lights: List(LocalLight) = {}
+  drawn: Int = 0
+  pipeline: RenderPipelineId = noRenderPipelineId()
+  uniform: BufferId = noBufferId()
+  bind: BindGroupId = noBindGroupId()
+  # the targets the bind reads
+  boundGen: Int = -1
+  boundFormat: Int32 = 0
+}
+
+func localLightsUpload(
+  localLights: mod LocalLights
+  resources: mod GpuResources
+  chosen: view List(LocalLight)
+) {
+  var writer: ArgWriter = createArgs(uniform: true)
+  loop let light: view LocalLight in chosen {
+    let bounds: LocalLightBounds = localLightBounds(light: light)
+    pushVec4F(
+      writer: writer
+      x: light.position.x
+      y: light.position.y
+      z: light.position.z
+      w: light.range
+    )
+    pushVec4F(
+      writer: writer
+      x: light.direction.x
+      y: light.direction.y
+      z: light.direction.z
+      w: light.outerCosine
+    )
+    pushVec4F(
+      writer: writer
+      x: light.color.x
+      y: light.color.y
+      z: light.color.z
+      w: light.innerCosine
+    )
+    pushVec4F(
+      writer: writer
+      x: bounds.center.x
+      y: bounds.center.y
+      z: bounds.center.z
+      w: bounds.radius
+    )
+  }
+  let uploaded: Bool = uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: localLights.uniform
+    offset: 0
+  )
+}
+
+# The pipeline, the uniform and the bind, made once and again for new targets;
+# false while they cannot be made
+func ensureLocalLights(
+  localLights: mod LocalLights
+  resources: mod GpuResources
+  targets: view DeferredTargets
+  gbuffer: view GbufferCache
+) ret Bool {
+  if not isValidBuffer(resources: resources, id: localLights.uniform) {
+    if let made: BufferId = createBuffer(
+      resources: resources
+      size: localLightsMost * localLightFloats * 4
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      localLights.uniform = made
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: localLights.pipeline) or localLights.boundFormat is not targets.litFormat {
+    let retired: Bool = retireRenderPipeline(resources: resources, id: localLights.pipeline)
+    localLights.pipeline = noRenderPipelineId()
+    let lightShader: Shader = shader(
+      files: ["lib/gbuffer_octahedral.wgsl", "lib/deferred_uniforms.wgsl", "lib/local_lights.wgsl"]
+    )
+    # premultiplied with an alpha of 0: added
+    var spec: RenderPipelineSpec = fullscreenPipelineSpec(format: targets.litFormat)
+    spec.alphaBlend = true
+    spec.premultiplied = true
+    if let made: RenderPipelineId = createRenderPipeline(
+      resources: resources
+      shader: lightShader
+      vertexEntry: "vs"
+      fragmentEntry: "fs"
+      spec: spec
+    ) {
+      localLights.pipeline = made
+    }
+    localLights.boundFormat = targets.litFormat
+    localLights.boundGen = -1
+  }
+  if localLights.boundGen is not targets.gen or not bindGroupIsUsable(
+    resources: resources
+    id: localLights.bind
+  ) {
+    let retired: Bool = retireBindGroup(resources: resources, id: localLights.bind)
+    localLights.bind = noBindGroupId()
+    localLights.boundGen = targets.gen
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 6)
+    entries.add(value: bufferRef(id: targets.lightUniform))
+    entries.add(value: bufferRef(id: localLights.uniform))
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetA))
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetB))
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetC))
+    entries.add(value: gbufferTargetRef(cache: gbuffer, index: gbufferTargetDepth))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: localLights.pipeline
+      entries: entries
+    ) {
+      localLights.bind = bind
+    }
+  }
+  ret bindGroupIsUsable(resources: resources, id: localLights.bind)
+}
+
+# The frame's lights onto the lit target, right after the sun's lighting
+func localLightsPass(
+  localLights: mod LocalLights
+  resources: mod GpuResources
+  targets: mod DeferredTargets
+  gbuffer: view GbufferCache
+  camera: view Camera3d
+) {
+  localLights.drawn = 0
+  if localLights.lights.length is 0 or not postPassReady(
+    targets: targets
+    resources: resources
+    gbuffer: gbuffer
+  ) {
+    ret
+  }
+  if not ensureLocalLights(
+    localLights: localLights
+    resources: resources
+    targets: targets
+    gbuffer: gbuffer
+  ) {
+    ret
+  }
+  let chosen: List(LocalLight) = localLightsChosen(lights: localLights.lights, eye: camera.position)
+  localLightsUpload(localLights: localLights, resources: resources, chosen: chosen)
+  localLights.drawn = chosen.length
+  unsafe {
+    let encoder: Ptr = postEncoder(targets: targets, resources: resources)
+    let lit: Ptr = textureViewHandle(resources: resources, id: targets.litView)
+    if encoder is webgpuNull() or lit is webgpuNull() {
+      ret
+    }
+    var atts: List(WGPURenderPassColorAttachment) = List.create(
+      WGPURenderPassColorAttachment
+      cap: 1
+    )
+    atts.add(
+      value: {
+        view_: lit
+        depthSlice: WGPU_DEPTH_SLICE_UNDEFINED as UInt32
+        loadOp: WGPULoadOp_Load
+        storeOp: WGPUStoreOp_Store
+      }
+    )
+    let descriptor: WGPURenderPassDescriptor = {
+      colorAttachmentCount: 1
+      colorAttachments: atts.data
+    }
+    let pass: Ptr = wgpuCommandEncoderBeginRenderPass(
+      commandEncoder: encoder
+      descriptor: descriptor
+    )
+    let recorded: Bool = recordDrawInPass(
+      resources: resources
+      pass: pass
+      pipeline: localLights.pipeline
+      bindGroup: localLights.bind
+      vertexCount: 6
+      instanceCount: chosen.length
+      firstVertex: 0
+      firstInstance: 0
+    )
+    wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
+    wgpuRenderPassEncoderRelease(renderPassEncoder: pass)
+  }
+}
