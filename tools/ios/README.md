@@ -173,6 +173,34 @@ docs/local-notifications.md):
   new one" must ring 45 s after the start, and no line starting with WRONG.
   The screen is gray until the answer, green for yes, red for no.
 
+## The app's log
+
+A phone app has no visible stdout, so `tools/device_log.c` sends stdout and stderr
+to files in the app's Documents folder:
+
+| file | what |
+|---|---|
+| `rae.log` | this run (or the last, when the app is not running) |
+| `rae.previous.log`, `rae.previous2.log`, `rae.previous3.log` | the runs before it: a start renames, so a crashed run's log is there after the next start |
+| `rae.earlier.log` | this run's earlier part, once `rae.log` reached 4 MB |
+| `rae.previous.earlier.log` | the same of the run before |
+
+    xcrun devicectl device copy from --device <id> --domain-type appDataContainer \
+      --domain-identifier <bundle id> --source Documents/rae.previous.log --destination previous.log
+
+Every line begins with its local time to the millisecond (`12:26:22.364 `), also
+wgpu's, a Rust panic's and the crash handler's. The first lines say the date and time
+zone, the app's version, build and commit, the binary's UUID (as the system's crash
+and GPU reports name it), the Rae that built it, the device and its iOS. The commit is
+the project's git repo's (`RAE_APP_COMMIT` sets another; `+`: changed files).
+
+A line that was printed is in the file when the print returns, so a SIGKILL loses
+nothing that was printed; only what writes to descriptor 2 itself (a Rust panic, NSLog)
+goes through a pipe, which a crash empties before it ends. An app that owns an
+`app3d/Heartbeat` adds a `[beat]` line each 5 s: frame, frames a second, memory, thermal
+state and the camera's place (`RAE_HEARTBEAT=1` asks for it on a desktop).
+`bash tools/device-log-test.sh` tests all of the log file on the Mac.
+
 ## Profile on a device
 
     APP=<bundle id> PLACES="name|x y" AT_ENV=<the app's start-spot variable> \
@@ -185,7 +213,8 @@ there. The GPU slots in it are not costs: docs/profiling.md, "What to trust".
 
 One run per place with GPU pass and frame timing on (the app's
 app3d/FrameLog `[frames]` lines among them), cooling between runs if asked,
-each log copied off the phone and summarized (median and 95th percentile
+each log copied off the phone (as `<place>.log.times`, and without the lines' times as
+`<place>.log`) and summarized (median and 95th percentile
 frame time, frames over budget, scales, thermal states, GPU passes, CPU
 time; SUMMARY_FIRST / SUMMARY_MIDDLE add lines of the app's own).
 `SUMMARY_ONLY=1` summarizes logs already copied. The script's head lists

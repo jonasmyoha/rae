@@ -92,6 +92,17 @@ static int rae_fault_is_stack_overflow(int sig, siginfo_t* info, void* uctx) {
   return 0;
 }
 
+/* Called last by the crash handler, when set: an app on a phone logs through a
+ * pipe (tools/device_log.c) and reads what is left in it here. It must be
+ * async-signal-safe. */
+void (*rae_crash_last_call)(void) = NULL;
+
+/* Ends the process from the crash handler */
+static void rae_crash_exit(int sig) {
+  if (rae_crash_last_call) rae_crash_last_call();
+  _exit(128 + sig);
+}
+
 /* Async-signal-safe: write(2) only, strings precomputed or constant. */
 static void rae_crash_write(const char* s) { if (s) write(STDERR_FILENO, s, strlen(s)); }
 
@@ -168,7 +179,7 @@ static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
     rae_crash_write("rae: stack overflow (deep recursion?) in ");
     rae_crash_write(g_rae_program_name);
     rae_crash_write("\n");
-    _exit(128 + sig);
+    rae_crash_exit(sig);
   }
   const char* name = "signal";
   switch (sig) {
@@ -211,7 +222,7 @@ static void rae_crash_handler(int sig, siginfo_t* info, void* uctx) {
    * supervisor sees a non-zero status and can restart. On macOS,
    * `raise(sig)` after restoring SIG_DFL doesn't reliably terminate for
    * synchronously-delivered SIGSEGV/SIGBUS, so we just `_exit` here. */
-  _exit(128 + sig);
+  rae_crash_exit(sig);
 }
 
 /* Every spawned worker calls this first (the emitted spawn thunk): the

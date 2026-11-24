@@ -88,7 +88,11 @@ missing), `RAE_ANDROID_API` (the oldest Android, default 28 = Android 9) and
   `lib/app3d/scenes`, `lib/ui/fileBrowser/scenes`, the WGSL), and other examples' assets that the C names.
 - `android_bootstrap.c` is the C entry SDL calls (`SDL_main`). The app's own
   `main` is compiled as `rae_android_app_main`. The bootstrap:
-  1. sends stdout and stderr to logcat;
+  1. sends stdout and stderr to logcat, and to `rae.log` in the app's external
+     files folder, each line with its time, with the last runs' logs beside it
+     (`tools/device_log.c`; the files are those of tools/ios/README.md, "The
+     app's log"): logcat drops old lines. To get them:
+     `adb pull /sdcard/Android/data/<package>/files/rae.previous.log`;
   2. sets the `raeEnv` variables;
   3. copies the APK's assets into the app's internal storage, once for each
      build of the APK (Rae reads files with `fopen`; an APK's assets are not

@@ -106,6 +106,10 @@ copy_log() {
   for try in 1 2 3; do
     if device copy from --device "$DEVICE" --domain-type appDataContainer \
       --domain-identifier "$APP" --source Documents/rae.log --destination "$1" > "$1.copy.txt" 2>&1; then
+      # The summary takes lines by their start: without the times. The log as it was stays
+      # beside it.
+      cp "$1" "$1.times"
+      sed -E 's/^[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} //' "$1.times" > "$1"
       [ "$try" -gt 1 ] && echo "   the log copied on try $try"
       return 0
     fi

@@ -67,7 +67,7 @@ for _ in $(seq 1 60); do
   if [ -f "$log" ] && grep -qE 'STOREKIT OK|FAIL' "$log"; then break; fi
   sleep 1
 done
-[ -f "$log" ] && grep -v '^@@' "$log"
+[ -f "$log" ] && grep -vE '^([0-9:.]+ )?@@' "$log"
 if [ -f "$log" ] && grep -q 'STOREKIT OK' "$log" && ! grep -q 'FAIL' "$log"; then
   echo "storeKit simulator: PASSED"
   exit 0

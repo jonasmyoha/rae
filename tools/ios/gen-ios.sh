@@ -75,6 +75,12 @@ extra_plist=""
 if [ "${RAE_IOS_EXEMPT_ENCRYPTION:-0}" = "1" ]; then
   extra_plist='<key>ITSAppUsesNonExemptEncryption</key><false/>'
 fi
+# What the log's first lines say is running (ios_bootstrap.c): the Rae that
+# built the app, and the app's own commit (tools/app-commit.sh).
+rae_version=$(sh "$root/tools/app-commit.sh" rae)
+app_commit=$(sh "$root/tools/app-commit.sh" app "$ex_dir")
+extra_plist="$extra_plist<key>RaeVersion</key><string>$rae_version</string>"
+extra_plist="$extra_plist<key>RaeAppCommit</key><string>$app_commit</string>"
 # RAE_IOS_HIGH_REFRESH=1 lets the app present above 60 Hz on a ProMotion
 # iPhone (CADisableMinimumFrameDurationOnPhone): iOS otherwise holds every
 # app to 60. Off by default (it costs battery); used to measure GPU headroom
@@ -402,6 +408,7 @@ add_executable(\${APP} MACOSX_BUNDLE
   "$gen/app_ios.c"
   "$runtime_dir/rae_runtime.c"
   "$here/ios_bootstrap.c"
+  "$root/tools/device_log.c"
   "$gen/privacy/PrivacyInfo.xcprivacy"
 $(printf "%b" "$box3d_sources")$(printf "%b" "$icon_source")$(printf "%b" "$asset_lines"))
 

@@ -4,9 +4,11 @@
  * calls SDL_main on its own thread. The app's emitted C is compiled with
  * `-Dmain=rae_android_app_main`, so this file's SDL_main runs first:
  *
- *   1. stdout and stderr go to logcat (tag "rae"): an Android app's stdout
- *      is /dev/null, and the app's log is how a run is read (`adb logcat
- *      -s rae`);
+ *   1. stdout and stderr go to logcat (tag "rae", which has its own times): an
+ *      Android app's stdout is /dev/null, and the app's log is how a run is
+ *      read (`adb logcat -s rae`); and, each line with its time, to rae.log in
+ *      the app's external files folder (tools/device_log.c), with the last
+ *      runs' logs beside it: logcat drops old lines;
  *   2. the launch intent's "raeEnv" extra sets environment variables
  *      (`am start ... --es raeEnv "RAE_WALKER_PHYSICS_TEST=1 RAE_X=2"`), the
  *      way a desktop run sets them on the command line;
@@ -20,52 +22,50 @@
  * then the app's main runs, and its exit code is logged as
  * "@@RAE_APP_EXIT@@ code=N" (what tools/android/run-android.sh waits for).
  */
+#include "../device_log.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <android/log.h>
 #include <jni.h>
 #include <errno.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/system_properties.h>
 #include <unistd.h>
 
 int rae_android_app_main(int argc, char** argv);
 
-static int rae_android_log_pipe[2];
-
-static void* rae_android_log_thread(void* unused) {
-  (void)unused;
-  char line[2048];
-  size_t used = 0;
-  for (;;) {
-    char chunk[512];
-    ssize_t got = read(rae_android_log_pipe[0], chunk, sizeof(chunk));
-    if (got <= 0) break;
-    for (ssize_t i = 0; i < got; i++) {
-      char c = chunk[i];
-      if (c == '\n' || used == sizeof(line) - 1) {
-        line[used] = 0;
-        __android_log_write(ANDROID_LOG_INFO, "rae", line);
-        used = 0;
-        if (c == '\n') continue;
-      }
-      line[used++] = c;
-    }
-  }
-  return NULL;
+static void rae_android_logcat_line(const char* text) {
+  __android_log_write(ANDROID_LOG_INFO, "rae", text);
 }
 
-static void rae_android_log_to_logcat(void) {
-  if (pipe(rae_android_log_pipe) != 0) return;
-  setvbuf(stdout, NULL, _IOLBF, 0);
-  setvbuf(stderr, NULL, _IONBF, 0);
-  dup2(rae_android_log_pipe[1], STDOUT_FILENO);
-  dup2(rae_android_log_pipe[1], STDERR_FILENO);
-  pthread_t thread;
-  if (pthread_create(&thread, NULL, rae_android_log_thread, NULL) == 0) pthread_detach(thread);
+static const char* rae_android_property(const char* name, char out[PROP_VALUE_MAX]) {
+  if (__system_property_get(name, out) <= 0) snprintf(out, PROP_VALUE_MAX, "unknown");
+  return out;
+}
+
+/* The external files folder (/sdcard/Android/data/<package>/files): adb reads
+ * it without the app being debuggable. Internal storage without one. */
+static void rae_android_start_log(void) {
+  const char* folder = SDL_GetAndroidExternalStoragePath();
+  if (!folder || !*folder || !device_log_start(folder, rae_android_logcat_line)) {
+    device_log_start(SDL_GetAndroidInternalStoragePath(), rae_android_logcat_line);
+  }
+  /* What was built: gen-android.sh's lines, packed last into the APK */
+  char lines[1024];
+  size_t size = 0;
+  char* built = (char*)SDL_LoadFile("raeRun.txt", &size);
+  char maker[PROP_VALUE_MAX], model[PROP_VALUE_MAX], release[PROP_VALUE_MAX], build[PROP_VALUE_MAX];
+  snprintf(lines, sizeof(lines), "%.*s[run] device %s %s, Android %s (%s), process %d\n",
+           built ? (int)size : 0, built ? built : "", rae_android_property("ro.product.manufacturer", maker),
+           rae_android_property("ro.product.model", model),
+           rae_android_property("ro.build.version.release", release),
+           rae_android_property("ro.build.id", build), (int)getpid());
+  SDL_free(built);
+  device_log_identity(lines);
 }
 
 /* The launch intent's "raeEnv" extra: KEY=VALUE pairs separated by spaces */
@@ -161,7 +161,7 @@ static int rae_android_unpack(const char* bundle) {
 }
 
 int SDL_main(int argc, char** argv) {
-  rae_android_log_to_logcat();
+  rae_android_start_log();
   rae_android_env_from_intent();
   const char* internal = SDL_GetAndroidInternalStoragePath();
   if (internal && *internal) {

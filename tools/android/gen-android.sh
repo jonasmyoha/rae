@@ -92,7 +92,7 @@ echo "gen-android: $(($(wc -l < "$gen/apk/assets/raeAssets.txt") - 1)) files to 
 #    wgpu-native. Objects compile in parallel.
 cflags="-std=c11 -fPIC -O2 -w -ffp-contract=off -g -DRAE_HAS_SDL3 -DRAE_HAS_WEBGPU
   -I$runtime_dir -I$deps/sdl3/include -I$deps/wgpu/include"
-sources="$gen/app.c $runtime_dir/rae_runtime.c $here/android_bootstrap.c"
+sources="$gen/app.c $runtime_dir/rae_runtime.c $here/android_bootstrap.c $root/tools/device_log.c"
 if grep -q 'box3d/box3d.h' "$gen/app.c"; then
   . "$root/tools/box3d/pin"
   box3d_cache=${RAE_BOX3D_CACHE:-$HOME/.cache/rae/box3d}
@@ -148,12 +148,21 @@ printf '%s\n' $sources | xargs -P "$jobs" -n 1 sh -c '
   $cc $cflags $extra -c "$source" -o "$object" || { echo "gen-android: $source failed" >&2; exit 255; }'
 "$cc" -shared -o "$gen/apk/lib/arm64-v8a/libmain.so" "$gen"/objects/*.o \
   -L"$deps/sdl3/lib" -lSDL3 "$deps/wgpu/lib/libwgpu_native.a" \
-  -llog -landroid -lm -ldl -Wl,-z,max-page-size=16384 -Wl,--no-undefined
+  -llog -landroid -lm -ldl -Wl,-z,max-page-size=16384 -Wl,--no-undefined -Wl,--build-id=sha1
 cp "$deps/sdl3/lib/libSDL3.so" "$gen/apk/lib/arm64-v8a/"
 "$toolchain/bin/llvm-strip" --strip-debug "$gen/apk/lib/arm64-v8a/libmain.so" -o "$gen/apk/lib/arm64-v8a/libmain.so.stripped"
 mv "$gen/apk/lib/arm64-v8a/libmain.so.stripped" "$gen/apk/lib/arm64-v8a/libmain.so"
 # (the unstripped objects stay in $gen/objects; ndk-stack -sym wants a
 # library with symbols: link it again without the strip step)
+
+# What the app's log says is running (android_bootstrap.c). Not in raeAssets.txt: a new commit
+# alone is no reason to unpack the files again.
+build_id=$("$toolchain/bin/llvm-readelf" -n "$gen/apk/lib/arm64-v8a/libmain.so" | sed -n 's/.*Build ID: //p' | head -1)
+cat > "$gen/apk/assets/raeRun.txt" <<EOF
+[run] app $label $version ($build_number), $package, commit $(sh "$root/tools/app-commit.sh" app "$ex_dir")
+[run] libmain.so build id ${build_id:-unknown}
+[run] Rae $(sh "$root/tools/app-commit.sh" rae)
+EOF
 
 # 4. SDL's Java half (org.libsdl.app) and RaeActivity (the link that opened
 #    the app, lib/AppLinks), compiled against the platform and
