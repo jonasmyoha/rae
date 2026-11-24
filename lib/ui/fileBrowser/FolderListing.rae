@@ -1,0 +1,84 @@
+# The thread of one listing (docs/file-browser-design.md §3.1): a folder's entries, filtered and
+# ordered, over a channel. It knows no UI.
+import Files
+import ui/EventLoop
+open Channel
+open text/NameOrder
+open ui/fileBrowser/FileBrowserPaths
+
+type FolderRequest {
+  generation: Int = 0
+  folder: String = ""
+  order: EntryOrder = {}
+  filter: EntryFilter
+  # A path outside this real folder is refused ("" for any)
+  limit: String = ""
+}
+
+type FolderAnswer {
+  generation: Int = 0
+  # false: its sizes and dates are still to come
+  finished: Bool = true
+  # its entries are those of the answer before, with their sizes and dates
+  detailsOnly: Bool = false
+  error: ListError = ListError.none
+  # not inside its limit
+  outside: Bool = false
+  realFolder: String = ""
+  entries: List(FileEntry) = {}
+  # the entries' names, made on the thread
+  names: List(String) = {}
+}
+
+func namesOf(entries: view List(FileEntry)) ret List(String) {
+  var names: List(String) = {}
+  loop let entry: view FileEntry in entries {
+    names.add(value: "{entry.name}")
+  }
+  ret names
+}
+
+# One listing: what the folder has, then, when that took none of their details, those
+func listFolderThread(answers: own Channel(FolderAnswer), request: own FolderRequest) ret Int {
+  let real: String = Files.realPath(path: request.folder)
+  var answer: FolderAnswer = { generation: request.generation, realFolder: "{real}" }
+  if request.limit.length() > 0 and real.length() > 0 and pathInside(
+    folder: request.limit
+    path: real
+  ) is false {
+    answer.outside = true
+    answers.channelSend(value: own answer)
+    EventLoop.wake()
+    ret 0
+  }
+  let fold: NameFold = createNameFold()
+  var listing: FolderListing = Files.listFolder(
+    fold: fold
+    folder: request.folder
+    order: request.order
+    filter: request.filter
+  )
+  let count: Int = listing.entries.length
+  answer.error = listing.error
+  answer.finished = listing.detailed
+  answer.names = namesOf(entries: listing.entries)
+  answer.entries = listing.entries
+  answers.channelSend(value: own answer)
+  EventLoop.wake()
+  if listing.detailed is false {
+    loop let entry: mod FileEntry in listing.entries {
+      Files.readEntryDetails(folder: request.folder, entry: entry)
+    }
+    # what the OS's own flag hides
+    Files.filterEntries(fold: fold, filter: request.filter, entries: listing.entries)
+    var whole: FolderAnswer = { generation: request.generation, realFolder: "{real}" }
+    whole.detailsOnly = listing.entries.length is count
+    if whole.detailsOnly is false {
+      whole.names = namesOf(entries: listing.entries)
+    }
+    whole.entries = listing.entries
+    answers.channelSend(value: own whole)
+    EventLoop.wake()
+  }
+  ret count
+}

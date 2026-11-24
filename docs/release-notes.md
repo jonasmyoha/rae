@@ -4,6 +4,23 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.55, 2026-11-24: the column file browser
+
+- `lib/ui/fileBrowser` (docs/file-browser-design.md): a file browser in columns that looks and changes
+  nothing on disk yet. `openFileBrowser` puts one in a node, any number in a world: folders read on
+  threads, live update, the keys, several selected, a bar with back, forward, the trail and a path
+  field, a preview column and a large preview, columns sized by dividers, a root it stays in (also
+  through symlinks), order, filter, hidden files, the tint of files opened often, entries an app
+  supplies, and the state an app saves. The app reads events: `folderOpened`, `fileActivated`,
+  `selectionChanged`, `entriesRequested`.
+- `Text.cut: "middle"`: a text wider than its node is cut in its middle, so a name keeps its extension
+  (docs/ui-scene-format.md section 55).
+- A clickable node takes no click where an ancestor with `Overflow: Clip` cuts it off. Before, a row
+  scrolled out of sight under another panel still took it. A node on a layer of its own is cut by none.
+- A list given `ListRowNames` after its first frame could keep no rows to select. A selection moved by
+  the keys says so (`ListEvent.byKey`).
+- Cases 1592, 1593, 1594, 1595, check `uiFileBrowser`.
+
 ## 0.4.54, 2026-11-24: thumbnails
 
 - `lib/Thumbnails` and `ui/ThumbnailSystem`: small pictures of files, made on threads, with a memory

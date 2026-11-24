@@ -1,0 +1,103 @@
+# The file browser's listing thread (lib/ui/fileBrowser/FolderListing): the names of a large folder
+# first and their details after, several at once, a folder outside its limit refused, also through a
+# symlink, and a missing one. Under ThreadSanitizer too.
+import Files
+import Sys
+open Channel
+open ui/fileBrowser/FolderListing
+
+func rae_ext_Files_makeLink(target: String, path: String) unsafe extern ret Int
+
+func request(generation: copy Int, folder: view String, limit: view String) ret FolderRequest {
+  ret FolderRequest {
+    generation: generation
+    folder: "{folder}"
+    order: EntryOrder {}
+    filter: EntryFilter { namePart: "", extensions: List(String) {} }
+    limit: "{limit}"
+  }
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+# Answers until `finished` listings ended
+func take(answers: view Channel(FolderAnswer), finished: view Int) {
+  var lines: List(String) = {}
+  var left: Int = finished
+  loop var i: Int = 0, i < 20000 and left > 0, ++i {
+    if answers.pending() is 0 {
+      sleep(ms: 1)
+      continue
+    }
+    let answer: FolderAnswer = answers.receive()
+    var sized: Int = 0
+    loop let entry: view FileEntry in answer.entries {
+      if entry.size >= 0 {
+        sized = sized + 1
+      }
+    }
+    lines.add(
+      value: "{answer.generation}: {answer.entries.length} entries, {answer.names.length} names, {sized} sizes, finished {answer.finished}, details only {answer.detailsOnly}, outside {answer.outside}, missing {answer.error is ListError.notFound}"
+    )
+    if answer.finished {
+      left = left - 1
+    }
+  }
+  # one line for each answer, by its listing
+  loop var generation: Int = 1, generation <= 9, ++generation {
+    loop let line: view String in lines {
+      if line.startsWith(prefix: "{generation}:") {
+        log(line)
+      }
+    }
+  }
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  let base: String = "{temporary}/rae-folder-listing-{nowNs()}"
+  var made: Bool = Sys.makeDir(path: base)
+  made = Sys.makeDir(path: "{base}/large")
+  made = Sys.makeDir(path: "{base}/small")
+  loop var i: Int = 0, i < 2400, ++i {
+    let written: Bool = Sys.writeFile(path: "{base}/large/{i}", content: "x")
+  }
+  let written: Bool = Sys.writeFile(path: "{base}/small/one.txt", content: "one")
+  unsafe {
+    let linked: Int = rae_ext_Files_makeLink(target: "{base}/large", path: "{base}/small/way out")
+  }
+  let answers: Channel(FolderAnswer) = createChannel(FolderAnswer)
+  let limit: String = Files.realPath(path: "{base}/small")
+  let first: Task(Int) = spawn thread listFolderThread(
+    answers: answers
+    request: request(generation: 1, folder: "{base}/large", limit: "")
+  )
+  let second: Task(Int) = spawn thread listFolderThread(
+    answers: answers
+    request: request(generation: 2, folder: "{base}/small", limit: limit)
+  )
+  let third: Task(Int) = spawn thread listFolderThread(
+    answers: answers
+    request: request(generation: 3, folder: "{base}/small/way out", limit: limit)
+  )
+  let fourth: Task(Int) = spawn thread listFolderThread(
+    answers: answers
+    request: request(generation: 4, folder: "{base}/none", limit: "")
+  )
+  take(answers: answers, finished: 4)
+  log("read {first.get()}, {second.get()}, {third.get()}, {fourth.get()}")
+  answers.freeChannel()
+  removeTree(folder: base)
+}

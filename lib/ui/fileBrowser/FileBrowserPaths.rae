@@ -1,0 +1,106 @@
+# Paths of the file browser, as text.
+import Sys
+
+# `path` without "." and "..", doubled slashes and one at its end
+func cleanPath(path: view String) ret String {
+  var parts: List(String) = {}
+  let all: List(String) = path.split(sep: "/")
+  loop let part: view String in all {
+    if part is ".." {
+      if parts.length > 0 {
+        parts.removeAt(index: parts.length - 1)
+      }
+    } else if part.length() > 0 and part is not "." {
+      parts.add(value: "{part}")
+    }
+  }
+  let joined: String = parts.join(sep: "/")
+  if path.startsWith(prefix: "/") {
+    ret "/{joined}"
+  }
+  ret joined
+}
+
+# Is `path` the folder, or below it?
+func pathInside(folder: view String, path: view String) ret Bool {
+  if folder is "/" or folder is path {
+    ret true
+  }
+  ret path.startsWith(prefix: "{folder}/")
+}
+
+# `folder` with `name` in it
+func pathIn(folder: view String, name: view String) ret String {
+  if folder.endsWith(suffix: "/") {
+    ret "{folder}{name}"
+  }
+  ret "{folder}/{name}"
+}
+
+func parentPath(path: view String) ret String {
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    if slash > 0 {
+      ret path.sub(start: 0, len: slash)
+    }
+  }
+  ret "/"
+}
+
+func lastPart(path: view String) ret String {
+  if let slash: Int = path.lastIndexOf(sub: "/") {
+    if slash + 1 < path.length() {
+      ret path.sub(start: slash + 1, len: path.length() - slash - 1)
+    }
+  }
+  ret "{path}"
+}
+
+# The names from `folder` down to `path`, which is inside it
+func partsBelow(folder: view String, path: view String) ret List(String) {
+  if pathInside(folder: folder, path: path) is false or folder is path {
+    ret List(String) {}
+  }
+  var start: Int = folder.length() + 1
+  if folder is "/" {
+    start = 1
+  }
+  ret path.sub(start: start, len: path.length() - start).split(sep: "/")
+}
+
+# `path` with a "~" at its start as the home folder
+func homePath(path: view String) ret String {
+  if path is "~" or path.startsWith(prefix: "~/") {
+    let home: String = Sys.getEnv(name: "HOME")
+    ret "{home}{path.sub(start: 1, len: path.length() - 1)}"
+  }
+  ret "{path}"
+}
+
+# A size as it is read: 512 bytes, 4.2 KB, 31 MB
+func sizeText(bytes: view Int) ret String {
+  if bytes < 0 {
+    ret ""
+  }
+  if bytes < 1000 {
+    ret "{bytes} bytes"
+  }
+  var size: Float64 = (bytes as Float64) / 1000.0
+  var unit: String = "KB"
+  if size >= 999.5 {
+    size = size / 1000.0
+    unit = "MB"
+  }
+  if size >= 999.5 {
+    size = size / 1000.0
+    unit = "GB"
+  }
+  if size >= 999.5 {
+    size = size / 1000.0
+    unit = "TB"
+  }
+  if size >= 9.95 {
+    ret "{(size + 0.5) as Int} {unit}"
+  }
+  let tenths: Int = (size * 10.0 + 0.5) as Int
+  ret "{tenths / 10}.{tenths % 10} {unit}"
+}

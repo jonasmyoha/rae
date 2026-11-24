@@ -3,7 +3,9 @@
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
-scrolling, dividers, scrollbars and thumbnails (steps 4 to 6). The steps are the `[file browser ...]` tasks in
+scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), and step 7, the column browser that
+changes nothing on disk: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the
+text below is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -477,7 +479,7 @@ an icon or thumbnail (16 points; 28 on touch), the name (cut in the middle, so t
 visible), and a chevron on a folder. Two bundles, `fileRow` and `fileColumn`, are what a theme
 replaces. Text is `body`; details are `muted`.
 
-A name cut in the middle is also missing in `Text` today; it is part of step 7.
+A name cut in the middle is `Text.cut` (docs/ui-scene-format.md section 55).
 
 ## 15. Tests
 
@@ -517,3 +519,20 @@ Order: 2, 4, 4b, 5, 5b, 5c and 6 can be done in any order; 3 needs 2; 7 needs 2,
 
 Other views, tags and colors, spotlight-like content search, network mounts, permissions editing,
 archives opened as folders (an app can, with `source: app`), several windows sharing one browser.
+
+## 18. Built in step 7, where it differs from the text above
+
+- The frame is `fileBrowserUpdate` and, after the scroll roots, `fileBrowserRows`; the queues advance in
+  `fileBrowserUpdate`, so there is no `fileBrowserFrameEnd`. `fileBrowserDeadline` says when a frame is
+  needed though nothing happens. `closeFileBrowsers` ends it.
+- The listing thread is `FolderListing` (no UI in it, so it runs under ThreadSanitizer, case 1595). It
+  sends the names, then all details at once, not in batches. Listings are not canceled: an answer its
+  column no longer wants is dropped.
+- A folder below the root waits for the root's own listing, whose real path is its limit; a folder that
+  is outside by its real path (a symlink) shows "This folder is outside the one shown here".
+- Widths are on `FileBrowser`, the large preview on `BrowserPreview`. The muted selection is the slot
+  `surfaceAlt`. A double click on a divider fits the names by a letter's usual width, not by measuring.
+- The scenes are `fileBrowser`, `fileColumn`, `fileRow`, `filePreview`, `fileLargePreview` and
+  `fileTrailPart`, in the app's `SceneRegistry`.
+- Not yet: a browser written in a scene (`"FileBrowser": {...}`), and the check every 2 s of folders that
+  are not watched (more than 32, or a platform without notifications): `refreshFileBrowser` reads them.

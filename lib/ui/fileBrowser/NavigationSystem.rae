@@ -1,0 +1,918 @@
+# The columns of a browser: opened, dropped, walked and remembered (docs/file-browser-design.md §5).
+# Selecting a folder opens its column; what is beyond the column selected in goes.
+import Files
+import Sys
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/PaneComponents
+open ui/SceneInstance
+open ui/ScrollBarSystem
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+
+# Folders whose scroll and selection a browser keeps, and folders it can go back to
+const rememberedFolders: Int = 200
+
+# ----- what there is --------------------------------------------------------------
+func browserColumns(systems: view FileBrowserSystems, browser: view EntityId) ret List(EntityId) {
+  if componentHas(this: systems.browsers, entityId: browser) is false {
+    ret List(EntityId) {}
+  }
+  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  ret mine.columns
+}
+
+# The column at a place (noEntity() when there is none)
+func columnAt(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  place: view Int
+) ret EntityId {
+  ret browserColumns(systems: systems, browser: browser).copyAtFallback(
+    index: place
+    fallback: noEntity()
+  )
+}
+
+func deepestColumn(systems: view FileBrowserSystems, browser: view EntityId) ret EntityId {
+  let columns: List(EntityId) = browserColumns(systems: systems, browser: browser)
+  ret columns.copyAtFallback(index: columns.length - 1, fallback: noEntity())
+}
+
+# The folder of a column ("" for none)
+func folderOfColumn(systems: view FileBrowserSystems, column: view EntityId) ret String {
+  if componentHas(this: systems.columns, entityId: column) {
+    ret "{componentView(this: systems.columns, entityId: column).folder}"
+  }
+  ret ""
+}
+
+func listOfColumn(systems: view FileBrowserSystems, column: view EntityId) ret EntityId {
+  if componentHas(this: systems.columns, entityId: column) {
+    ret componentView(this: systems.columns, entityId: column).list
+  }
+  ret noEntity()
+}
+
+func placeOfColumn(systems: view FileBrowserSystems, column: view EntityId) ret Int {
+  if componentHas(this: systems.columns, entityId: column) {
+    ret componentView(this: systems.columns, entityId: column).place
+  }
+  ret -1
+}
+
+# The folder the browser is at: its deepest column's
+func browserFolder(systems: view FileBrowserSystems, browser: view EntityId) ret String {
+  ret folderOfColumn(systems: systems, column: deepestColumn(systems: systems, browser: browser))
+}
+
+# The browser whose column has the keys (noEntity() none), and that column
+func columnWithKeys(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  uiSystems: view UiSystems
+) ret EntityId {
+  let holder: EntityId = keyHolder(world: world, uiSystems: uiSystems)
+  if isNone(this: holder) {
+    ret noEntity()
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    if componentView(this: systems.columns, entityId: column).body is holder {
+      ret column
+    }
+  }
+  ret noEntity()
+}
+
+# The deepest column with a selection (noEntity() none): the selection of the browser
+func selectedColumn(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret EntityId {
+  let columns: List(EntityId) = browserColumns(systems: systems, browser: browser)
+  loop var i: Int = columns.length - 1, i >= 0, --i {
+    let column: EntityId = columns.copyAtFallback(index: i, fallback: noEntity())
+    if selectedCount(world: world, list: listOfColumn(systems: systems, column: column)) > 0 {
+      ret column
+    }
+  }
+  ret noEntity()
+}
+
+func selectedCount(world: view UiWorld, list: view EntityId) ret Int {
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    ret componentView(this: world.listSelecteds, entityId: list).selected.length
+  }
+  ret 0
+}
+
+func firstSelectedName(world: view UiWorld, list: view EntityId) ret String {
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    let state: view ListSelected = componentView(this: world.listSelecteds, entityId: list)
+    ret state.selected.copyAtFallback(index: 0, fallback: "")
+  }
+  ret ""
+}
+
+# The browser's selection as it is now, to be compared with the one looked at last
+func selectionSeen(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret SelectionSeen {
+  let column: EntityId = selectedColumn(systems: systems, world: world, browser: browser)
+  if isNone(this: column) {
+    ret SelectionSeen { selected: 0, entries: 0 }
+  }
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  ret SelectionSeen {
+    column: column
+    selected: componentModStamp(this: world.listSelecteds, entityId: mine.list)
+    entries: mine.entriesStamp
+  }
+}
+
+func sameSelection(first: view SelectionSeen, second: view SelectionSeen) ret Bool {
+  ret first.column is second.column and first.selected is second.selected and first.entries is second.entries
+}
+
+# The paths selected in the browser
+func selectedPaths(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret List(String) {
+  let column: EntityId = selectedColumn(systems: systems, world: world, browser: browser)
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  var paths: List(String) = {}
+  loop let name: view String in names {
+    paths.add(value: pathIn(folder: folder, name: name))
+  }
+  ret paths
+}
+
+# The entry `name` of a column, its place in the order (-1 none)
+func entryIndex(
+  systems: view FileBrowserSystems
+  column: view EntityId
+  name: view String
+) ret Int {
+  if componentHas(this: systems.entries, entityId: column) is false {
+    ret -1
+  }
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  loop var i: Int = 0, i < held.entries.length, ++i {
+    if let entry: view FileEntry = held.entries.viewAt(index: i) {
+      if entry.name is name {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+# The entry `name` of a column
+func entryOfColumn(
+  systems: view FileBrowserSystems
+  column: view EntityId
+  name: view String
+) ret opt FileEntry {
+  let index: Int = entryIndex(systems: systems, column: column, name: name)
+  if index < 0 {
+    ret none
+  }
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  ret held.entries.copyAt(index: index)
+}
+
+func entryOpensAsFolder(
+  systems: view FileBrowserSystems
+  column: view EntityId
+  name: view String
+) ret Bool {
+  if let entry: FileEntry = entryOfColumn(systems: systems, column: column, name: name) {
+    ret opensAsFolder(kinds: systems.kinds, entry: entry)
+  }
+  ret false
+}
+
+func browserOptions(systems: view FileBrowserSystems, browser: view EntityId) ret BrowserOptions {
+  if componentHas(this: systems.browsers, entityId: browser) {
+    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    ret mine.options
+  }
+  ret BrowserOptions {}
+}
+
+# ----- opening and dropping ---------------------------------------------------------
+
+# A column of `folder` at the end of the strip
+func openColumn(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  folder: view String
+) ret EntityId {
+  dropPreviewNode(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let place: Int = browserColumns(systems: systems, browser: browser).length
+  let strip: EntityId = componentView(this: systems.browsers, entityId: browser).strip
+  let node: EntityId = mountFileScene(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    key: "fileColumn"
+    parent: strip
+  )
+  if isNone(this: node) {
+    ret node
+  }
+  var column: FileColumn = { browser: browser, place: place, folder: "{folder}" }
+  column.body = nodeIn(world: world, root: node, nodeId: "FileColumnBody")
+  column.list = nodeIn(world: world, root: node, nodeId: "FileColumnList")
+  column.divider = nodeIn(world: world, root: node, nodeId: "FileColumnDivider")
+  column.stateBox = nodeIn(world: world, root: node, nodeId: "FileColumnState")
+  column.wantScroll = rememberedFolder(systems: systems, browser: browser, folder: folder).scroll
+  var width: Float = componentView(this: systems.browsers, entityId: browser).widths.copyAtFallback(
+    index: place
+    fallback: 0.0
+  )
+  if width <= 0.0 {
+    width = options.columnWidth
+  }
+  setColumnWidth(
+    world: world
+    uiSystems: uiSystems
+    body: column.body
+    divider: column.divider
+    width: width
+  )
+  if options.multiple is false and componentHas(this: world.listSelections, entityId: column.list) {
+    componentMod(this: world.listSelections, entityId: column.list).mode = ListSelectMode.single
+  }
+  componentSet(
+    this: systems.columnOfList
+    entityId: column.list
+    data: ListOfColumn { column: node }
+  )
+  let retry: EntityId = nodeIn(world: world, root: node, nodeId: "FileColumnRetry")
+  componentSet(
+    this: systems.buttons
+    entityId: retry
+    data: ButtonOfBrowser { browser: browser, button: BrowserButton.retry, column: node }
+  )
+  componentSet(this: systems.columns, entityId: node, data: own column)
+  componentSet(this: systems.entries, entityId: node, data: ColumnEntries {})
+  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.columns.add(value: node)
+  mine.reveal = place
+  systems.watchesStale = true
+  ret node
+}
+
+func setColumnWidth(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  body: view EntityId
+  divider: view EntityId
+  width: view Float
+) {
+  if componentHas(this: world.rects, entityId: body) {
+    componentMod(this: world.rects, entityId: body).size.x = width
+  }
+  if componentHas(this: world.dividers, entityId: divider) {
+    componentMod(this: world.dividers, entityId: divider).size = width
+  }
+}
+
+# Drop the columns from `place` on; the keys of one of them go to the column before
+func dropColumnsFrom(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+  place: view Int
+) {
+  let columns: List(EntityId) = browserColumns(systems: systems, browser: browser)
+  if place >= columns.length {
+    ret
+  }
+  var hadKeys: Bool = false
+  loop var i: Int = columns.length - 1, i >= place, --i {
+    let column: EntityId = columns.copyAtFallback(index: i, fallback: noEntity())
+    rememberColumn(
+      systems: systems
+      world: world
+      browser: browser
+      column: column
+    )
+    if componentView(this: systems.columns, entityId: column).body is world.keyFocus.entityId {
+      hadKeys = true
+    }
+    componentRemove(
+      this: systems.columnOfList
+      entityId: componentView(this: systems.columns, entityId: column).list
+    )
+    componentRemove(
+      this: systems.buttons
+      entityId: nodeIn(world: world, root: column, nodeId: "FileColumnRetry")
+    )
+    componentRemove(this: systems.entries, entityId: column)
+    componentRemove(this: systems.columns, entityId: column)
+    # (a page that was destroyed took its nodes with it)
+    if isAlive(world: world, entityId: column) {
+      destroyEntitySubtree(world: world, uiSystems: uiSystems, root: column)
+    }
+    let dropped: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    dropped.columns.removeAt(index: i)
+    if dropped.openColumn is column {
+      dropped.openAt = -1.0
+    }
+  }
+  systems.watchesStale = true
+  let last: EntityId = columnAt(systems: systems, browser: browser, place: place - 1)
+  if isNone(this: last) {
+    ret
+  }
+  componentMod(this: systems.columns, entityId: last).openChild = ""
+  if hadKeys {
+    setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: last).body)
+  }
+}
+
+# The folder `name` of `column` opens at its right, unless it is open
+func openChildFolder(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  name: view String
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  componentMod(this: systems.browsers, entityId: browser).openAt = -1.0
+  if componentView(this: systems.columns, entityId: column).openChild is name {
+    ret
+  }
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: place + 1
+  )
+  let folder: String = pathIn(folder: folderOfColumn(systems: systems, column: column), name: name)
+  let opened: EntityId = openColumn(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+  componentMod(this: systems.columns, entityId: column).openChild = "{name}"
+}
+
+# What a selection in `column` does: one folder opens (after a moment when `later`), else what is
+# beyond the column goes
+func showColumnSelection(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  later: view Bool
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  let picked: EntityId = listOfColumn(systems: systems, column: column)
+  let name: String = firstSelectedName(world: world, list: picked)
+  let count: Int = selectedCount(world: world, list: picked)
+  componentMod(this: systems.browsers, entityId: browser).openAt = -1.0
+  let folder: Bool = count is 1 and entryOpensAsFolder(systems: systems, column: column, name: name)
+  if folder is false or componentView(this: systems.columns, entityId: column).openChild is not name {
+    dropColumnsFrom(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+      place: place + 1
+    )
+  } else {
+    showOnlyChild(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      column: column
+    )
+  }
+  if folder is false {
+    ret
+  }
+  if later and componentView(this: systems.columns, entityId: column).openChild is not name {
+    let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    mine.openAt = systems.now + openDelaySeconds
+    mine.openColumn = column
+    ret
+  }
+  openChildFolder(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+    name: name
+  )
+}
+
+# A folder walked over opens once its row has been selected for this long
+const openDelaySeconds: Float64 = 0.12
+
+# The open folder of `column` is what is selected: its own column shows no selection, and those
+# beyond it go
+func showOnlyChild(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  column: view EntityId
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  let child: EntityId = columnAt(systems: systems, browser: browser, place: place + 1)
+  if isNone(this: child) {
+    ret
+  }
+  rememberColumn(
+    systems: systems
+    world: world
+    browser: browser
+    column: child
+  )
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: place + 2
+  )
+  let list: EntityId = listOfColumn(systems: systems, column: child)
+  if selectedCount(world: world, list: list) > 0 {
+    setListSelection(world: world, list: list, keys: List(String) {})
+  }
+  componentMod(this: systems.columns, entityId: child).wantSelected.clear()
+  componentMod(this: systems.columns, entityId: child).wantFirst = false
+}
+
+# ----- walking ------------------------------------------------------------------------
+
+# Right: into the folder selected in `column`, onto the row it was left at, else its first
+func walkInto(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let picked: EntityId = listOfColumn(systems: systems, column: column)
+  let name: String = firstSelectedName(world: world, list: picked)
+  let count: Int = selectedCount(world: world, list: picked)
+  if count is not 1 or entryOpensAsFolder(systems: systems, column: column, name: name) is false {
+    ret
+  }
+  openChildFolder(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+    name: name
+  )
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  let child: EntityId = columnAt(systems: systems, browser: browser, place: place + 1)
+  if isNone(this: child) {
+    ret
+  }
+  setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: child).body)
+  componentMod(this: systems.browsers, entityId: browser).reveal = place + 1
+  let list: EntityId = listOfColumn(systems: systems, column: child)
+  if selectedCount(world: world, list: list) > 0 {
+    ret
+  }
+  let remembered: FolderMemory = rememberedFolder(
+    systems: systems
+    browser: browser
+    folder: folderOfColumn(systems: systems, column: child)
+  )
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: child)
+  mine.wantSelected = remembered.selected
+  mine.wantFirst = true
+  if mine.listed {
+    selectWanted(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: child
+    )
+  }
+}
+
+# The rows a column was to have selected: those it has, else its first when that is wanted
+func selectWanted(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) {
+  var wanted: List(String) = {}
+  var first: Bool = false
+  if let mine: FileColumn = componentCopy(this: systems.columns, entityId: column) {
+    wanted = mine.wantSelected
+    first = mine.wantFirst
+  }
+  if wanted.length is 0 and first is false {
+    ret
+  }
+  var names: List(String) = {}
+  loop let name: view String in wanted {
+    if entryIndex(systems: systems, column: column, name: name) >= 0 {
+      names.add(value: "{name}")
+    }
+  }
+  if names.length is 0 and first {
+    let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+    if let entry: view FileEntry = held.entries.viewAt(index: 0) {
+      names.add(value: "{entry.name}")
+    }
+  }
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  mine.wantSelected.clear()
+  mine.wantFirst = false
+  if names.length is 0 {
+    ret
+  }
+  setListSelection(world: world, list: listOfColumn(systems: systems, column: column), keys: names)
+  let child: String = "{componentView(this: systems.columns, entityId: column).openChild}"
+  if names.length is 1 and child is names.copyAtFallback(index: 0, fallback: "") {
+    # its column is open, with what was opened beyond it
+    ret
+  }
+  showColumnSelection(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+    later: true
+  )
+}
+
+# Left: the keys go to the column before, whose row is the folder that was left
+func walkOut(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  if place is 0 {
+    walkAboveRoot(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+    )
+    ret
+  }
+  let before: EntityId = columnAt(systems: systems, browser: browser, place: place - 1)
+  showOnlyChild(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    column: before
+  )
+  setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: before).body)
+  componentMod(this: systems.browsers, entityId: browser).reveal = place - 1
+  componentMod(this: systems.browsers, entityId: browser).openAt = -1.0
+}
+
+# The folder the root is in becomes the root, when the browser may go there
+func walkAboveRoot(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) {
+  let root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
+  if root is "/" or browserOptions(systems: systems, browser: browser).allowAboveRoot is false {
+    ret
+  }
+  componentMod(this: systems.browsers, entityId: browser).root = parentPath(path: root)
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: root
+  )
+  let first: EntityId = columnAt(systems: systems, browser: browser, place: 0)
+  setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: first).body)
+}
+
+# The columns from the root to `folder`, those already open kept. False when it is not inside the
+# root, and the browser may not go above it. What is not there is dropped once its listing says so.
+func openTrail(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  folder: view String
+) ret Bool {
+  var target: String = cleanPath(path: folder)
+  var root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
+  if pathInside(folder: root, path: target) is false {
+    # the root by its real path
+    let first: EntityId = columnAt(systems: systems, browser: browser, place: 0)
+    var real: String = ""
+    if componentHas(this: systems.columns, entityId: first) {
+      real = "{componentView(this: systems.columns, entityId: first).realFolder}"
+    }
+    if real.length() > 0 and pathInside(folder: real, path: target) {
+      loop let part: view String in partsBelow(folder: real, path: target) {
+        root = pathIn(folder: root, name: part)
+      }
+      target = own root
+      root = "{componentView(this: systems.browsers, entityId: browser).root}"
+    } else if browserOptions(systems: systems, browser: browser).allowAboveRoot {
+      loop pathInside(folder: root, path: target) is false {
+        root = parentPath(path: root)
+      }
+      componentMod(this: systems.browsers, entityId: browser).root = "{root}"
+    } else {
+      ret false
+    }
+  }
+  var hadKeys: Bool = false
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    if componentView(this: systems.columns, entityId: column).body is world.keyFocus.entityId {
+      hadKeys = true
+    }
+  }
+  # the first column, then one for each part; a column that shows another folder goes, with what is
+  # beyond it
+  var parts: List(String) = partsBelow(folder: root, path: target)
+  var path: String = own root
+  loop var i: Int = 0, i <= parts.length, ++i {
+    let part: String = parts.copyAtFallback(index: i - 1, fallback: "")
+    if i > 0 {
+      path = pathIn(folder: path, name: part)
+    }
+    let here: EntityId = columnAt(systems: systems, browser: browser, place: i)
+    if isNone(this: here) is false and folderOfColumn(systems: systems, column: here) is not path {
+      dropColumnsFrom(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+        place: i
+      )
+    }
+    if isNone(this: columnAt(systems: systems, browser: browser, place: i)) {
+      let opened: EntityId = openColumn(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: browser
+        folder: path
+      )
+    }
+    if i > 0 {
+      selectChild(
+        systems: systems
+        world: world
+        column: columnAt(systems: systems, browser: browser, place: i - 1)
+        name: part
+      )
+    }
+  }
+  # the last is the folder: nothing is selected in it
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: parts.length + 1
+  )
+  let last: EntityId = deepestColumn(systems: systems, browser: browser)
+  setListSelection(
+    world: world
+    list: listOfColumn(systems: systems, column: last)
+    keys: List(String) {}
+  )
+  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.openAt = -1.0
+  mine.reveal = parts.length
+  if hadKeys {
+    setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: last).body)
+  }
+  ret true
+}
+
+# `name` is the open child of `column`, and its selection
+func selectChild(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  column: view EntityId
+  name: view String
+) {
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  mine.openChild = "{name}"
+  mine.wantFirst = false
+  mine.wantSelected.clear()
+  if mine.listed is false {
+    mine.wantSelected.add(value: "{name}")
+    ret
+  }
+  let list: EntityId = mine.list
+  var keys: List(String) = {}
+  if entryIndex(systems: systems, column: column, name: name) >= 0 {
+    keys.add(value: "{name}")
+  }
+  setListSelection(world: world, list: list, keys: keys)
+}
+
+# ----- memory and history ---------------------------------------------------------------
+func rememberedFolder(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+) ret FolderMemory {
+  if componentHas(this: systems.history, entityId: browser) {
+    let history: view BrowserHistory = componentView(this: systems.history, entityId: browser)
+    if let memory: FolderMemory = history.memory.get(k: folder) {
+      ret memory
+    }
+  }
+  ret FolderMemory {}
+}
+
+# What a column is scrolled to, and its selection, kept for when its folder opens again
+func rememberColumn(
+  systems: mod FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+  column: view EntityId
+) {
+  if componentView(this: systems.columns, entityId: column).listed is false {
+    ret
+  }
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  var memory: FolderMemory = {}
+  if componentHas(this: world.scrollStates, entityId: list) {
+    memory.scroll = componentView(this: world.scrollStates, entityId: list).y
+  }
+  # a selection of thousands is not worth keeping
+  if selectedCount(world: world, list: list) <= rememberedFolders {
+    memory.selected = listSelectedKeys(world: world, list: list)
+  }
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  let empty: Bool = memory.selected.length is 0
+  if empty {
+    # an unselected folder keeps the row it was left at
+    if let before: FolderMemory = history.memory.get(k: folder) {
+      memory.selected = before.selected
+    }
+  }
+  if history.memory.has(k: folder) is false {
+    history.kept.add(value: "{folder}")
+    if history.kept.length > rememberedFolders {
+      let oldest: String = history.kept.copyAtFallback(index: 0, fallback: "")
+      history.kept.removeAt(index: 0)
+      history.memory.remove(k: oldest)
+    }
+  }
+  history.memory.set(k: folder, value: own memory)
+}
+
+# The browser is at another folder: one more to go back from
+func noteFolder(systems: mod FileBrowserSystems, browser: view EntityId, folder: view String) {
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  let current: String = history.folders.copyAtFallback(index: history.at, fallback: "")
+  if current is folder {
+    ret
+  }
+  loop history.folders.length > history.at + 1 {
+    history.folders.removeAt(index: history.folders.length - 1)
+  }
+  history.folders.add(value: "{folder}")
+  if history.folders.length > rememberedFolders {
+    history.folders.removeAt(index: 0)
+  }
+  history.at = history.folders.length - 1
+}
+
+# Back (-1) or forward (1)
+func walkHistory(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  step: view Int
+) {
+  if canWalkHistory(systems: systems, browser: browser, step: step) is false {
+    ret
+  }
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  history.at = history.at + step
+  let folder: String = history.folders.copyAtFallback(index: history.at, fallback: "")
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+}
+
+func canWalkHistory(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  step: view Int
+) ret Bool {
+  if componentHas(this: systems.history, entityId: browser) is false {
+    ret false
+  }
+  let history: view BrowserHistory = componentView(this: systems.history, entityId: browser)
+  let to: Int = history.at + step
+  ret to >= 0 and to < history.folders.length
+}
+
+# ----- the frame -----------------------------------------------------------------------
+
+# The folders whose wait is over open; true when one did
+func fileNavigationSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    let due: Bool = mine.openAt >= 0.0 and systems.now >= mine.openAt
+    let column: EntityId = mine.openColumn
+    if due {
+      changed = true
+      componentMod(this: systems.browsers, entityId: browser).openAt = -1.0
+      if componentHas(this: systems.columns, entityId: column) {
+        showColumnSelection(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          column: column
+          later: false
+        )
+      }
+    }
+  }
+  ret changed
+}

@@ -61,8 +61,19 @@ const builtInMenuSeparator: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\"
 
 const builtInMenuLine: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":1\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Shape\":\{\"kind\":\"Rect\",\"fill\":\"outline\",\"radius\":0\}\}"
 
+# The file browser's (ui/fileBrowser): a row of a column, and a column's body
+const builtInFileRow: String = "\{\"Layout\":\{\"type\":\"Stack\"\},\"Shape\":\{\"kind\":\"RoundedRect\",\"radius\":5\}\}"
+
+const builtInFileColumn: String = "\{\"Padding\":\{\"l\":4,\"t\":4,\"r\":4,\"b\":4\}\}"
+
 # The built-in bundle `name`'s JSON object, or "" when lib/ui has none
 func builtInBundleJson(name: view String) ret String {
+  if name is "fileRow" {
+    ret builtInFileRow
+  }
+  if name is "fileColumn" {
+    ret builtInFileColumn
+  }
   if name is "appearFade" {
     ret builtInAppearFade
   }

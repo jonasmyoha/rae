@@ -85,7 +85,7 @@ missing), `RAE_ANDROID_API` (the oldest Android, default 28 = Android 9) and
 - `tools/stage-app-assets.sh` (shared with `tools/ios`) stages the files the
   app reads at run time, each at the relative path the app names it by: the
   project's `assets/`, the stdlib's shared data (`lib/assets`, `lib/data`,
-  `lib/app3d/scenes`, the WGSL), and other examples' assets that the C names.
+  `lib/app3d/scenes`, `lib/ui/fileBrowser/scenes`, the WGSL), and other examples' assets that the C names.
 - `android_bootstrap.c` is the C entry SDL calls (`SDL_main`). The app's own
   `main` is compiled as `rae_android_app_main`. The bootstrap:
   1. sends stdout and stderr to logcat;

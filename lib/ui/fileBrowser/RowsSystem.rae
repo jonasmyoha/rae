@@ -1,0 +1,193 @@
+# The rows of each column that are in view (docs/file-browser-design.md §5, §6): the ListViewData of
+# its list, made from its entries. A column out of the strip's view keeps its entries and no rows.
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/ListWindow
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/NavigationSystem
+
+# Opened this often a file has the stronger tint
+const oftenOpened: Int = 10
+
+# Opened this often it has the tint
+const someOpened: Int = 3
+
+func fileRowsSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    changed = fillColumnRows(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      column: column
+    ) or changed
+  }
+  ret changed
+}
+
+func fillColumnRows(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  column: view EntityId
+) ret Bool {
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  let list: EntityId = mine.list
+  let stamp: Int = mine.entriesStamp + systems.openCountsStamp
+  let stale: Bool = mine.rowsStamp is not stamp
+  let browser: EntityId = mine.browser
+  let count: Int = componentView(this: systems.entries, entityId: column).entries.length
+  if componentHas(this: world.listViews, entityId: list) is false {
+    ret false
+  }
+  var wanted: ListRange = listWindowWanted(
+    world: world
+    uiSystems: uiSystems
+    list: list
+    count: count
+  )
+  if columnInView(
+    systems: systems
+    uiSystems: uiSystems
+    browser: browser
+    column: column
+  ) is false {
+    wanted = ListRange { first: wanted.first, count: 0 }
+    if stale is false and componentHas(this: world.listViewDatas, entityId: list) and componentView(
+      this: world.listViewDatas
+      entityId: list
+    ).rows.length is 0 {
+      ret false
+    }
+  } else if stale is false and listWindowHas(
+    world: world
+    list: list
+    wanted: wanted
+    count: count
+  ) {
+    ret false
+  }
+  let tinted: Bool = browserOptions(systems: systems, browser: browser).openCountTint
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  var rows: List(ListViewRow) = {}
+  loop var i: Int = wanted.first, i < wanted.first + wanted.count, ++i {
+    if let entry: view FileEntry = componentView(this: systems.entries, entityId: column).entries.viewAt(
+      index: i
+    ) {
+      rows.add(value: rowOfEntry(
+        systems: systems
+        folder: folder
+        entry: entry
+        tinted: tinted
+      ))
+    }
+  }
+  setListWindowRows(
+    world: world
+    list: list
+    count: count
+    first: wanted.first
+    rows: own rows
+  )
+  componentMod(this: systems.columns, entityId: column).rowsStamp = stamp
+  ret true
+}
+
+func flag(on: view Bool) ret String {
+  if on {
+    ret "true"
+  }
+  ret "false"
+}
+
+# The cells of a row: name, icon, path (of a picture), size, changed, folder, tint, tintStrong
+func rowOfEntry(
+  systems: view FileBrowserSystems
+  folder: view String
+  entry: view FileEntry
+  tinted: view Bool
+) ret ListViewRow {
+  let kind: FileKind = kindOfEntry(kinds: systems.kinds, entry: entry)
+  let path: String = pathIn(folder: folder, name: entry.name)
+  var opened: Int = 0
+  if tinted {
+    if let count: Int = systems.openCounts.get(k: path) {
+      opened = count
+    }
+  }
+  var picture: String = ""
+  if kind.picture {
+    picture = "{path}"
+  }
+  var bytes: Int = 0
+  if entry.size > 0 {
+    bytes = entry.size
+  }
+  var changedMs: Int = 0
+  if entry.modifiedSeconds > 0.0 {
+    changedMs = (entry.modifiedSeconds * 1000.0) as Int
+  }
+  ret ListViewRow {
+    keys: List(String) {
+      "name"
+      "icon"
+      "path"
+      "bytes"
+      "changed"
+      "byProgram"
+      "folder"
+      "tint"
+      "tintStrong"
+    }
+    values: List(String) {
+      "{entry.name}"
+      "{kind.icon}"
+      own picture
+      "{bytes}"
+      "{changedMs}"
+      flag(on: kind.byProgram)
+      flag(on: opensAsFolder(kinds: systems.kinds, entry: entry))
+      flag(on: opened >= someOpened and opened < oftenOpened)
+      flag(on: opened >= oftenOpened)
+    }
+  }
+}
+
+# Is the column inside the window its strip scrolls in? (Yes before the first layout.)
+func columnInView(
+  systems: view FileBrowserSystems
+  uiSystems: view UiSystems
+  browser: view EntityId
+  column: view EntityId
+) ret Bool {
+  let window: EntityId = componentView(this: systems.browsers, entityId: browser).stripWindow
+  if componentHas(this: uiSystems.layout.computedRects, entityId: column) is false or componentHas(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: column
+  ) is false or componentHas(this: uiSystems.transform2d.worldTransforms, entityId: window) is false {
+    ret true
+  }
+  let box: WorldRect = worldBox(uiSystems: uiSystems, entityId: column)
+  let shown: WorldRect = worldBox(uiSystems: uiSystems, entityId: window)
+  # a column's width on either side, so that one coming into view has its rows
+  ret box.x + box.w * 2.0 > shown.x and box.x - box.w < shown.x + shown.w
+}
+
+func worldBox(uiSystems: view UiSystems, entityId: view EntityId) ret WorldRect {
+  ret worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+  )
+}

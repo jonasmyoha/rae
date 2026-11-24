@@ -1,0 +1,250 @@
+# The file browser with 100,000 entries (a program's own): the rows live are those in view, the keys
+# reach the last, a frame with nothing to do allocates nothing, and walking through folders for
+# thousands of frames keeps nothing.
+import SdfText
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/ListWindow
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+const entryTotal: Int = 100000
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  files: FileBrowserSystems
+  host: EntityId
+}
+
+# "many" has the 100,000; every other folder ten folders and a file
+func answerRequests(app: mod App) {
+  loop var i: Int = 0, i < eventCount(EntriesRequested, this: app.files.entriesRequested), ++i {
+    let wanted: EntriesRequested = eventAt(EntriesRequested, this: app.files.entriesRequested, i: i)
+    var entries: List(FileEntry) = {}
+    if wanted.folder.endsWith(suffix: "many") {
+      loop var n: Int = 0, n < entryTotal, ++n {
+        entries.add(value: FileEntry { name: "entry {n + entryTotal}", kind: EntryKind.file })
+      }
+    } else {
+      loop var n: Int = 0, n < 10, ++n {
+        entries.add(value: FileEntry { name: "folder {n}", kind: EntryKind.folder })
+      }
+      entries.add(value: FileEntry { name: "many", kind: EntryKind.folder })
+      entries.add(value: FileEntry { name: "plain.txt", kind: EntryKind.file, size: 12 })
+    }
+    setColumnEntries(
+      systems: app.files
+      world: app.world
+      uiSystems: app.uiSystems
+      scenes: app.scenes
+      browser: wanted.browser
+      folder: wanted.folder
+      entries: own entries
+    )
+  }
+}
+
+func frame(app: mod App, listKeys: view ListSelectionKeys, keys: view BrowserKeys) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.02
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 5.0
+      y: 5.0
+      down: false
+      kind: InputKind.mouse
+    )
+    wheel: 0.0
+  )
+  var changed: Bool = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: listKeys
+  )
+  changed = fileBrowserUpdate(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    keys: keys
+    nowSeconds: app.input.nowSeconds
+  )
+  answerRequests(app: app)
+  changed = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.02
+  )
+  changed = scrollToRowSystem(world: app.world, uiSystems: app.uiSystems)
+  changed = fileBrowserRows(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func frames(app: mod App, count: view Int) {
+  loop var i: Int = 0, i < count, ++i {
+    frame(app: app, listKeys: ListSelectionKeys {}, keys: BrowserKeys {})
+  }
+}
+
+func key(app: mod App, listKeys: view ListSelectionKeys) {
+  frame(app: app, listKeys: listKeys, keys: BrowserKeys {})
+  frames(app: app, count: 8)
+}
+
+func show(app: view App, step: view String) {
+  let columns: List(EntityId) = browserColumns(systems: app.files, browser: app.host)
+  let column: EntityId = columns.copyAtFallback(index: columns.length - 1, fallback: noEntity())
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  var live: Int = 0
+  if componentHas(this: app.world.childrens, entityId: list) {
+    let rows: view Children = componentView(this: app.world.childrens, entityId: list)
+    live = rows.ids.length
+  }
+  let held: Int = componentView(this: app.files.entries, entityId: column).entries.length
+  log(
+    "{step}: {columns.length} columns, {held} entries, {live} rows live, at {scrollPositionOf(
+      world: app.world
+      entityId: list
+    )}, [{listSelectedKeys(world: app.world, list: list).length}] lead {listLeadKey(
+      world: app.world
+      list: list
+    )}"
+  )
+}
+
+func outstanding() ret Int {
+  unsafe {
+    ret rae_ext_rae_mem_stats_outstanding() + rae_ext_rae_mem_stats_buf_outstanding()
+  }
+}
+
+func main() {
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    files: createFileBrowsers()
+    host: noEntity()
+  }
+  registerFileBrowserScenes(scenes: app.scenes)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 700.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Host") {
+    app.host = nodeEntityId(world: app.world, index: raw)
+  }
+  app.host = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: app.host
+    root: "/made"
+    options: BrowserOptions { source: BrowserSource.app }
+  )
+  frames(app: app, count: 3)
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.host)
+  key(app: app, listKeys: ListSelectionKeys { text: "man" })
+  show(app: app, step: "many opened")
+  key(app: app, listKeys: ListSelectionKeys { right: true })
+  key(app: app, listKeys: ListSelectionKeys { end: true })
+  show(app: app, step: "End")
+  key(app: app, listKeys: ListSelectionKeys { text: "entry 150000" })
+  show(app: app, step: "typed")
+  frames(app: app, count: 60)
+  let before: Int = outstanding()
+  frames(app: app, count: 200)
+  log("idle: {outstanding() - before} more held")
+  key(app: app, listKeys: ListSelectionKeys { selectAll: true, toggle: true })
+  show(app: app, step: "all")
+  key(app: app, listKeys: ListSelectionKeys { left: true })
+  show(app: app, step: "Left")
+
+  # walking: down six levels and up again, many times over the same folders
+  var held: Int = 0
+  loop var round: Int = 0, round < 30, ++round {
+    if round is 18 {
+      held = outstanding()
+    }
+    key(app: app, listKeys: ListSelectionKeys { home: true })
+    loop var depth: Int = 0, depth < 6, ++depth {
+      key(app: app, listKeys: ListSelectionKeys { right: true })
+      key(app: app, listKeys: ListSelectionKeys { down: true })
+    }
+    loop var depth: Int = 0, depth < 6, ++depth {
+      key(app: app, listKeys: ListSelectionKeys { left: true })
+    }
+  }
+  show(app: app, step: "walked")
+  log("walking: {outstanding() - held} more held")
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+}

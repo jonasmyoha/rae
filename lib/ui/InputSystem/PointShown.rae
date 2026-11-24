@@ -3,11 +3,13 @@
 open ui/Ecs
 open ui/AnimationSystem
 open ui/Components
+open ui/Layer
 open ui/UiSystems
 open ecs/Entity
 open ecs/ComponentTable
 
-# Is (x, y) inside every ancestor of `entityId` that clips?
+# Is (x, y) inside every ancestor of `entityId` that clips? (A node on a layer of its own is cut by
+# none.)
 func uiPointInClips(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -17,7 +19,10 @@ func uiPointInClips(
 ) ret Bool {
   var at: EntityId = entityId
   loop var depth: Int = 0, depth < 256, ++depth {
-    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false or tagNamesLayer(
+      world: world
+      entityId: at
+    ) {
       ret true
     }
     at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent

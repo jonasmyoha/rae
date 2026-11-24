@@ -244,6 +244,32 @@ func uiPointInEntityTarget(
   )
 }
 
+# `uiPointInEntityTarget`, where the entity is not cut off there by an ancestor that clips: what is
+# not painted takes no click
+func uiPointOnEntity(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  targetSize: view Float
+) ret Bool {
+  ret uiPointInEntityTarget(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: x
+    y: y
+    targetSize: targetSize
+  ) and uiPointInClips(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: x
+    y: y
+  )
+}
+
 func uiHitTestEntity(
   world: view UiWorld
   uiSystems: view UiSystems
@@ -313,7 +339,7 @@ func uiHitTestEntity(
       world: world
       entityId: entityId
     ) {
-      if uiPointInEntityTarget(
+      if uiPointOnEntity(
         world: world
         uiSystems: uiSystems
         entityId: entityId

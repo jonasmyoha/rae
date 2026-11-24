@@ -45,7 +45,7 @@ if [ -n "$package_lines" ]; then
 $package_lines
 EOF
 fi
-for shared in lib/app3d/scenes lib/data lib/assets/walker; do
+for shared in lib/app3d/scenes lib/ui/fileBrowser/scenes lib/data lib/assets/walker; do
   if [ -e "$root/$shared" ]; then
     dst="$stage/$(dirname "$shared")"; mkdir -p "$dst"; cp -R "$root/$shared" "$dst/"
   fi

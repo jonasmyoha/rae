@@ -3570,6 +3570,8 @@ static bool emcc_link_c_to_web(const char* entry_rae_file,
    * build -- a project that uses none of this should not have to have lib/. */
   static const char* lib_runtime_paths[] = {
     "lib/app3d/scenes",
+    /* the file browser's scenes (ui/fileBrowser/FileBrowser) */
+    "lib/ui/fileBrowser/scenes",
     "lib/data",
     /* the Material icon atlas every `mat:` icon draws from (ui/MaterialIconFont) */
     "lib/assets/fonts/MaterialIconsRound-Regular.mtsdf.json",

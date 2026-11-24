@@ -1,0 +1,416 @@
+# Folders read off the main thread (docs/file-browser-design.md §3.1, §3.2): a thread a folder, four
+# at once, the newest wanted first; an answer whose request is not its column's last is dropped. A
+# thread that does not answer in 5 s is left alone, and its column says so.
+open Channel
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FolderListing
+open ui/fileBrowser/NavigationSystem
+
+const listingsAtOnce: Int = 4
+
+# A listing without an answer for this long is of a disk that does not answer
+const notAnsweringSeconds: Float64 = 5.0
+
+# ----- the frame -----------------------------------------------------------------------
+
+# The answers taken, the listings the columns need asked for; true when a column changed
+func fileListingSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop systems.listing.answers.pending() > 0 {
+    var answer: FolderAnswer = systems.listing.answers.receive()
+    if answer.finished {
+      finishJob(systems: systems, generation: answer.generation)
+    }
+    let column: EntityId = columnOfGeneration(systems: systems, generation: answer.generation)
+    if isNone(this: column) is false {
+      takeAnswer(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: column
+        answer: own answer
+      )
+      changed = true
+    }
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    changed = askForColumn(systems: systems, column: column) or changed
+  }
+  changed = dropGoneColumns(systems: systems, world: world, uiSystems: uiSystems) or changed
+  startListings(systems: systems)
+  ret changed
+}
+
+# The listing has sent its last answer: its thread is at its end, so dropping its task does not wait
+func finishJob(systems: mod FileBrowserSystems, generation: view Int) {
+  loop var i: Int = systems.listing.jobs.length - 1, i >= 0, --i {
+    var mine: Bool = false
+    if let job: view FolderJob = systems.listing.jobs.viewAt(index: i) {
+      mine = job.generation is generation
+    }
+    if mine {
+      systems.listing.jobs.removeAt(index: i)
+    }
+  }
+}
+
+# The column that asked with `generation` (noEntity() when it asked again since, or is gone)
+func columnOfGeneration(systems: view FileBrowserSystems, generation: view Int) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    if componentView(this: systems.columns, entityId: column).generation is generation {
+      ret column
+    }
+  }
+  ret noEntity()
+}
+
+func takeAnswer(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  answer: own FolderAnswer
+) {
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  mine.realFolder = "{answer.realFolder}"
+  if answer.outside or answer.error is not ListError.none {
+    mine.listed = true
+    mine.state = ColumnState.failed
+    if answer.outside {
+      mine.state = ColumnState.outside
+    } else if answer.error is ListError.noPermission {
+      mine.state = ColumnState.noPermission
+    } else if answer.error is ListError.notFound or answer.error is ListError.notFolder {
+      mine.state = ColumnState.gone
+    }
+    emptyColumn(systems: systems, world: world, column: column)
+    ret
+  }
+  if answer.detailsOnly {
+    mine.entriesStamp = mine.entriesStamp + 1
+    let held: ColumnEntries = { entries: answer.entries }
+    componentSet(this: systems.entries, entityId: column, data: own held)
+    ret
+  }
+  setEntries(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+    entries: answer.entries
+    names: answer.names
+  )
+}
+
+# A column that cannot be read shows no rows
+func emptyColumn(systems: mod FileBrowserSystems, world: mod UiWorld, column: view EntityId) {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  componentSet(this: systems.entries, entityId: column, data: ColumnEntries {})
+  componentSet(this: world.listRowNames, entityId: list, data: ListRowNames {})
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  mine.entriesStamp = mine.entriesStamp + 1
+}
+
+# The column's entries: the row at its top stays there, and what was to be selected is
+func setEntries(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  entries: own List(FileEntry)
+  names: own List(String)
+) {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  let anchor: RowAnchor = rowAtTop(
+    systems: systems
+    world: world
+    column: column
+    list: list
+  )
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let place: Int = componentView(this: systems.columns, entityId: column).place
+  let child: String = "{componentView(this: systems.columns, entityId: column).openChild}"
+  let hadChild: Bool = child.length() > 0 and entryIndex(
+    systems: systems
+    column: column
+    name: child
+  ) >= 0
+  keepRowAtTop(
+    world: world
+    list: list
+    names: names
+    anchor: anchor
+  )
+  let held: ColumnEntries = { entries: own entries }
+  componentSet(this: systems.entries, entityId: column, data: own held)
+  let rowNames: ListRowNames = { keys: own names }
+  componentSet(this: world.listRowNames, entityId: list, data: own rowNames)
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  let first: Bool = mine.listed is false
+  let scroll: Float = mine.wantScroll
+  mine.wantScroll = 0.0
+  mine.state = ColumnState.ready
+  mine.listed = true
+  mine.entriesStamp = mine.entriesStamp + 1
+  if first and scroll < 0.0 {
+    componentSet(
+      this: world.scrollStates
+      entityId: list
+      data: ScrollState { y: scroll, velocity: 0.0 }
+    )
+  }
+  if hadChild and entryIndex(systems: systems, column: column, name: child) < 0 {
+    # the open folder is gone: this column is the deepest that is left
+    setListSelection(world: world, list: list, keys: List(String) {})
+    dropColumnsFrom(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+      place: place + 1
+    )
+  }
+  selectWanted(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: column
+  )
+}
+
+# The row at the top of a list, and how far it is scrolled past it
+type RowAnchor {
+  name: String = ""
+  past: Float = 0.0
+}
+
+func rowAtTop(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+  list: view EntityId
+) ret RowAnchor {
+  if componentHas(this: world.scrollStates, entityId: list) is false or componentHas(
+    this: world.listViews
+    entityId: list
+  ) is false {
+    ret RowAnchor {}
+  }
+  let position: Float = -componentView(this: world.scrollStates, entityId: list).y
+  let height: Float = componentView(this: world.listViews, entityId: list).itemHeight
+  if position <= 0.0 or height <= 0.0 {
+    ret RowAnchor {}
+  }
+  let index: Int = (position / height).toInt()
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  if let entry: view FileEntry = held.entries.viewAt(index: index) {
+    ret RowAnchor { name: "{entry.name}", past: position - index.toFloat() * height }
+  }
+  ret RowAnchor {}
+}
+
+func keepRowAtTop(
+  world: mod UiWorld
+  list: view EntityId
+  names: view List(String)
+  anchor: view RowAnchor
+) {
+  if anchor.name.length() is 0 {
+    ret
+  }
+  let height: Float = componentView(this: world.listViews, entityId: list).itemHeight
+  if let index: Int = names.indexOf(value: anchor.name) {
+    let position: Float = -(index.toFloat() * height + anchor.past)
+    if componentView(this: world.scrollStates, entityId: list).y is not position {
+      componentMod(this: world.scrollStates, entityId: list).y = position
+    }
+  }
+}
+
+# A column whose folder is gone goes, with those beyond it, and the folder before is read again; the
+# first column stays and says so
+func dropGoneColumns(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = componentCount(this: systems.columns) - 1, i >= 0, --i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    if isNone(this: column) {
+      continue
+    }
+    let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+    let gone: Bool = mine.state is ColumnState.gone
+    let browser: EntityId = mine.browser
+    let place: Int = mine.place
+    if gone and place is 0 {
+      dropColumnsFrom(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+        place: 1
+      )
+    } else if gone {
+      let before: EntityId = columnAt(systems: systems, browser: browser, place: place - 1)
+      dropColumnsFrom(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+        place: place
+      )
+      let parent: mod FileColumn = componentMod(this: systems.columns, entityId: before)
+      parent.stale = true
+      parent.wantSelected.clear()
+      setListSelection(
+        world: world
+        list: listOfColumn(systems: systems, column: before)
+        keys: List(String) {}
+      )
+      changed = true
+      # the table moved
+      i = componentCount(this: systems.columns)
+    }
+  }
+  ret changed
+}
+
+# A stale column asks again; one whose listing is late says so
+func askForColumn(systems: mod FileBrowserSystems, column: view EntityId) ret Bool {
+  let now: Float64 = systems.now
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  if mine.stale is false {
+    let late: Bool = mine.state is ColumnState.listing and now - mine.askedSeconds > notAnsweringSeconds
+    if late {
+      mine.state = ColumnState.notAnswering
+    }
+    ret late
+  }
+  let generation: Int = systems.listing.nextGeneration
+  systems.listing.nextGeneration = generation + 1
+  let asking: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  asking.stale = false
+  asking.generation = generation
+  asking.askedSeconds = now
+  if asking.state is not ColumnState.ready {
+    asking.state = ColumnState.listing
+  }
+  let browser: EntityId = asking.browser
+  let folder: String = "{asking.folder}"
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  if options.source is BrowserSource.app {
+    let wanted: EntriesRequested = { browser: browser, folder: own folder }
+    eventSend(this: systems.entriesRequested, value: own wanted)
+    ret true
+  }
+  let extensions: List(String) = options.extensions
+  let filter: EntryFilter = {
+    showHidden: options.showHidden
+    namePart: ""
+    extensions: own extensions
+  }
+  let request: FolderRequest = {
+    generation: generation
+    folder: own folder
+    order: options.order
+    filter: own filter
+  }
+  systems.listing.waiting.add(value: own request)
+  ret true
+}
+
+# The real folder a browser must stay in: its root's, as its first column's listing found it ("" not
+# known yet)
+func rootLimit(systems: view FileBrowserSystems, browser: view EntityId) ret String {
+  let first: EntityId = columnAt(systems: systems, browser: browser, place: 0)
+  if componentHas(this: systems.columns, entityId: first) {
+    ret "{componentView(this: systems.columns, entityId: first).realFolder}"
+  }
+  ret ""
+}
+
+func waitingRequest(systems: view FileBrowserSystems, index: view Int) ret FolderRequest {
+  if let request: view FolderRequest = systems.listing.waiting.viewAt(index: index) {
+    ret request
+  }
+  ret FolderRequest { filter: EntryFilter { namePart: "", extensions: {} } }
+}
+
+# Threads for what waits, the newest first. What no column wants any more is not begun, and one
+# below a root waits until the root's real folder is known.
+func startListings(systems: mod FileBrowserSystems) {
+  loop var i: Int = systems.listing.waiting.length - 1, i >= 0, --i {
+    var request: FolderRequest = waitingRequest(systems: systems, index: i)
+    let column: EntityId = columnOfGeneration(systems: systems, generation: request.generation)
+    if isNone(this: column) {
+      systems.listing.waiting.removeAt(index: i)
+      continue
+    }
+    let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+    let limited: Bool = placeOfColumn(systems: systems, column: column) > 0 and browserOptions(
+      systems: systems
+      browser: browser
+    ).allowAboveRoot is false
+    let limit: String = rootLimit(systems: systems, browser: browser)
+    if systems.listing.jobs.length >= listingsAtOnce or (limited and limit.length() is 0) {
+      continue
+    }
+    if limited {
+      request.limit = own limit
+    }
+    systems.listing.waiting.removeAt(index: i)
+    let generation: Int = request.generation
+    let task: Task(Int) = spawn thread listFolderThread(
+      answers: systems.listing.answers
+      request: own request
+    )
+    systems.listing.jobs.add(value: FolderJob { generation: generation, task: own task })
+  }
+}
+
+# Every listing is over and its thread ended. False when one has not answered in `waitMs`: the app
+# ends with Sys.exit then, which joins nothing.
+func stopFileListings(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  systems.listing.waiting.clear()
+  loop var i: Int = 0, i < waitMs and systems.listing.jobs.length > 0, ++i {
+    loop systems.listing.answers.pending() > 0 {
+      let answer: FolderAnswer = systems.listing.answers.receive()
+      if answer.finished {
+        finishJob(systems: systems, generation: answer.generation)
+      }
+    }
+    if systems.listing.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.listing.jobs.length > 0 {
+    ret false
+  }
+  systems.listing.answers.freeChannel()
+  ret true
+}

@@ -6,6 +6,7 @@ import Gpu2d
 import Math
 import Gpu2dText
 import SdfText
+open text/Graphemes
 open ui/AnimationSystem
 import ui/Components
 import ui/IconCodepoints
@@ -33,6 +34,30 @@ func paintTextG(
   let t: view Text = componentView(this: world.texts, entityId: entityId)
   if content.length() is 0 {
     ret
+  }
+  # cut in its middle where it is too wide (and not being cut already)
+  if t.cut is TextCut.middle and t.wrapWidthMode is WrapWidthMode.none {
+    let shown: String = textCutToBox(
+      world: world
+      entityId: entityId
+      wt: wt
+      cr: cr
+      res: res
+      content: content
+    )
+    if shown is not content {
+      paintTextG(
+        world: world
+        entityId: entityId
+        wt: wt
+        cr: cr
+        chain255: chain255
+        res: res
+        canvas: canvas
+        content: shown
+      )
+      ret
+    }
   }
   # Hard line breaks ("\n", "\r\n"): each line on its own (a wrapping text
   # breaks there itself, drawTextWrappedEx)
@@ -622,4 +647,72 @@ func canvasPixelsPerUnit(canvas: view Gpu2dCanvas) ret Float {
     ret 1.0
   }
   ret scale
+}
+
+# The text of a node as it fits its box, cut in the middle when it does not
+func textCutToBox(
+  world: view UiWorld
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  res: view Gpu2dUi
+  content: view String
+) ret String {
+  let t: view Text = componentView(this: world.texts, entityId: entityId)
+  var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
+  if componentHas(this: world.styleOverrides, entityId: entityId) {
+    let override: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
+    size = styleOverrideSize(base: size, so: override)
+  }
+  ret middleCutText(
+    font: res.textFont
+    text: content
+    sizePx: size * wt.scale.x
+    width: worldRectOf(wt: wt, cr: cr).w
+  )
+}
+
+# `text` with its middle replaced by "..." so that it is at most `width` wide, by whole characters,
+# the same room at each end; itself when it fits
+func middleCutText(
+  font: view SdfFont
+  text: view String
+  sizePx: view Float
+  width: view Float
+) ret String {
+  if SdfText.sdfMeasureText(font: font, text: text, sizePx: sizePx) <= width {
+    ret "{text}"
+  }
+  let dots: String = "..."
+  let room: Float = width - SdfText.sdfMeasureText(font: font, text: dots, sizePx: sizePx)
+  var head: Int = 0
+  var tail: Int = text.length()
+  var headWidth: Float = 0.0
+  var tailWidth: Float = 0.0
+  loop head < tail {
+    # the shorter end grows
+    let atHead: Bool = headWidth <= tailWidth
+    var start: Int = previousGrapheme(text: text, at: tail)
+    var end: Int = tail
+    if atHead {
+      start = head
+      end = nextGrapheme(text: text, at: head)
+    }
+    let grown: Float = SdfText.sdfMeasureText(
+      font: font
+      text: text.sub(start: start, len: end - start)
+      sizePx: sizePx
+    )
+    if headWidth + tailWidth + grown > room {
+      break
+    }
+    if atHead {
+      head = end
+      headWidth = headWidth + grown
+    } else {
+      tail = start
+      tailWidth = tailWidth + grown
+    }
+  }
+  ret "{text.sub(start: 0, len: head)}{dots}{text.sub(start: tail, len: text.length() - tail)}"
 }

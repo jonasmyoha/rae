@@ -1,0 +1,65 @@
+# What kinds of files there are (docs/file-browser-design.md §9): by extension, a name, an icon, and
+# whether a picture of it can be shown. An app adds its own to FileBrowserSystems.kinds, in front.
+import Files
+
+type FileKind {
+  # Lowercase, without the dot
+  extensions: String = ""
+  name: String = ""
+  icon: String = "mat:insert_drive_file"
+  # A thumbnail is made of it, by the program when `byProgram`
+  picture: Bool = false
+  byProgram: Bool = false
+  # A folder of this kind is opened as a file (a macOS bundle)
+  asFile: Bool = false
+}
+
+# Each list of extensions has a space before and after every one
+func defaultFileKinds() ret List(FileKind) {
+  ret List(FileKind) {
+    FileKind { extensions: " png jpg jpeg ", name: "Picture", icon: "mat:image", picture: true }
+    FileKind { extensions: " gif webp tiff tif bmp heic svg ", name: "Picture", icon: "mat:image" }
+    FileKind { extensions: " mp4 mov mkv avi webm m4v ", name: "Video", icon: "mat:movie" }
+    FileKind {
+      extensions: " wav mp3 aac m4a flac ogg aiff aif "
+      name: "Sound"
+      icon: "mat:audiotrack"
+    }
+    FileKind { extensions: " txt md rtf log ", name: "Text", icon: "mat:description" }
+    FileKind { extensions: " pdf ", name: "PDF document", icon: "mat:picture_as_pdf" }
+    FileKind {
+      extensions: " rae c h js ts py rs swift sh json wgsl raepack raescene "
+      name: "Code"
+      icon: "mat:code"
+    }
+    FileKind { extensions: " zip gz tar 7z rar dmg ", name: "Archive", icon: "mat:archive" }
+    FileKind {
+      extensions: " app photoslibrary bundle framework "
+      name: "Bundle"
+      icon: "mat:apps"
+      asFile: true
+    }
+  }
+}
+
+# The kind of an entry (a plain file's when no kind lists it)
+func kindOfEntry(kinds: view List(FileKind), entry: view FileEntry) ret FileKind {
+  let extension: String = Files.extensionOf(name: entry.name)
+  let folder: Bool = Files.isFolder(entry: entry)
+  if extension.length() > 0 {
+    loop let kind: view FileKind in kinds {
+      if kind.asFile is folder and kind.extensions.contains(sub: " {extension} ") {
+        ret kind
+      }
+    }
+  }
+  if folder {
+    ret FileKind { name: "Folder", icon: "mat:folder" }
+  }
+  ret FileKind { name: "File" }
+}
+
+# Is it opened as a folder (a column)?
+func opensAsFolder(kinds: view List(FileKind), entry: view FileEntry) ret Bool {
+  ret Files.isFolder(entry: entry) and kindOfEntry(kinds: kinds, entry: entry).asFile is false
+}

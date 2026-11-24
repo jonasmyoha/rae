@@ -1,0 +1,100 @@
+# Live update (docs/file-browser-design.md §7): each folder shown is watched, and read again when it
+# changed, at most once in 200 ms.
+import FileNotify
+open ecs/ComponentTable
+open ecs/Entity
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+
+# Folders watched at once; those beyond are not
+const watchedFolders: Int = 32
+
+const relistSeconds: Float64 = 0.2
+
+# True when a column is to be read again
+func fileWatchSystem(systems: mod FileBrowserSystems) ret Bool {
+  if systems.watchesStale {
+    systems.watchesStale = false
+    setWatches(systems: systems)
+  }
+  var changed: Bool = false
+  loop var i: Int = 0, i < systems.watches.length, ++i {
+    var due: Bool = false
+    var folder: String = ""
+    if let watch: mod FolderWatch = systems.watches.modAt(index: i) {
+      if FileNotify.fileNotifyTakeChanged(fileNotify: watch.notify) {
+        watch.changed = true
+      }
+      due = watch.changed and systems.now - watch.lastSeconds >= relistSeconds
+      if due {
+        watch.changed = false
+        watch.lastSeconds = systems.now
+        folder = "{watch.folder}"
+      }
+    }
+    if due {
+      loop var at: Int = 0, at < componentCount(this: systems.columns), ++at {
+        let column: EntityId = componentEntityAt(this: systems.columns, i: at)
+        if componentView(this: systems.columns, entityId: column).folder is folder {
+          componentMod(this: systems.columns, entityId: column).stale = true
+          changed = true
+        }
+      }
+    }
+  }
+  ret changed
+}
+
+# When a change that waits is acted on (below 0: none waits)
+func watchDeadline(systems: view FileBrowserSystems) ret Float64 {
+  var deadline: Float64 = -1.0
+  loop let watch: view FolderWatch in systems.watches {
+    let at: Float64 = watch.lastSeconds + relistSeconds
+    if watch.changed and (deadline < 0.0 or at < deadline) {
+      deadline = at
+    }
+  }
+  ret deadline
+}
+
+# One watch for each folder a column shows, the deepest columns' first
+func setWatches(systems: mod FileBrowserSystems) {
+  var wanted: List(String) = {}
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+    let fromDisk: Bool = browserOptions(systems: systems, browser: mine.browser).source is BrowserSource.disk
+    if fromDisk and wanted.contains(value: mine.folder) is false {
+      wanted.add(value: "{mine.folder}")
+    }
+  }
+  loop var i: Int = systems.watches.length - 1, i >= 0, --i {
+    var unwanted: Bool = false
+    if let watch: mod FolderWatch = systems.watches.modAt(index: i) {
+      unwanted = wanted.contains(value: watch.folder) is false
+      if unwanted {
+        FileNotify.closeFileNotify(fileNotify: watch.notify)
+      } else if let at: Int = wanted.indexOf(value: watch.folder) {
+        wanted.removeAt(index: at)
+      }
+    }
+    if unwanted {
+      systems.watches.removeAt(index: i)
+    }
+  }
+  loop let folder: view String in wanted {
+    if systems.watches.length >= watchedFolders {
+      ret
+    }
+    var notify: FileNotify = FileNotify.createFileNotify()
+    let watched: Bool = FileNotify.fileNotifyWatch(fileNotify: notify, path: folder)
+    systems.watches.add(value: FolderWatch { folder: "{folder}", notify: own notify })
+  }
+}
+
+func closeWatches(systems: mod FileBrowserSystems) {
+  loop let watch: mod FolderWatch in systems.watches {
+    FileNotify.closeFileNotify(fileNotify: watch.notify)
+  }
+  systems.watches.clear()
+}

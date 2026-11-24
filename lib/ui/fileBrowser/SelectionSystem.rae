@@ -1,0 +1,213 @@
+# What the rows' selection does in the browser (docs/file-browser-design.md §1.2, §5): the events of
+# the columns' lists (ui/ListSelectionSystem), and a click on the folder that is open already.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+
+func fileSelectionSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(ListEvent, this: world.listEvents), ++i {
+    let event: ListEvent = eventAt(ListEvent, this: world.listEvents, i: i)
+    let column: EntityId = columnOfEvent(systems: systems, list: event.list)
+    if isNone(this: column) is false {
+      takeListEvent(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: column
+        event: event
+      )
+      changed = true
+    }
+  }
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    changed = clickOpenFolder(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      entityId: action.entityId
+    ) or changed
+  }
+  ret changed
+}
+
+func columnOfEvent(systems: view FileBrowserSystems, list: view EntityId) ret EntityId {
+  if componentHas(this: systems.columnOfList, entityId: list) {
+    ret componentView(this: systems.columnOfList, entityId: list).column
+  }
+  ret noEntity()
+}
+
+func takeListEvent(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  event: view ListEvent
+) {
+  if event.kind is ListEventKind.selectionChanged {
+    showColumnSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      later: event.byKey
+    )
+  } else if event.kind is ListEventKind.right {
+    walkInto(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if event.kind is ListEventKind.left {
+    walkOut(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if event.byKey is false or returnOpens(systems: systems, column: column) {
+    activateSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  }
+}
+
+func returnOpens(systems: view FileBrowserSystems, column: view EntityId) ret Bool {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  ret browserOptions(systems: systems, browser: browser).returnKey is BrowserReturnKey.open
+}
+
+# The rows selected in `column` are opened: one folder's column, or the app is told of the files
+func activateSelection(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) {
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  if names.length is 0 {
+    ret
+  }
+  let first: String = names.copyAtFallback(index: 0, fallback: "")
+  if names.length is 1 and entryOpensAsFolder(systems: systems, column: column, name: first) {
+    openChildFolder(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      name: first
+    )
+    ret
+  }
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  var event: FileActivated = {
+    browser: componentView(this: systems.columns, entityId: column).browser
+    paths: {}
+  }
+  loop let name: view String in names {
+    event.paths.add(value: pathIn(folder: folder, name: name))
+  }
+  eventSend(this: systems.fileActivated, value: own event)
+}
+
+# A click on the row of the folder that is open: what was selected beyond it is no more
+func clickOpenFolder(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  entityId: view EntityId
+) ret Bool {
+  let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: entityId)
+  let column: EntityId = columnOfEvent(systems: systems, list: row.list)
+  if isNone(this: column) {
+    ret false
+  }
+  let key: String = shownKey(uiSystems: uiSystems, row: row)
+  let open: String = "{componentView(this: systems.columns, entityId: column).openChild}"
+  if key.length() is 0 or key is not open {
+    ret false
+  }
+  if selectedCount(world: world, list: row.list) is not 1 {
+    ret false
+  }
+  showOnlyChild(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    column: column
+  )
+  ret true
+}
+
+# The app is told of what is selected now, and of the folder the browser is at
+func sendBrowserEvents(systems: mod FileBrowserSystems, world: view UiWorld) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    let folder: String = browserFolder(systems: systems, browser: browser)
+    let paths: List(String) = selectedPaths(systems: systems, world: world, browser: browser)
+    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    let moved: Bool = mine.toldFolder is not folder
+    let picked: Bool = samePaths(first: mine.toldPaths, second: paths) is false
+    if moved {
+      noteFolder(systems: systems, browser: browser, folder: folder)
+      let opened: FolderOpened = { browser: browser, folder: "{folder}" }
+      eventSend(this: systems.folderOpened, value: own opened)
+      componentMod(this: systems.browsers, entityId: browser).toldFolder = "{folder}"
+    }
+    if picked {
+      let event: SelectionChanged = { browser: browser, paths: paths }
+      eventSend(this: systems.selectionChanged, value: own event)
+      componentMod(this: systems.browsers, entityId: browser).toldPaths = paths
+    }
+    changed = changed or moved or picked
+  }
+  ret changed
+}
+
+func samePaths(first: view List(String), second: view List(String)) ret Bool {
+  if first.length is not second.length {
+    ret false
+  }
+  loop var i: Int = 0, i < first.length, ++i {
+    if let path: view String = first.viewAt(index: i) {
+      if let other: view String = second.viewAt(index: i) {
+        if path is not other {
+          ret false
+        }
+      }
+    }
+  }
+  ret true
+}

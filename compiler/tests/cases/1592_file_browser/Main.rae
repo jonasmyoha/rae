@@ -1,0 +1,976 @@
+# The file browser (lib/ui/fileBrowser) driven by scripted input over a made tree: clicks, the keys,
+# several selected, Back and Forward, the trail, the path field, the folders left and come back to,
+# the
+# root limit by every way in, hidden files, order and type filter, live update, a gone folder, what
+# an
+# app saves, two browsers in one world, a source of the app's own, dividers. Runs under
+# ThreadSanitizer too.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PreviewSystem
+open ui/textFieldSystem/TextFieldSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func rae_ext_Files_makeLink(target: String, path: String) unsafe extern ret Int
+
+func rae_ext_Files_renameAsIs(path: String, newPath: String) unsafe extern ret Int
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  files: FileBrowserSystems
+  base: String
+  left: EntityId
+  right: EntityId
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+# One frame of everything, as an app has it
+func frame(
+  app: mod App
+  pointer: view UiPointerState
+  listKeys: view ListSelectionKeys
+  keys: view BrowserKeys
+  text: view TextInputFrame
+) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.02
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  var changed: Bool = dividerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: DividerKeys {}
+  )
+  changed = scrollBarSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  changed = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  changed = textFieldSystem(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    actions: app.world.uiActions
+    input: text
+    now: app.input.nowSeconds
+  )
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: listKeys
+  )
+  changed = fileBrowserUpdate(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    keys: keys
+    nowSeconds: app.input.nowSeconds
+  )
+  answerRequests(app: app)
+  changed = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.02
+  )
+  changed = scrollToRowSystem(world: app.world, uiSystems: app.uiSystems)
+  changed = fileBrowserRows(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# A browser of the app's own entries: two folders, and in "seasons" four names
+func answerRequests(app: mod App) {
+  loop var i: Int = 0, i < eventCount(EntriesRequested, this: app.files.entriesRequested), ++i {
+    let wanted: EntriesRequested = eventAt(EntriesRequested, this: app.files.entriesRequested, i: i)
+    var entries: List(FileEntry) = {}
+    if wanted.folder.endsWith(suffix: "seasons") {
+      entries.add(value: FileEntry { name: "spring", kind: EntryKind.file })
+      entries.add(value: FileEntry { name: "summer", kind: EntryKind.file })
+    } else {
+      entries.add(value: FileEntry { name: "seasons", kind: EntryKind.folder })
+      entries.add(value: FileEntry { name: "weeks", kind: EntryKind.folder })
+    }
+    setColumnEntries(
+      systems: app.files
+      world: app.world
+      uiSystems: app.uiSystems
+      scenes: app.scenes
+      browser: wanted.browser
+      folder: wanted.folder
+      entries: own entries
+    )
+  }
+}
+
+func emptyText() ret TextInputFrame {
+  ret TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+}
+
+func still(app: view App) ret UiPointerState {
+  ret uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: false
+    kind: InputKind.mouse
+  )
+}
+
+func idle(app: mod App) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys {}
+    text: emptyText()
+  )
+}
+
+# Frames until no folder is being read, and some more
+func settle(app: mod App) {
+  var quiet: Int = 0
+  loop var i: Int = 0, i < 3000 and quiet < 12, ++i {
+    idle(app: app)
+    quiet = quiet + 1
+    if app.files.listing.jobs.length > 0 or app.files.listing.waiting.length > 0 {
+      quiet = 0
+      sleep(ms: 1)
+    }
+  }
+}
+
+func listKey(app: mod App, keys: view ListSelectionKeys) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: keys
+    keys: BrowserKeys {}
+    text: emptyText()
+  )
+}
+
+func browserKey(app: mod App, keys: view BrowserKeys) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: keys
+    text: emptyText()
+  )
+}
+
+# A press and a release at a place
+func clickAt(
+  app: mod App
+  x: view Float
+  y: view Float
+  clicks: view Int
+  listKeys: view ListSelectionKeys
+) {
+  loop var step: Int = 0, step < 3, ++step {
+    var state: UiPointerState = uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: step is 1
+      kind: InputKind.mouse
+    )
+    state.clicks = clicks
+    frame(
+      app: app
+      pointer: state
+      listKeys: listKeys
+      keys: BrowserKeys {}
+      text: emptyText()
+    )
+  }
+}
+
+func boxOf(app: view App, entityId: view EntityId) ret WorldRect {
+  ret worldRectOf(
+    wt: componentView(this: app.uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: app.uiSystems.layout.computedRects, entityId: entityId)
+  )
+}
+
+func clickNode(app: mod App, entityId: view EntityId) {
+  if isNone(this: entityId) {
+    log("no node to click")
+    ret
+  }
+  let box: WorldRect = boxOf(app: app, entityId: entityId)
+  clickAt(
+    app: app
+    x: box.x + box.w * 0.5
+    y: box.y + box.h * 0.5
+    clicks: 1
+    listKeys: ListSelectionKeys {}
+  )
+}
+
+# A click on row `row` of the column at `place`
+func clickRow(
+  app: mod App
+  browser: view EntityId
+  place: view Int
+  row: view Int
+  clicks: view Int
+  listKeys: view ListSelectionKeys
+) {
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  let box: WorldRect = boxOf(app: app, entityId: list)
+  clickAt(
+    app: app
+    x: box.x + 30.0
+    y: box.y + row.toFloat() * 24.0 + 12.0
+    clicks: clicks
+    listKeys: listKeys
+  )
+}
+
+func plain(
+  app: mod App
+  browser: view EntityId
+  place: view Int
+  row: view Int
+) {
+  clickRow(
+    app: app
+    browser: browser
+    place: place
+    row: row
+    clicks: 1
+    listKeys: ListSelectionKeys {}
+  )
+  settle(app: app)
+}
+
+func short(app: view App, path: view String) ret String {
+  if path.startsWith(prefix: app.base) {
+    ret "~{path.sub(start: app.base.length(), len: path.length() - app.base.length())}"
+  }
+  ret "{path}"
+}
+
+# The rows shown by a column's live nodes
+func rowsOf(app: view App, column: view EntityId) ret String {
+  var text: String = ""
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  let names: view ListRowNames = componentView(this: app.world.listRowNames, entityId: list)
+  ret names.keys.join(sep: " ")
+}
+
+func show(app: view App, browser: view EntityId, step: view String) {
+  log("{step}")
+  let columns: List(EntityId) = browserColumns(systems: app.files, browser: browser)
+  let withKeys: EntityId = columnWithKeys(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  loop let column: view EntityId in columns {
+    var mark: String = " "
+    if column is withKeys {
+      mark = "*"
+    }
+    let mine: view FileColumn = componentView(this: app.files.columns, entityId: column)
+    var state: String = ""
+    if mine.state is ColumnState.outside {
+      state = " OUTSIDE"
+    } else if mine.state is ColumnState.gone {
+      state = " GONE"
+    } else if mine.state is ColumnState.listing {
+      state = " LISTING"
+    } else if mine.state is ColumnState.noPermission {
+      state = " NO PERMISSION"
+    } else if mine.state is ColumnState.failed {
+      state = " FAILED"
+    }
+    var rows: String = ""
+    if componentHas(this: app.world.listRowNames, entityId: mine.list) {
+      rows = rowsOf(app: app, column: column)
+    }
+    log(
+      " {mark} {short(app: app, path: mine.folder)}: {rows} [{listSelectedKeys(
+        world: app.world
+        list: mine.list
+      ).join(sep: " ")}]{state}"
+    )
+  }
+  let preview: String = "{componentView(this: app.files.previews, entityId: browser).shown}"
+  if preview.length() > 0 {
+    let node: EntityId = componentView(this: app.files.previews, entityId: browser).node
+    let name: EntityId = nodeIn(world: app.world, root: node, nodeId: "FilePreviewName")
+    let size: EntityId = nodeIn(world: app.world, root: node, nodeId: "FilePreviewSize")
+    log(
+      "   preview {componentView(this: app.world.texts, entityId: name).text}, {componentView(
+        this: app.world.texts
+        entityId: size
+      ).text}"
+    )
+  }
+}
+
+func showEvents(app: view App) {
+  loop var i: Int = 0, i < eventCount(FolderOpened, this: app.files.folderOpened), ++i {
+    let event: FolderOpened = eventAt(FolderOpened, this: app.files.folderOpened, i: i)
+    log("   opened {short(app: app, path: event.folder)}")
+  }
+  loop var i: Int = 0, i < eventCount(FileActivated, this: app.files.fileActivated), ++i {
+    let event: FileActivated = eventAt(FileActivated, this: app.files.fileActivated, i: i)
+    log("   activated {short(app: app, path: event.paths.join(sep: " "))}")
+  }
+}
+
+func trailOf(app: view App, browser: view EntityId) ret String {
+  let trail: EntityId = componentView(this: app.files.browsers, entityId: browser).trail
+  var text: String = ""
+  let parts: view Children = componentView(this: app.world.childrens, entityId: trail)
+  loop let part: view EntityId in parts.ids {
+    let name: EntityId = nodeIn(world: app.world, root: part, nodeId: "FileTrailName")
+    text = text.concat(other: "/{componentView(this: app.world.texts, entityId: name).text}")
+  }
+  ret text
+}
+
+func writeFile(path: view String, text: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: text)
+}
+
+func makeFolder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func makeTree(base: view String) {
+  makeFolder(path: base)
+  makeFolder(path: "{base}/root")
+  makeFolder(path: "{base}/secret")
+  writeFile(path: "{base}/secret/key.txt", text: "x")
+  makeFolder(path: "{base}/root/Film")
+  makeFolder(path: "{base}/root/Film/Cuts")
+  makeFolder(path: "{base}/root/Film/Sounds")
+  makeFolder(path: "{base}/root/Photos")
+  makeFolder(path: "{base}/root/Empty")
+  writeFile(path: "{base}/root/Film/Sounds/door.wav", text: "1234")
+  writeFile(path: "{base}/root/Film/Sounds/rain.wav", text: "123456")
+  writeFile(path: "{base}/root/Film/Sounds/steps.wav", text: "12345678")
+  writeFile(path: "{base}/root/Film/film.txt", text: "film")
+  writeFile(path: "{base}/root/Photos/a.png", text: "png")
+  writeFile(path: "{base}/root/Photos/b.png", text: "png")
+  writeFile(path: "{base}/root/notes2.txt", text: "two")
+  writeFile(path: "{base}/root/notes10.txt", text: "ten")
+  writeFile(path: "{base}/root/.hidden", text: "h")
+  unsafe {
+    let linked: Int = rae_ext_Files_makeLink(
+      target: "{base}/secret"
+      path: "{base}/root/Photos/way out"
+    )
+  }
+}
+
+func makeApp(base: view String) ret App {
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    files: createFileBrowsers()
+    base: "{base}"
+    left: noEntity()
+    right: noEntity()
+  }
+  registerFileBrowserScenes(scenes: app.scenes)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 800.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  app.left = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Left")
+    root: "{base}/root/"
+    options: BrowserOptions {}
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  ret app
+}
+
+func walking(app: mod App) {
+  let browser: EntityId = app.left
+  settle(app: app)
+  show(app: app, browser: browser, step: "start")
+  plain(
+    app: app
+    browser: browser
+    place: 0
+    row: 1
+  )
+  show(app: app, browser: browser, step: "click Film")
+  plain(
+    app: app
+    browser: browser
+    place: 1
+    row: 1
+  )
+  plain(
+    app: app
+    browser: browser
+    place: 2
+    row: 1
+  )
+  show(app: app, browser: browser, step: "Sounds, rain.wav")
+  log("   trail {trailOf(app: app, browser: browser)}")
+  let strip: EntityId = componentView(this: app.files.browsers, entityId: browser).strip
+  log("   the strip is scrolled to {scrollPositionOf(world: app.world, entityId: strip)}")
+  clickRow(
+    app: app
+    browser: browser
+    place: 2
+    row: 2
+    clicks: 1
+    listKeys: ListSelectionKeys { toggle: true }
+  )
+  settle(app: app)
+  show(app: app, browser: browser, step: "and steps.wav")
+  listKey(app: app, keys: ListSelectionKeys { selectAll: true, toggle: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "all")
+  clickRow(
+    app: app
+    browser: browser
+    place: 2
+    row: 0
+    clicks: 1
+    listKeys: ListSelectionKeys {}
+  )
+  clickRow(
+    app: app
+    browser: browser
+    place: 2
+    row: 0
+    clicks: 2
+    listKeys: ListSelectionKeys {}
+  )
+  settle(app: app)
+
+  # the keys
+  listKey(app: app, keys: ListSelectionKeys { left: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Left")
+  listKey(app: app, keys: ListSelectionKeys { right: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Right, onto the row it was left at")
+  browserKey(app: app, keys: BrowserKeys { parent: true })
+  browserKey(app: app, keys: BrowserKeys { parent: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Cmd+Up twice")
+  browserKey(app: app, keys: BrowserKeys { parent: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Cmd+Up at the root")
+  listKey(app: app, keys: ListSelectionKeys { down: true })
+  let waiting: Int = browserColumns(systems: app.files, browser: browser).length
+  log("Down onto Photos: at once {waiting} column")
+  settle(app: app)
+  show(app: app, browser: browser, step: "and after a moment")
+  listKey(app: app, keys: ListSelectionKeys { text: "notes" })
+  settle(app: app)
+  show(app: app, browser: browser, step: "typed notes")
+  browserKey(app: app, keys: BrowserKeys { open: true })
+  showEvents(app: app)
+  browserKey(app: app, keys: BrowserKeys { escape: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Escape")
+}
+
+func history(app: mod App) {
+  let browser: EntityId = app.left
+  log("history {componentView(this: app.files.history, entityId: browser).folders.length} folders")
+  browserKey(app: app, keys: BrowserKeys { back: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Back")
+  browserKey(app: app, keys: BrowserKeys { back: true })
+  browserKey(app: app, keys: BrowserKeys { back: true })
+  browserKey(app: app, keys: BrowserKeys { back: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "Back three times")
+  clickNode(app: app, entityId: componentView(this: app.files.browsers, entityId: browser).forward)
+  settle(app: app)
+  show(app: app, browser: browser, step: "the Forward button")
+
+  # the trail
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    folder: "{app.base}/root/Film/Sounds"
+  )
+  settle(app: app)
+  show(app: app, browser: browser, step: "set to Sounds: {opened}")
+  let trail: EntityId = componentView(this: app.files.browsers, entityId: browser).trail
+  let parts: view Children = componentView(this: app.world.childrens, entityId: trail)
+  let film: EntityId = parts.ids.copyAtFallback(index: 1, fallback: noEntity())
+  clickNode(app: app, entityId: film)
+  settle(app: app)
+  show(app: app, browser: browser, step: "Film of the trail")
+}
+
+func typePath(app: mod App, browser: view EntityId, path: view String) {
+  let trail: EntityId = componentView(this: app.files.browsers, entityId: browser).trail
+  let box: WorldRect = boxOf(app: app, entityId: trail)
+  clickAt(
+    app: app
+    x: box.x + box.w - 6.0
+    y: box.y + box.h * 0.5
+    clicks: 1
+    listKeys: ListSelectionKeys {}
+  )
+  let field: EntityId = componentView(this: app.files.browsers, entityId: browser).pathField
+  log(
+    "field {short(app: app, path: componentView(this: app.world.textFields, entityId: field).text)}, focused {focusedTextFieldEntityId(
+      world: app.world
+    ) is field}"
+  )
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys {}
+    text: TextInputFrame { typed: "{path}", backspaces: 0, enter: false, tapped: false }
+  )
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys {}
+    text: TextInputFrame { typed: "", backspaces: 0, enter: true, tapped: false }
+  )
+  settle(app: app)
+}
+
+func limits(app: mod App) {
+  let browser: EntityId = app.left
+  typePath(app: app, browser: browser, path: "{app.base}/root/Film/Sounds/../Cuts")
+  show(app: app, browser: browser, step: "the path field, to Cuts")
+  typePath(app: app, browser: browser, path: "{app.base}/secret")
+  show(app: app, browser: browser, step: "to the folder outside")
+  typePath(app: app, browser: browser, path: "{app.base}/root/../secret")
+  show(app: app, browser: browser, step: "to it with ..")
+  typePath(app: app, browser: browser, path: "{app.base}/root/Film/None/Deeper")
+  show(app: app, browser: browser, step: "to what is not there")
+  plain(
+    app: app
+    browser: browser
+    place: 0
+    row: 2
+  )
+  plain(
+    app: app
+    browser: browser
+    place: 1
+    row: 0
+  )
+  show(app: app, browser: browser, step: "the symlink out")
+  var state: FileBrowserState = { folder: "{app.base}/secret" }
+  let restored: Bool = restoreFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    state: state
+  )
+  log("a restored trail outside: {restored}")
+  browserKey(app: app, keys: BrowserKeys { hidden: true })
+  settle(app: app)
+  show(app: app, browser: browser, step: "hidden files shown")
+  browserKey(app: app, keys: BrowserKeys { hidden: true })
+  var options: BrowserOptions = { allowAboveRoot: true, order: EntryOrder { descending: true } }
+  options.extensions.add(value: "png")
+  setBrowserOptions(
+    systems: app.files
+    world: app.world
+    browser: browser
+    options: options
+  )
+  settle(app: app)
+  show(app: app, browser: browser, step: "only pictures, from the end, above the root allowed")
+  focusFileBrowser(systems: app.files, world: app.world, browser: browser)
+  loop var i: Int = 0, i < 3, ++i {
+    browserKey(app: app, keys: BrowserKeys { parent: true })
+  }
+  settle(app: app)
+  show(app: app, browser: browser, step: "Cmd+Up past the root")
+}
+
+func live(app: mod App) {
+  let browser: EntityId = app.left
+  setBrowserOptions(
+    systems: app.files
+    world: app.world
+    browser: browser
+    options: BrowserOptions { allowAboveRoot: true }
+  )
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    folder: "{app.base}/root/Film/Sounds"
+  )
+  settle(app: app)
+  let last: Int = browserColumns(systems: app.files, browser: browser).length - 1
+  plain(
+    app: app
+    browser: browser
+    place: last
+    row: 1
+  )
+  writeFile(path: "{app.base}/root/Film/Sounds/a first.wav", text: "1")
+  waitForRows(
+    app: app
+    browser: browser
+    place: last
+    rows: 4
+  )
+  show(app: app, browser: browser, step: "a file came")
+  let gone: Bool = Sys.delete(path: "{app.base}/root/Film/Sounds/rain.wav")
+  waitForRows(
+    app: app
+    browser: browser
+    place: last
+    rows: 3
+  )
+  show(app: app, browser: browser, step: "the selected one went")
+  unsafe {
+    let moved: Int = rae_ext_Files_renameAsIs(
+      path: "{app.base}/root/Film"
+      newPath: "{app.base}/root/Movies"
+    )
+  }
+  loop var i: Int = 0, i < 400 and browserColumns(systems: app.files, browser: browser).length > 2, ++i {
+    idle(app: app)
+    sleep(ms: 2)
+  }
+  settle(app: app)
+  settle(app: app)
+  show(app: app, browser: browser, step: "the open folder was renamed")
+}
+
+func waitForRows(
+  app: mod App
+  browser: view EntityId
+  place: view Int
+  rows: view Int
+) {
+  loop var i: Int = 0, i < 1000, ++i {
+    let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+    if componentHas(this: app.files.entries, entityId: column) and componentView(
+      this: app.files.entries
+      entityId: column
+    ).entries.length is rows {
+      settle(app: app)
+      ret
+    }
+    idle(app: app)
+    sleep(ms: 2)
+  }
+  log("the rows did not come")
+}
+
+func saved(app: mod App) {
+  let browser: EntityId = app.left
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: browser
+    folder: "{app.base}/root/Movies/Sounds"
+  )
+  settle(app: app)
+  let last: Int = browserColumns(systems: app.files, browser: browser).length - 1
+  plain(
+    app: app
+    browser: browser
+    place: last
+    row: 2
+  )
+  var state: FileBrowserState = fileBrowserState(
+    systems: app.files
+    world: app.world
+    browser: browser
+  )
+  log("saved {short(app: app, path: state.folder)} [{state.selected.join(sep: " ")}]")
+  state.widths = List(Float) { 150.0, 0.0, 300.0 }
+  state.folder = "{app.base}/root/Movies/Sounds/Gone"
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "{app.base}/root"
+    options: BrowserOptions { showPreview: false, multiple: false, columnWidth: 130.0 }
+  )
+  let restored: Bool = restoreFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.right
+    state: state
+  )
+  settle(app: app)
+  show(app: app, browser: app.right, step: "restored in a second browser, as far as it exists")
+  loop let column: view EntityId in browserColumns(systems: app.files, browser: app.right) {
+    log("   width {boxOf(app: app, entityId: column).w}")
+  }
+
+  # the two have their own selections; the keys are one's
+  plain(
+    app: app
+    browser: app.right
+    place: 0
+    row: 2
+  )
+  show(app: app, browser: app.right, step: "right: a click where Photos is cut off")
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.right)
+  listKey(app: app, keys: ListSelectionKeys { left: true })
+  listKey(app: app, keys: ListSelectionKeys { left: true })
+  settle(app: app)
+  plain(
+    app: app
+    browser: app.right
+    place: 0
+    row: 2
+  )
+  show(app: app, browser: app.right, step: "right: Left twice, click Photos")
+  show(app: app, browser: browser, step: "left")
+  listKey(app: app, keys: ListSelectionKeys { up: true })
+  settle(app: app)
+  show(app: app, browser: app.right, step: "right: Up")
+  log("watches {app.files.watches.length}")
+}
+
+func large(app: mod App) {
+  let browser: EntityId = app.left
+  plain(
+    app: app
+    browser: browser
+    place: browserColumns(systems: app.files, browser: browser).length - 1
+    row: 0
+  )
+  browserKey(app: app, keys: BrowserKeys { space: true })
+  settle(app: app)
+  log("Space: large {largePreviewOpen(systems: app.files, browser: browser)}")
+  listKey(app: app, keys: ListSelectionKeys { down: true })
+  settle(app: app)
+  let node: EntityId = componentView(this: app.files.previews, entityId: browser).large
+  let name: EntityId = nodeIn(world: app.world, root: node, nodeId: "FileLargeName")
+  log(
+    "Down: {componentView(this: app.world.texts, entityId: name).text}, {boxOf(
+      app: app
+      entityId: node
+    ).w} wide"
+  )
+  browserKey(app: app, keys: BrowserKeys { escape: true })
+  settle(app: app)
+  show(
+    app: app
+    browser: browser
+    step: "Escape: large {largePreviewOpen(systems: app.files, browser: browser)}"
+  )
+}
+
+func widths(app: mod App) {
+  let browser: EntityId = app.right
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: 0)
+  let divider: EntityId = componentView(this: app.files.columns, entityId: column).divider
+  let box: WorldRect = boxOf(app: app, entityId: divider)
+  let x: Float = box.x
+  loop var step: Int = 0, step < 5, ++step {
+    var to: Float = x
+    if step > 1 {
+      to = x + 40.0
+    }
+    frame(
+      app: app
+      pointer: uiPointerScriptFrame(
+        previous: app.input.pointer
+        x: to
+        y: 200.0
+        down: step > 0 and step < 4
+        kind: InputKind.mouse
+      )
+      listKeys: ListSelectionKeys {}
+      keys: BrowserKeys {}
+      text: emptyText()
+    )
+  }
+  log("dragged to {boxOf(app: app, entityId: column).w}")
+  clickAt(
+    app: app
+    x: x + 40.0
+    y: 200.0
+    clicks: 2
+    listKeys: ListSelectionKeys {}
+  )
+  settle(app: app)
+  let fitted: Float = boxOf(app: app, entityId: column).w
+  log("a double click fits the names: {fitted < x and fitted > 120.0}")
+  closeFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: browser
+  )
+  settle(app: app)
+  log("closed: {componentCount(this: app.files.browsers)} browser left")
+  # its host is free for another, of the app's own entries
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "/own"
+    options: BrowserOptions { source: BrowserSource.app, openCountTint: true }
+  )
+  settle(app: app)
+  plain(
+    app: app
+    browser: app.right
+    place: 0
+    row: 0
+  )
+  loop var i: Int = 0, i < 4, ++i {
+    countOpened(systems: app.files, path: "/own/seasons/summer")
+  }
+  settle(app: app)
+  show(app: app, browser: app.right, step: "the app's own")
+  let child: EntityId = columnAt(systems: app.files, browser: app.right, place: 1)
+  let list: EntityId = listOfColumn(systems: app.files, column: child)
+  let rows: view Children = componentView(this: app.world.childrens, entityId: list)
+  var tints: String = ""
+  loop let row: view EntityId in rows.ids {
+    let tint: EntityId = nodeIn(world: app.world, root: row, nodeId: "FileRowTint")
+    tints = tints.concat(other: " {componentView(this: app.world.actives, entityId: tint).value}")
+  }
+  log("tints{tints}")
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let box: String = "{temporary}/rae-file-browser-{nowNs()}"
+  let base: String = "{box}/base"
+  makeFolder(path: box)
+  makeTree(base: base)
+  var app: App = makeApp(base: base)
+  walking(app: app)
+  history(app: app)
+  limits(app: app)
+  live(app: app)
+  saved(app: app)
+  large(app: app)
+  widths(app: app)
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}, columns {componentCount(this: app.files.columns)}")
+  removeTree(folder: box)
+}

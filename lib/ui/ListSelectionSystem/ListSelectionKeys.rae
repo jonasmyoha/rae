@@ -209,6 +209,12 @@ func stepKeysOfList(
     toggle: false
     extend: extend
   )
+  if picked {
+    let sent: Int = uiSystems.listSelection.pending.length - 1
+    if let event: mod ListEvent = uiSystems.listSelection.pending.modAt(index: sent) {
+      event.byKey = true
+    }
+  }
   if isNone(this: scrollToRowRoot(world: world, uiSystems: uiSystems, listEntity: list)) is false {
     requestScrollToRow(
       world: world

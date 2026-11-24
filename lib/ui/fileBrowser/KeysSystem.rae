@@ -1,0 +1,329 @@
+# The browser's own keys (docs/file-browser-design.md §1.1), for the browser whose column has them,
+# and the clicks on its bar. The rows' keys are ui/ListSelectionSystem's.
+import Keys
+import Sdl3
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PreviewSystem
+open ui/fileBrowser/SelectionSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func browserKeysFromDevice() ret BrowserKeys {
+  if listCommandHeld() is false {
+    ret BrowserKeys {
+      space: Sdl3.isKeyPressed(key: Keys.keySpace)
+      escape: Sdl3.isKeyPressed(key: Keys.keyEscape)
+    }
+  }
+  let shift: Bool = Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift)
+  ret BrowserKeys {
+    open: Sdl3.isKeyPressed(key: Keys.keyO) or Sdl3.isKeyPressed(key: Keys.keyDown)
+    parent: Sdl3.isKeyPressed(key: Keys.keyUp)
+    back: Sdl3.isKeyPressed(key: Keys.keyLeftBracket)
+    forward: Sdl3.isKeyPressed(key: Keys.keyRightBracket)
+    hidden: shift and Sdl3.isKeyPressed(key: Keys.keyPeriod)
+  }
+}
+
+func fileKeysSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: view BrowserKeys
+) ret Bool {
+  var changed: Bool = stepBarClicks(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  )
+  changed = stepPathFields(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    escape: keys.escape
+  ) or changed
+  if not (keys.open or keys.parent or keys.back or keys.forward or keys.hidden or keys.space or keys.escape) {
+    ret changed
+  }
+  let column: EntityId = columnWithKeys(systems: systems, world: world, uiSystems: uiSystems)
+  if isNone(this: column) {
+    ret changed
+  }
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  if keys.open {
+    activateSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if keys.parent {
+    walkOut(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if keys.back or keys.forward {
+    var step: Int = 1
+    if keys.back {
+      step = -1
+    }
+    walkHistory(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      step: step
+    )
+  } else if keys.hidden {
+    let shown: Bool = browserOptions(systems: systems, browser: browser).showHidden
+    setBrowserHidden(systems: systems, browser: browser, shown: shown is false)
+  } else if keys.space {
+    stepSpace(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      column: column
+    )
+  } else if keys.escape {
+    if largePreviewOpen(systems: systems, browser: browser) {
+      dropLargePreview(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+      )
+    } else {
+      let list: EntityId = listOfColumn(systems: systems, column: column)
+      if clearListSelection(world: world, uiSystems: uiSystems, list: list) {
+        showColumnSelection(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          column: column
+          later: false
+        )
+      }
+    }
+  }
+  ret true
+}
+
+# Space opens and closes the large preview, unless it goes on with a name being typed
+func stepSpace(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  column: view EntityId
+) {
+  if largePreviewOpen(systems: systems, browser: browser) {
+    dropLargePreview(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+    ret
+  }
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    let state: view ListSelected = componentView(this: world.listSelecteds, entityId: list)
+    if state.typed.length() > 1 and systems.now - state.typedSeconds < listTypeSeconds {
+      ret
+    }
+  }
+  openLargePreview(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+  )
+}
+
+# Show or hide the hidden files of a browser
+func setBrowserHidden(systems: mod FileBrowserSystems, browser: view EntityId, shown: view Bool) {
+  componentMod(this: systems.browsers, entityId: browser).options.showHidden = shown
+  staleBrowser(systems: systems, browser: browser)
+}
+
+# Every open folder of a browser is read again
+func staleBrowser(systems: mod FileBrowserSystems, browser: view EntityId) {
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    componentMod(this: systems.columns, entityId: column).stale = true
+  }
+}
+
+# ----- the bar --------------------------------------------------------------------------
+func stepBarClicks(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if let part: TrailPart = componentCopy(this: systems.trailParts, entityId: action.entityId) {
+      let opened: Bool = openTrail(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: part.browser
+        folder: part.folder
+      )
+      focusDeepest(systems: systems, world: world, browser: part.browser)
+      changed = true
+    }
+    if let button: ButtonOfBrowser = componentCopy(this: systems.buttons, entityId: action.entityId) {
+      changed = true
+      if button.button is BrowserButton.back or button.button is BrowserButton.forward {
+        var step: Int = 1
+        if button.button is BrowserButton.back {
+          step = -1
+        }
+        walkHistory(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          browser: button.browser
+          step: step
+        )
+      } else if button.button is BrowserButton.trail {
+        openPathField(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          browser: button.browser
+        )
+      } else if componentHas(this: systems.columns, entityId: button.column) {
+        let column: mod FileColumn = componentMod(this: systems.columns, entityId: button.column)
+        column.stale = true
+        column.state = ColumnState.listing
+      }
+    }
+  }
+  ret changed
+}
+
+# The keys go to the deepest column
+func focusDeepest(systems: view FileBrowserSystems, world: mod UiWorld, browser: view EntityId) {
+  let column: EntityId = deepestColumn(systems: systems, browser: browser)
+  if isNone(this: column) is false {
+    setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: column).body)
+  }
+}
+
+# The trail becomes a field with the path, all of it selected
+func openPathField(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  let folder: String = browserFolder(systems: systems, browser: browser)
+  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let trail: EntityId = mine.trail
+  let box: EntityId = mine.pathBox
+  let field: EntityId = mine.pathField
+  if componentHas(this: world.textFields, entityId: field) is false {
+    ret
+  }
+  showNode(world: world, entityId: trail, shown: false)
+  showNode(world: world, entityId: box, shown: true)
+  componentMod(this: world.textFields, entityId: field).text = "{folder}"
+  let focused: Bool = setTextFieldSelection(
+    world: world
+    textFieldSystem: uiSystems.textField
+    entityId: field
+    start: 0
+    end: folder.length()
+  )
+}
+
+# Return in a path field goes there; Escape, or the focus lost, brings the trail back
+func stepPathFields(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  escape: view Bool
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+    let trail: EntityId = mine.trail
+    let box: EntityId = mine.pathBox
+    let field: EntityId = mine.pathField
+    let action: String = "{mine.pathAction}"
+    if componentHas(this: world.textFields, entityId: field) is false or componentHas(
+      this: world.actives
+      entityId: box
+    ) is false or componentView(this: world.actives, entityId: box).value is false {
+      continue
+    }
+    let entered: Bool = actionSent(world: world, actionId: action)
+    let focused: Bool = focusedTextFieldEntityId(world: world) is field
+    if focused and escape is false and entered is false {
+      continue
+    }
+    if entered {
+      let text: String = "{componentView(this: world.textFields, entityId: field).text}"
+      let opened: Bool = openTrail(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: browser
+        folder: homePath(path: text)
+      )
+    }
+    if focused {
+      let left: Bool = focusTextField(world: world, entityId: noEntity())
+    }
+    showNode(world: world, entityId: box, shown: false)
+    showNode(world: world, entityId: trail, shown: true)
+    if entered or escape {
+      focusDeepest(systems: systems, world: world, browser: browser)
+    }
+    changed = true
+  }
+  ret changed
+}
+
+func actionSent(world: view UiWorld, actionId: view String) ret Bool {
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    if eventAt(UiAction, this: world.uiActions, i: i).actionId is actionId {
+      ret true
+    }
+  }
+  ret false
+}

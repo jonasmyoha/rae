@@ -1,0 +1,133 @@
+# The browser's nodes: its scenes mounted, found by their ids, and shown or hidden.
+import Gpu2d
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/SceneInstance
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+
+# The scene `key` of the registry mounted at the end of `parent`'s children
+func mountFileScene(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  key: view String
+  parent: view EntityId
+) ret EntityId {
+  let overrides: List(SceneOverride) = emptyOverrides()
+  if let index: Int = sceneRegistryIndex(reg: scenes, key: key) {
+    let node: EntityId = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: sceneRegistryGet(reg: scenes, idx: index)
+      overrides: overrides
+    )
+    if isNone(this: node) is false {
+      setParent(
+        parents: uiSystems.hierarchy.parents
+        childrens: world.childrens
+        child: node
+        parent: parent
+      )
+    }
+    ret node
+  }
+  ret noEntity()
+}
+
+# The node `nodeId` of the scene mounted at `root`
+func nodeIn(world: view UiWorld, root: view EntityId, nodeId: view String) ret EntityId {
+  var nodes: List(EntityId) = {}
+  collectSubtree(childrens: world.childrens, node: root, out: nodes)
+  loop let node: view EntityId in nodes {
+    if componentHas(this: world.sceneSources, entityId: node) and componentView(
+      this: world.sceneSources
+      entityId: node
+    ).nodeId is nodeId {
+      ret node
+    }
+  }
+  ret noEntity()
+}
+
+# Show a node or not (it takes no place then)
+func showNode(world: mod UiWorld, entityId: view EntityId, shown: view Bool) {
+  if isNone(this: entityId) {
+    ret
+  }
+  if componentHas(this: world.actives, entityId: entityId) {
+    if componentView(this: world.actives, entityId: entityId).value is shown {
+      ret
+    }
+  } else if shown {
+    ret
+  }
+  componentSet(this: world.actives, entityId: entityId, data: Active { value: shown })
+}
+
+func setNodeText(world: mod UiWorld, entityId: view EntityId, text: view String) {
+  if componentHas(this: world.texts, entityId: entityId) and componentView(
+    this: world.texts
+    entityId: entityId
+  ).text is not text {
+    componentMod(this: world.texts, entityId: entityId).text = "{text}"
+  }
+}
+
+func setNodeOpacity(world: mod UiWorld, entityId: view EntityId, value: view Float) {
+  if isNone(this: entityId) {
+    ret
+  }
+  if componentHas(this: world.opacities, entityId: entityId) and componentView(
+    this: world.opacities
+    entityId: entityId
+  ).value is value {
+    ret
+  }
+  componentSet(this: world.opacities, entityId: entityId, data: Opacity { value: value })
+}
+
+# The preview column goes
+func dropPreviewNode(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  if componentHas(this: systems.previews, entityId: browser) is false {
+    ret
+  }
+  let node: EntityId = componentView(this: systems.previews, entityId: browser).node
+  if isNone(this: node) is false and isAlive(world: world, entityId: node) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
+  preview.node = noEntity()
+  preview.shown = ""
+}
+
+# The large preview goes, and Escape is the app's again
+func dropLargePreview(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  if componentHas(this: systems.previews, entityId: browser) is false {
+    ret
+  }
+  let node: EntityId = componentView(this: systems.previews, entityId: browser).large
+  if isNone(this: node) {
+    ret
+  }
+  if isAlive(world: world, entityId: node) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
+  preview.large = noEntity()
+  preview.largeShown = ""
+  Gpu2d.setEscapeQuits(on: preview.escapeQuit)
+}

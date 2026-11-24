@@ -1,0 +1,498 @@
+# A file browser in columns (docs/file-browser-design.md), as many of them in a UiWorld as an app
+# wants:
+#
+#     var files: FileBrowserSystems = createFileBrowsers()
+#     registerFileBrowserScenes(scenes: scenes)
+#     let browser: EntityId = openFileBrowser(systems: files, world: world, uiSystems: uiSystems,
+#       scenes: scenes, host: node, root: folder, options: {})
+#
+# Each frame, after updateUiInput, dividerSystem, scrollBarSystem, keyFocusSystem, the text fields
+# and
+# listSelectionSystem: fileBrowserUpdate; then updateScrollRoots and scrollToRowSystem;
+# fileBrowserRows; listViewSystem and the rest. The app reads the events (files.folderOpened,
+# fileActivated, selectionChanged, entriesRequested) after fileBrowserUpdate. At the end:
+# closeFileBrowsers.
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/Scene
+open ui/SceneFile
+open ui/SceneInstance
+open ui/UiSystems
+open ui/fileBrowser/ChromeSystem
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FolderListing
+open ui/fileBrowser/KeysSystem
+open ui/fileBrowser/ListingSystem
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PreviewSystem
+open ui/fileBrowser/RowsSystem
+open ui/fileBrowser/SelectionSystem
+open ui/fileBrowser/WatchSystem
+
+# The browser's scenes, those the app has not registered itself under the same name
+func registerFileBrowserScenes(scenes: mod SceneRegistry) {
+  let names: List(String) = {
+    "fileBrowser"
+    "fileColumn"
+    "fileRow"
+    "filePreview"
+    "fileLargePreview"
+    "fileTrailPart"
+  }
+  loop let name: view String in names {
+    if sceneRegistryHas(reg: scenes, key: name) is false {
+      let scene: Scene = loadSceneFile(path: "lib/ui/fileBrowser/scenes/{name}.raescene")
+      registerScene(reg: scenes, key: "{name}", scene: own scene)
+    }
+  }
+}
+
+# A browser of the folder `root` in the node `host`, which it fills
+func openFileBrowser(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  host: view EntityId
+  root: view String
+  options: view BrowserOptions
+) ret EntityId {
+  let scene: EntityId = mountFileScene(
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    key: "fileBrowser"
+    parent: host
+  )
+  systems.browsersMade = systems.browsersMade + 1
+  let folder: String = cleanPath(path: homePath(path: root))
+  var browser: FileBrowser = { root: "{folder}", options: options }
+  browser.scene = scene
+  browser.bar = nodeIn(world: world, root: scene, nodeId: "FileBrowserBar")
+  browser.back = nodeIn(world: world, root: scene, nodeId: "FileBrowserBack")
+  browser.forward = nodeIn(world: world, root: scene, nodeId: "FileBrowserForward")
+  browser.trail = nodeIn(world: world, root: scene, nodeId: "FileBrowserTrail")
+  browser.pathBox = nodeIn(world: world, root: scene, nodeId: "FileBrowserPath")
+  browser.pathField = nodeIn(world: world, root: scene, nodeId: "FileBrowserPathField")
+  browser.strip = nodeIn(world: world, root: scene, nodeId: "FileBrowserStrip")
+  browser.stripWindow = nodeIn(world: world, root: scene, nodeId: "FileBrowserWindow")
+  browser.pathAction = "fileBrowser.path.{systems.browsersMade}"
+  if componentHas(this: world.textFields, entityId: browser.pathField) {
+    componentMod(this: world.textFields, entityId: browser.pathField).actionId = "{browser.pathAction}"
+  }
+  showNode(world: world, entityId: browser.pathBox, shown: false)
+  showNode(world: world, entityId: browser.bar, shown: options.showBar)
+  noteButton(
+    systems: systems
+    entityId: browser.back
+    browser: host
+    button: BrowserButton.back
+  )
+  noteButton(
+    systems: systems
+    entityId: browser.forward
+    browser: host
+    button: BrowserButton.forward
+  )
+  noteButton(
+    systems: systems
+    entityId: browser.trail
+    browser: host
+    button: BrowserButton.trail
+  )
+  componentSet(this: systems.browsers, entityId: host, data: own browser)
+  let history: BrowserHistory = { memory: createStringMap(FolderMemory, cap: 16) }
+  componentSet(this: systems.history, entityId: host, data: own history)
+  componentSet(this: systems.previews, entityId: host, data: BrowserPreview {})
+  let first: EntityId = openColumn(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: host
+    folder: folder
+  )
+  ret host
+}
+
+func noteButton(
+  systems: mod FileBrowserSystems
+  entityId: view EntityId
+  browser: view EntityId
+  button: copy BrowserButton
+) {
+  if isNone(this: entityId) is false {
+    componentSet(
+      this: systems.buttons
+      entityId: entityId
+      data: ButtonOfBrowser { browser: browser, button: button }
+    )
+  }
+}
+
+# One frame of every browser's input, listings and columns. True when something changed, so that
+# there is a frame to draw.
+func fileBrowserUpdate(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: view BrowserKeys
+  nowSeconds: view Float64
+) ret Bool {
+  frameAdvance(this: systems.folderOpened)
+  frameAdvance(this: systems.fileActivated)
+  frameAdvance(this: systems.selectionChanged)
+  frameAdvance(this: systems.entriesRequested)
+  systems.now = nowSeconds
+  closeDeadBrowsers(systems: systems, world: world, uiSystems: uiSystems)
+  var changed: Bool = fileSelectionSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  )
+  changed = fileKeysSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: keys
+  ) or changed
+  changed = fileNavigationSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
+  changed = fileWatchSystem(systems: systems) or changed
+  changed = fileListingSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
+  changed = filePreviewSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
+  ret sendBrowserEvents(systems: systems, world: world) or changed
+}
+
+# The rows in view and what is around them, after the scroll roots were stepped
+func fileBrowserRows(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  let around: Bool = fileChromeSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  )
+  ret fileRowsSystem(systems: systems, world: world, uiSystems: uiSystems) or around
+}
+
+# When the browsers need a frame though nothing happens (a folder to open, a spinner to show), in
+# the clock of fileBrowserUpdate; below 0: they do not
+func fileBrowserDeadline(systems: view FileBrowserSystems) ret Float64 {
+  var deadline: Float64 = earlier(
+    first: watchDeadline(systems: systems)
+    second: listingDeadline(systems: systems)
+  )
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    deadline = earlier(
+      first: deadline
+      second: componentView(this: systems.browsers, entityId: browser).openAt
+    )
+  }
+  ret deadline
+}
+
+func earlier(first: view Float64, second: view Float64) ret Float64 {
+  if first < 0.0 or (second >= 0.0 and second < first) {
+    ret second
+  }
+  ret first
+}
+
+# ----- what an app calls ------------------------------------------------------------------------
+
+# Go to `folder`; false when the browser may not (its root, allowAboveRoot)
+func setBrowserFolder(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  folder: view String
+) ret Bool {
+  ret openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: homePath(path: folder)
+  )
+}
+
+# Other options; the folders are read again
+func setBrowserOptions(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+  options: view BrowserOptions
+) {
+  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.options = options
+  showNode(
+    world: world
+    entityId: componentView(this: systems.browsers, entityId: browser).bar
+    shown: options.showBar
+  )
+  staleBrowser(systems: systems, browser: browser)
+}
+
+# Read every open folder of a browser again
+func refreshFileBrowser(systems: mod FileBrowserSystems, browser: view EntityId) {
+  staleBrowser(systems: systems, browser: browser)
+}
+
+# The keys go to the browser (its deepest column)
+func focusFileBrowser(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+) {
+  focusDeepest(systems: systems, world: world, browser: browser)
+}
+
+# A file was opened once more (for the tint of those opened often)
+func countOpened(systems: mod FileBrowserSystems, path: view String) {
+  var count: Int = 0
+  if let before: Int = systems.openCounts.get(k: path) {
+    count = before
+  }
+  systems.openCounts.set(k: path, value: count + 1)
+  systems.openCountsStamp = systems.openCountsStamp + 1
+}
+
+# The answer to EntriesRequested: the entries of `folder`, in the order to be shown
+func setColumnEntries(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  folder: view String
+  entries: own List(FileEntry)
+) {
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    if folderOfColumn(systems: systems, column: column) is folder {
+      let names: List(String) = namesOf(entries: entries)
+      setEntries(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        column: column
+        entries: own entries
+        names: own names
+      )
+      ret
+    }
+  }
+}
+
+# What an app saves of a browser
+func fileBrowserState(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret FileBrowserState {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  var state: FileBrowserState = {
+    folder: browserFolder(systems: systems, browser: browser)
+    order: options.order
+    showHidden: options.showHidden
+  }
+  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  state.widths = mine.widths
+  let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
+  state.selected = listSelectedOf(systems: systems, world: world, column: deepest)
+  ret state
+}
+
+func listSelectedOf(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+) ret List(String) {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    let state: view ListSelected = componentView(this: world.listSelecteds, entityId: list)
+    ret state.selected
+  }
+  ret List(String) {}
+}
+
+# Bring back what was saved, as far as it still exists and the browser may show it
+func restoreFileBrowser(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  state: view FileBrowserState
+) ret Bool {
+  let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.options.order = state.order
+  mine.options.showHidden = state.showHidden
+  mine.widths = state.widths
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    let width: Float = state.widths.copyAtFallback(
+      index: placeOfColumn(systems: systems, column: column)
+      fallback: 0.0
+    )
+    if width > 0.0 {
+      let shown: view FileColumn = componentView(this: systems.columns, entityId: column)
+      setColumnWidth(
+        world: world
+        uiSystems: uiSystems
+        body: shown.body
+        divider: shown.divider
+        width: width
+      )
+    }
+  }
+  staleBrowser(systems: systems, browser: browser)
+  if state.folder.length() is 0 {
+    ret true
+  }
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: state.folder
+  )
+  if opened and state.selected.length > 0 {
+    let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
+    componentMod(this: systems.columns, entityId: deepest).wantSelected = state.selected
+  }
+  ret opened
+}
+
+# ----- closing
+# --------------------------------------------------------------------------------------
+
+# Close a browser: its nodes go, the host node stays
+func closeFileBrowser(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  if componentHas(this: systems.browsers, entityId: browser) is false {
+    ret
+  }
+  dropLargePreview(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+  dropPreviewNode(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: 0
+  )
+  let scene: EntityId = componentView(this: systems.browsers, entityId: browser).scene
+  forgetBrowserNodes(systems: systems, browser: browser)
+  if isAlive(world: world, entityId: scene) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: scene)
+  }
+  componentRemove(this: systems.browsers, entityId: browser)
+  componentRemove(this: systems.history, entityId: browser)
+  componentRemove(this: systems.previews, entityId: browser)
+}
+
+func forgetBrowserNodes(systems: mod FileBrowserSystems, browser: view EntityId) {
+  loop var i: Int = componentCount(this: systems.buttons) - 1, i >= 0, --i {
+    let node: EntityId = componentEntityAt(this: systems.buttons, i: i)
+    if componentView(this: systems.buttons, entityId: node).browser is browser {
+      componentRemove(this: systems.buttons, entityId: node)
+    }
+  }
+  loop var i: Int = componentCount(this: systems.trailParts) - 1, i >= 0, --i {
+    let node: EntityId = componentEntityAt(this: systems.trailParts, i: i)
+    if componentView(this: systems.trailParts, entityId: node).browser is browser {
+      componentRemove(this: systems.trailParts, entityId: node)
+    }
+  }
+}
+
+# Browsers whose nodes were destroyed with a page
+func closeDeadBrowsers(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) {
+  loop var i: Int = componentCount(this: systems.browsers) - 1, i >= 0, --i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    if isAlive(
+      world: world
+      entityId: componentView(this: systems.browsers, entityId: browser).scene
+    ) is false {
+      closeFileBrowser(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+      )
+    }
+  }
+}
+
+# Close every browser and end what runs for them. False when a disk has not answered in a second:
+# the app then ends with Sys.exit, which waits for nothing.
+func closeFileBrowsers(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  loop componentCount(this: systems.browsers) > 0 {
+    closeFileBrowser(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: componentEntityAt(this: systems.browsers, i: 0)
+    )
+  }
+  closeWatches(systems: systems)
+  ret stopFileListings(systems: systems, waitMs: 1000)
+}

@@ -1,0 +1,317 @@
+# Four file browsers (lib/ui/fileBrowser) in two worlds, painted: dark above, light below; a wide
+# one
+# with a preview (above), one scrolled far into 100,000 entries with tints (below), and a narrow
+# one of
+# each. The entries are the program's own, so that the picture is the same everywhere.
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/files.bmp \
+#     compiler/bin/rae run checks/uiFileBrowser/Main.rae
+#
+# The behavior is checked in compiler/tests/cases/1592_file_browser. Exit 0 when it drew.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/Schedule
+open Gpu2dCanvas
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/InputSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+
+const designW: Int = 1100
+
+const designH: Int = 720
+
+func fileEntry(name: view String, kind: copy EntryKind, size: view Int) ret FileEntry {
+  ret FileEntry { name: "{name}", kind: kind, size: size, modifiedSeconds: 1790000000.0 }
+}
+
+func entriesOf(folder: view String) ret List(FileEntry) {
+  var entries: List(FileEntry) = {}
+  if folder.endsWith(suffix: "Many") {
+    loop var i: Int = 0, i < 100000, ++i {
+      entries.add(
+        value: fileEntry(name: "recording {i + 100000}.wav", kind: EntryKind.file, size: 900)
+      )
+    }
+    ret entries
+  }
+  if folder.endsWith(suffix: "Sounds") {
+    loop let name: view String in List(String) {
+      "door.wav"
+      "rain on a tin roof, recorded at night.wav"
+      "steps.wav"
+      "wind.mp3"
+    } {
+      entries.add(value: fileEntry(name: name, kind: EntryKind.file, size: 4200000))
+    }
+    ret entries
+  }
+  loop let name: view String in List(String) {
+    "Archive"
+    "Film"
+    "Many"
+    "Photos"
+    "Sounds"
+  } {
+    entries.add(value: fileEntry(name: name, kind: EntryKind.folder, size: 0))
+  }
+  entries.add(
+    value: fileEntry(name: "a very long name of some notes.txt", kind: EntryKind.file, size: 812)
+  )
+  entries.add(value: fileEntry(name: "cover.png", kind: EntryKind.file, size: 81200))
+  entries.add(value: fileEntry(name: "film.pdf", kind: EntryKind.file, size: 81200))
+  entries.add(value: fileEntry(name: "main.rae", kind: EntryKind.file, size: 81200))
+  ret entries
+}
+
+func answer(
+  files: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) {
+  loop var i: Int = 0, i < eventCount(EntriesRequested, this: files.entriesRequested), ++i {
+    let wanted: EntriesRequested = eventAt(EntriesRequested, this: files.entriesRequested, i: i)
+    setColumnEntries(
+      systems: files
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: wanted.browser
+      folder: wanted.folder
+      entries: entriesOf(folder: wanted.folder)
+    )
+  }
+}
+
+func nodeNamed(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = world.nodeIds.get(k: nodeId) {
+    ret id(v: raw)
+  }
+  ret noEntity()
+}
+
+# Open a browser at `folder` with `names` selected in it
+func openAt(
+  files: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  node: view String
+  folder: view String
+  names: own List(String)
+) ret EntityId {
+  let browser: EntityId = openFileBrowser(
+    systems: files
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    host: nodeNamed(world: world, nodeId: node)
+    root: "/Projects"
+    options: BrowserOptions { source: BrowserSource.app, openCountTint: true }
+  )
+  let restored: Bool = restoreFileBrowser(
+    systems: files
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    state: FileBrowserState { folder: "{folder}", selected: own names }
+  )
+  ret browser
+}
+
+# One world with its two browsers
+type Half {
+  world: UiWorld
+  uiSystems: UiSystems
+  resources: Gpu2dUi
+  files: FileBrowserSystems
+  schedule: Schedule
+  wide: EntityId
+  large: Bool
+}
+
+func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) ret Half {
+  let resources: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "../../../checks/uiFileBrowser/{theme}.raescene"
+  )
+  var world: UiWorld = create()
+  let schedule: Schedule = createUiPipeline(world: world)
+  var half: Half = {
+    world: own world
+    uiSystems: createUiSystems()
+    resources: own resources
+    files: createFileBrowsers()
+    schedule: own schedule
+    wide: noEntity()
+    large: large
+  }
+  seedWorldTheme(world: half.world, res: half.resources)
+  half.world.layoutW = designW.toFloat()
+  half.world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiFileBrowser/page.raescene")
+  loadScene(world: half.world, uiSystems: half.uiSystems, scene: scene)
+  if large {
+    # the lower half of the window
+    componentMod(this: half.world.paddings, entityId: nodeNamed(world: half.world, nodeId: "Page")).insets.t = 370.0
+  }
+  loop var i: Int = 0, i < 12, ++i {
+    countOpened(systems: half.files, path: "/Projects/Many/recording 160003.wav")
+    if i < 4 {
+      countOpened(systems: half.files, path: "/Projects/Many/recording 160005.wav")
+    }
+  }
+  var folder: String = "/Projects/Sounds"
+  var names: List(String) = { "rain on a tin roof, recorded at night.wav" }
+  if large {
+    folder = "/Projects/Many"
+    names = List(String) { "recording 160008.wav", "recording 160009.wav" }
+  }
+  half.wide = openAt(
+    files: half.files
+    world: half.world
+    uiSystems: half.uiSystems
+    scenes: scenes
+    node: "Wide"
+    folder: folder
+    names: own names
+  )
+  let narrow: EntityId = openAt(
+    files: half.files
+    world: half.world
+    uiSystems: half.uiSystems
+    scenes: scenes
+    node: "Narrow"
+    folder: "/Projects/Film/Photos"
+    names: List(String) {}
+  )
+  ret half
+}
+
+func stepHalf(half: mod Half, scenes: view SceneRegistry, frames: view Int) {
+  let changed: Bool = fileBrowserUpdate(
+    systems: half.files
+    world: half.world
+    uiSystems: half.uiSystems
+    scenes: scenes
+    keys: BrowserKeys {}
+    nowSeconds: frames as Float64 * 0.016
+  )
+  answer(
+    files: half.files
+    world: half.world
+    uiSystems: half.uiSystems
+    scenes: scenes
+  )
+  if frames is 2 and half.large {
+    let column: EntityId = columnAt(systems: half.files, browser: half.wide, place: 1)
+    setScrollPosition(
+      world: half.world
+      uiSystems: half.uiSystems
+      entityId: listOfColumn(systems: half.files, column: column)
+      position: -60000.0 * 24.0
+    )
+  }
+  if frames is 2 and half.large is false {
+    focusFileBrowser(systems: half.files, world: half.world, browser: half.wide)
+  }
+  listSelectionSystem(
+    world: half.world
+    uiSystems: half.uiSystems
+    input: idleInput(nowSeconds: frames as Float64 * 0.016)
+    keys: ListSelectionKeys {}
+  )
+  let rows: Bool = fileBrowserRows(
+    systems: half.files
+    world: half.world
+    uiSystems: half.uiSystems
+    scenes: scenes
+  )
+  listViewSystem(world: half.world, uiSystems: half.uiSystems, scenes: scenes)
+  runScheduledUiSystems(
+    schedule: half.schedule
+    world: half.world
+    uiSystems: half.uiSystems
+    res: half.resources
+  )
+}
+
+func idleInput(nowSeconds: view Float64) ret UiInput {
+  var input: UiInput = createUiInput()
+  input.nowSeconds = nowSeconds
+  ret input
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI file browser check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  var scenes: SceneRegistry = createSceneRegistry()
+  registerFileBrowserScenes(scenes: scenes)
+  var dark: Half = makeHalf(scenes: scenes, theme: "ThemeDark", large: false)
+  var light: Half = makeHalf(scenes: scenes, theme: "ThemeLight", large: true)
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    stepHalf(half: dark, scenes: scenes, frames: frames)
+    stepHalf(half: light, scenes: scenes, frames: frames)
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.5
+      g: 0.5
+      b: 0.5
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: dark.world
+      uiSystems: dark.uiSystems
+      res: dark.resources
+      canvas: canvas
+    )
+    renderSystemGpu2d(
+      world: light.world
+      uiSystems: light.uiSystems
+      res: light.resources
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let columns: Int = browserColumns(systems: dark.files, browser: dark.wide).length
+  var ended: Bool = closeFileBrowsers(
+    systems: dark.files
+    world: dark.world
+    uiSystems: dark.uiSystems
+  )
+  ended = closeFileBrowsers(systems: light.files, world: light.world, uiSystems: light.uiSystems) and ended
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if columns is not 2 or ended is false {
+    log("UI FILE BROWSER FAILED: {columns} columns")
+    ret 1
+  }
+  log("UI FILE BROWSER OK")
+  ret 0
+}

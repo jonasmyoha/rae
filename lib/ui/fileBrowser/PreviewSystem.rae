@@ -1,0 +1,311 @@
+# The preview column (one file selected, or how many are and their size) and the large preview
+# (docs/file-browser-design.md §1). Pictures are ui/ThumbnailSystem's, where the app runs it.
+import Gpu2d
+import Time
+open ecs/ComponentTable
+open ecs/Entity
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/ThumbnailComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/NavigationSystem
+
+# What the selection of a browser shows: nothing for one folder
+func previewContent(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret PreviewContent {
+  let column: EntityId = selectedColumn(systems: systems, world: world, browser: browser)
+  if isNone(this: column) {
+    ret PreviewContent {}
+  }
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  if selectedCount(world: world, list: list) > 1 {
+    ret severalContent(
+      systems: systems
+      column: column
+      folder: folder
+      names: componentView(this: world.listSelecteds, entityId: list).selected
+    )
+  }
+  let name: String = firstSelectedName(world: world, list: list)
+  if let entry: FileEntry = entryOfColumn(systems: systems, column: column, name: name) {
+    if opensAsFolder(kinds: systems.kinds, entry: entry) {
+      ret PreviewContent {}
+    }
+    let kind: FileKind = kindOfEntry(kinds: systems.kinds, entry: entry)
+    let path: String = pathIn(folder: folder, name: name)
+    var content: PreviewContent = {
+      stamp: "{path}|{entry.size}|{entry.modifiedSeconds}"
+      path: own path
+      name: "{name}"
+      kind: "{kind.name}"
+      icon: "{kind.icon}"
+      size: sizeText(bytes: entry.size)
+      bytes: entry.size
+      picture: kind.picture
+      byProgram: kind.byProgram
+    }
+    if entry.modifiedSeconds >= 0.0 {
+      content.modifiedMs = (entry.modifiedSeconds * 1000.0) as Int
+      content.changed = "Changed {Time.civilText(
+        civil: Time.localCivilFromEpochSeconds(epochSeconds: entry.modifiedSeconds as Int)
+        withTime: true
+      )}"
+    }
+    ret content
+  }
+  ret PreviewContent {}
+}
+
+func severalContent(
+  systems: view FileBrowserSystems
+  column: view EntityId
+  folder: view String
+  names: view List(String)
+) ret PreviewContent {
+  var bytes: Int = 0
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  # both are in the list's order
+  var at: Int = 0
+  loop let entry: view FileEntry in held.entries {
+    if let name: view String = names.viewAt(index: at) {
+      if name is entry.name {
+        at = at + 1
+        if entry.size > 0 {
+          bytes = bytes + entry.size
+        }
+      }
+    }
+  }
+  ret PreviewContent {
+    stamp: "{folder}|{names.length} items|{bytes}"
+    name: "{names.length} items"
+    icon: "mat:content_copy"
+    size: sizeText(bytes: bytes)
+  }
+}
+
+func filePreviewSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    let content: PreviewContent = previewContent(systems: systems, world: world, browser: browser)
+    changed = showPreviewColumn(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      content: content
+    ) or changed
+    changed = showLargePreview(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+      content: content
+    ) or changed
+  }
+  ret changed
+}
+
+func showPreviewColumn(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  content: view PreviewContent
+) ret Bool {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  if options.showPreview is false {
+    ret false
+  }
+  let shown: String = "{componentView(this: systems.previews, entityId: browser).shown}"
+  if shown is content.stamp {
+    ret false
+  }
+  if content.stamp.length() is 0 {
+    dropPreviewNode(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+    ret true
+  }
+  var node: EntityId = componentView(this: systems.previews, entityId: browser).node
+  if isNone(this: node) {
+    node = mountFileScene(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      key: "filePreview"
+      parent: componentView(this: systems.browsers, entityId: browser).strip
+    )
+    if componentHas(this: world.rects, entityId: node) {
+      componentMod(this: world.rects, entityId: node).size.x = options.previewWidth
+    }
+    let last: Int = browserColumns(systems: systems, browser: browser).length
+    componentMod(this: systems.browsers, entityId: browser).reveal = last
+  }
+  fillPreview(
+    world: world
+    root: node
+    prefix: "FilePreview"
+    content: content
+  )
+  let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
+  preview.node = node
+  preview.shown = "{content.stamp}"
+  ret true
+}
+
+# A line of the preview; an empty one takes no place
+func showPreviewLine(world: mod UiWorld, entityId: view EntityId, text: view String) {
+  setNodeText(world: world, entityId: entityId, text: text)
+  showNode(world: world, entityId: entityId, shown: text.length() > 0)
+}
+
+# A preview scene's nodes: <prefix>Picture, Name, Kind, Size and Changed
+func fillPreview(
+  world: mod UiWorld
+  root: view EntityId
+  prefix: view String
+  content: view PreviewContent
+) {
+  setNodeText(
+    world: world
+    entityId: nodeIn(world: world, root: root, nodeId: "{prefix}Name")
+    text: content.name
+  )
+  showPreviewLine(
+    world: world
+    entityId: nodeIn(world: world, root: root, nodeId: "{prefix}Kind")
+    text: content.kind
+  )
+  showPreviewLine(
+    world: world
+    entityId: nodeIn(world: world, root: root, nodeId: "{prefix}Size")
+    text: content.size
+  )
+  showPreviewLine(
+    world: world
+    entityId: nodeIn(world: world, root: root, nodeId: "{prefix}Changed")
+    text: content.changed
+  )
+  let picture: EntityId = nodeIn(world: world, root: root, nodeId: "{prefix}Picture")
+  if componentHas(this: world.sprites, entityId: picture) is false {
+    ret
+  }
+  if componentHas(this: world.thumbnails, entityId: picture) {
+    let thumbnail: mod Thumbnail = componentMod(this: world.thumbnails, entityId: picture)
+    thumbnail.icon = "{content.icon}"
+    thumbnail.path = ""
+    if content.picture {
+      thumbnail.path = "{content.path}"
+    }
+    thumbnail.fileSize = content.bytes
+    thumbnail.modifiedMs = content.modifiedMs
+    thumbnail.byProgram = content.byProgram
+  }
+  # the thumbnails show and take back their own picture
+  let key: String = "{componentView(this: world.sprites, entityId: picture).textureKey}"
+  if key.startsWith(prefix: "thumbnail|") is false and key is not content.icon {
+    componentMod(this: world.sprites, entityId: picture).textureKey = "{content.icon}"
+  }
+}
+
+# ----- the large preview -------------------------------------------------------------------
+func largePreviewOpen(systems: view FileBrowserSystems, browser: view EntityId) ret Bool {
+  ret componentHas(this: systems.previews, entityId: browser) and isNone(
+    this: componentView(this: systems.previews, entityId: browser).large
+  ) is false
+}
+
+# The preview over the whole window, for a selection that has one
+func openLargePreview(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) {
+  let content: PreviewContent = previewContent(systems: systems, world: world, browser: browser)
+  if content.stamp.length() is 0 or largePreviewOpen(systems: systems, browser: browser) {
+    ret
+  }
+  if let index: Int = sceneRegistryIndex(reg: scenes, key: "fileLargePreview") {
+    let overrides: List(SceneOverride) = emptyOverrides()
+    let node: EntityId = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: sceneRegistryGet(reg: scenes, idx: index)
+      overrides: overrides
+    )
+    componentSet(this: world.layerTags, entityId: node, data: LayerTag { id: "popover", z: 900 })
+    let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
+    preview.large = node
+    preview.largeShown = ""
+    preview.escapeQuit = Gpu2d.escapeQuits()
+    # Escape closes the preview, not the app
+    Gpu2d.setEscapeQuits(on: false)
+  }
+}
+
+# The large preview follows the selection and the window; with nothing to show it closes
+func showLargePreview(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+  content: view PreviewContent
+) ret Bool {
+  if largePreviewOpen(systems: systems, browser: browser) is false {
+    ret false
+  }
+  let node: EntityId = componentView(this: systems.previews, entityId: browser).large
+  if content.stamp.length() is 0 {
+    dropLargePreview(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+    ret true
+  }
+  if componentHas(this: world.rects, entityId: node) {
+    let size: Vec2 = componentView(this: world.rects, entityId: node).size
+    if size.x is not world.layoutW or size.y is not world.layoutH {
+      let rect: mod Rect = componentMod(this: world.rects, entityId: node)
+      rect.size.x = world.layoutW
+      rect.size.y = world.layoutH
+    }
+  }
+  if componentView(this: systems.previews, entityId: browser).largeShown is content.stamp {
+    ret false
+  }
+  fillPreview(
+    world: world
+    root: node
+    prefix: "FileLarge"
+    content: content
+  )
+  componentMod(this: systems.previews, entityId: browser).largeShown = "{content.stamp}"
+  ret true
+}

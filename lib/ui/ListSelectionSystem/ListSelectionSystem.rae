@@ -65,12 +65,13 @@ func setListSelection(world: mod UiWorld, list: view EntityId, keys: view List(S
 
 # ----- the rows' keys ---------------------------------------------------------
 
-# What the keys are made from: the program's ListRowNames, else the list's data
+# What the keys are made from: the program's ListRowNames (an odd number), else the list's data (an
+# even one, as the two tables count on their own)
 func listKeysStamp(world: view UiWorld, list: view EntityId) ret Int {
   if componentHas(this: world.listRowNames, entityId: list) {
-    ret componentModStamp(this: world.listRowNames, entityId: list)
+    ret componentModStamp(this: world.listRowNames, entityId: list) * 2 + 1
   }
-  ret componentModStamp(this: world.listViewDatas, entityId: list)
+  ret componentModStamp(this: world.listViewDatas, entityId: list) * 2
 }
 
 # All the rows' keys of `list`, in order

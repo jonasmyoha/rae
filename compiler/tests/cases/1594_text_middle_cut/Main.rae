@@ -1,0 +1,31 @@
+# Text.cut: a text wider than its node is cut in its middle by whole characters, so that its start
+# and its end (a name's extension) stay; one that fits is not.
+import SdfText
+open ui/RenderSystem
+
+func show(font: view SdfFont, text: view String, width: view Float) {
+  let cut: String = middleCutText(
+    font: font
+    text: text
+    sizePx: 14.0
+    width: width
+  )
+  let wide: Float = SdfText.sdfMeasureText(font: font, text: cut, sizePx: 14.0)
+  log("{width}: {cut} (fits {wide <= width})")
+}
+
+func main() {
+  let font: SdfFont = SdfText.loadSdfFont(
+    jsonPath: "../examples/104_ui_hello/assets/Roboto-Regular.mtsdf.json"
+    rawAtlasPath: "../examples/104_ui_hello/assets/Roboto-Regular.mtsdf.raw"
+  )
+  let name: String = "A long name of a sound that was recorded.wav"
+  show(font: font, text: name, width: 400.0)
+  show(font: font, text: name, width: 200.0)
+  show(font: font, text: name, width: 120.0)
+  show(font: font, text: name, width: 40.0)
+  show(font: font, text: name, width: 4.0)
+  # e with a combining accent stays whole
+  show(font: font, text: "résumé résumé résumé.txt", width: 100.0)
+  show(font: font, text: "", width: 10.0)
+}

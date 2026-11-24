@@ -1854,3 +1854,13 @@ A node that shows a small picture of a file (`ui/ThumbnailSystem`, over `lib/Thu
   the program answers with `setThumbnail(cache:, key:, pixels:)` or `failThumbnail`.
 
 Cases 1590 (under ThreadSanitizer too) and 1591; `checks/uiThumbnails` scrolls 2,000 pictures.
+
+## 55. A text cut in its middle
+
+`"Text": { "text": "...", "cut": "middle" }`: a line wider than its node is drawn with its middle replaced
+by "...", by whole characters, so that its start and its end stay (a file name keeps its extension).
+It is for one-line text; a text that wraps (`wrapWidthMode`) is not cut. The component keeps the whole
+text. Case 1594.
+
+A clickable node (`OnClick`) takes no click where an ancestor with `"Overflow": { "mode": "Clip" }` cuts
+it off, as it is not painted there. A node on a layer of its own (`LayerTag`) is cut by none.

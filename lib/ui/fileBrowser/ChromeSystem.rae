@@ -1,0 +1,398 @@
+# What is around the rows (docs/file-browser-design.md §1.3, §5): the bar with its trail, the
+# columns'
+# widths and states, and the strip's scroll to a column.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/PaneComponents
+open ui/DividerSystem
+open ui/SceneInstance
+open ui/ScrollBarSystem
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+
+# A folder listed sooner shows no spinner
+const spinnerSeconds: Float64 = 0.15
+
+# About how wide a letter of the names and the trail is, in points, and what a row and a trail part
+# have besides the name
+const letterWidth: Float = 7.6
+
+const rowExtra: Float = 58.0
+
+const trailExtra: Float = 30.0
+
+func fileChromeSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = takeWidths(systems: systems, world: world, uiSystems: uiSystems)
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    changed = showColumnState(systems: systems, world: world, column: column) or changed
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+    changed = showBar(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+    ) or changed
+    changed = revealColumn(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    ) or changed
+  }
+  ret changed
+}
+
+# ----- widths -------------------------------------------------------------------------------
+func columnOfDivider(systems: view FileBrowserSystems, divider: view EntityId) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    if componentView(this: systems.columns, entityId: column).divider is divider {
+      ret column
+    }
+  }
+  ret noEntity()
+}
+
+# The dividers that were moved: a width is kept by the column's place; a double click fits the names
+func takeWidths(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(DividerEvent, this: world.dividerEvents), ++i {
+    let event: DividerEvent = eventAt(DividerEvent, this: world.dividerEvents, i: i)
+    let column: EntityId = columnOfDivider(systems: systems, divider: event.divider)
+    if isNone(this: column) {
+      continue
+    }
+    let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+    let place: Int = placeOfColumn(systems: systems, column: column)
+    var width: Float = event.size
+    if event.kind is DividerEventKind.doubleClicked {
+      setDividerSize(
+        world: world
+        uiSystems: uiSystems
+        divider: event.divider
+        size: widthOfNames(systems: systems, column: column)
+      )
+      width = componentView(this: world.dividers, entityId: event.divider).size
+    }
+    let mine: mod FileBrowser = componentMod(this: systems.browsers, entityId: browser)
+    loop mine.widths.length <= place {
+      mine.widths.add(value: 0.0)
+    }
+    mine.widths.set(index: place, value: width)
+    changed = true
+  }
+  ret changed
+}
+
+func widthOfNames(systems: view FileBrowserSystems, column: view EntityId) ret Float {
+  var longest: Int = 0
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  loop let entry: view FileEntry in held.entries {
+    let length: Int = entry.name.length()
+    if length > longest {
+      longest = length
+    }
+  }
+  ret longest.toFloat() * letterWidth + rowExtra
+}
+
+# ----- states ----------------------------------------------------------------------------------
+
+# What a column's state box says ("" nothing; "spinner" the spinner)
+func stateTextOf(systems: view FileBrowserSystems, column: view EntityId) ret String {
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  if mine.state is ColumnState.ready {
+    if componentView(this: systems.entries, entityId: column).entries.length is 0 {
+      ret "Empty folder"
+    }
+    ret ""
+  }
+  if mine.state is ColumnState.listing {
+    if systems.now - mine.askedSeconds > spinnerSeconds {
+      ret "spinner"
+    }
+    ret ""
+  }
+  if mine.state is ColumnState.noPermission {
+    when Target.os is Os.macos {
+      ret "No permission to read this folder.\nSystem Settings, Privacy & Security, Files & Folders allows it."
+    } else {
+      ret "No permission to read this folder"
+    }
+  }
+  if mine.state is ColumnState.notAnswering {
+    ret "This disk is not answering"
+  }
+  if mine.state is ColumnState.outside {
+    ret "This folder is outside the one shown here"
+  }
+  if mine.state is ColumnState.gone {
+    ret "This folder is gone"
+  }
+  ret "This folder could not be read"
+}
+
+func showColumnState(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  column: view EntityId
+) ret Bool {
+  let text: String = stateTextOf(systems: systems, column: column)
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  if mine.stateShown is text {
+    ret false
+  }
+  let box: EntityId = mine.stateBox
+  let retry: Bool = mine.state is ColumnState.failed or mine.state is ColumnState.gone or mine.state is ColumnState.notAnswering or mine.state is ColumnState.noPermission
+  let spinner: Bool = text is "spinner"
+  showNode(world: world, entityId: box, shown: text.length() > 0)
+  showNode(
+    world: world
+    entityId: nodeIn(world: world, root: box, nodeId: "FileColumnSpinner")
+    shown: spinner
+  )
+  let label: EntityId = nodeIn(world: world, root: box, nodeId: "FileColumnText")
+  showNode(world: world, entityId: label, shown: spinner is false)
+  if spinner is false {
+    setNodeText(world: world, entityId: label, text: text)
+  }
+  showNode(
+    world: world
+    entityId: nodeIn(world: world, root: box, nodeId: "FileColumnRetry")
+    shown: retry
+  )
+  componentMod(this: systems.columns, entityId: column).stateShown = own text
+  ret true
+}
+
+# When a column's spinner is to show, or its disk to be called late (below 0: nothing waits)
+func listingDeadline(systems: view FileBrowserSystems) ret Float64 {
+  var deadline: Float64 = -1.0
+  loop var i: Int = 0, i < componentCount(this: systems.columns), ++i {
+    let column: EntityId = componentEntityAt(this: systems.columns, i: i)
+    let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+    if mine.state is ColumnState.listing {
+      var at: Float64 = mine.askedSeconds + spinnerSeconds
+      if at < systems.now {
+        at = mine.askedSeconds + 5.0
+      }
+      if deadline < 0.0 or at < deadline {
+        deadline = at
+      }
+    }
+  }
+  ret deadline
+}
+
+# ----- the bar -----------------------------------------------------------------------------------
+func barOpacity(on: view Bool) ret Float {
+  if on {
+    ret 1.0
+  }
+  ret 0.35
+}
+
+func showBar(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) ret Bool {
+  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  if mine.options.showBar is false {
+    ret false
+  }
+  let folder: String = browserFolder(systems: systems, browser: browser)
+  let root: String = "{mine.root}"
+  let back: Bool = canWalkHistory(systems: systems, browser: browser, step: -1)
+  let forward: Bool = canWalkHistory(systems: systems, browser: browser, step: 1)
+  let trail: EntityId = mine.trail
+  let backButton: EntityId = mine.back
+  let forwardButton: EntityId = mine.forward
+  var width: Float = 0.0
+  if componentHas(this: uiSystems.layout.computedRects, entityId: trail) {
+    width = componentView(this: uiSystems.layout.computedRects, entityId: trail).size.x
+  }
+  let shown: String = "{root}|{folder}|{digitOf(on: back)}{digitOf(on: forward)}|{width}"
+  if mine.barShown is shown {
+    ret false
+  }
+  componentMod(this: systems.browsers, entityId: browser).barShown = own shown
+  setNodeOpacity(world: world, entityId: backButton, value: barOpacity(on: back))
+  setNodeOpacity(world: world, entityId: forwardButton, value: barOpacity(on: forward))
+  fillTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    trail: trail
+    root: root
+    folder: folder
+    width: width
+  )
+  ret true
+}
+
+func digitOf(on: view Bool) ret Int {
+  if on {
+    ret 1
+  }
+  ret 0
+}
+
+# The trail's parts: the root, then each folder below it; the first ones go when there is no room
+func fillTrail(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  trail: view EntityId
+  root: view String
+  folder: view String
+  width: view Float
+) {
+  var old: List(EntityId) = {}
+  if componentHas(this: world.childrens, entityId: trail) {
+    let children: view Children = componentView(this: world.childrens, entityId: trail)
+    old = children.ids
+  }
+  loop let node: view EntityId in old {
+    componentRemove(this: systems.trailParts, entityId: node)
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  var folders: List(String) = { "{root}" }
+  var path: String = "{root}"
+  loop let part: view String in partsBelow(folder: root, path: folder) {
+    path = pathIn(folder: path, name: part)
+    folders.add(value: "{path}")
+  }
+  var first: Int = folders.length
+  var room: Float = width
+  loop first > 0 {
+    let name: String = lastPart(path: folders.copyAtFallback(index: first - 1, fallback: ""))
+    room = room - name.length().toFloat() * letterWidth - trailExtra
+    if width > 0.0 and room < 0.0 and first < folders.length {
+      break
+    }
+    first = first - 1
+  }
+  loop var i: Int = first, i < folders.length, ++i {
+    let here: String = folders.copyAtFallback(index: i, fallback: "")
+    let node: EntityId = mountFileScene(
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      key: "fileTrailPart"
+      parent: trail
+    )
+    if isNone(this: node) {
+      ret
+    }
+    setNodeText(
+      world: world
+      entityId: nodeIn(world: world, root: node, nodeId: "FileTrailName")
+      text: lastPart(path: here)
+    )
+    showNode(
+      world: world
+      entityId: nodeIn(world: world, root: node, nodeId: "FileTrailArrow")
+      shown: i > 0
+    )
+    let part: TrailPart = { browser: browser, folder: own here }
+    componentSet(this: systems.trailParts, entityId: node, data: own part)
+  }
+}
+
+# ----- the strip
+# -----------------------------------------------------------------------------------
+func columnWidthNow(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+) ret Float {
+  let body: EntityId = componentView(this: systems.columns, entityId: column).body
+  if componentHas(this: world.rects, entityId: body) {
+    ret componentView(this: world.rects, entityId: body).size.x + 1.0
+  }
+  ret 0.0
+}
+
+# Scroll the strip so that the column asked for is in view: no farther than it must
+func revealColumn(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) ret Bool {
+  let mine: view FileBrowser = componentView(this: systems.browsers, entityId: browser)
+  let place: Int = mine.reveal
+  let strip: EntityId = mine.strip
+  let window: EntityId = mine.stripWindow
+  if place < 0 or componentHas(this: uiSystems.layout.computedRects, entityId: window) is false {
+    ret false
+  }
+  componentMod(this: systems.browsers, entityId: browser).reveal = -1
+  let shown: Float = componentView(this: uiSystems.layout.computedRects, entityId: window).size.x
+  let columns: List(EntityId) = browserColumns(systems: systems, browser: browser)
+  var start: Float = 0.0
+  var end: Float = 0.0
+  loop var i: Int = 0, i < columns.length and i <= place, ++i {
+    start = end
+    end = end + columnWidthNow(
+      systems: systems
+      world: world
+      column: columns.copyAtFallback(index: i, fallback: noEntity())
+    )
+  }
+  if place >= columns.length {
+    start = end
+    end = end + browserOptions(systems: systems, browser: browser).previewWidth
+  }
+  var position: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: strip) {
+    position = componentView(this: world.scrollStates, entityId: strip).y
+  }
+  var target: Float = position
+  if end + target > shown {
+    target = shown - end
+  }
+  if start + target < 0.0 {
+    target = -start
+  }
+  if target > 0.0 {
+    target = 0.0
+  }
+  if target is position {
+    ret false
+  }
+  setScrollPosition(
+    world: world
+    uiSystems: uiSystems
+    entityId: strip
+    position: target
+  )
+  ret true
+}

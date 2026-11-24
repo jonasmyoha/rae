@@ -1,0 +1,297 @@
+# The file browser's data (docs/file-browser-design.md §4). A browser is an entity (the node it is
+# in),
+# a column is an entity (the root of its scene); a file on the disk never is. The tables are on
+# FileBrowserSystems, which an app owns next to its UiWorld.
+import FileNotify
+import Files
+open Channel
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/FolderListing
+
+enum BrowserSource { disk, app }
+
+# What Return does on a row
+enum BrowserReturnKey { rename, open }
+
+type BrowserOptions {
+  order: EntryOrder = {}
+  showHidden: Bool = false
+  # Lowercase, without dots; none for any. Folders always show.
+  extensions: List(String) = {}
+  returnKey: BrowserReturnKey = BrowserReturnKey.rename
+  # May it go above its root
+  allowAboveRoot: Bool = false
+  showBar: Bool = true
+  showPreview: Bool = true
+  # Files opened often get a tint (the app's counts, countOpened)
+  openCountTint: Bool = false
+  columnWidth: Float = 220.0
+  previewWidth: Float = 260.0
+  multiple: Bool = true
+  source: BrowserSource = BrowserSource.disk
+}
+
+# Which selection was looked at: a column's, by how often it and the column's entries had changed
+type SelectionSeen {
+  column: EntityId = noEntity()
+  selected: Int = -1
+  entries: Int = -1
+}
+
+type FileBrowser {
+  root: String
+  options: BrowserOptions
+  # Its nodes: the mounted scene, the strip that scrolls and its window, the bar's parts
+  scene: EntityId = noEntity()
+  strip: EntityId = noEntity()
+  stripWindow: EntityId = noEntity()
+  bar: EntityId = noEntity()
+  back: EntityId = noEntity()
+  forward: EntityId = noEntity()
+  trail: EntityId = noEntity()
+  pathBox: EntityId = noEntity()
+  pathField: EntityId = noEntity()
+  # The action the path field sends on Return
+  pathAction: String = ""
+  # Its columns, left to right
+  columns: List(EntityId) = {}
+  # Their widths by place, 0 for the option's
+  widths: List(Float) = {}
+  # The column to be scrolled into view (its place; one past the last: the preview's), -1 none
+  reveal: Int = -1
+  # The column whose selected folder opens at `openAt` (below 0 none does)
+  openAt: Float64 = -1.0
+  openColumn: EntityId = noEntity()
+  # What the app was told, and what the bar shows
+  toldFolder: String = ""
+  toldPaths: List(String) = {}
+  # The selection looked at last
+  seen: SelectionSeen = {}
+  barShown: String = ""
+}
+
+enum ColumnState {
+  listing
+  ready
+  noPermission
+  gone
+  notAnswering
+  outside
+  failed
+}
+
+type FileColumn {
+  browser: EntityId
+  place: Int
+  folder: String
+  state: ColumnState = ColumnState.listing
+  # Its listing: the number of the request, when it was asked, whether another must follow, and
+  # whether it ever had an answer
+  generation: Int = 0
+  askedSeconds: Float64 = 0.0
+  stale: Bool = true
+  listed: Bool = false
+  # Its nodes
+  body: EntityId = noEntity()
+  list: EntityId = noEntity()
+  divider: EntityId = noEntity()
+  stateBox: EntityId = noEntity()
+  # The entry whose column is open to the right, and what is to be selected when the rows come (or
+  # the first of them)
+  openChild: String = ""
+  wantSelected: List(String) = {}
+  wantFirst: Bool = false
+  wantScroll: Float = 0.0
+  # Counts up with each change of its entries; what the rows were made from
+  entriesStamp: Int = 0
+  rowsStamp: Int = -1
+  # Its own path on the disk, with symlinks followed ("" not known yet)
+  realFolder: String = ""
+  # What its state box shows
+  stateShown: String = "-"
+}
+
+# The entries shown, in order
+type ColumnEntries {
+  entries: List(FileEntry) = {}
+}
+
+type FolderMemory {
+  scroll: Float = 0.0
+  selected: List(String) = {}
+}
+
+type BrowserHistory {
+  # Folders the browser was at, and which it is at now
+  folders: List(String) = {}
+  at: Int = -1
+  memory: StringMap(FolderMemory)
+  # Folders of `memory`, the one kept longest first
+  kept: List(String) = {}
+}
+
+# What a preview shows
+type PreviewContent {
+  # "" nothing
+  stamp: String = ""
+  path: String = ""
+  name: String = ""
+  kind: String = ""
+  icon: String = ""
+  size: String = ""
+  changed: String = ""
+  bytes: Int = 0
+  modifiedMs: Int = 0
+  picture: Bool = false
+  byProgram: Bool = false
+}
+
+type BrowserPreview {
+  # The preview column's node, and what it shows ("" nothing)
+  node: EntityId = noEntity()
+  shown: String = ""
+  # What it was made from
+  content: PreviewContent = {}
+  seen: SelectionSeen = {}
+  # The large preview's node, what it shows, and whether Escape quit the app before it opened
+  large: EntityId = noEntity()
+  largeShown: String = ""
+  escapeQuit: Bool = true
+}
+
+# A part of the trail: the folder a click on it goes to
+type TrailPart {
+  browser: EntityId
+  folder: String
+}
+
+# The column of a list, and the browser of a button or a field
+type ListOfColumn {
+  column: EntityId
+}
+
+enum BrowserButton { back, forward, trail, retry }
+
+type ButtonOfBrowser {
+  browser: EntityId
+  button: BrowserButton
+  # the column of a Retry button
+  column: EntityId = noEntity()
+}
+
+# ----- listing -----------------------------------------------------------------
+# A listing's thread
+type FolderJob {
+  generation: Int
+  task: opt Task(Int)
+}
+
+type ListingJobs {
+  answers: Channel(FolderAnswer)
+  jobs: List(FolderJob) = {}
+  waiting: List(FolderRequest) = {}
+  nextGeneration: Int = 1
+}
+
+# A folder watched, by how many columns, and when a change was last acted on
+type FolderWatch {
+  folder: String
+  notify: FileNotify.FileNotify
+  lastSeconds: Float64 = -10.0
+  changed: Bool = false
+}
+
+# ----- events --------------------------------------------------------------------
+
+# The deepest column's folder
+type FolderOpened {
+  browser: EntityId
+  folder: String
+}
+
+type FileActivated {
+  browser: EntityId
+  paths: List(String)
+}
+
+type SelectionChanged {
+  browser: EntityId
+  paths: List(String)
+}
+
+# A browser with the `app` source wants a folder's entries (setColumnEntries)
+type EntriesRequested {
+  browser: EntityId
+  folder: String
+}
+
+type FileBrowserSystems {
+  browsers: ComponentTable(FileBrowser)
+  columns: ComponentTable(FileColumn)
+  entries: ComponentTable(ColumnEntries)
+  history: ComponentTable(BrowserHistory)
+  previews: ComponentTable(BrowserPreview)
+  trailParts: ComponentTable(TrailPart)
+  columnOfList: ComponentTable(ListOfColumn)
+  buttons: ComponentTable(ButtonOfBrowser)
+  # resources, shared by every browser of the app
+  listing: ListingJobs
+  watches: List(FolderWatch) = {}
+  # columns came or went since the watches were set up
+  watchesStale: Bool = false
+  browsersMade: Int = 0
+  kinds: List(FileKind)
+  openCounts: StringMap(Int)
+  openCountsStamp: Int = 0
+  now: Float64 = 0.0
+  folderOpened: EventQueue(FolderOpened)
+  fileActivated: EventQueue(FileActivated)
+  selectionChanged: EventQueue(SelectionChanged)
+  entriesRequested: EventQueue(EntriesRequested)
+}
+
+func createFileBrowsers() ret FileBrowserSystems {
+  ret FileBrowserSystems {
+    browsers: ComponentTable.create(FileBrowser)
+    columns: ComponentTable.create(FileColumn)
+    entries: ComponentTable.create(ColumnEntries)
+    history: ComponentTable.create(BrowserHistory)
+    previews: ComponentTable.create(BrowserPreview)
+    trailParts: ComponentTable.create(TrailPart)
+    columnOfList: ComponentTable.create(ListOfColumn)
+    buttons: ComponentTable.create(ButtonOfBrowser)
+    listing: ListingJobs { answers: createChannel(FolderAnswer) }
+    kinds: defaultFileKinds()
+    openCounts: createStringMap(Int, cap: 64)
+    folderOpened: createEventQueue(FolderOpened)
+    fileActivated: createEventQueue(FileActivated)
+    selectionChanged: createEventQueue(SelectionChanged)
+    entriesRequested: createEventQueue(EntriesRequested)
+  }
+}
+
+# This frame's keys of the browser that has them (the rows' own are ui/ListSelectionSystem's;
+# browserKeysFromDevice reads them)
+type BrowserKeys {
+  # Cmd with O or Down, Up, [ and ], and with Shift and the period
+  open: Bool = false
+  parent: Bool = false
+  back: Bool = false
+  forward: Bool = false
+  hidden: Bool = false
+  space: Bool = false
+  escape: Bool = false
+}
+
+# What an app saves of a browser (fileBrowserState), and gives back (restoreFileBrowser)
+type FileBrowserState {
+  folder: String = ""
+  selected: List(String) = {}
+  widths: List(Float) = {}
+  order: EntryOrder = {}
+  showHidden: Bool = false
+}
