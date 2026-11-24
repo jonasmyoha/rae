@@ -1,0 +1,101 @@
+# SDL's drop events through the runtime to Gpu2d.readOsDrop: held over the window, let go with two
+# files,
+# told of for one frame, and one that leaves the window. The place is in design units, half a window
+# point here. What a drop does is checked in compiler/tests/cases/1600_ui_drag.
+#
+#   RAE_HEADLESS_FRAMES=12 compiler/bin/rae run checks/osDrop/Main.rae
+#
+# Exit 0 when all of it came.
+import Gpu2d
+
+func osDropHold(x: Float, y: Float) unsafe extern
+
+func osDropLetGo(x: Float, y: Float) unsafe extern
+
+func osDropLeave() unsafe extern
+
+func expect(what: view String, right: view Bool, wrong: mod Int) {
+  if right is false {
+    log("OS DROP FAILED: {what}")
+    wrong = wrong + 1
+  }
+}
+
+func near(a: view Float, b: view Float) ret Bool {
+  ret a - b < 0.6 and b - a < 0.6
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 400, height: 200, title: "OS drop check")
+  Gpu2d.setDesignResolution(width: 200.0, height: 100.0, fit: 0)
+  var wrong: Int = 0
+  var frames: Int = 0
+  loop frames < 10 and not Gpu2d.pollClose() {
+    let drop: OsDrop = Gpu2d.readOsDrop()
+    if frames is 0 or frames is 4 or frames is 8 {
+      expect(
+        what: "nothing at {frames}"
+        right: drop.over is false and drop.dropped is false
+        wrong: wrong
+      )
+    }
+    if frames is 1 {
+      unsafe {
+        osDropHold(x: 100.0, y: 60.0)
+      }
+    }
+    if frames is 2 {
+      expect(what: "held", right: drop.over and drop.dropped is false, wrong: wrong)
+      expect(
+        what: "at {drop.x}, {drop.y}"
+        right: near(a: drop.x, b: 50.0) and near(a: drop.y, b: 30.0)
+        wrong: wrong
+      )
+      unsafe {
+        osDropLetGo(x: 200.0, y: 100.0)
+      }
+    }
+    if frames is 3 {
+      expect(
+        what: "let go"
+        right: drop.dropped and drop.over is false and drop.text is false
+        wrong: wrong
+      )
+      expect(
+        what: "{drop.values.join(sep: "|")}"
+        right: drop.values.join(sep: "|") is "/tmp/one picture.png|/tmp/zwölf.png"
+        wrong: wrong
+      )
+      expect(
+        what: "there {drop.x}, {drop.y}"
+        right: near(a: drop.x, b: 100.0) and near(a: drop.y, b: 50.0)
+        wrong: wrong
+      )
+    }
+    if frames is 5 {
+      unsafe {
+        osDropHold(x: 10.0, y: 10.0)
+      }
+    }
+    if frames is 6 {
+      expect(what: "held again", right: drop.over and drop.values.length is 0, wrong: wrong)
+      unsafe {
+        osDropLeave()
+      }
+    }
+    if frames is 7 {
+      expect(what: "left", right: drop.dropped and drop.values.length is 0, wrong: wrong)
+    }
+    frames = frames + 1
+  }
+  Gpu2d.closeWindow()
+  if frames < 9 {
+    log("OS DROP FAILED: {frames} frames")
+    ret 1
+  }
+  if wrong > 0 {
+    ret 1
+  }
+  log("OS DROP OK")
+  ret 0
+}

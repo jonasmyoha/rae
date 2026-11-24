@@ -318,6 +318,10 @@ func main() {
     folder: folders.copyAtFallback(index: 20, fallback: "")
   )
   settle(app: app)
+  # (a late notice of the OS is acted on first; a look every 2 s would never end)
+  loop var i: Int = 0, i < 50 and fileBrowserDeadline(systems: app.files) >= 0.0, ++i {
+    pass(app: app, seconds: 0.3)
+  }
   log(
     "{browserColumns(systems: app.files, browser: browser).length} columns, {app.files.watches.length} watched, {app.files.polling.folders.length} looked at, needs a frame {fileBrowserDeadline(
       systems: app.files

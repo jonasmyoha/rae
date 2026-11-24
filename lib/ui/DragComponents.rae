@@ -1,0 +1,95 @@
+# The data of drags (ui/DragSystem): their authored components, the drag of a UiWorld, a resource on
+# it, and its events.
+open ecs/Entity
+open ui/Components
+
+# On a node: a press on it, held and moved, asks the program for a drag (a DragEvent `begin`).
+# `kind`
+# is the program's word for it. With `touch` a finger held still does too; without, a finger
+# scrolls.
+#
+#     "Row": { "DragSource": { "kind": "file" }, "DropTarget": { "kinds": "files" } }
+type DragSource {
+  kind: String = ""
+  touch: Bool = false
+}
+
+# On a node: drags of these kinds (with spaces between) can be let go on it; "files" and "text" are
+# what the OS drops. A drag that a node does not take is its ancestors'.
+type DropTarget {
+  kinds: String = ""
+}
+
+# What letting go does: nothing, or the thing is moved or copied there
+enum DragEffect { refused, move, copyThere }
+
+# What is dragged
+type UiDragPayload {
+  kind: String = ""
+  # What the program drags: paths, ids, text
+  values: List(String) = {}
+  # What is drawn at the pointer
+  label: String = ""
+  icon: String = ""
+  mayMove: Bool = true
+  mayCopy: Bool = true
+  # The node it began on (noEntity() for the OS's), and a number of the program's
+  source: EntityId = noEntity()
+  note: Int = 0
+}
+
+enum UiDragPhase {
+  idle
+  # on a DragSource, not moved far enough yet
+  pressed
+  # `begin` was sent: the program starts it (startDrag) in this frame, or it is none
+  asked
+  dragging
+}
+
+# The drag of a world
+type UiDrag {
+  phase: UiDragPhase = UiDragPhase.idle
+  payload: UiDragPayload = {}
+  # It is the OS's
+  external: Bool = false
+  # The node pressed, where and when
+  source: EntityId = noEntity()
+  pressX: Float = 0.0
+  pressY: Float = 0.0
+  pressSeconds: Float64 = 0.0
+  # Where it is, the DropTarget under it, and what letting go would do there: what the keys say,
+  # which
+  # a program changes or refuses (setDragEffect)
+  x: Float = 0.0
+  y: Float = 0.0
+  target: EntityId = noEntity()
+  wanted: DragEffect = DragEffect.refused
+  effect: DragEffect = DragEffect.refused
+  # The keys ask for a move also where it would be a copy
+  moveAsked: Bool = false
+  # It was there when the frame began: the frame's keys are its
+  tookKeys: Bool = false
+  # Its label's node, its time of the last frame, and the root a modal may cover
+  label: EntityId = noEntity()
+  seconds: Float64 = 0.0
+  root: EntityId = noEntity()
+}
+
+enum DragEventKind { begin, over, drop, canceled }
+
+# `begin`: a press on the DragSource `source` moved: startDrag, or it is none. `over`: another
+# target
+# (noEntity() none) is under the drag. `drop`: it was let go on `target`. `canceled`: it was not.
+type DragEvent {
+  kind: DragEventKind
+  source: EntityId = noEntity()
+  target: EntityId = noEntity()
+  payload: UiDragPayload = {}
+  external: Bool = false
+  # What the keys say letting go does, and whether they ask for a move
+  wanted: DragEffect = DragEffect.refused
+  moveAsked: Bool = false
+  x: Float = 0.0
+  y: Float = 0.0
+}

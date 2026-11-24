@@ -27,7 +27,6 @@
 # A press of the button that opened it, dragged onto a row and let go there, chooses the row.
 # The items are nodes: their look is the bundles menuPanel, menuRow, menuIcon, menuText,
 # menuShortcut, menuSeparator and menuLine (ui/BuiltInBundles), which a theme can define itself.
-import Gpu2d
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
@@ -35,6 +34,7 @@ open ecs/hierarchySystem/HierarchySystem
 open text/NameOrder
 open ui/Components
 open ui/Ecs
+open ui/EscapeHold
 open ui/InputSystem
 open ui/Layer
 open ui/MenuComponents
@@ -86,10 +86,9 @@ func openMenu(world: mod UiWorld, uiSystems: mod UiSystems, request: own MenuReq
     pointerX: request.x
     pointerY: request.y
     request: own request
-    escapeQuit: Gpu2d.escapeQuits()
     pending: pending
   }
-  Gpu2d.setEscapeQuits(on: false)
+  holdEscape(world: world)
   openMenuLevel(
     world: world
     uiSystems: uiSystems
@@ -114,7 +113,7 @@ func closeMenu(world: mod UiWorld, uiSystems: mod UiSystems) {
     }
   }
   world.menu.levels.clear()
-  Gpu2d.setEscapeQuits(on: world.menu.escapeQuit)
+  releaseEscape(world: world)
   sendMenuEvent(world: world, kind: MenuEventKind.closed, itemId: "")
 }
 

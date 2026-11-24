@@ -4,6 +4,21 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.58, 2026-11-24: drags, and files dropped from the OS
+
+- `ui/DragSystem`: `DragSource` and `DropTarget` on any nodes, one drag in a world (`world.drag`), its events
+  in `world.dragEvents`, copy or move, a label at the pointer, scrolling at the edges, canceled by Escape, a
+  dialog or a menu (docs/ui-scene-format.md section 56). What the OS drags onto the window comes the same
+  way, by `Gpu2d.readOsDrop`.
+- In the file browser rows are dragged onto folders, columns, the trail and other browsers, a folder opens
+  under a held drag, and files are dropped from the OS: call `dragSystem` (docs/file-browser-design.md
+  section 18). One volume moves, across volumes and with Alt it copies. `filesDropped` tells of each.
+  `fileBrowserUpdate` takes `input` as `mod`.
+- A mouse press on a `DragSource` does not pan the list it is in; the wheel and the scrollbar do.
+- `ui/EscapeHold`: a menu, a drag, a dialog and an edited name hold Escape together, so "Escape quits" comes
+  back whatever order they end in.
+- Cases 1600, 1601, check `osDrop`.
+
 ## 0.4.57, 2026-11-24: the file browser's operations
 
 - A file browser makes folders, renames in place (the name selected without its extension), duplicates,

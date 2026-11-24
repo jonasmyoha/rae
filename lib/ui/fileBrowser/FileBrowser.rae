@@ -8,7 +8,8 @@
 #
 # or, in a scene, `"Files": { "FileBrowser": { "root": "~/Projects" } }` (FileBrowserComponents).
 #
-# Each frame, after updateUiInput, menuSystem, dividerSystem, scrollBarSystem, keyFocusSystem, the
+# Each frame, after updateUiInput, menuSystem, dividerSystem, scrollBarSystem, dragSystem,
+# keyFocusSystem, the
 # text fields
 # and
 # listSelectionSystem: fileBrowserUpdate; then updateScrollRoots and scrollToRowSystem;
@@ -36,6 +37,7 @@ open ui/fileBrowser/ChromeSystem
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileDragSystem
 open ui/fileBrowser/FileMenuSystem
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/KeysSystem
@@ -162,7 +164,7 @@ func fileBrowserUpdate(
   uiSystems: mod UiSystems
   scenes: view SceneRegistry
   keys: view BrowserKeys
-  input: view UiInput
+  input: mod UiInput
   windowFocused: view Bool
 ) ret Bool {
   frameAdvance(this: systems.folderOpened)
@@ -173,6 +175,7 @@ func fileBrowserUpdate(
   frameAdvance(this: systems.operationDone)
   frameAdvance(this: systems.operationRequested)
   frameAdvance(this: systems.browserMenuChosen)
+  frameAdvance(this: systems.filesDropped)
   systems.now = input.nowSeconds
   closeDeadBrowsers(systems: systems, world: world, uiSystems: uiSystems)
   applyFileBrowserComponents(systems: systems, world: world)
@@ -196,6 +199,13 @@ func fileBrowserUpdate(
     keys: keys
   ) or changed
   changed = fileMenuSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    input: input
+  ) or changed
+  changed = fileDragSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
@@ -273,6 +283,7 @@ func fileBrowserDeadline(systems: view FileBrowserSystems) ret Float64 {
     second: listingDeadline(systems: systems)
   )
   deadline = earlier(first: deadline, second: operationDeadline(systems: systems))
+  deadline = earlier(first: deadline, second: dragOpenDeadline(systems: systems))
   loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
     let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
     deadline = earlier(

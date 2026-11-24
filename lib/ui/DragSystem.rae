@@ -1,0 +1,591 @@
+# ui/DragSystem — drags of any widget, and what the OS drops on the window, the same way
+# (docs/ui-scene-format.md "Drags"). A node that can be dragged has a DragSource, one that takes a
+# drag
+# a DropTarget. A UiWorld has one drag at a time, world.drag. Once a frame, after updateUiInput,
+# menuSystem, dividerSystem and scrollBarSystem, before keyFocusSystem:
+#
+#   dragSystem(world: world, uiSystems: uiSystems, input: input, keys: dragKeysFromDevice(),
+#     osDrop: Gpu2d.readOsDrop())
+#   loop var i: Int = 0, i < eventCount(DragEvent, this: world.dragEvents), ++i { ... }
+#
+# At `begin` the program calls startDrag with what is dragged, or leaves it. While it is dragged the
+# program may say what letting go does at world.drag.target (setDragEffect, each frame; let go
+# where it is refused, the drag is canceled); at `drop` it does it. A
+# drag is canceled by Escape, by a dialog that opens, by a menu, and by cancelDrag (a program with
+# captures: dragCaptureCanceled). Scroll roots under it scroll near their edges. While one is
+# (dragRunning) a program draws frames without waiting for input.
+import Keys
+import Math
+import Sdl3
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/DragComponents
+open ui/Ecs
+open ui/EscapeHold
+open ui/InputKind
+open ui/InputSystem
+open ui/Layer
+open ui/LayerCapture
+open ui/ListSelectionSystem
+open ui/BindingComponents
+open ui/Scene
+open ui/SceneInstance
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/Transform
+open ui/UiSystems
+
+# How far a press moves before it is a drag, and how long a finger is held still
+const dragStartPoints: Float = 5.0
+
+const dragHoldSeconds: Float64 = 0.4
+
+# How near a scroll root's edge a drag scrolls it, and how fast at the edge
+const dragEdgePoints: Float = 36.0
+
+const dragEdgePointsPerSecond: Float = 900.0
+
+# Where the label is, from the pointer
+const dragLabelX: Float = 14.0
+
+const dragLabelY: Float = 10.0
+
+# This frame's keys
+type DragKeys {
+  escape: Bool = false
+  # Alt: copy what would be moved
+  copyThere: Bool = false
+  # Command (Control): move what would be copied
+  move: Bool = false
+}
+
+func dragKeysFromDevice() ret DragKeys {
+  ret DragKeys {
+    escape: Sdl3.isKeyPressed(key: Keys.keyEscape)
+    copyThere: Sdl3.isKeyDown(key: Keys.keyLAlt) or Sdl3.isKeyDown(key: Keys.keyRAlt)
+    move: listCommandHeld()
+  }
+}
+
+# Is something being dragged?
+func dragRunning(world: view UiWorld) ret Bool {
+  ret world.drag.phase is UiDragPhase.dragging
+}
+
+# ----- what a program calls ----------------------------------------------------------------
+
+# Drag `payload`, at a `begin` (or at any time while the pointer is down)
+func startDrag(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  payload: own UiDragPayload
+) {
+  world.drag.payload = own payload
+  beginDragging(
+    world: world
+    uiSystems: uiSystems
+    nowSeconds: input.nowSeconds
+    x: input.pointer.x
+    y: input.pointer.y
+  )
+  world.drag.external = false
+  # the press is the drag's: its release clicks nothing
+  input.pressedEntityId = noEntity()
+}
+
+# What letting go at the target does now (the program knows what it takes)
+func setDragEffect(world: mod UiWorld, effect: view DragEffect) {
+  if world.drag.effect is effect {
+    ret
+  }
+  world.drag.effect = effect
+  showDragEffect(world: world)
+}
+
+# The drag ends and nothing is dropped
+func cancelDrag(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.drag.phase is UiDragPhase.dragging {
+    sendDragEvent(world: world, kind: DragEventKind.canceled, target: noEntity())
+  }
+  endDrag(world: world, uiSystems: uiSystems)
+}
+
+# A program with captures (ui/LayerCapture): a modal took the mouse's press, so a drag is canceled
+func dragCaptureCanceled(world: mod UiWorld, uiSystems: mod UiSystems, captures: view UiCaptures) {
+  loop let canceled: view PointerCanceled in captures.canceled {
+    if canceled.pointerId is pointerIdMouse and world.drag.external is false {
+      cancelDrag(world: world, uiSystems: uiSystems)
+      ret
+    }
+  }
+}
+
+# ----- the frame ------------------------------------------------------------------------------
+
+# One frame of the drag; true when something changed
+func dragSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  keys: view DragKeys
+  osDrop: view OsDrop
+) ret Bool {
+  frameAdvance(this: world.dragEvents)
+  world.drag.tookKeys = world.drag.phase is UiDragPhase.dragging
+  let before: UiDragPhase = world.drag.phase
+  if before is UiDragPhase.asked {
+    # the program did not start it
+    world.drag.phase = UiDragPhase.idle
+  }
+  if (osDrop.over or osDrop.dropped) and before is not UiDragPhase.dragging {
+    beginOsDrag(
+      world: world
+      uiSystems: uiSystems
+      osDrop: osDrop
+      nowSeconds: input.nowSeconds
+    )
+  }
+  if world.drag.phase is UiDragPhase.dragging {
+    stepDragging(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      keys: keys
+      osDrop: osDrop
+    )
+    ret true
+  }
+  stepDragPress(world: world, uiSystems: uiSystems, input: input)
+  ret before is not world.drag.phase
+}
+
+# A press on a DragSource, until it moves
+func stepDragPress(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) {
+  if input.pointer.pressed {
+    world.drag.phase = UiDragPhase.idle
+    let source: EntityId = dragSourceAt(world: world, uiSystems: uiSystems, input: input)
+    if isNone(this: source) is false and world.menu.open is false {
+      world.drag.phase = UiDragPhase.pressed
+      world.drag.source = source
+      world.drag.pressX = input.pointer.x
+      world.drag.pressY = input.pointer.y
+      world.drag.pressSeconds = input.nowSeconds
+    }
+    ret
+  }
+  if world.drag.phase is not UiDragPhase.pressed {
+    ret
+  }
+  if input.pointer.down is false or world.menu.open or isAlive(
+    world: world
+    entityId: world.drag.source
+  ) is false {
+    world.drag.phase = UiDragPhase.idle
+    ret
+  }
+  let moved: Float = distanceOf(
+    x: input.pointer.x - world.drag.pressX
+    y: input.pointer.y - world.drag.pressY
+  )
+  let far: Bool = moved > uiUnitsFromPoints(input: input, points: dragStartPoints)
+  var begins: Bool = far
+  if input.pointer.kind is InputKind.touch {
+    # a finger that moves scrolls; one held still drags
+    begins = input.nowSeconds - world.drag.pressSeconds >= dragHoldSeconds
+    if far and begins is false {
+      world.drag.phase = UiDragPhase.idle
+      ret
+    }
+  }
+  if begins {
+    world.drag.phase = UiDragPhase.asked
+    let event: DragEvent = {
+      kind: DragEventKind.begin
+      source: world.drag.source
+      x: world.drag.pressX
+      y: world.drag.pressY
+    }
+    eventSend(this: world.dragEvents, value: own event)
+  }
+}
+
+func distanceOf(x: view Float, y: view Float) ret Float {
+  ret Math.sqrt(x: x * x + y * y)
+}
+
+# The DragSource this frame's press is on
+func dragSourceAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+) ret EntityId {
+  if componentCount(this: world.dragSources) is 0 {
+    ret noEntity()
+  }
+  let route: UiWheelRoute = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: input.pointer.x
+    y: input.pointer.y
+    want: UiRouteWant.dragSource
+  )
+  let source: EntityId = dialogLayerHolds(world: world, uiSystems: uiSystems, hit: route.target)
+  if isNone(this: source) {
+    ret source
+  }
+  if input.pointer.kind is InputKind.touch and componentView(
+    this: world.dragSources
+    entityId: source
+  ).touch is false {
+    ret noEntity()
+  }
+  ret source
+}
+
+func beginDragging(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  nowSeconds: view Float64
+  x: view Float
+  y: view Float
+) {
+  world.drag.phase = UiDragPhase.dragging
+  world.drag.x = x
+  world.drag.y = y
+  world.drag.seconds = nowSeconds
+  world.drag.target = noEntity()
+  world.drag.effect = DragEffect.refused
+  world.drag.wanted = DragEffect.refused
+  world.drag.root = noEntity()
+  let source: EntityId = world.drag.payload.source
+  if isNone(this: source) is false and isAlive(world: world, entityId: source) {
+    world.drag.root = hitRootOf(world: world, uiSystems: uiSystems, entityId: source)
+  }
+  holdEscape(world: world)
+}
+
+func beginOsDrag(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  osDrop: view OsDrop
+  nowSeconds: view Float64
+) {
+  world.drag.payload = UiDragPayload { kind: "files", mayMove: false }
+  beginDragging(
+    world: world
+    uiSystems: uiSystems
+    nowSeconds: nowSeconds
+    x: osDrop.x
+    y: osDrop.y
+  )
+  world.drag.external = true
+}
+
+func stepDragging(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  keys: view DragKeys
+  osDrop: view OsDrop
+) {
+  var ends: Bool = false
+  if world.drag.external {
+    ends = osDrop.over is false
+    if ends and (osDrop.dropped is false or osDrop.values.length is 0) {
+      cancelDrag(world: world, uiSystems: uiSystems)
+      ret
+    }
+    world.drag.x = osDrop.x
+    world.drag.y = osDrop.y
+    if ends {
+      world.drag.payload.values = osDrop.values
+      if osDrop.text {
+        world.drag.payload.kind = "text"
+      }
+    }
+  } else {
+    ends = input.pointer.down is false
+    let covered: Bool = isNone(this: world.drag.root) is false and isAlive(
+      world: world
+      entityId: world.drag.root
+    ) and dialogLayerCovers(world: world, uiSystems: uiSystems, entityId: world.drag.root)
+    if keys.escape or world.menu.open or covered {
+      cancelDrag(world: world, uiSystems: uiSystems)
+      ret
+    }
+    world.drag.x = input.pointer.x
+    world.drag.y = input.pointer.y
+    input.pressedEntityId = noEntity()
+  }
+  world.drag.wanted = wantedEffect(world: world, keys: keys)
+  world.drag.moveAsked = keys.move
+  let target: EntityId = dropTargetAt(
+    world: world
+    uiSystems: uiSystems
+    x: world.drag.x
+    y: world.drag.y
+  )
+  let moved: Bool = target is not world.drag.target
+  world.drag.target = target
+  if ends {
+    # (refused where it was: the program said so in the frame before)
+    if isNone(this: target) or (moved is false and world.drag.effect is DragEffect.refused) {
+      cancelDrag(world: world, uiSystems: uiSystems)
+    } else {
+      sendDragEvent(world: world, kind: DragEventKind.drop, target: target)
+      endDrag(world: world, uiSystems: uiSystems)
+    }
+    ret
+  }
+  if moved {
+    sendDragEvent(world: world, kind: DragEventKind.over, target: target)
+  }
+  var effect: DragEffect = world.drag.wanted
+  if isNone(this: target) {
+    effect = DragEffect.refused
+  }
+  setDragEffect(world: world, effect: effect)
+  scrollDragEdges(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    seconds: input.nowSeconds - world.drag.seconds
+  )
+  world.drag.seconds = input.nowSeconds
+  placeDragLabel(world: world, uiSystems: uiSystems)
+}
+
+# What the keys say letting go does
+func wantedEffect(world: view UiWorld, keys: view DragKeys) ret DragEffect {
+  let payload: view UiDragPayload = world.drag.payload
+  if payload.mayCopy and (keys.copyThere or payload.mayMove is false) {
+    ret DragEffect.copyThere
+  }
+  if payload.mayMove {
+    ret DragEffect.move
+  }
+  ret DragEffect.refused
+}
+
+# The DropTarget at (x, y) that takes the drag's kind
+func dropTargetAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret EntityId {
+  if componentCount(this: world.dropTargets) is 0 {
+    ret noEntity()
+  }
+  let route: UiWheelRoute = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    want: UiRouteWant.drop
+  )
+  ret dialogLayerHolds(world: world, uiSystems: uiSystems, hit: route.target)
+}
+
+func sendDragEvent(world: mod UiWorld, kind: copy DragEventKind, target: view EntityId) {
+  let event: DragEvent = {
+    kind: kind
+    source: world.drag.payload.source
+    target: target
+    payload: world.drag.payload
+    external: world.drag.external
+    wanted: world.drag.wanted
+    moveAsked: world.drag.moveAsked
+    x: world.drag.x
+    y: world.drag.y
+  }
+  eventSend(this: world.dragEvents, value: own event)
+}
+
+func endDrag(world: mod UiWorld, uiSystems: mod UiSystems) {
+  let label: EntityId = world.drag.label
+  if isNone(this: label) is false and isAlive(world: world, entityId: label) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: label)
+  }
+  if world.drag.phase is UiDragPhase.dragging {
+    releaseEscape(world: world)
+  }
+  let tookKeys: Bool = world.drag.tookKeys
+  world.drag = UiDrag { tookKeys: tookKeys }
+}
+
+# ----- scrolling at the edges ---------------------------------------------------------------
+func scrollDragEdges(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  seconds: view Float64
+) {
+  var step: Float = seconds as Float
+  if step > 0.1 {
+    step = 0.1
+  }
+  if step <= 0.0 {
+    ret
+  }
+  scrollDragEdge(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    step: step
+    want: UiRouteWant.wheel
+  )
+  scrollDragEdge(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    step: step
+    want: UiRouteWant.wheelX
+  )
+}
+
+func scrollDragEdge(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  step: view Float
+  want: copy UiRouteWant
+) {
+  let root: EntityId = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: world.drag.x
+    y: world.drag.y
+    want: want
+  ).target
+  if componentHas(this: world.scrollRoots, entityId: root) is false or componentHas(
+    this: uiSystems.hierarchy.parents
+    entityId: root
+  ) is false {
+    ret
+  }
+  let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: root)
+  let window: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: root).parent
+  if range.active is false or componentHas(this: uiSystems.layout.computedRects, entityId: window) is false {
+    ret
+  }
+  let box: WorldRect = worldRectOf(
+    wt: componentView(this: uiSystems.transform2d.worldTransforms, entityId: window)
+    cr: componentView(this: uiSystems.layout.computedRects, entityId: window)
+  )
+  var start: Float = world.drag.y - box.y
+  var length: Float = box.h
+  if want is UiRouteWant.wheelX {
+    start = world.drag.x - box.x
+    length = box.w
+  }
+  var band: Float = uiUnitsFromPoints(input: input, points: dragEdgePoints)
+  if band > length * 0.25 {
+    band = length * 0.25
+  }
+  # -1 at the start's edge to 1 at the end's
+  var pull: Float = 0.0
+  if start < band {
+    pull = -(1.0 - start / band)
+  } else if length - start < band {
+    pull = 1.0 - (length - start) / band
+  }
+  if pull is 0.0 {
+    ret
+  }
+  let speed: Float = uiUnitsFromPoints(input: input, points: dragEdgePointsPerSecond)
+  let before: Float = scrollPositionOf(world: world, entityId: root)
+  var position: Float = before - pull * speed * step
+  if position > 0.0 {
+    position = 0.0
+  }
+  if position < range.floor {
+    position = range.floor
+  }
+  if position is not before {
+    setScrollPosition(
+      world: world
+      uiSystems: uiSystems
+      entityId: root
+      position: position
+    )
+  }
+}
+
+# ----- the label ---------------------------------------------------------------------------------
+
+# The label beside the pointer: an icon, its text, and what letting go does. Bundles dragLabel,
+# dragText and dragEffect.
+func placeDragLabel(world: mod UiWorld, uiSystems: mod UiSystems) {
+  if world.drag.external or world.drag.payload.label.length() is 0 {
+    ret
+  }
+  if isNone(this: world.drag.label) {
+    var overrides: List(SceneOverride) = emptyOverrides()
+    addTextOverride(list: overrides, nodeId: "DragText", value: "{world.drag.payload.label}")
+    var children: String = "\"DragText\",\"DragMark\""
+    var icon: String = ""
+    if world.drag.payload.icon.length() > 0 {
+      children = "\"DragIcon\",{children}"
+      icon = ",\"DragIcon\":\{\"bundles\":[\"dragEffect\"]\}"
+      addSpriteOverride(list: overrides, nodeId: "DragIcon", value: "{world.drag.payload.icon}")
+    }
+    let label: EntityId = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: parseScene(
+        source: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"dragLabel\",\"root\":\"DragLabel\",\"nodes\":\{\"DragLabel\":\{\"bundles\":[\"dragLabel\"],\"Children\":[{children}]\},\"DragText\":\{\"bundles\":[\"dragText\"]\},\"DragMark\":\{\"bundles\":[\"dragEffect\"]\}{icon}\}\}"
+      )
+      overrides: overrides
+    )
+    if isNone(this: label) {
+      ret
+    }
+    # over everything but a debug layer, and never under the pointer
+    componentSet(this: world.layerTags, entityId: label, data: LayerTag { id: "popover", z: 3000 })
+    world.drag.label = label
+    showDragEffect(world: world)
+  }
+  let label: EntityId = world.drag.label
+  var x: Float = world.drag.x + dragLabelX
+  let y: Float = world.drag.y + dragLabelY
+  if componentHas(this: uiSystems.layout.computedRects, entityId: label) {
+    # at the window's right edge it is on the pointer's other side
+    let width: Float = componentView(this: uiSystems.layout.computedRects, entityId: label).size.x
+    if x + width > world.layoutW {
+      x = world.drag.x - dragLabelX - width
+    }
+  }
+  componentSet(
+    this: uiSystems.transform2d.runtimeOffsets
+    entityId: label
+    data: RuntimeOffset { delta: Vec2 { x: x, y: y } }
+  )
+}
+
+# The label's mark: a plus for a copy, an arrow for a move, a bar where it cannot be let go
+func showDragEffect(world: mod UiWorld) {
+  let label: EntityId = world.drag.label
+  if isNone(this: label) or componentHas(this: world.childrens, entityId: label) is false {
+    ret
+  }
+  let children: view Children = componentView(this: world.childrens, entityId: label)
+  let mark: EntityId = children.ids.copyAtFallback(
+    index: children.ids.length - 1
+    fallback: noEntity()
+  )
+  if componentHas(this: world.sprites, entityId: mark) is false {
+    ret
+  }
+  var icon: String = "mat:block"
+  if world.drag.effect is DragEffect.move {
+    icon = "mat:arrow_forward"
+  } else if world.drag.effect is DragEffect.copyThere {
+    icon = "mat:add_circle"
+  }
+  componentMod(this: world.sprites, entityId: mark).textureKey = own icon
+}

@@ -33,6 +33,7 @@ open ui/InputComponents
 open ui/MenuComponents
 open ui/SelectionComponents
 open ui/PaneComponents
+open ui/DragComponents
 open ui/ThumbnailComponents
 open ui/ListWindowComponents
 open ui/AnimationComponents
@@ -111,6 +112,8 @@ type UiWorld {
   dividers: ComponentTable(Divider)
   scrollBars: ComponentTable(ScrollBar)
   thumbnails: ComponentTable(Thumbnail)
+  dragSources: ComponentTable(DragSource)
+  dropTargets: ComponentTable(DropTarget)
   # lists of rows to select (ui/ListSelectionSystem); the last two are runtime
   listSelections: ComponentTable(ListSelection)
   selectionStyles: ComponentTable(SelectionStyle)
@@ -324,6 +327,9 @@ type UiWorld {
   # resource: one menu is open at a time.
   menu: UiMenu
   menuEvents: EventQueue(MenuEvent)
+  drag: UiDrag
+  escapeHold: UiEscapeHold
+  dragEvents: EventQueue(DragEvent)
   # The node that has the keys (ui/KeyFocusSystem), and what the lists' selections did
   # resource: one node has the keys.
   keyFocus: KeyFocus
@@ -386,6 +392,8 @@ func createUiWorld() ret UiWorld {
     dividers: ComponentTable.create(Divider)
     scrollBars: ComponentTable.create(ScrollBar)
     thumbnails: ComponentTable.create(Thumbnail)
+    dragSources: ComponentTable.create(DragSource)
+    dropTargets: ComponentTable.create(DropTarget)
     listSelections: ComponentTable.create(ListSelection)
     selectionStyles: ComponentTable.create(SelectionStyle)
     listRowNames: ComponentTable.create(ListRowNames)
@@ -508,6 +516,9 @@ func createUiWorld() ret UiWorld {
     uiActions: createEventQueue(UiAction)
     menu: UiMenu {}
     menuEvents: createEventQueue(MenuEvent)
+    drag: UiDrag {}
+    escapeHold: UiEscapeHold {}
+    dragEvents: createEventQueue(DragEvent)
     keyFocus: KeyFocus {}
     listEvents: createEventQueue(ListEvent)
     dividerEvents: createEventQueue(DividerEvent)

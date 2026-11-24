@@ -26,8 +26,9 @@ type FolderAnswer {
   outside: Bool = false
   realFolder: String = ""
   entries: List(FileEntry) = {}
-  # when the folder was changed, looked at before it was read
+  # when the folder was changed, looked at before it was read, and the volume it is on
   modified: Int = -1
+  device: Int = 0
   # the entries' names, made on the thread
   names: List(String) = {}
 }
@@ -72,10 +73,12 @@ func namesOf(entries: view List(FileEntry)) ret List(String) {
 func listFolderThread(answers: own Channel(FolderAnswer), request: own FolderRequest) ret Int {
   let real: String = Files.realPath(path: request.folder)
   let modified: Int = folderStamp(folder: request.folder)
+  let device: Int = Files.pathStatus(path: request.folder, follow: true).device
   var answer: FolderAnswer = {
     generation: request.generation
     realFolder: "{real}"
     modified: modified
+    device: device
   }
   if request.limit.length() > 0 and real.length() > 0 and pathInside(
     folder: request.limit
@@ -110,6 +113,7 @@ func listFolderThread(answers: own Channel(FolderAnswer), request: own FolderReq
       generation: request.generation
       realFolder: "{real}"
       modified: modified
+      device: device
     }
     whole.detailsOnly = listing.entries.length is count
     if whole.detailsOnly is false {

@@ -1,11 +1,11 @@
 # The browser's nodes: its scenes mounted, found by their ids, and shown or hidden.
-import Gpu2d
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
 open ecs/hierarchySystem/HierarchySystem
 open ui/Components
 open ui/Ecs
+open ui/EscapeHold
 open ui/SceneInstance
 open ui/UiSystems
 open ui/fileBrowser/FileBrowserComponents
@@ -130,7 +130,7 @@ func dropLargePreview(
   let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
   preview.large = noEntity()
   preview.largeShown = ""
-  Gpu2d.setEscapeQuits(on: preview.escapeQuit)
+  releaseEscape(world: world)
 }
 
 # Was the action `actionId` sent this frame?

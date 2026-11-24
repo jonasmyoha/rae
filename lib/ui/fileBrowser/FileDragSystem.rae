@@ -1,0 +1,420 @@
+# Rows dragged, and files dropped, by ui/DragSystem (docs/file-browser-design.md §8, §10): onto a
+# folder's row, a column or a part of the trail, of this browser or another, or from the OS. A
+# folder
+# under a held drag opens. One volume moves, across volumes and with Alt it copies.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/DragComponents
+open ui/DragSystem
+open ui/Ecs
+open ui/InputSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/FileMenuSystem
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/SelectionSystem
+
+# What is dragged: paths on the disk (the OS's too), or entries of a program's own
+const filesKind: String = "files"
+
+const ownFilesKind: String = "ownFiles"
+
+# How long a drag is held on a folder before it opens
+const dragOpenSeconds: Float64 = 0.7
+
+# Where a drag would be let go
+type FileDrop {
+  browser: EntityId = noEntity()
+  # noEntity() on the trail
+  column: EntityId = noEntity()
+  # the folder's live row (noEntity() for the column's own folder), and its name
+  row: EntityId = noEntity()
+  name: String = ""
+  folder: String = ""
+}
+
+func fileDragSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  input: mod UiInput
+) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < eventCount(DragEvent, this: world.dragEvents), ++i {
+    let event: DragEvent = eventAt(DragEvent, this: world.dragEvents, i: i)
+    if event.kind is DragEventKind.begin {
+      changed = beginFileDrag(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        input: input
+        source: event.source
+      ) or changed
+    } else if event.kind is DragEventKind.drop {
+      changed = dropFiles(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        event: event
+      ) or changed
+    }
+  }
+  ret showFileDrag(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
+}
+
+# ----- beginning --------------------------------------------------------------------------
+func beginFileDrag(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  source: view EntityId
+) ret Bool {
+  let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: source)
+  let column: EntityId = columnOfEvent(systems: systems, list: row.list)
+  if isNone(this: column) {
+    ret false
+  }
+  let key: String = shownKey(uiSystems: uiSystems, row: row)
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  var paths: List(String) = pathsInColumn(systems: systems, world: world, column: column)
+  let pressed: String = pathIn(folder: folder, name: key)
+  if paths.contains(value: pressed) is false {
+    # a row that is not of the selection is dragged alone
+    paths = List(String) { "{pressed}" }
+  }
+  var payload: UiDragPayload = {
+    kind: "{filesKind}"
+    label: "{key}"
+    source: source
+    note: componentView(this: systems.columns, entityId: column).device
+  }
+  if paths.length > 1 {
+    payload.label = itemsText(count: paths.length)
+    payload.icon = "mat:content_copy"
+  } else if let entry: FileEntry = entryOfColumn(systems: systems, column: column, name: key) {
+    let kind: FileKind = kindOfEntry(kinds: systems.kinds, entry: entry)
+    payload.icon = kind.icon
+  }
+  payload.values = own paths
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  # what may not be changed is only copied
+  payload.mayMove = mayOperate(systems: systems, browser: browser)
+  if browserOptions(systems: systems, browser: browser).source is BrowserSource.app {
+    payload.kind = "{ownFilesKind}"
+    systems.dragBrowser = browser
+  }
+  startDrag(
+    world: world
+    uiSystems: uiSystems
+    input: input
+    payload: own payload
+  )
+  ret true
+}
+
+# ----- where it is ------------------------------------------------------------------------------
+
+# The folder of a DropTarget of a browser (a browser of noEntity() when it is none)
+func fileDropOf(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  uiSystems: view UiSystems
+  target: view EntityId
+) ret FileDrop {
+  var drop: FileDrop = {}
+  if componentHas(this: systems.trailParts, entityId: target) {
+    let part: view TrailPart = componentView(this: systems.trailParts, entityId: target)
+    drop.browser = part.browser
+    drop.folder = "{part.folder}"
+    ret drop
+  }
+  let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: target)
+  drop.column = columnOfEvent(systems: systems, list: row.list)
+  if isNone(this: drop.column) {
+    drop.column = columnOfBody(systems: systems, body: target)
+  }
+  if isNone(this: drop.column) {
+    ret drop
+  }
+  drop.browser = componentView(this: systems.columns, entityId: drop.column).browser
+  drop.folder = folderOfColumn(systems: systems, column: drop.column)
+  let name: String = shownKey(uiSystems: uiSystems, row: row)
+  if row.index >= 0 and entryOpensAsFolder(systems: systems, column: drop.column, name: name) {
+    drop.row = target
+    drop.folder = pathIn(folder: drop.folder, name: name)
+    drop.name = own name
+  }
+  ret drop
+}
+
+# What letting `payload` go there does. `wanted` is what the keys say.
+func fileDropEffect(
+  systems: view FileBrowserSystems
+  drop: view FileDrop
+  payload: view UiDragPayload
+  wanted: view DragEffect
+  moveAsked: view Bool
+) ret DragEffect {
+  if isNone(this: drop.browser) or mayOperate(systems: systems, browser: drop.browser) is false {
+    ret DragEffect.refused
+  }
+  let ownEntries: Bool = payload.kind is ownFilesKind
+  if ownEntries and drop.browser is not systems.dragBrowser {
+    # a program's entries are not files
+    ret DragEffect.refused
+  }
+  if isNone(this: drop.column) is false and componentView(
+    this: systems.columns
+    entityId: drop.column
+  ).state is not ColumnState.ready {
+    ret DragEffect.refused
+  }
+  var elsewhere: Bool = payload.values.length is 0
+  loop let path: view String in payload.values {
+    if pathInside(folder: path, path: drop.folder) {
+      # into itself
+      ret DragEffect.refused
+    }
+    if parentPath(path: path) is not drop.folder {
+      elsewhere = true
+    }
+  }
+  var effect: DragEffect = wanted
+  if effect is DragEffect.move and moveAsked is false and otherVolume(
+    systems: systems
+    drop: drop
+    device: payload.note
+  ) {
+    effect = DragEffect.copyThere
+  }
+  if effect is DragEffect.move and ownEntries is false and browserOptions(
+    systems: systems
+    browser: drop.browser
+  ).source is BrowserSource.app {
+    # files are taken into a program's entries, not away from the disk
+    effect = DragEffect.copyThere
+  }
+  if effect is DragEffect.move and elsewhere is false {
+    # it is there already
+    ret DragEffect.refused
+  }
+  ret effect
+}
+
+# Is the column on another volume than the one it was dragged from? (The operation's thread asks the
+# disk, so a folder that is a mounted disk copies too.)
+func otherVolume(systems: view FileBrowserSystems, drop: view FileDrop, device: view Int) ret Bool {
+  if device is 0 or isNone(this: drop.column) {
+    ret false
+  }
+  let there: Int = componentView(this: systems.columns, entityId: drop.column).device
+  ret there is not 0 and there is not device
+}
+
+# ----- showing it
+# ----------------------------------------------------------------------------------
+func showFileDrag(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var row: EntityId = noEntity()
+  var column: EntityId = noEntity()
+  var opens: String = ""
+  if dragRunning(world: world) {
+    let drop: FileDrop = fileDropOf(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      target: world.drag.target
+    )
+    if isNone(this: drop.browser) is false {
+      let effect: DragEffect = fileDropEffect(
+        systems: systems
+        drop: drop
+        payload: world.drag.payload
+        wanted: world.drag.wanted
+        moveAsked: world.drag.moveAsked
+      )
+      setDragEffect(world: world, effect: effect)
+      if effect is not DragEffect.refused {
+        row = drop.row
+        if isNone(this: row) {
+          column = drop.column
+        }
+      }
+      if isNone(this: drop.row) is false and world.drag.payload.values.contains(value: drop.folder) is false {
+        opens = "{drop.folder}"
+        stepDragOpen(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          drop: drop
+        )
+      }
+    }
+  }
+  if opens.length() is 0 {
+    systems.dragOpenFolder = ""
+  }
+  ret markDropTarget(
+    systems: systems
+    world: world
+    row: row
+    column: column
+  )
+}
+
+# The folder under the drag opens once it has been held there
+func stepDragOpen(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  drop: view FileDrop
+) {
+  if systems.dragOpenFolder is not drop.folder {
+    systems.dragOpenFolder = "{drop.folder}"
+    systems.dragOpenAt = systems.now + dragOpenSeconds
+    ret
+  }
+  if systems.dragOpenAt < 0.0 or systems.now < systems.dragOpenAt {
+    ret
+  }
+  systems.dragOpenAt = -1.0
+  setListSelection(
+    world: world
+    list: listOfColumn(systems: systems, column: drop.column)
+    keys: List(String) { "{drop.name}" }
+  )
+  openChildFolder(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    column: drop.column
+    name: drop.name
+  )
+}
+
+# The folder row, or the column, that the drag would go into is marked
+func markDropTarget(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  row: view EntityId
+  column: view EntityId
+) ret Bool {
+  if systems.dropRow is row and systems.dropColumn is column {
+    ret false
+  }
+  markNode(
+    world: world
+    root: systems.dropRow
+    nodeId: "FileRowDrop"
+    shown: false
+  )
+  markNode(
+    world: world
+    root: systems.dropColumn
+    nodeId: "FileColumnDrop"
+    shown: false
+  )
+  markNode(
+    world: world
+    root: row
+    nodeId: "FileRowDrop"
+    shown: true
+  )
+  markNode(
+    world: world
+    root: column
+    nodeId: "FileColumnDrop"
+    shown: true
+  )
+  systems.dropRow = row
+  systems.dropColumn = column
+  ret true
+}
+
+func markNode(
+  world: mod UiWorld
+  root: view EntityId
+  nodeId: view String
+  shown: view Bool
+) {
+  if isNone(this: root) is false and isAlive(world: world, entityId: root) {
+    showNode(world: world, entityId: nodeIn(world: world, root: root, nodeId: nodeId), shown: shown)
+  }
+}
+
+# When a held drag opens a folder (below 0: none does)
+func dragOpenDeadline(systems: view FileBrowserSystems) ret Float64 {
+  if systems.dragOpenFolder.length() is 0 {
+    ret -1.0
+  }
+  ret systems.dragOpenAt
+}
+
+# ----- letting go
+# ----------------------------------------------------------------------------------
+func dropFiles(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  event: view DragEvent
+) ret Bool {
+  let drop: FileDrop = fileDropOf(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    target: event.target
+  )
+  let effect: DragEffect = fileDropEffect(
+    systems: systems
+    drop: drop
+    payload: event.payload
+    wanted: event.wanted
+    moveAsked: event.moveAsked
+  )
+  if effect is DragEffect.refused or event.payload.values.length is 0 {
+    ret false
+  }
+  let asMove: Bool = effect is DragEffect.move
+  let told: FilesDropped = {
+    browser: drop.browser
+    folder: "{drop.folder}"
+    paths: event.payload.values
+    external: event.external
+    moved: asMove
+  }
+  eventSend(this: systems.filesDropped, value: own told)
+  putFiles(
+    systems: systems
+    browser: drop.browser
+    folder: drop.folder
+    paths: event.payload.values
+    asMove: asMove
+    byVolume: asMove and event.moveAsked is false
+    # a column with another open beyond it keeps that one open
+    selected: browserFolder(systems: systems, browser: drop.browser) is drop.folder
+  )
+  ret true
+}

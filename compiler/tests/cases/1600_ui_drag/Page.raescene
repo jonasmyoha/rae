@@ -1,0 +1,14 @@
+{
+  "type": "Scene", "version": 2, "sceneId": "page", "root": "Page",
+  "nodes": {
+    "Page": {"Rect": {"x": 0, "y": 0, "w": 600, "h": 400}, "Children": ["Card", "Plain", "Outer", "List"]},
+    "Card": {"Rect": {"x": 0, "y": 0, "w": 80, "h": 40}, "Shape": {"kind": "Rect", "fill": "accent", "radius": 0}, "OnClick": {"actionId": "card", "label": "Card"}, "DragSource": {"kind": "card"}},
+    "Plain": {"Rect": {"x": 0, "y": 50, "w": 80, "h": 40}, "Shape": {"kind": "Rect", "fill": "accent", "radius": 0}, "OnClick": {"actionId": "plain", "label": "Plain"}, "DragSource": {"kind": "plain", "touch": true}},
+    "Outer": {"Rect": {"x": 200, "y": 0, "w": 200, "h": 200}, "Shape": {"kind": "Rect", "fill": "surface", "radius": 0}, "DropTarget": {"kinds": "cards text files"}, "Children": ["Inner"]},
+    "Inner": {"Rect": {"x": 50, "y": 50, "w": 100, "h": 100}, "Shape": {"kind": "Rect", "fill": "accent", "radius": 0}, "DropTarget": {"kinds": "cards"}, "Children": ["Other"]},
+    "Other": {"Rect": {"x": 0, "y": 0, "w": 40, "h": 40}, "Shape": {"kind": "Rect", "fill": "surface", "radius": 0}, "DropTarget": {"kinds": "pictures"}},
+    "List": {"Rect": {"x": 450, "y": 0, "w": 100, "h": 100}, "Overflow": {"mode": "Clip"}, "Shape": {"kind": "Rect", "fill": "surface", "radius": 0}, "Children": ["Rows"]},
+    "Rows": {"Rect": {"x": 0, "y": 0, "w": 100, "h": 600}, "ScrollRoot": {"axis": "y", "floor": "content"}, "Children": ["Row"]},
+    "Row": {"Rect": {"x": 0, "y": 0, "w": 100, "h": 600}, "Shape": {"kind": "Rect", "fill": "accent", "radius": 0}, "OnClick": {"actionId": "row", "label": "Row"}, "DragSource": {"kind": "card"}, "DropTarget": {"kinds": "cards"}}
+  }
+}

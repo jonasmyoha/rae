@@ -1,0 +1,609 @@
+# Drags in the file browser by scripted input: rows onto a folder's row, a column and the trail,
+# several,
+# a row that is not of the selection, into itself and where it is already, Alt, Escape, a folder
+# that
+# opens under a held drag, the edges that scroll, two browsers, one that may not be changed, a
+# program's
+# own entries, and files the OS drops.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/DragComponents
+open ui/DragSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileDragSystem
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func sounds(app: mod App) {
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/root"
+  )
+  settle(app: app)
+  app.lines.clear()
+}
+
+func x0(app: view App, browser: view EntityId) ret Float {
+  ret rowX(app: app, browser: browser, place: 0)
+}
+
+func rows(app: mod App) {
+  let left: EntityId = app.left
+  let x: Float = x0(app: app, browser: left)
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "a.txt"
+    )
+  )
+  log("lifted: {dragText(app: app)}, pressed {isNone(this: app.input.pressedEntityId)}")
+  carry(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "Film"
+    )
+  )
+  log("over a folder: {dragText(app: app)}")
+  carry(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "b.txt"
+    )
+  )
+  log("over a file: {dragText(app: app)}")
+  carry(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "Film"
+    )
+  )
+  letGo(app: app)
+  show(app: app, step: "onto Film")
+  press(app: app, keys: BrowserKeys { undo: true })
+  show(app: app, step: "undone")
+
+  # several, by one of them; then one that is not of them
+  clickAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "a.txt"
+    )
+    listKeys: ListSelectionKeys {}
+  )
+  clickAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "b.txt"
+    )
+    listKeys: ListSelectionKeys { toggle: true }
+  )
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "a.txt"
+    )
+  )
+  log("two: {dragText(app: app)}")
+  app.dragKeys = DragKeys { copyThere: true }
+  carry(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "Film"
+    )
+  )
+  log("with Alt: {dragText(app: app)}")
+  letGo(app: app)
+  app.dragKeys = DragKeys {}
+  show(app: app, step: "copied")
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "c.txt"
+    )
+  )
+  log("another: {dragText(app: app)}")
+  app.dragKeys = DragKeys { escape: true }
+  press(app: app, keys: BrowserKeys { escape: true })
+  app.dragKeys = DragKeys {}
+  letGo(app: app)
+  show(app: app, step: "Escape: {dragText(app: app)}")
+
+  # a folder into itself and into what is in it, and onto where it is
+  clickAt(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "Film"
+    )
+    listKeys: ListSelectionKeys {}
+  )
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: left
+      place: 0
+      name: "Film"
+    )
+  )
+  log("a folder: {dragText(app: app)}")
+  carry(
+    app: app
+    x: rowX(app: app, browser: left, place: 1)
+    y: rowY(
+      app: app
+      browser: left
+      place: 1
+      name: "Cuts"
+    )
+  )
+  log("into what is in it: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "refused")
+
+  # from a column to the one before, and to the trail
+  lift(
+    app: app
+    x: rowX(app: app, browser: left, place: 1)
+    y: rowY(
+      app: app
+      browser: left
+      place: 1
+      name: "a.txt"
+    )
+  )
+  carry(app: app, x: x, y: 300.0)
+  log("over the column before: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "there is one: {question(app: app)}")
+  press(app: app, keys: BrowserKeys { confirm: true })
+  show(app: app, step: "both kept")
+  let moved: EntityId = componentView(this: app.files.browsers, entityId: left).trail
+  let parts: view Children = componentView(this: app.world.childrens, entityId: moved)
+  let first: WorldRect = boxOf(
+    app: app
+    entityId: parts.ids.copyAtFallback(index: 0, fallback: noEntity())
+  )
+  lift(
+    app: app
+    x: rowX(app: app, browser: left, place: 1)
+    y: rowY(
+      app: app
+      browser: left
+      place: 1
+      name: "b.txt"
+    )
+  )
+  app.dragKeys = DragKeys { copyThere: true }
+  carry(app: app, x: first.x + first.w * 0.5, y: first.y + first.h * 0.5)
+  log("over the trail: {dragText(app: app)}")
+  letGo(app: app)
+  app.dragKeys = DragKeys {}
+  press(app: app, keys: BrowserKeys { confirm: true })
+  show(app: app, step: "onto the trail")
+}
+
+func opening(app: mod App) {
+  sounds(app: app)
+  let x: Float = x0(app: app, browser: app.left)
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "c.txt"
+    )
+  )
+  carry(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Film"
+    )
+  )
+  log(
+    "held: {browserColumns(systems: app.files, browser: app.left).length} columns, needs a frame {dragOpenDeadline(
+      systems: app.files
+    ) > 0.0}"
+  )
+  app.step = 0.4
+  loop var i: Int = 0, i < 4, ++i {
+    pointTo(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+    )
+  }
+  app.step = 0.02
+  loop var i: Int = 0, i < 400 and busy(app: app), ++i {
+    pointTo(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+    )
+    sleep(ms: 1)
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    pointTo(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+    )
+  }
+  log(
+    "after a while: {browserColumns(systems: app.files, browser: app.left).length} columns, {dragText(
+      app: app
+    )}"
+  )
+  carry(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 1)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 1
+      name: "Cuts"
+    )
+  )
+  log("over Cuts in it: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "into Cuts")
+}
+
+func scrolling(app: mod App) {
+  loop var i: Int = 0, i < 60, ++i {
+    writeFile(path: "{app.base}/root/Film/Cuts/clip {100 + i}", text: "x")
+  }
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/root/Film/Cuts"
+  )
+  settle(app: app)
+  let column: EntityId = columnAt(systems: app.files, browser: app.left, place: 2)
+  let list: EntityId = listOfColumn(systems: app.files, column: column)
+  let box: WorldRect = boxOf(
+    app: app
+    entityId: componentView(this: app.files.columns, entityId: column).body
+  )
+  lift(app: app, x: box.x + 60.0, y: box.y + 40.0)
+  carry(app: app, x: box.x + 60.0, y: box.y + box.h - 5.0)
+  loop var i: Int = 0, i < 20, ++i {
+    pointTo(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+    )
+  }
+  let down: Float = scrollPositionOf(world: app.world, entityId: list)
+  log("at the lower edge it scrolls: {down < -50.0}")
+  carry(app: app, x: box.x + 60.0, y: box.y + 3.0)
+  loop var i: Int = 0, i < 60, ++i {
+    pointTo(
+      app: app
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+    )
+  }
+  log("at the upper one back to {scrollPositionOf(world: app.world, entityId: list)}")
+  app.dragKeys = DragKeys { escape: true }
+  pointTo(
+    app: app
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: true
+  )
+  app.dragKeys = DragKeys {}
+  letGo(app: app)
+  app.lines.clear()
+}
+
+func twoBrowsers(app: mod App) {
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "{app.base}/other"
+    options: BrowserOptions { showPreview: false }
+  )
+  settle(app: app)
+  sounds(app: app)
+  let x: Float = x0(app: app, browser: app.left)
+  let there: Float = x0(app: app, browser: app.right)
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "a.txt"
+    )
+  )
+  carry(
+    app: app
+    x: there
+    y: rowY(
+      app: app
+      browser: app.right
+      place: 0
+      name: "Box"
+    )
+  )
+  log("over the other browser: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "moved into it")
+  log("   other: {diskText(folder: "{app.base}/other")}")
+
+  # the right one may not be changed: nothing goes in, and what comes out is copied
+  var options: BrowserOptions = browserOptions(systems: app.files, browser: app.right)
+  options.allowOperations = false
+  setBrowserOptions(
+    systems: app.files
+    world: app.world
+    browser: app.right
+    options: options
+  )
+  settle(app: app)
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "b.txt"
+    )
+  )
+  carry(app: app, x: there, y: 300.0)
+  log("into one that may not be changed: {dragText(app: app)}")
+  letGo(app: app)
+  lift(
+    app: app
+    x: there
+    y: rowY(
+      app: app
+      browser: app.right
+      place: 0
+      name: "there.txt"
+    )
+  )
+  carry(app: app, x: x, y: 300.0)
+  log("out of it: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "copied out")
+  closeFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: app.right
+  )
+
+  # a program's own entries are no files, but files may come to them
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "/own"
+    options: BrowserOptions { source: BrowserSource.app, showPreview: false }
+  )
+  settle(app: app)
+  lift(
+    app: app
+    x: there
+    y: rowY(
+      app: app
+      browser: app.right
+      place: 0
+      name: "clip"
+    )
+  )
+  carry(app: app, x: x, y: 300.0)
+  log("a program's entry over files: {dragText(app: app)}")
+  letGo(app: app)
+  lift(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "b.txt"
+    )
+  )
+  carry(app: app, x: there, y: 300.0)
+  log("a file over a program's entries: {dragText(app: app)}")
+  letGo(app: app)
+  show(app: app, step: "asked")
+}
+
+# The OS holds something at a place
+func osOver(app: mod App, x: view Float, y: view Float) {
+  app.osDrop = OsDrop { over: true, x: x, y: y }
+  idle(app: app)
+  idle(app: app)
+}
+
+func osLetGo(app: mod App, values: own List(String), text: view Bool) {
+  app.osDrop = OsDrop {
+    dropped: true
+    text: text
+    x: app.osDrop.x
+    y: app.osDrop.y
+    values: own values
+  }
+  idle(app: app)
+  app.osDrop = OsDrop {}
+  settle(app: app)
+}
+
+func fromTheOs(app: mod App) {
+  let x: Float = x0(app: app, browser: app.left)
+  osOver(
+    app: app
+    x: x
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Film"
+    )
+  )
+  log("held over Film: {dragText(app: app)}")
+  osLetGo(
+    app: app
+    values: List(String) { "{app.base}/outside/one.png", "{app.base}/outside/two.png" }
+    text: false
+  )
+  show(app: app, step: "dropped: {dragText(app: app)}")
+  log("   outside: {diskText(folder: "{app.base}/outside")}")
+  osOver(app: app, x: x, y: 300.0)
+  osLetGo(app: app, values: List(String) {}, text: false)
+  show(app: app, step: "it left the window: {dragText(app: app)}")
+  osOver(app: app, x: x, y: 300.0)
+  osLetGo(app: app, values: List(String) { "some words" }, text: true)
+  show(app: app, step: "text is no file: {dragText(app: app)}")
+  # without a move over it first, as a drop on an app's icon or a quick one comes
+  app.osDrop = OsDrop { x: x, y: 300.0 }
+  osLetGo(app: app, values: List(String) { "{app.base}/outside/two.png" }, text: false)
+  show(app: app, step: "at once")
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-drags-{nowNs()}"
+  makeFolder(path: base)
+  loop let folder: view String in List(String) {
+    "trash"
+    "other"
+    "other/Box"
+    "outside"
+    "root"
+    "root/Film"
+    "root/Film/Cuts"
+  } {
+    makeFolder(path: "{base}/{folder}")
+  }
+  loop let name: view String in List(String) {
+    "root/a.txt"
+    "root/b.txt"
+    "root/c.txt"
+    "other/there.txt"
+    "outside/one.png"
+    "outside/two.png"
+  } {
+    writeFile(path: "{base}/{name}", text: name)
+  }
+  var app: App = makeApp(base: base)
+  app.files.operations.rules = OperationRules { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  settle(app: app)
+  rows(app: app)
+  opening(app: app)
+  scrolling(app: app)
+  twoBrowsers(app: app)
+  fromTheOs(app: app)
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

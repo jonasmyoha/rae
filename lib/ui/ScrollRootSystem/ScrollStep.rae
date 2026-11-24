@@ -5,6 +5,7 @@ open Spring
 open ui/Ecs
 open ui/AnimationComponents
 open ui/Components
+open ui/DragComponents
 open ui/InputSystem
 open ui/Transform
 open ui/ScrollPhysics
@@ -307,7 +308,8 @@ func stepScrollRoot(
   # threshold), so a tap with a little tremor stays a tap and clicks. An
   # active drag claims the press (`active`, read by updateUiInput), so its
   # release clicks nothing under the finger.
-  if input.pointer.pressed and inside and takesPress {
+  # (a press on what can be dragged is ui/DragSystem's)
+  if input.pointer.pressed and inside and takesPress and world.drag.phase is UiDragPhase.idle {
     drag.dragging = true
     drag.active = false
     drag.pressPointer = pointer

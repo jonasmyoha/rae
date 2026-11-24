@@ -2,6 +2,7 @@
 # the path to the topmost painted node there (InputSystem.rae has the rules and the frame).
 open ui/Ecs
 open ui/Components
+open ui/DragComponents
 open ui/Layer
 open ui/UiLayers
 open ui/UiSystems
@@ -12,8 +13,15 @@ open ecs/Entity
 open ecs/ComponentTable
 
 # What is looked for under the pointer: what takes the wheel, what takes its sideways scroll, a
-# secondary click, or the keys
-enum UiRouteWant { wheel, wheelX, secondaryClick, keys }
+# secondary click, the keys, a press that drags, or the drag there is
+enum UiRouteWant {
+  wheel
+  wheelX
+  secondaryClick
+  keys
+  dragSource
+  drop
+}
 
 # One subtree's answer to "who takes the wheel here?". `blocked`: the pointer
 # landed on something painted or interactive in this subtree, so nodes painted
@@ -22,6 +30,15 @@ enum UiRouteWant { wheel, wheelX, secondaryClick, keys }
 type UiWheelRoute {
   blocked: Bool
   target: EntityId
+}
+
+# Does the node take the drag there is (its kind)?
+func takesDrag(world: view UiWorld, entityId: view EntityId) ret Bool {
+  if componentHas(this: world.dropTargets, entityId: entityId) is false {
+    ret false
+  }
+  let kinds: String = componentView(this: world.dropTargets, entityId: entityId).kinds
+  ret " {kinds} ".contains(sub: " {world.drag.payload.kind} ")
 }
 
 func uiRouteConsumerAt(
@@ -46,6 +63,19 @@ func uiRouteConsumerAt(
       )
     }
     ret uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+  }
+  if want is UiRouteWant.dragSource or want is UiRouteWant.drop {
+    var takes: Bool = componentHas(this: world.dragSources, entityId: entityId)
+    if want is UiRouteWant.drop {
+      takes = takesDrag(world: world, entityId: entityId)
+    }
+    ret takes and uiPointInEntity(
       world: world
       uiSystems: uiSystems
       entityId: entityId

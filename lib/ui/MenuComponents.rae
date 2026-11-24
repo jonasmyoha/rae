@@ -75,6 +75,13 @@ type MenuLevel {
   slide: Float = 0.0
 }
 
+# Who has the Escape key besides the program (ui/EscapeHold), a resource of a UiWorld
+type UiEscapeHold {
+  holders: Int = 0
+  # whether Escape quit the program before
+  quits: Bool = true
+}
+
 # The open menu of a world
 type UiMenu {
   open: Bool = false
@@ -97,8 +104,6 @@ type UiMenu {
   # What was typed to find a row, and when
   typed: String = ""
   typedSeconds: Float64 = 0.0
-  # Whether Escape quit the program before the menu took the key
-  escapeQuit: Bool = false
   # Events made since the last menuSystem (it sends them)
   pending: List(MenuEvent) = {}
 }

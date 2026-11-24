@@ -30,6 +30,7 @@
 open ui/Ecs
 open ui/AnimationComponents
 open ui/Components
+open ui/DragComponents
 open ui/Layer
 open ui/UiLayers
 import Gpu2d
@@ -553,6 +554,10 @@ func scrollActivationUnits(input: view UiInput) ret Float {
 # frame). A claimed press has no pressed entity and its release clicks
 # nothing.
 func uiPressClaimed(input: view UiInput, world: view UiWorld) ret Bool {
+  # A drag has it (ui/DragSystem)
+  if world.drag.phase is UiDragPhase.dragging {
+    ret true
+  }
   # A swipe from the edge has it (ui/PageTransitionSystem/EdgeSwipe)
   if world.edgeSwipe.phase is EdgeSwipePhase.active {
     ret true

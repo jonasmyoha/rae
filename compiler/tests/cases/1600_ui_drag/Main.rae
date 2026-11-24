@@ -1,0 +1,772 @@
+# Drags (ui/DragSystem) by scripted input: a press that moves asks for one, the press it takes,
+# targets
+# in targets by kind, what the keys and the program say, Escape, a dialog, a menu, a canceled
+# capture, a
+# press that stays a click, a finger, a scroll root's edge, a source that goes, and what the OS
+# drops.
+import Gpu2d
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DragComponents
+open ui/DragSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/LayerCapture
+open ui/LayerHit
+open ui/LayoutSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  # what a `begin` is answered with, and what the program says at a target
+  starts: Bool = true
+  mayMove: Bool = true
+  mayCopy: Bool = true
+  refuses: Bool = false
+  values: Int = 1
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func nameOf(world: view UiWorld, entityId: view EntityId) ret String {
+  if componentHas(this: world.sceneSources, entityId: entityId) {
+    ret "{componentView(this: world.sceneSources, entityId: entityId).nodeId}"
+  }
+  ret "none"
+}
+
+func frame(
+  app: mod App
+  step: view String
+  pointer: view UiPointerState
+  keys: view DragKeys
+  osDrop: view OsDrop
+) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.05
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(UiAction, this: app.world.uiActions), ++i {
+    text = "{text} action {eventAt(UiAction, this: app.world.uiActions, i: i).actionId}"
+  }
+  let changed: Bool = dragSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: keys
+    osDrop: osDrop
+  )
+  var begins: Bool = false
+  loop var i: Int = 0, i < eventCount(DragEvent, this: app.world.dragEvents), ++i {
+    let event: DragEvent = eventAt(DragEvent, this: app.world.dragEvents, i: i)
+    text = "{text} {event.kind}"
+    if event.kind is DragEventKind.begin {
+      begins = true
+      text = "{text} of {nameOf(world: app.world, entityId: event.source)}"
+    } else if event.kind is not DragEventKind.canceled {
+      text = "{text} {nameOf(world: app.world, entityId: event.target)}"
+    }
+    if event.kind is DragEventKind.drop {
+      text = "{text} ({event.payload.kind} {event.payload.values.length}, {event.wanted}, external {event.external})"
+    }
+  }
+  if begins and app.starts {
+    var payload: UiDragPayload = {
+      kind: "cards"
+      label: "A card"
+      icon: "mat:image"
+      mayMove: app.mayMove
+      mayCopy: app.mayCopy
+      source: app.world.drag.source
+    }
+    loop var i: Int = 0, i < app.values, ++i {
+      payload.values.add(value: "card {i}")
+    }
+    startDrag(
+      world: app.world
+      uiSystems: app.uiSystems
+      input: app.input
+      payload: own payload
+    )
+  }
+  if app.refuses and dragRunning(world: app.world) {
+    setDragEffect(world: app.world, effect: DragEffect.refused)
+  }
+  let scrolled: Bool = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.05
+  )
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  if step.length() > 0 {
+    var effect: String = ""
+    if dragRunning(world: app.world) {
+      effect = " [{app.world.drag.effect}, {markOf(app: app)}]"
+    }
+    log("{step}:{text}{effect}")
+  }
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# The label's place from the pointer, in whole points
+func labelAt(app: view App) ret String {
+  let label: EntityId = app.world.drag.label
+  if componentHas(this: app.uiSystems.transform2d.worldTransforms, entityId: label) is false {
+    ret "none"
+  }
+  let at: Vec2 = componentView(this: app.uiSystems.transform2d.worldTransforms, entityId: label).position
+  ret "{Math.round(x: at.x - app.world.drag.x)} {Math.round(x: at.y - app.world.drag.y)}, left {at.x < app.world.drag.x}"
+}
+
+# The label's mark
+func markOf(app: view App) ret String {
+  let label: EntityId = app.world.drag.label
+  if isNone(this: label) or componentHas(this: app.world.childrens, entityId: label) is false {
+    ret "no label"
+  }
+  let children: view Children = componentView(this: app.world.childrens, entityId: label)
+  let mark: EntityId = children.ids.copyAtFallback(
+    index: children.ids.length - 1
+    fallback: noEntity()
+  )
+  ret "{componentView(this: app.world.sprites, entityId: mark).textureKey}"
+}
+
+func point(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  frame(
+    app: app
+    step: step
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: down
+      kind: InputKind.mouse
+    )
+    keys: DragKeys {}
+    osDrop: OsDrop {}
+  )
+}
+
+func finger(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  frame(
+    app: app
+    step: step
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: down
+      kind: InputKind.touch
+    )
+    keys: DragKeys {}
+    osDrop: OsDrop {}
+  )
+}
+
+func withKeys(app: mod App, step: view String, keys: view DragKeys) {
+  frame(
+    app: app
+    step: step
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: true
+      kind: InputKind.mouse
+    )
+    keys: keys
+    osDrop: OsDrop {}
+  )
+}
+
+func fromOs(app: mod App, step: view String, osDrop: view OsDrop) {
+  frame(
+    app: app
+    step: step
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 5.0
+      y: 395.0
+      down: false
+      kind: InputKind.mouse
+    )
+    keys: DragKeys {}
+    osDrop: osDrop
+  )
+}
+
+# A press on the card, moved: dragged
+func lift(app: mod App, x: view Float, y: view Float) {
+  point(
+    app: app
+    step: ""
+    x: x
+    y: y
+    down: false
+  )
+  point(
+    app: app
+    step: ""
+    x: x
+    y: y
+    down: true
+  )
+  point(
+    app: app
+    step: ""
+    x: x + 8.0
+    y: y
+    down: true
+  )
+}
+
+func main() {
+  var app: App = { world: createUiWorld(), uiSystems: createUiSystems(), input: createUiInput() }
+  app.world.layoutW = 600.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  point(
+    app: app
+    step: ""
+    x: 40.0
+    y: 20.0
+    down: false
+  )
+
+  # a press that stays is a click
+  point(
+    app: app
+    step: "press"
+    x: 40.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "a little"
+    x: 43.0
+    y: 21.0
+    down: true
+  )
+  point(
+    app: app
+    step: "let go"
+    x: 43.0
+    y: 21.0
+    down: false
+  )
+
+  # one that moves is a drag, when the program starts it
+  app.starts = false
+  point(
+    app: app
+    step: "press"
+    x: 40.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "moved"
+    x: 50.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "not started"
+    x: 60.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "let go"
+    x: 60.0
+    y: 20.0
+    down: false
+  )
+  app.starts = true
+  point(
+    app: app
+    step: "press"
+    x: 40.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "moved"
+    x: 50.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "on nothing"
+    x: 150.0
+    y: 300.0
+    down: true
+  )
+  point(
+    app: app
+    step: "on Outer"
+    x: 220.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "in it"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  point(
+    app: app
+    step: "on one of another kind"
+    x: 260.0
+    y: 60.0
+    down: true
+  )
+  log("the label is at {labelAt(app: app)}")
+  point(
+    app: app
+    step: ""
+    x: 595.0
+    y: 300.0
+    down: true
+  )
+  point(
+    app: app
+    step: ""
+    x: 595.0
+    y: 300.0
+    down: true
+  )
+  log("at the window's edge on the left {labelAt(app: app).endsWith(suffix: "true")}")
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  withKeys(app: app, step: "Alt", keys: DragKeys { copyThere: true })
+  app.refuses = true
+  point(
+    app: app
+    step: "refused"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  point(
+    app: app
+    step: "let go where it is refused"
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  app.refuses = false
+  lift(app: app, x: 40.0, y: 20.0)
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  point(
+    app: app
+    step: "let go"
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  point(
+    app: app
+    step: "after"
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  lift(app: app, x: 40.0, y: 20.0)
+  point(
+    app: app
+    step: "let go on its own place"
+    x: 45.0
+    y: 20.0
+    down: false
+  )
+
+  # only a copy, only a move
+  app.mayMove = false
+  lift(app: app, x: 40.0, y: 20.0)
+  point(
+    app: app
+    step: "no move"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  app.mayMove = true
+  app.mayCopy = false
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  lift(app: app, x: 40.0, y: 20.0)
+  point(
+    app: app
+    step: "no copy"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  withKeys(app: app, step: "though Alt", keys: DragKeys { copyThere: true })
+  app.mayCopy = true
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+
+  # canceled
+  lift(app: app, x: 40.0, y: 20.0)
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  log("Escape quits {Gpu2d.escapeQuits()}")
+  withKeys(app: app, step: "Escape", keys: DragKeys { escape: true })
+  log("the keys were its {app.world.drag.tookKeys}, Escape quits {Gpu2d.escapeQuits()}")
+  point(
+    app: app
+    step: "moved on"
+    x: 330.0
+    y: 120.0
+    down: true
+  )
+  log("then {app.world.drag.tookKeys}")
+  point(
+    app: app
+    step: "let go"
+    x: 330.0
+    y: 120.0
+    down: false
+  )
+  lift(app: app, x: 40.0, y: 20.0)
+  let dialog: EntityId = createEntity(world: app.world)
+  componentSet(
+    this: app.world.rects
+    entityId: dialog
+    data: Rect { position: { x: 0.0, y: 0.0 }, size: { x: 600.0, y: 400.0 } }
+  )
+  componentSet(this: app.world.shapes, entityId: dialog, data: Shape.default())
+  componentSet(this: app.world.onClicks, entityId: dialog, data: OnClick { actionId: "scrim" })
+  componentSet(this: app.world.layerTags, entityId: dialog, data: LayerTag { id: "dialog" })
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  point(
+    app: app
+    step: "a dialog"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  log("drags {dragRunning(world: app.world)}")
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  point(
+    app: app
+    step: "a press under it"
+    x: 40.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: "moved"
+    x: 60.0
+    y: 20.0
+    down: true
+  )
+  point(
+    app: app
+    step: ""
+    x: 60.0
+    y: 20.0
+    down: false
+  )
+  destroyEntitySubtree(world: app.world, uiSystems: app.uiSystems, root: dialog)
+  lift(app: app, x: 40.0, y: 20.0)
+  var captures: UiCaptures = createUiCaptures()
+  captures.canceled.add(value: PointerCanceled { pointerId: pointerIdMouse, hit: UiHit {} })
+  dragCaptureCanceled(world: app.world, uiSystems: app.uiSystems, captures: captures)
+  log("a capture canceled: drags {dragRunning(world: app.world)}")
+  point(
+    app: app
+    step: ""
+    x: 60.0
+    y: 20.0
+    down: false
+  )
+  lift(app: app, x: 40.0, y: 20.0)
+  openMenu(
+    world: app.world
+    uiSystems: app.uiSystems
+    request: MenuRequest { id: "menu", items: List(MenuItem) { MenuItem { id: "a", text: "A" } } }
+  )
+  point(
+    app: app
+    step: "a menu"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  closeMenu(world: app.world, uiSystems: app.uiSystems)
+  point(
+    app: app
+    step: ""
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+
+  # a finger: it scrolls where a finger does not drag, and drags held still where it does
+  finger(
+    app: app
+    step: ""
+    x: 40.0
+    y: 70.0
+    down: true
+  )
+  finger(
+    app: app
+    step: "a finger that moves"
+    x: 60.0
+    y: 70.0
+    down: true
+  )
+  finger(
+    app: app
+    step: ""
+    x: 60.0
+    y: 70.0
+    down: false
+  )
+  finger(
+    app: app
+    step: ""
+    x: 40.0
+    y: 70.0
+    down: true
+  )
+  loop var i: Int = 0, i < 8, ++i {
+    finger(
+      app: app
+      step: ""
+      x: 40.0
+      y: 70.0
+      down: true
+    )
+  }
+  finger(
+    app: app
+    step: "held"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  finger(
+    app: app
+    step: "let go"
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+  finger(
+    app: app
+    step: ""
+    x: 500.0
+    y: 80.0
+    down: true
+  )
+  finger(
+    app: app
+    step: ""
+    x: 500.0
+    y: 60.0
+    down: true
+  )
+  finger(
+    app: app
+    step: ""
+    x: 500.0
+    y: 30.0
+    down: true
+  )
+  let rows: EntityId = nodeOf(world: app.world, nodeId: "Rows")
+  log("a finger scrolls the rows: {scrollPositionOf(world: app.world, entityId: rows) < -10.0}")
+  finger(
+    app: app
+    step: ""
+    x: 500.0
+    y: 30.0
+    down: false
+  )
+  componentSet(this: app.world.scrollStates, entityId: rows, data: ScrollState { y: 0.0 })
+
+  # the mouse does not pan what it drags; the edges scroll
+  lift(app: app, x: 500.0, y: 50.0)
+  point(
+    app: app
+    step: ""
+    x: 500.0
+    y: 20.0
+    down: true
+  )
+  log("the mouse does not: {scrollPositionOf(world: app.world, entityId: rows)}")
+  loop var i: Int = 0, i < 6, ++i {
+    point(
+      app: app
+      step: ""
+      x: 500.0
+      y: 98.0
+      down: true
+    )
+  }
+  log("the edge does: {scrollPositionOf(world: app.world, entityId: rows) < -100.0}")
+  loop var i: Int = 0, i < 60, ++i {
+    point(
+      app: app
+      step: ""
+      x: 500.0
+      y: 98.0
+      down: true
+    )
+  }
+  log("to the end {scrollPositionOf(world: app.world, entityId: rows)}")
+
+  # its source goes: what is dragged stays
+  destroyEntitySubtree(
+    world: app.world
+    uiSystems: app.uiSystems
+    root: nodeOf(world: app.world, nodeId: "List")
+  )
+  point(
+    app: app
+    step: "the source is gone"
+    x: 320.0
+    y: 120.0
+    down: true
+  )
+  point(
+    app: app
+    step: "let go"
+    x: 320.0
+    y: 120.0
+    down: false
+  )
+
+  # the OS
+  fromOs(app: app, step: "held", osDrop: OsDrop { over: true, x: 220.0, y: 20.0 })
+  fromOs(
+    app: app
+    step: "on Inner, which takes no files"
+    osDrop: OsDrop { over: true, x: 320.0, y: 120.0 }
+  )
+  fromOs(
+    app: app
+    step: "let go"
+    osDrop: OsDrop {
+      dropped: true
+      x: 320.0
+      y: 120.0
+      values: List(String) { "/a.png", "/b.png" }
+    }
+  )
+  fromOs(app: app, step: "after", osDrop: OsDrop {})
+  fromOs(app: app, step: "held", osDrop: OsDrop { over: true, x: 220.0, y: 20.0 })
+  fromOs(app: app, step: "left the window", osDrop: OsDrop { dropped: true, x: 0.0, y: 0.0 })
+  fromOs(
+    app: app
+    step: "text at once"
+    osDrop: OsDrop {
+      dropped: true
+      text: true
+      x: 220.0
+      y: 20.0
+      values: List(String) { "words" }
+    }
+  )
+  fromOs(app: app, step: "held", osDrop: OsDrop { over: true, x: 220.0, y: 20.0 })
+  fromOs(app: app, step: "nothing more is heard", osDrop: OsDrop {})
+  log("Escape quits {Gpu2d.escapeQuits()}")
+}

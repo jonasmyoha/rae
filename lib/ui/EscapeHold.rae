@@ -1,0 +1,23 @@
+# Who has the Escape key besides the program: a menu, a drag, a dialog, an edited name. While one
+# does, Escape does not quit the program; when the last lets go it does what it did before, in
+# whatever order they end.
+import Gpu2d
+open ui/Ecs
+
+func holdEscape(world: mod UiWorld) {
+  if world.escapeHold.holders is 0 {
+    world.escapeHold.quits = Gpu2d.escapeQuits()
+    Gpu2d.setEscapeQuits(on: false)
+  }
+  world.escapeHold.holders = world.escapeHold.holders + 1
+}
+
+func releaseEscape(world: mod UiWorld) {
+  if world.escapeHold.holders is 0 {
+    ret
+  }
+  world.escapeHold.holders = world.escapeHold.holders - 1
+  if world.escapeHold.holders is 0 {
+    Gpu2d.setEscapeQuits(on: world.escapeHold.quits)
+  }
+}

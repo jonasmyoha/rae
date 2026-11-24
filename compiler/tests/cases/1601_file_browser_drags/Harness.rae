@@ -1,0 +1,578 @@
+# What drives the file browser in this case: frames, clicks, keys, and what is shown.
+import Files
+import SdfText
+import Sys
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/DividerSystem
+open ui/DragComponents
+open ui/DragSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollBarSystem
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/Transform
+open ui/UiSystems
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/textFieldSystem/TextFieldSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  files: FileBrowserSystems
+  base: String
+  left: EntityId
+  right: EntityId
+  step: Float64 = 0.02
+  lines: List(String) = {}
+  dragKeys: DragKeys = {}
+  osDrop: OsDrop = {}
+}
+
+# One frame of everything, as an app has it
+func frame(
+  app: mod App
+  pointer: view UiPointerState
+  listKeys: view ListSelectionKeys
+  keys: view BrowserKeys
+  text: view TextInputFrame
+  menuKeys: view MenuKeys
+) {
+  app.input.nowSeconds = app.input.nowSeconds + app.step
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  menuSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: menuKeys
+  )
+  var changed: Bool = dividerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: DividerKeys {}
+  )
+  changed = scrollBarSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  changed = dragSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: app.dragKeys
+    osDrop: app.osDrop
+  )
+  changed = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  changed = textFieldSystem(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    actions: app.world.uiActions
+    input: text
+    now: app.input.nowSeconds
+  )
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: listKeys
+  )
+  changed = fileBrowserUpdate(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    keys: keys
+    input: app.input
+    windowFocused: true
+  )
+  noteEvents(app: app)
+  changed = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.02
+  )
+  changed = scrollToRowSystem(world: app.world, uiSystems: app.uiSystems)
+  changed = fileBrowserRows(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    res: app.resources
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func boxOf(app: view App, entityId: view EntityId) ret WorldRect {
+  ret worldRectOf(
+    wt: componentView(this: app.uiSystems.transform2d.worldTransforms, entityId: entityId)
+    cr: componentView(this: app.uiSystems.layout.computedRects, entityId: entityId)
+  )
+}
+
+func writeFile(path: view String, text: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: text)
+}
+
+func makeFolder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+func makeApp(base: view String) ret App {
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    files: createFileBrowsers()
+    base: "{base}"
+    left: noEntity()
+    right: noEntity()
+  }
+  registerFileBrowserScenes(scenes: app.scenes)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 800.0
+  app.world.layoutH = 400.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  app.left = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Left")
+    root: "{base}/root/"
+    options: BrowserOptions { showPreview: false }
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  ret app
+}
+
+# What the browsers told of, kept until it is shown
+func noteEvents(app: mod App) {
+  loop var i: Int = 0, i < eventCount(FilesDropped, this: app.files.filesDropped), ++i {
+    let event: FilesDropped = eventAt(FilesDropped, this: app.files.filesDropped, i: i)
+    app.lines.add(
+      value: "   dropped {event.paths.length} in {Files.nameOf(path: event.folder)}, moved {event.moved}, external {event.external}"
+    )
+  }
+  loop var i: Int = 0, i < eventCount(OperationDone, this: app.files.operationDone), ++i {
+    let event: OperationDone = eventAt(OperationDone, this: app.files.operationDone, i: i)
+    var text: String = ""
+    loop let result: view ItemResult in event.results {
+      text = "{text} {Files.nameOf(path: result.source)}>{Files.nameOf(path: result.target)} {result.outcome}"
+      if result.error is not OperationError.none {
+        text = "{text} ({result.error})"
+      }
+    }
+    app.lines.add(value: "   done {event.kind}:{text}")
+  }
+  loop var i: Int = 0, i < eventCount(OperationAsked, this: app.files.operationAsked), ++i {
+    let event: OperationAsked = eventAt(OperationAsked, this: app.files.operationAsked, i: i)
+    app.lines.add(
+      value: "   asks {event.kind}: {Files.nameOf(path: event.source)} > {Files.nameOf(
+        path: event.target
+      )}"
+    )
+  }
+  loop var i: Int = 0, i < eventCount(OperationRequested, this: app.files.operationRequested), ++i {
+    let event: OperationRequested = eventAt(
+      OperationRequested
+      this: app.files.operationRequested
+      i: i
+    )
+    app.lines.add(
+      value: "   requested {event.kind} in {event.folder}: {event.paths.length} paths {event.name}"
+    )
+  }
+  loop var i: Int = 0, i < eventCount(BrowserMenuChosen, this: app.files.browserMenuChosen), ++i {
+    let event: BrowserMenuChosen = eventAt(
+      BrowserMenuChosen
+      this: app.files.browserMenuChosen
+      i: i
+    )
+    app.lines.add(value: "   chosen {event.itemId}: {event.paths.length} paths")
+  }
+  loop var i: Int = 0, i < eventCount(EntriesRequested, this: app.files.entriesRequested), ++i {
+    let wanted: EntriesRequested = eventAt(EntriesRequested, this: app.files.entriesRequested, i: i)
+    var entries: List(FileEntry) = {}
+    entries.add(value: FileEntry { name: "clip", kind: EntryKind.file })
+    setColumnEntries(
+      systems: app.files
+      world: app.world
+      uiSystems: app.uiSystems
+      scenes: app.scenes
+      browser: wanted.browser
+      folder: wanted.folder
+      entries: own entries
+    )
+  }
+}
+
+func emptyText() ret TextInputFrame {
+  ret TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+}
+
+func still(app: view App) ret UiPointerState {
+  ret uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: false
+    kind: InputKind.mouse
+  )
+}
+
+func idle(app: mod App) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys {}
+    text: emptyText()
+    menuKeys: MenuKeys {}
+  )
+}
+
+func busy(app: view App) ret Bool {
+  loop let job: view OperationJob in app.files.operations.jobs {
+    if job.state is OperationJobState.running or job.state is OperationJobState.waiting {
+      ret true
+    }
+  }
+  ret app.files.listing.jobs.length + app.files.listing.waiting.length > 0
+}
+
+# Frames until nothing is read or done, and some more
+func settle(app: mod App) {
+  var quiet: Int = 0
+  loop var i: Int = 0, i < 4000 and quiet < 12, ++i {
+    idle(app: app)
+    quiet = quiet + 1
+    if busy(app: app) {
+      quiet = 0
+      sleep(ms: 1)
+    }
+  }
+}
+
+func listKey(app: mod App, keys: view ListSelectionKeys) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: keys
+    keys: BrowserKeys {}
+    text: emptyText()
+    menuKeys: MenuKeys {}
+  )
+  settle(app: app)
+}
+
+func press(app: mod App, keys: view BrowserKeys) {
+  frame(
+    app: app
+    pointer: still(app: app)
+    listKeys: ListSelectionKeys {}
+    keys: keys
+    text: emptyText()
+    menuKeys: MenuKeys {}
+  )
+  settle(app: app)
+}
+
+func clickAt(
+  app: mod App
+  x: view Float
+  y: view Float
+  listKeys: view ListSelectionKeys
+) {
+  loop var step: Int = 0, step < 3, ++step {
+    var state: UiPointerState = uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: step is 1
+      kind: InputKind.mouse
+    )
+    state.clicks = 1
+    frame(
+      app: app
+      pointer: state
+      listKeys: listKeys
+      keys: BrowserKeys {}
+      text: emptyText()
+      menuKeys: MenuKeys {}
+    )
+  }
+  settle(app: app)
+}
+
+func clickNode(app: mod App, entityId: view EntityId) {
+  if isNone(this: entityId) or componentHas(
+    this: app.uiSystems.layout.computedRects
+    entityId: entityId
+  ) is false {
+    log("no node to click")
+    ret
+  }
+  let box: WorldRect = boxOf(app: app, entityId: entityId)
+  clickAt(
+    app: app
+    x: box.x + box.w * 0.5
+    y: box.y + box.h * 0.5
+    listKeys: ListSelectionKeys {}
+  )
+}
+
+func rowX(app: view App, browser: view EntityId, place: view Int) ret Float {
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+  ret boxOf(app: app, entityId: listOfColumn(systems: app.files, column: column)).x + 30.0
+}
+
+func rowY(
+  app: view App
+  browser: view EntityId
+  place: view Int
+  name: view String
+) ret Float {
+  let column: EntityId = columnAt(systems: app.files, browser: browser, place: place)
+  let index: Int = entryIndex(systems: app.files, column: column, name: name)
+  let box: WorldRect = boxOf(app: app, entityId: listOfColumn(systems: app.files, column: column))
+  ret box.y + index.toFloat() * 24.0 + 12.0
+}
+
+func pick(
+  app: mod App
+  browser: view EntityId
+  place: view Int
+  name: view String
+) {
+  clickAt(
+    app: app
+    x: rowX(app: app, browser: browser, place: place)
+    y: rowY(
+      app: app
+      browser: browser
+      place: place
+      name: name
+    )
+    listKeys: ListSelectionKeys {}
+  )
+}
+
+func question(app: view App) ret String {
+  let node: EntityId = app.files.operations.question.node
+  if isNone(this: node) {
+    ret "no question"
+  }
+  let title: EntityId = nodeIn(world: app.world, root: node, nodeId: "FileQuestionTitle")
+  ret componentView(this: app.world.texts, entityId: title).text
+}
+
+# The tree of a folder on the disk
+func diskText(folder: view String) ret String {
+  var text: String = ""
+  var listing: FolderListing = Files.readFolder(folder: folder)
+  var names: List(String) = {}
+  loop let entry: view FileEntry in listing.entries {
+    var name: String = "{entry.name}"
+    if entry.kind is EntryKind.folder {
+      name = "{name}({diskText(folder: "{folder}/{entry.name}")})"
+    }
+    names.add(value: own name)
+  }
+  # by name
+  loop var i: Int = 0, i < names.length, ++i {
+    loop var j: Int = i + 1, j < names.length, ++j {
+      let first: String = names.copyAtFallback(index: i, fallback: "")
+      let second: String = names.copyAtFallback(index: j, fallback: "")
+      if second.compare(other: first) < 0 {
+        names.set(index: i, value: second)
+        names.set(index: j, value: first)
+      }
+    }
+  }
+  ret names.join(sep: " ")
+}
+
+func show(app: mod App, step: view String) {
+  log("{step}")
+  loop let line: view String in app.lines {
+    log("{line}")
+  }
+  app.lines.clear()
+  loop let column: view EntityId in browserColumns(systems: app.files, browser: app.left) {
+    let mine: view FileColumn = componentView(this: app.files.columns, entityId: column)
+    var names: List(String) = {}
+    let held: view ColumnEntries = componentView(this: app.files.entries, entityId: column)
+    loop let entry: view FileEntry in held.entries {
+      names.add(value: "{entry.name}")
+    }
+    log(
+      "   {Files.nameOf(path: mine.folder)}: {names.join(sep: " ")} [{listSelectedKeys(
+        world: app.world
+        list: mine.list
+      ).join(sep: " ")}]"
+    )
+  }
+}
+
+# The pointer moves to (x, y), held or not
+func pointTo(
+  app: mod App
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  frame(
+    app: app
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: down
+      kind: InputKind.mouse
+    )
+    listKeys: ListSelectionKeys {}
+    keys: BrowserKeys {}
+    text: emptyText()
+    menuKeys: MenuKeys {}
+  )
+}
+
+# A press at a place, moved a little: the drag has begun
+func lift(app: mod App, x: view Float, y: view Float) {
+  pointTo(
+    app: app
+    x: x
+    y: y
+    down: false
+  )
+  pointTo(
+    app: app
+    x: x
+    y: y
+    down: true
+  )
+  pointTo(
+    app: app
+    x: x + 4.0
+    y: y + 5.0
+    down: true
+  )
+  pointTo(
+    app: app
+    x: x + 6.0
+    y: y + 7.0
+    down: true
+  )
+}
+
+# The drag to a place, in two frames
+func carry(app: mod App, x: view Float, y: view Float) {
+  pointTo(
+    app: app
+    x: x - 1.0
+    y: y
+    down: true
+  )
+  pointTo(
+    app: app
+    x: x
+    y: y
+    down: true
+  )
+}
+
+func letGo(app: mod App) {
+  pointTo(
+    app: app
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: false
+  )
+  settle(app: app)
+}
+
+func dragText(app: view App) ret String {
+  let drag: view UiDrag = app.world.drag
+  if drag.phase is not UiDragPhase.dragging {
+    ret "no drag"
+  }
+  var mark: String = ""
+  if isNone(this: app.files.dropRow) is false {
+    mark = ", a row marked"
+  } else if isNone(this: app.files.dropColumn) is false {
+    mark = ", a column marked"
+  }
+  ret "drags \"{drag.payload.label}\" ({drag.payload.values.length}): {drag.effect}{mark}"
+}

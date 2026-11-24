@@ -1,0 +1,47 @@
+# Files and text dragged onto the window from the OS. readOsDrop is this frame's, for ui/DragSystem.
+func nativeDropOver() mainThread unsafe extern("rae_ext_Gpu2d_dropOver") ret Bool
+
+func nativeDropDone() mainThread unsafe extern("rae_ext_Gpu2d_dropDone") ret Bool
+
+func nativeDropIsText() mainThread unsafe extern("rae_ext_Gpu2d_dropIsText") ret Bool
+
+func nativeDropCount() mainThread unsafe extern("rae_ext_Gpu2d_dropCount") ret Int
+
+func nativeDropValue(index: Int) mainThread unsafe extern("rae_ext_Gpu2d_dropValue") ret String
+
+func nativeDropX() mainThread unsafe extern("rae_ext_Gpu2d_dropX") ret Float
+
+func nativeDropY() mainThread unsafe extern("rae_ext_Gpu2d_dropY") ret Float
+
+# What the OS drags onto the window. `over`: it is held at (x, y), in design units; what it is comes
+# when it is let go. `dropped`, for one frame: its paths, or its text (`text`); no values: it left
+# the
+# window, or was canceled.
+type OsDrop {
+  over: Bool = false
+  dropped: Bool = false
+  text: Bool = false
+  x: Float = 0.0
+  y: Float = 0.0
+  values: List(String) = {}
+}
+
+func readOsDrop() ret OsDrop {
+  var drop: OsDrop = {}
+  unsafe {
+    drop.over = nativeDropOver()
+    drop.dropped = nativeDropDone()
+    if drop.over is false and drop.dropped is false {
+      ret drop
+    }
+    drop.x = nativeDropX()
+    drop.y = nativeDropY()
+    if drop.dropped {
+      drop.text = nativeDropIsText()
+      loop var i: Int = 0, i < nativeDropCount(), ++i {
+        drop.values.add(value: nativeDropValue(index: i))
+      }
+    }
+  }
+  ret drop
+}

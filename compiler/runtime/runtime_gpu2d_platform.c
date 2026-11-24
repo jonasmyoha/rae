@@ -569,6 +569,8 @@ static void rae_loop_trace_tick(void) {
     if (g_loop_trace) fprintf(stderr, "[loop-wake] %lld\n", (long long)rae_ext_nowMs());
 }
 
+#include "runtime_gpu2d_drops.c"
+
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
     if (g_g2d_live_frame_depth > 0) return 0;   /* a live-resize frame pumps nothing */
     rae_g2d_test_pointer_advance();
@@ -594,6 +596,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     g_g2d_pinch = 1.0f;
     g_g2d_wheel_kind = 0;
     g_g2d_text_input_len = 0; g_g2d_text_input[0] = 0;
+    rae_g2d_drop_poll_begin();
     SDL_Event e;
     rae_Bool quit = 0;
     g_g2d_at_frame_boundary = 1;
@@ -693,6 +696,13 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 if (!any && g_sdl_mouse_captured) { SDL_CaptureMouse(false); g_sdl_mouse_captured = false; }
                 break;
             }
+            case SDL_EVENT_DROP_BEGIN:
+            case SDL_EVENT_DROP_POSITION:
+            case SDL_EVENT_DROP_FILE:
+            case SDL_EVENT_DROP_TEXT:
+            case SDL_EVENT_DROP_COMPLETE:
+                rae_g2d_drop_event(&e);
+                break;
             case SDL_EVENT_PINCH_UPDATE:
                 if (e.pinch.scale > 0.0f) g_g2d_pinch *= e.pinch.scale;
                 break;
@@ -880,6 +890,15 @@ void rae_ext_Gpu2d_simulateEnterBackground(void){
  * take), so hit-testing matches what was drawn. SDL reports logical window
  * points; we scale to physical px (× dpr) then invert the design fit transform
  * (subtract the letterbox offset, divide by scale). */
+static void rae_g2d_window_to_design(float wx, float wy, double* dx, double* dy) {
+    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
+    double scly = (lh > 0) ? (double)g_sdl_h / (double)lh : 1.0;
+    float xf[8]; rae_g2d_compute_xform(xf);
+    double physX = (double)wx * sclx, physY = (double)wy * scly;
+    *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
+    *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
+}
 static void rae_g2d_pointer_design(double* dx, double* dy) {
     if (rae_g2d_test_pointer_on() && g_g2d_test_pointer_state == 3) {
         long long step = g_g2d_test_pointer_moves % g_g2d_test_pointer_steps;
@@ -896,15 +915,15 @@ static void rae_g2d_pointer_design(double* dx, double* dy) {
         return;
     }
     float mx = 0, my = 0; SDL_GetMouseState(&mx, &my);
-    int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
-    if (g_g2d_sim_pointer) { mx = g_g2d_sim_pointer_nx * (float)lw; my = g_g2d_sim_pointer_ny * (float)lh; }
-    double sclx = (lw > 0) ? (double)g_sdl_w / (double)lw : 1.0;
-    double scly = (lh > 0) ? (double)g_sdl_h / (double)lh : 1.0;
-    float xf[8]; rae_g2d_compute_xform(xf);
-    double physX = (double)mx * sclx, physY = (double)my * scly;
-    *dx = (xf[2] != 0.0f) ? (physX - xf[4]) / xf[2] : physX;
-    *dy = (xf[3] != 0.0f) ? (physY - xf[5]) / xf[3] : physY;
+    if (g_g2d_sim_pointer) {
+        int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+        mx = g_g2d_sim_pointer_nx * (float)lw; my = g_g2d_sim_pointer_ny * (float)lh;
+    }
+    rae_g2d_window_to_design(mx, my, dx, dy);
 }
+/* Where an OS drop is held (runtime_gpu2d_drops.c). */
+float rae_ext_Gpu2d_dropX(void) { double x, y; rae_g2d_window_to_design(g_g2d_drop_x, g_g2d_drop_y, &x, &y); return (float)x; }
+float rae_ext_Gpu2d_dropY(void) { double x, y; rae_g2d_window_to_design(g_g2d_drop_x, g_g2d_drop_y, &x, &y); return (float)y; }
 float rae_ext_Gpu2d_pointerX(void){ double x, y; rae_g2d_pointer_design(&x, &y); return x; }
 /* The characters typed since the last event poll, as one UTF-8 String. */
 rae_String rae_ext_Gpu2d_textInput(void){ return rae_ext_rae_str_from_cstr(g_g2d_text_input); }

@@ -1,13 +1,13 @@
 # What an operation shows (docs/file-browser-design.md §11): a row at the bottom of the browser that
 # asked for it, once it has run for half a second, with how far it is and a button that stops it, or
 # with what did not work; and the question of one that asks, over everything.
-import Gpu2d
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
 open ui/BindingComponents
 open ui/Components
 open ui/Ecs
+open ui/EscapeHold
 open ui/SceneInstance
 open ui/UiSystems
 open ui/fileBrowser/FileBrowserComponents
@@ -279,7 +279,7 @@ func closeQuestion(systems: mod FileBrowserSystems, world: mod UiWorld, uiSystem
     destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
   }
   if isNone(this: node) is false {
-    Gpu2d.setEscapeQuits(on: systems.operations.question.escapeQuit)
+    releaseEscape(world: world)
   }
   systems.operations.question = OperationQuestion {}
 }
@@ -313,12 +313,8 @@ func openQuestion(
     ret
   }
   componentSet(this: world.layerTags, entityId: node, data: LayerTag { id: "dialog", z: 900 })
-  systems.operations.question = OperationQuestion {
-    node: node
-    number: number
-    escapeQuit: Gpu2d.escapeQuits()
-  }
-  Gpu2d.setEscapeQuits(on: false)
+  systems.operations.question = OperationQuestion { node: node, number: number }
+  holdEscape(world: world)
   var title: String = ""
   var detail: String = ""
   var deleting: Bool = false

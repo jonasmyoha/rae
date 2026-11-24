@@ -3,8 +3,8 @@
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
-scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, and 7b,
-its operations: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
+scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, 7b, its
+operations, and 7c, drags: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
 is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
@@ -403,7 +403,7 @@ None of these is about files; each is its own module with its own cases.
 | **menus** | built: `ui/MenuSystem` (section 47) | `menuSystem` with items as data, keys, one submenu level, kept in the window |
 | **dividers, scrollbars** | built (docs/ui-scene-format.md sections 52, 53) | `Divider` and `ScrollBar` components with a system each |
 | **text editing** | built (docs/ui-scene-format.md section 11) | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
-| **drags** | per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |
+| **drags** | built (docs/ui-scene-format.md section 56), was: per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |
 | **images** | built (docs/ui-scene-format.md section 54), was: a registered image is never released | release behind in-flight frames; decode off the main thread; a budget. `lib/Gpu2dCanvas/Canvas.rae` has 999 lines, so it is split first |
 | **sorting** | insertion sort, numbers only | §3 |
 
@@ -555,3 +555,17 @@ Step 7b:
 - While a rename, a move or an undo of ours runs (for a second at most), what a listing found waits, so an
   open folder is not taken for gone before its new name is known.
 - The bytes of a copy are measured before it begins; a cancel waits for that.
+
+Step 7c:
+
+- `FileDragSystem`, over `ui/DragSystem`. What is dragged is the selection, or the one row when it is not of
+  it. A folder's row, a column, or a part of the trail takes it (the sidebar will, 7d).
+- Moved or copied is shown by what the columns' listings know of the volumes; the operation's thread asks the
+  disk for each item (`byVolume`), so a folder that is a mounted disk copies too. Alt copies, Command
+  (Control) moves also across volumes. A drop by the OS copies. Files dropped on a program's own entries are
+  copied there; a program's own entries can only go within their browser.
+- A drop into a folder itself or what is in it, and a move to where it is, are refused. A browser that may not
+  change anything gives copies and takes nothing.
+- A folder under a held drag opens after 0.7 s and is then selected; a canceled drag does not go back. What
+  was dropped is selected only in the deepest column, so a column beyond it stays open.
+- Not by a finger yet (7d).

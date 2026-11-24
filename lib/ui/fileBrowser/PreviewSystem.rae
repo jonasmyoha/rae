@@ -1,12 +1,12 @@
 # The preview column (one file selected, or how many are and their size) and the large preview
 # (docs/file-browser-design.md §1). Pictures are ui/ThumbnailSystem's, where the app runs it.
-import Gpu2d
 import Time
 open ecs/ComponentTable
 open ecs/Entity
 open ui/BindingComponents
 open ui/Components
 open ui/Ecs
+open ui/EscapeHold
 open ui/ListSelectionSystem
 open ui/SceneInstance
 open ui/ThumbnailComponents
@@ -262,9 +262,8 @@ func openLargePreview(
     let preview: mod BrowserPreview = componentMod(this: systems.previews, entityId: browser)
     preview.large = node
     preview.largeShown = ""
-    preview.escapeQuit = Gpu2d.escapeQuits()
     # Escape closes the preview, not the app
-    Gpu2d.setEscapeQuits(on: false)
+    holdEscape(world: world)
   }
 }
 

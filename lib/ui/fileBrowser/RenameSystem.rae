@@ -2,13 +2,13 @@
 # the
 # name selected without its extension. Return or the focus lost renames, Escape does not.
 import Files
-import Gpu2d
 open ecs/ComponentTable
 open ecs/Entity
 open ecs/Event
 open ui/BindingComponents
 open ui/Components
 open ui/Ecs
+open ui/EscapeHold
 open ui/KeyFocusSystem
 open ui/ListSelectionSystem
 open ui/SceneInstance
@@ -91,8 +91,7 @@ func beginRename(
   if systems.escapeHeld is false {
     # Escape ends the edit, not the program
     systems.escapeHeld = true
-    systems.escapeQuit = Gpu2d.escapeQuits()
-    Gpu2d.setEscapeQuits(on: false)
+    holdEscape(world: world)
   }
   selectName(
     systems: systems
@@ -220,7 +219,7 @@ func fileRenameSystem(
   }
   if systems.escapeHeld and componentCount(this: systems.renames) is 0 {
     systems.escapeHeld = false
-    Gpu2d.setEscapeQuits(on: systems.escapeQuit)
+    releaseEscape(world: world)
   }
   ret changed
 }

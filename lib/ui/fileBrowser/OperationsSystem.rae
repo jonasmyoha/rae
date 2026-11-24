@@ -74,6 +74,22 @@ func runOperation(
   folder: view String
   operation: own FileOperation
 ) ret Int {
+  ret addOperation(
+    systems: systems
+    browser: browser
+    folder: folder
+    operation: own operation
+    byVolume: false
+  )
+}
+
+func addOperation(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+  operation: own FileOperation
+  byVolume: view Bool
+) ret Int {
   systems.operations.lastNumber = systems.operations.lastNumber + 1
   let number: Int = systems.operations.lastNumber
   let count: Int = operation.items.length
@@ -88,6 +104,7 @@ func runOperation(
     count: count
     folder: "{folder}"
     operation: own operation
+    byVolume: byVolume
     commands: createChannel(OperationCommand)
     signal: createSignal()
   }
@@ -211,13 +228,41 @@ func copySelection(systems: mod FileBrowserSystems, world: view UiWorld, column:
 # What is on the clipboard is copied into the column's folder, or moved there
 func pasteInto(systems: mod FileBrowserSystems, column: view EntityId, asMove: view Bool) {
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
-  let folder: String = folderOfColumn(systems: systems, column: column)
   let paths: List(String) = systems.operations.clipboard
+  let put: Bool = putFiles(
+    systems: systems
+    browser: browser
+    folder: folderOfColumn(systems: systems, column: column)
+    paths: paths
+    asMove: asMove
+    byVolume: false
+    selected: true
+  )
+  if put and asMove and browserOptions(systems: systems, browser: browser).source is BrowserSource.disk {
+    systems.operations.clipboard.clear()
+  }
+}
+
+# Copy `paths` into a folder of a browser, or move them there (`byVolume`: from another volume they
+# are
+# copied). What came is selected there when `selected`. False when the browser may not.
+func putFiles(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+  paths: view List(String)
+  asMove: view Bool
+  byVolume: view Bool
+  selected: view Bool
+) ret Bool {
   var kind: OperationKind = OperationKind.copy
   if asMove {
     kind = OperationKind.move
   }
-  if mayOperate(systems: systems, browser: browser) is false or paths.length is 0 or sendRequest(
+  if mayOperate(systems: systems, browser: browser) is false or paths.length is 0 {
+    ret false
+  }
+  if sendRequest(
     systems: systems
     browser: browser
     kind: kind
@@ -225,20 +270,25 @@ func pasteInto(systems: mod FileBrowserSystems, column: view EntityId, asMove: v
     folder: folder
     name: ""
   ) {
-    ret
+    ret true
   }
   let rules: OperationRules = rulesOf(systems: systems, browser: browser)
   var operation: FileOperation = Files.copyFiles(sources: paths, folder: folder, rules: rules)
   if asMove {
     operation = Files.moveFiles(sources: paths, folder: folder, rules: rules)
-    systems.operations.clipboard.clear()
   }
-  let number: Int = runOperation(
+  var selectedIn: String = ""
+  if selected {
+    selectedIn = "{folder}"
+  }
+  let number: Int = addOperation(
     systems: systems
     browser: browser
-    folder: folder
+    folder: selectedIn
     operation: own operation
+    byVolume: byVolume
   )
+  ret true
 }
 
 func trashSelection(systems: mod FileBrowserSystems, world: view UiWorld, column: view EntityId) {
@@ -409,6 +459,7 @@ func startOperations(systems: mod FileBrowserSystems) {
           signal: job.signal
           number: job.number
           operation: job.operation
+          byVolume: job.byVolume
         )
         job.task = own task
       } else {

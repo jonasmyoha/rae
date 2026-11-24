@@ -66,8 +66,24 @@ const builtInFileRow: String = "\{\"Layout\":\{\"type\":\"Stack\"\},\"Shape\":\{
 
 const builtInFileColumn: String = "\{\"Padding\":\{\"l\":4,\"t\":4,\"r\":4,\"b\":4\}\}"
 
+# A drag's label (ui/DragSystem): its panel, its text, and its icon and mark
+const builtInDragLabel: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":28\},\"Size\":\{\"w\":\{\"mode\":\"Hug\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Layout\":\{\"type\":\"Horizontal\",\"gap\":6,\"alignCross\":\"Center\"\},\"Padding\":\{\"l\":9,\"t\":0,\"r\":8,\"b\":0\},\"Shape\":\{\"kind\":\"RoundedRect\",\"fill\":\"surfaceAlt\",\"stroke\":\"outline\",\"strokeWidth\":1,\"radius\":7\},\"Shadow\":\{\"blur\":16,\"opacity\":0.4\}\}"
+
+const builtInDragText: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":20\},\"Size\":\{\"w\":\{\"mode\":\"Hug\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Text\":\{\"text\":\"\",\"styleId\":\"primary\",\"styleOverride\":\{\"size\":14\}\}\}"
+
+const builtInDragEffect: String = "\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":16,\"h\":16\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Sprite\":\{\"textureKey\":\"mat:block\",\"scaleMode\":\"Fit\",\"tint\":\"textMuted\"\}\}"
+
 # The built-in bundle `name`'s JSON object, or "" when lib/ui has none
 func builtInBundleJson(name: view String) ret String {
+  if name is "dragLabel" {
+    ret builtInDragLabel
+  }
+  if name is "dragText" {
+    ret builtInDragText
+  }
+  if name is "dragEffect" {
+    ret builtInDragEffect
+  }
   if name is "fileRow" {
     ret builtInFileRow
   }

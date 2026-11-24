@@ -45,14 +45,34 @@ func bytesOfOperation(operation: view FileOperation) ret Int {
   ret Files.measureFiles(paths: paths)
 }
 
+# What would be moved to another volume is copied there
+func copyAcrossVolumes(operation: mod FileOperation) {
+  var copied: Int = 0
+  loop let item: mod OperationItem in operation.items {
+    let source: PathStatus = Files.pathStatus(path: item.source, follow: false)
+    let folder: PathStatus = Files.pathStatus(path: item.folder, follow: true)
+    if item.action is ItemAction.move and source.found and folder.found and source.device is not folder.device {
+      item.action = ItemAction.copy
+      copied = copied + 1
+    }
+  }
+  if copied > 0 and copied is operation.items.length {
+    operation.kind = OperationKind.copy
+  }
+}
+
 func operationThread(
   updates: own Channel(OperationUpdate)
   commands: own Channel(OperationCommand)
   signal: own Signal
   number: copy Int
   operation: own FileOperation
+  byVolume: copy Bool
 ) ret Int {
   var running: FileOperation = own operation
+  if byVolume {
+    copyAcrossVolumes(operation: running)
+  }
   let total: Int = bytesOfOperation(operation: running)
   var told: Int = nowMs()
   var asked: Bool = false

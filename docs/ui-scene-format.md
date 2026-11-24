@@ -1864,3 +1864,29 @@ text. Case 1594.
 
 A clickable node (`OnClick`) takes no click where an ancestor with `"Overflow": { "mode": "Clip" }` cuts
 it off, as it is not painted there. A node on a layer of its own (`LayerTag`) is cut by none.
+
+## 56. Drags
+
+```json
+"Row": { "DragSource": { "kind": "file" }, "DropTarget": { "kinds": "files text" } }
+```
+
+`DragSource` on a node: a press on it, held and moved 5 points, sends a `DragEvent` `begin` in
+`world.dragEvents`; the program answers with `startDrag` and a `UiDragPayload` (its kind, values, label and
+icon, whether it may be moved and copied), or leaves it. A finger scrolls instead, unless `touch` is true: then
+it drags once held still for 0.4 s. `DropTarget` on a node: drags whose payload's kind is one of `kinds` can be
+let go there; one of another kind is its ancestors'.
+
+`dragSystem` runs once a frame, after `updateUiInput`, `menuSystem`, `dividerSystem` and `scrollBarSystem`,
+before `keyFocusSystem`. `world.drag` is the drag: its payload, the target under it, and its effect, `move`
+(`copyThere` with Alt, or when it may not be moved). The program may change it each frame (`setDragEffect`),
+to `refused` too; let go there, the drag is canceled. Events: `over` (another target), `drop`, `canceled`.
+Escape, a dialog, a menu and `cancelDrag` cancel it (a program with captures calls `dragCaptureCanceled`).
+Scroll roots under it scroll near their edges. While `dragRunning`, draw frames without waiting for input.
+The label is the bundles `dragLabel`, `dragText` and `dragEffect`.
+
+What the OS drags onto the window is given to `dragSystem` by `Gpu2d.readOsDrop()` and is a drag of the kind
+`files`, or `text` when let go. Its values are known only then. Cases 1600, check `osDrop`.
+
+`ui/EscapeHold`: `holdEscape` and `releaseEscape` around anything that Escape ends, so that the key does not
+also quit the program.

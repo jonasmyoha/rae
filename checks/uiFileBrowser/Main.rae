@@ -212,13 +212,14 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
 }
 
 func stepHalf(half: mod Half, scenes: view SceneRegistry, frames: view Int) {
+  var input: UiInput = idleInput(nowSeconds: frames as Float64 * 0.016)
   let changed: Bool = fileBrowserUpdate(
     systems: half.files
     world: half.world
     uiSystems: half.uiSystems
     scenes: scenes
     keys: BrowserKeys {}
-    input: idleInput(nowSeconds: frames as Float64 * 0.016)
+    input: input
     windowFocused: true
   )
   answer(

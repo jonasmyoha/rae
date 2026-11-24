@@ -158,6 +158,8 @@ type FileColumn {
   realFolder: String = ""
   # When the folder was changed last, before its listing read it (folderStamp)
   modified: Int = -1
+  # The volume it is on (0 not known)
+  device: Int = 0
   # What its state box shows
   stateShown: String = "-"
 }
@@ -204,10 +206,9 @@ type BrowserPreview {
   # What it was made from
   content: PreviewContent = {}
   seen: SelectionSeen = {}
-  # The large preview's node, what it shows, and whether Escape quit the app before it opened
+  # The large preview's node, and what it shows
   large: EntityId = noEntity()
   largeShown: String = ""
-  escapeQuit: Bool = true
 }
 
 # A part of the trail: the folder a click on it goes to
@@ -284,6 +285,7 @@ type OperationJob {
   # its items
   count: Int
   operation: FileOperation
+  byVolume: Bool = false
   state: OperationJobState = OperationJobState.waiting
   undoing: Bool = false
   redoing: Bool = false
@@ -317,8 +319,6 @@ type OperationQuestion {
   asked: String = ""
   # the answer is for all of its items
   forAll: Bool = false
-  # whether Escape quit the program before it
-  escapeQuit: Bool = true
 }
 
 type FileOperations {
@@ -420,6 +420,15 @@ type OperationRequested {
   name: String = ""
 }
 
+# Paths were dropped on a browser, by a drag or (`external`) by the OS; the operation is begun
+type FilesDropped {
+  browser: EntityId
+  folder: String
+  paths: List(String) = {}
+  external: Bool = false
+  moved: Bool = false
+}
+
 # One of the app's own menu items was chosen
 type BrowserMenuChosen {
   browser: EntityId
@@ -451,9 +460,16 @@ type FileBrowserSystems {
   # the app's own items of the context menu
   menuItems: List(BrowserMenuItem) = {}
   operations: FileOperations
-  # Escape is the edited name's, and what it did before
+  # Escape is an edited name's
   escapeHeld: Bool = false
-  escapeQuit: Bool = true
+  # A drag over the browsers (ui/fileBrowser/FileDragSystem): the row or the column marked, the
+  # folder it
+  # is held on and when that opens, and the browser whose own entries are dragged
+  dropRow: EntityId = noEntity()
+  dropColumn: EntityId = noEntity()
+  dragOpenFolder: String = ""
+  dragOpenAt: Float64 = -1.0
+  dragBrowser: EntityId = noEntity()
   openCounts: StringMap(Int)
   openCountsStamp: Int = 0
   now: Float64 = 0.0
@@ -465,6 +481,7 @@ type FileBrowserSystems {
   operationDone: EventQueue(OperationDone)
   operationRequested: EventQueue(OperationRequested)
   browserMenuChosen: EventQueue(BrowserMenuChosen)
+  filesDropped: EventQueue(FilesDropped)
 }
 
 func createFileBrowsers() ret FileBrowserSystems {
@@ -496,6 +513,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     operationDone: createEventQueue(OperationDone)
     operationRequested: createEventQueue(OperationRequested)
     browserMenuChosen: createEventQueue(BrowserMenuChosen)
+    filesDropped: createEventQueue(FilesDropped)
   }
 }
 
