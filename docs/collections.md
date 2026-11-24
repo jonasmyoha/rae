@@ -48,6 +48,9 @@ func main() {
 `import collections/StringMap` also works if you prefer the qualified form
 (`StringMap.createStringMap(...)`); `open` implies `import`.
 
+`{ }` is the empty map (`var names: StringMap(Int) = {}`), and `create(cap: n)` one with room for
+`n`. A `{ }` literal with elements is only ever a List.
+
 ## Why maps are not in core
 
 They pass none of the "core" tests: the compiler has no built-in knowledge of

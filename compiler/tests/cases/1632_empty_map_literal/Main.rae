@@ -1,0 +1,77 @@
+# `{ }` is the empty map, and the default of any other generic struct, wherever its type is written:
+# a binding, an assignment, an argument, a field, an element, and typed for an optional.
+open collections/IntMap
+open collections/StringMap
+open ecs/ComponentTable
+
+type Shelf {
+  names: StringMap(Int) = {}
+  boxes: IntMap(String)
+}
+
+type Box {
+  number: Int = 1
+}
+
+func countOf(names: view StringMap(Int)) ret Int {
+  ret names.length
+}
+
+func fill(T: type, value: view T) ret Int {
+  var values: StringMap(T) = {}
+  values.set(k: "one", value: value)
+  var list: List(T) = {}
+  list.add(value: value)
+  ret values.length + list.length
+}
+
+func main() {
+  var names: StringMap(Int) = {}
+  log("empty: {names.length}, {names.has(k: "a")}, {names.keys().length}")
+  names.remove(k: "a")
+  loop var i: Int = 0, i < 20, ++i {
+    names.set(k: "name {i}", value: i)
+  }
+  log("filled: {names.length}, {names.has(k: "name 19")}")
+  names = {}
+  log("assigned: {names.length}, argument: {countOf(names: {})}")
+
+  var boxes: IntMap(String) = {}
+  boxes.set(k: 3, value: "three {names.length}")
+  boxes.set(k: 4, value: "four")
+  boxes.remove(k: 4)
+  log("by number: {boxes.length}, {boxes.has(k: 3)}")
+
+  var lists: StringMap(List(String)) = {}
+  lists.set(k: "a", value: List(String) { "x", "y" })
+  if let list: view List(String) = lists.viewGet(key: "a") {
+    log("lists: {list.length}")
+  }
+
+  var shelf: Shelf = {}
+  shelf.names.set(k: "a", value: 1)
+  shelf.boxes.set(k: 1, value: "one")
+  let other: Shelf = { names: {}, boxes: {} }
+  log(
+    "fields: {shelf.names.length} {shelf.boxes.length}, {other.names.length} {other.boxes.length}"
+  )
+
+  let maps: List(IntMap(Int)) = { {}, {} }
+  log("elements: {maps.length}, generic: {fill(value: 5)} {fill(value: "five")}")
+
+  var table: ComponentTable(Box) = {}
+  log("a table: {componentCount(this: table)}")
+
+  let maybe: opt StringMap(Int) = StringMap(Int) {}
+  if let map: view StringMap(Int) = maybe {
+    log("an optional map: {map.length}")
+  }
+  let list: opt List(Int) = List(Int) { 1, 2 }
+  if let numbers: view List(Int) = list {
+    log("an optional list: {numbers.length}")
+  }
+  let box: opt Box = { number: 4 }
+  if let inside: view Box = box {
+    log("an optional struct: {inside.number}")
+  }
+}

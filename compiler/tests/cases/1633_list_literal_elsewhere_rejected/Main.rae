@@ -1,0 +1,39 @@
+# A `{ }` literal of elements is a List, and an empty one a struct or a List: where neither is
+# wanted
+# it is refused. Such a value was dropped without a word (`let count: Int = { 3 }` was 0, `let box:
+# Box
+# = { 3 }` a Box of its defaults, `let maybe: opt Box = {}` was `none`), or was an error of the C
+# compiler.
+open collections/IntMap
+open collections/StringMap
+
+enum Kind { a, b }
+
+type Box {
+  number: Int = 1
+}
+
+type Holder {
+  box: opt Box
+  names: StringMap(Int)
+}
+
+func countOf(names: view StringMap(Int)) ret Int {
+  ret names.length
+}
+
+func main() {
+  let names: StringMap(Int) = { 1, 2 }
+  var numbers: IntMap(Int) = {}
+  numbers = { 3 }
+  log("{countOf(names: { 4 })}")
+  let box: Box = { 5 }
+  let boxes: List(Box) = { {}, { 6 } }
+  let count: Int = { 7 }
+  let text: String = {}
+  let kind: Kind = {}
+  let task: Task(Int) = {}
+  let maybe: opt Box = {}
+  let list: opt List(Int) = { 8, 9 }
+  let holder: Holder = { box: {}, names: { 10 } }
+}

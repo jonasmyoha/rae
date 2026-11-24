@@ -6833,6 +6833,7 @@ static bool sema_check_redundant_literal_cast(const AstExpr* e, const TypeInfo* 
 }
 
 static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* errFile);
+static TypeInfo* sema_strip_ref(TypeInfo* t);
 /* Every element of a `{ ... }` / `List(T) { ... }` literal is a value of the
  * list's element type. */
 static void sema_check_collection_literal(const AstExpr* e, const TypeInfo* list_type) {
@@ -6845,6 +6846,47 @@ static void sema_check_collection_literal(const AstExpr* e, const TypeInfo* list
             sema_check_literal_part(list_type->as.structure.generic_args[0], el->value,
                                     s_current_decl_origin ? s_current_decl_origin
                                     : (s_current_module ? s_current_module->file_path : NULL));
+}
+
+/* An untyped `{ ... }` with no field names takes its type from where it goes: a
+ * List's elements, or, when it is empty, a struct (a map, a generic struct) with
+ * its default fields. Anywhere else the code generator dropped what was in it
+ * (`let n: Int = { 3 }` was 0), or built a List the C compiler refused. */
+static void sema_check_untyped_collection(const AstExpr* e, TypeInfo* expected) {
+    if (!e || e->kind != AST_EXPR_COLLECTION_LITERAL || e->as.collection.type) return;
+    TypeInfo* want = sema_strip_ref(expected);
+    if (!want) return;
+    bool has_elements = e->as.collection.elements != NULL;
+    char message[320];
+    if (want->kind == TYPE_OPT) {
+        snprintf(message, sizeof message,
+                 "'{ }' for an optional does not say which value it is: write the type, as in `List(Int) { ... }`, or `none`");
+    } else if (want->kind == TYPE_STRUCT || want->kind == TYPE_GENERIC_INST) {
+        AstDecl* decl = want->as.structure.decl;
+        if (!decl || decl->kind != AST_DECL_TYPE) return;
+        Str name = decl->as.type_decl.name;
+        if (str_eq_cstr(name, "List")) {
+            sema_check_collection_literal(e, want);
+            return;
+        }
+        if (!has_elements || str_eq_cstr(name, "Array") || str_eq_cstr(name, "Buffer")) return;
+        if (str_eq_cstr(name, "StringMap") || str_eq_cstr(name, "IntMap")) {
+            snprintf(message, sizeof message,
+                     "a '{ }' literal with elements is a List, but the type here is %.*s: start with `{ }` and `set` each key",
+                     (int)name.len, name.data);
+        } else {
+            snprintf(message, sizeof message,
+                     "a '{ }' literal with elements is a List, but the type here is %.*s: name its fields, as in `{ field: value }`",
+                     (int)name.len, name.data);
+        }
+    } else if (sema_is_scalar_kind(want->kind) || want->kind == TYPE_TASK) {
+        snprintf(message, sizeof message, "a '{ }' literal is a List or a struct, and neither is wanted here");
+    } else {
+        return;
+    }
+    diag_error(s_current_decl_origin ? s_current_decl_origin : (s_current_module ? s_current_module->file_path : NULL),
+               (int)e->line, (int)e->column, message);
+    if (s_current_module) s_current_module->had_error = true;
 }
 
 /* See through `view T` / `mod T` for the numeric-conversion check.
@@ -7196,7 +7238,7 @@ static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* 
     if (value->kind == AST_EXPR_OBJECT && !value->as.object_literal.type) {
         sema_check_object_literal_fields(type, value->as.object_literal.fields, value->line, value->column, errFile);
     } else if (value->kind == AST_EXPR_COLLECTION_LITERAL && !value->as.collection.type) {
-        sema_check_collection_literal(value, type);
+        sema_check_untyped_collection(value, want);
     } else if (got && got->kind == TYPE_OPT && type->kind != TYPE_OPT && type->kind != TYPE_ANY
                && type->kind != TYPE_GENERIC_PARAM && value->kind != AST_EXPR_NONE) {
         diag_error(errFile, (int)value->line, (int)value->column, "optional not unwrapped — use `if let`");
@@ -7458,7 +7500,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
      * below return early); its integer elements must fit the destination's
      * element type. A typed one is checked at its own analysis. */
     if (expr->kind == AST_EXPR_COLLECTION_LITERAL && !expr->as.collection.type)
-        sema_check_collection_literal(expr, sema_strip_ref(expected));
+        sema_check_untyped_collection(expr, expected);
     /* #880: a pending `create(...)` takes its constructor from the expected type. */
     if (sema_is_pending_create(expr) && s_lifecycle_symbols && s_current_module) {
         if (!sema_resolve_create(ctx, s_current_module, s_lifecycle_symbols, expr, expected)) return;

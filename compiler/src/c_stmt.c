@@ -3175,7 +3175,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         }
                     }
                 }
-            } else if (stmt->as.let_stmt.value && stmt->as.let_stmt.value->kind == AST_EXPR_COLLECTION_LITERAL) {
+            } else if (stmt->as.let_stmt.value && stmt->as.let_stmt.value->kind == AST_EXPR_COLLECTION_LITERAL
+                       && !(stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt)) {
                 // Collection literal: let x: List(Int) = { 10, 20, 30 }
                 // Emit as: createList(count) followed by add() calls
                 const AstTypeRef* list_type = stmt->as.let_stmt.type;
@@ -3198,7 +3199,10 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (str_eq_cstr(d->as.func_decl.name, "add") && d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
                 }
 
-                if (create_fd && add_fd && elem_type) {
+                /* Only a List is built so: `{ }` of a map or of another generic
+                 * struct is that struct's default, below. */
+                bool is_list = list_type && str_eq_cstr(get_base_type_name(list_type), "List");
+                if (create_fd && add_fd && elem_type && is_list) {
                     // Register specializations
                     register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
                     register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);

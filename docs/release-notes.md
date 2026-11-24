@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.73, 2026-11-24: `{ }` is the empty map, and a list literal only a List
+
+- `var names: StringMap(Int) = {}` (an `IntMap`, a `ComponentTable`, any generic struct) is the empty one; it was an
+  error of the C compiler.
+- Breaking: a `{ }` literal of elements where no List is wanted, an empty one for a number, a String, a Bool, an enum
+  or a Task, and an untyped one for an optional, are errors. What was in them was dropped (`let count: Int = { 3 }` was
+  0, `let box: Box = { 3 }` a Box of its defaults, `let box: opt Box = {}` was `none`) or was an error of the C
+  compiler. An optional's value says its type (`List(Int) { 1 }`), or names its fields.
+- Cases 1632 and 1633.
+
 ## 0.4.72, 2026-11-24: a Task removed from a list is joined
 
 - A `List(Task(T))` joins and frees a task it lets go of (`removeAt`, `remove`, `removeLast`, `swapRemove`, `set`,
