@@ -148,7 +148,9 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     const AstTypeRef* arg_type = infer_expr_type_ref(ctx, inner);
     bool arg_is_ref = arg_type && (arg_type->is_view || arg_type->is_mod);
     bool arg_is_opt = arg_type && arg_type->is_opt;
-    if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped) return false;
+    /* a Task nobody holds is joined at the statement's end, as a temporary */
+    bool task = str_eq_cstr(base, "Task");
+    if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped && !task) return false;
 
     /* The parameter resolves as REF(OPT(T)): the optional and its payload
      * are the types under the reference */
@@ -1602,21 +1604,21 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
              * move was marked above). Passing the bare value handed C a
              * `T` where the parameter is a `rae_opt_T`. An optional or `none`
              * argument already is the parameter's type and goes on below. */
-            if (p && p->type && p->type->is_opt && !(p->type->is_view || p->type->is_mod)
-                && a->value && a->value->kind != AST_EXPR_NONE) {
+            if (p && p->type && !(p->type->is_view || p->type->is_mod) && a->value) {
                 const AstExpr* plain = a->value;
                 if (plain->kind == AST_EXPR_OWN) plain = plain->as.unary.operand;
-                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, plain);
-                bool arg_is_opt = (arg_tr && arg_tr->is_opt)
-                    || (plain->resolved_type && plain->resolved_type->kind == TYPE_OPT)
-                    || plain->kind == AST_EXPR_UNBOX;
-                Str arg_base = arg_tr ? get_base_type_name(arg_tr) : (Str){0};
-                bool arg_is_any = str_eq_cstr(arg_base, "Any") || str_eq_cstr(arg_base, "RaeAny");
+                /* `own T` of a generic function is an optional too, when T is
+                 * one (`add` of a List(opt Int)) */
                 const AstTypeRef* opt_pt = p->type;
                 if (fd->generic_params && concrete)
                     opt_pt = substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
-                if (!arg_is_opt && !arg_is_any && rae_opt_is_struct_rep(ctx, opt_pt)) {
-                    emit_optional_boxed_expr(ctx, opt_pt, plain, out);
+                if (c_plain_value_for_optional(ctx, opt_pt, plain)) {
+                    /* a local that moves on this path only is moved, not copied */
+                    int local = close_live_flag ? local_index_by_name(ctx, a->value->as.ident) : -1;
+                    bool was_moved = local >= 0 && ctx->local_moved[local];
+                    if (local >= 0) ctx->local_moved[local] = true;
+                    emit_optional_boxed_expr(ctx, opt_pt, a->value, out);
+                    if (local >= 0) ctx->local_moved[local] = was_moved;
                     if (close_live_flag) fprintf(out, ")");
                     if (a->next) fprintf(out, ", ");
                     a = a->next; p = p->next;

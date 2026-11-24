@@ -1128,6 +1128,9 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     }
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
     Str base = get_base_type_name(tr);
+    // Every Task is the one pointer; its `rae_Task_<T>` name is declared only
+    // when the program writes that Task as a type of something
+    if (str_eq_cstr(base, "Task") && !is_ptr) return "RaeTask*";
     // Check if return type is an enum — emit as int64_t
     if (ctx && ctx->module) {
         const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
@@ -1748,6 +1751,23 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                 }
             }
             break;
+        }
+        /* `spawn f()` is a Task of what f returns; without a type it was never
+         * wrapped into the `opt Task(T)` it initialized */
+        case AST_EXPR_UNARY: {
+            if (expr->as.unary.op != AST_UNARY_SPAWN || !ctx->compiler_ctx) break;
+            static AstIdentifierPart kTask_part = { .text = { .data = "Task", .len = 4 } };
+            const AstTypeRef* result = infer_expr_type_ref(ctx, expr->as.unary.operand);
+            if (!result) {
+                return expr->resolved_type ? sema_type_ref_of(ctx->compiler_ctx, expr->resolved_type) : NULL;
+            }
+            AstTypeRef* args = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+            *args = *result; args->next = NULL;
+            AstTypeRef* task = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+            memset(task, 0, sizeof(*task));
+            task->parts = &kTask_part;
+            task->generic_args = args;
+            return task;
         }
         case AST_EXPR_INTEGER: return &kInt_tr;
         case AST_EXPR_FLOAT: return &kFloat_tr;

@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.74, 2026-11-24: an optional Task
+
+- An `opt Task(T)` works as a binding, an assignment, a return, an argument and in a list, from `spawn`, a call or
+  `own`; only a struct's field did, the rest were errors of the C compiler.
+- A plain value that goes into a list of optionals (`add`, `set`, `insert`, a literal) is wrapped.
+- A place that holds a Task in a list literal (`{ task }`) is an error: write `own task`.
+- Cases 1634 (under ThreadSanitizer too), 1635 and 1636.
+
 ## 0.4.73, 2026-11-24: `{ }` is the empty map, and a list literal only a List
 
 - `var names: StringMap(Int) = {}` (an `IntMap`, a `ComponentTable`, any generic struct) is the empty one; it was an

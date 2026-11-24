@@ -6841,11 +6841,21 @@ static void sema_check_collection_literal(const AstExpr* e, const TypeInfo* list
     if (list_type->kind != TYPE_STRUCT && list_type->kind != TYPE_GENERIC_INST) return;
     if (list_type->as.structure.generic_count != 1 || !list_type->as.structure.generic_args) return;
     if (list_type->name.len < 4 || memcmp(list_type->name.data, "List", 4) != 0) return;
-    for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next)
+    for (const AstCollectionElement* el = e->as.collection.elements; el; el = el->next) {
+        /* a place in a list literal is copied, and a Task has no copy */
+        if (el->value && sema_expr_copies_place(el->value) && s_lifecycle_symbols && s_current_module
+            && sema_typeinfo_holds_task(s_lifecycle_symbols, el->value->resolved_type, 0)) {
+            sema_report_task_copy(s_current_module,
+                                  s_current_decl_origin ? s_current_decl_origin : s_current_module->file_path,
+                                  el->value->line, el->value->column, NULL,
+                                  "into a list literal (write 'own <expr>')");
+            continue;
+        }
         if (el->value)
             sema_check_literal_part(list_type->as.structure.generic_args[0], el->value,
                                     s_current_decl_origin ? s_current_decl_origin
                                     : (s_current_module ? s_current_module->file_path : NULL));
+    }
 }
 
 /* An untyped `{ ... }` with no field names takes its type from where it goes: a

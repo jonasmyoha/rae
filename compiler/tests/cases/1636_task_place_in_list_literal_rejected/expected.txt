@@ -1,0 +1,12 @@
+tests/cases/1636_task_place_in_list_literal_rejected/Main.rae:14:34: cannot copy this value into a list literal (write 'own <expr>'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    14 |   let tasks: List(Task(Int)) = { task }  # ERROR
+       |                                  ^~~~
+tests/cases/1636_task_place_in_list_literal_rejected/Main.rae:15:42: cannot copy this value into a list literal (write 'own <expr>'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    15 |   let optionals: List(opt Task(Int)) = { maybe, none }  # ERROR
+       |                                          ^~~~
+tests/cases/1636_task_place_in_list_literal_rejected/Main.rae:16:37: cannot copy this value into a list literal (write 'own <expr>'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    16 |   let jobs: List(Job) = List(Job) { job }  # ERROR
+       |                                     ^~~~
+tests/cases/1636_task_place_in_list_literal_rejected/Main.rae:17:40: cannot copy this value into a list literal (write 'own <expr>'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    17 |   let wrapped: List(opt Task(Int)) = { task }  # ERROR
+       |                                        ^~~~

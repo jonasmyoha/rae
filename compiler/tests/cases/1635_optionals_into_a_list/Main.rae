@@ -1,0 +1,88 @@
+# A plain value that goes into a list of optionals is wrapped, as it is for any optional: by add,
+# set,
+# insert and a literal, from a place, a call, a literal, `own`, and from a local that moves on one
+# path only. Nothing leaks and nothing is dropped twice. It was an error of the C compiler.
+type Note {
+  text: String = ""
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!" }
+}
+
+func maybe(on: view Bool) ret opt Note {
+  if on {
+    ret noteOf(text: "maybe")
+  }
+  ret none
+}
+
+func onePath(on: view Bool) {
+  let note: Note = { text: "note {on}" }
+  let other: Note = { text: "other {on}" }
+  let text: String = "text {on}"
+  var notes: List(opt Note) = {}
+  var texts: List(opt String) = {}
+  if on {
+    notes.add(value: note)
+    notes.add(value: own other)
+    texts.add(value: own text)
+  }
+  log("on one path: {notes.length} {texts.length}")
+}
+
+func keep(note: opt own Note) ret Int {
+  if let mine: view Note = note {
+    ret mine.text.length()
+  }
+  ret -1
+}
+
+func keptOnOnePath(on: view Bool) {
+  let note: Note = { text: "note {on}" }
+  let other: Note = { text: "other {on}" }
+  if on {
+    log("kept: {keep(note: own note)} {keep(note: other)} {keep(note: none)}")
+  }
+}
+
+func main() {
+  var notes: List(opt Note) = {}
+  let kept: Note = { text: "kept {notes.length}" }
+  let given: Note = { text: "given {notes.length}" }
+  notes.add(value: kept)
+  notes.add(value: own given)
+  notes.add(value: noteOf(text: "call"))
+  notes.add(value: Note { text: "typed {notes.length}" })
+  notes.add(value: { text: "bare {notes.length}" })
+  notes.add(value: none)
+  notes.add(value: maybe(on: true))
+  notes.add(value: maybe(on: false))
+  let there: opt Note = noteOf(text: "there")
+  notes.add(value: there)
+  notes.set(index: 0, value: noteOf(text: "set"))
+  let again: Note = { text: "again {notes.length}" }
+  notes.insert(index: 0, value: again)
+  notes.removeAt(index: 1)
+  log("notes: {notes.length}")
+  let word: String = "word {notes.length}"
+  var texts: List(opt String) = { "a {notes.length}", none, word }
+  texts.add(value: "b {texts.length}")
+  texts.add(value: "c")
+  texts.add(value: word)
+  log("texts: {texts.length}")
+  let count: Int = 3
+  var numbers: List(opt Int) = { 1, none, count }
+  numbers.add(value: count + 1)
+  numbers.add(value: count)
+  log("numbers: {numbers.length}")
+  var lists: List(opt List(Int)) = {}
+  lists.add(value: List(Int) { 1, 2 })
+  let mine: List(Int) = { 3 }
+  lists.add(value: mine)
+  log("lists: {lists.length}")
+  onePath(on: true)
+  onePath(on: false)
+  keptOnOnePath(on: true)
+  keptOnOnePath(on: false)
+}

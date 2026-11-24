@@ -1,0 +1,129 @@
+# An `opt Task(T)` in every place a value goes: a binding, an assignment, a field, a return, an
+# argument and a list, from `spawn`, a call and `own`. A `spawn` was not wrapped, and a binding or a
+# parameter of the type was dropped as if it were the Task: errors of the C compiler. A task that is
+# dropped, replaced or removed is joined: under ThreadSanitizer a thread nobody joined is an error.
+open Atomic
+
+type Job {
+  number: Int = 0
+  task: opt Task(Int) = none
+}
+
+func work(finished: own Atomic(Int), number: copy Int) ret Int {
+  sleep(ms: 5)
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret number
+}
+
+func started(finished: view Atomic(Int), number: copy Int) ret Task(Int) {
+  ret spawn thread work(finished: finished, number: number)
+}
+
+func maybe(finished: view Atomic(Int), number: copy Int) ret opt Task(Int) {
+  if number is 0 {
+    ret none
+  }
+  if number is 1 {
+    ret spawn thread work(finished: finished, number: number)
+  }
+  ret started(finished: finished, number: number)
+}
+
+func take(task: opt own Task(Int)) ret Int {
+  if let mine: view Task(Int) = task {
+    ret mine.get()
+  }
+  ret -1
+}
+
+func look(task: opt view Task(Int)) ret Int {
+  if let mine: view Task(Int) = task {
+    ret mine.get()
+  }
+  ret -1
+}
+
+func onePath(finished: view Atomic(Int), on: view Bool) ret Int {
+  let task: Task(Int) = started(finished: finished, number: 30)
+  if on {
+    ret take(task: own task)
+  }
+  ret 0
+}
+
+func bindings(finished: view Atomic(Int)) {
+  let spawned: opt Task(Int) = spawn thread work(finished: finished, number: 1)
+  let pooled: opt Task(Int) = spawn work(finished: finished, number: 2)
+  let called: opt Task(Int) = started(finished: finished, number: 3)
+  let task: Task(Int) = started(finished: finished, number: 4)
+  let moved: opt Task(Int) = own task
+  log("bound: {look(task: spawned)} {look(task: pooled)} {look(task: called)} {look(task: moved)}")
+  var again: opt Task(Int) = none
+  log("none: {look(task: again)}")
+  again = spawn thread work(finished: finished, number: 5)
+  log("assigned: {look(task: again)}")
+  again = started(finished: finished, number: 6)
+  log("again: {look(task: again)}")
+  again = none
+  log("none again: {look(task: again)}, finished {finished.load()} of 6")
+}
+
+func fields(finished: view Atomic(Int)) {
+  var job: Job = { task: spawn thread work(finished: finished, number: 1) }
+  let first: Int = look(task: job.task)
+  job.task = started(finished: finished, number: 2)
+  let second: Int = look(task: job.task)
+  let taken: opt Task(Int) = own job.task
+  log("a field: {first} {second} {look(task: job.task)} {look(task: taken)}")
+  var jobs: List(Job) = {}
+  jobs.add(value: { task: spawn work(finished: finished, number: 3) })
+  jobs.add(value: Job { number: 1 })
+  jobs.removeAt(index: 0)
+  log("jobs: {jobs.length}, finished {finished.load()} of 9")
+}
+
+func calls(finished: view Atomic(Int)) {
+  if let task: Task(Int) = maybe(finished: finished, number: 1) {
+    log("returned: {task.get()}")
+  }
+  if let task: Task(Int) = maybe(finished: finished, number: 2) {
+    log("returned: {task.get()}")
+  }
+  let nothing: opt Task(Int) = maybe(finished: finished, number: 0)
+  log("returned none: {look(task: nothing)}")
+  log("taken: {take(task: spawn thread work(finished: finished, number: 3))}")
+  log("taken: {take(task: started(finished: finished, number: 4))} {take(task: none)}")
+  let task: Task(Int) = started(finished: finished, number: 5)
+  log("taken: {take(task: own task)}")
+  log("looked at: {look(task: started(finished: finished, number: 6))}")
+  log("looked at: {look(task: spawn work(finished: finished, number: 7))} {look(task: none)}")
+  log(
+    "on one path: {onePath(finished: finished, on: true)} {onePath(finished: finished, on: false)}"
+  )
+  log("finished {finished.load()} of 18")
+}
+
+func lists(finished: view Atomic(Int)) {
+  var tasks: List(opt Task(Int)) = { spawn thread work(finished: finished, number: 1), none }
+  tasks.add(value: spawn thread work(finished: finished, number: 2))
+  tasks.add(value: spawn work(finished: finished, number: 3))
+  tasks.add(value: started(finished: finished, number: 4))
+  tasks.add(value: none)
+  let task: Task(Int) = started(finished: finished, number: 5)
+  tasks.add(value: own task)
+  tasks.insert(index: 0, value: started(finished: finished, number: 6))
+  tasks.set(index: 1, value: spawn thread work(finished: finished, number: 7))
+  tasks.removeAt(index: 2)
+  log("a list: {tasks.length}")
+  tasks.clear()
+  log("cleared: finished {finished.load()} of 25")
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  bindings(finished: finished)
+  fields(finished: finished)
+  calls(finished: finished)
+  lists(finished: finished)
+  finished.freeAtomic()
+}

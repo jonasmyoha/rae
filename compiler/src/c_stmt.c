@@ -55,8 +55,26 @@ void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 //   and moves in; a String is detached from the statement's string pool.
 // A heap-owning place no helper can copy keeps the old behavior: it moves,
 // and a local is marked moved so its scope does not drop it too.
+bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, const AstExpr* plain) {
+  if (!opt_type || !opt_type->is_opt || opt_type->is_view || opt_type->is_mod) return false;
+  if (!plain || plain->kind == AST_EXPR_NONE || plain->kind == AST_EXPR_UNBOX) return false;
+  const AstTypeRef* type = infer_expr_type_ref(ctx, plain);
+  if (type && ctx->generic_params && ctx->generic_args)
+    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+  if ((type && type->is_opt) || (plain->resolved_type && plain->resolved_type->kind == TYPE_OPT)) return false;
+  Str base = type ? get_base_type_name(type) : (Str){0};
+  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
+  return rae_opt_is_struct_rep(ctx, opt_type);
+}
+
 void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* elem_type,
                              bool elem_is_string, bool elem_is_any, FILE* out) {
+  /* A plain value in a list of optionals is wrapped, as an argument is */
+  const AstExpr* plain = value && value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
+  if (!elem_is_any && c_plain_value_for_optional(ctx, elem_type, plain)) {
+    emit_optional_boxed_expr(ctx, elem_type, value, out);
+    return;
+  }
   bool is_place = value && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
                             || value->kind == AST_EXPR_INDEX);
   bool plain_type = elem_type && !elem_type->is_view && !elem_type->is_mod && !elem_type->is_opt;
@@ -1161,7 +1179,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
                          const char* cname, bool owns_heap) {
   if (!ctx || !out || !type) return;
   if (type->is_view || type->is_mod) return;
-  if (str_eq_cstr(get_base_type_name(type), "Task")) {
+  if (!type->is_opt && str_eq_cstr(get_base_type_name(type), "Task")) {
     fprintf(out, "  rae_task_drop(%s);\n", cname);
     return;
   }
@@ -1574,7 +1592,7 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
   // struct), so it'd be skipped below — handle it here. rae_task_drop
   // joins (no-op if already get()'d) then frees, so a worker thread
   // can't outlive its scope / be killed at process teardown.
-  if (str_eq_cstr(get_base_type_name(type), "Task")) {
+  if (!type->is_opt && str_eq_cstr(get_base_type_name(type), "Task")) {
     fprintf(out, "  rae_task_drop(%.*s);\n",
             (int)ctx->locals[idx].len, ctx->locals[idx].data);
     return;

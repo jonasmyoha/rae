@@ -1,0 +1,19 @@
+# A place in a list literal is copied, and a Task has no copy
+func work(number: copy Int) ret Int {
+  ret number
+}
+
+type Job {
+  task: opt Task(Int) = none
+}
+
+func main() {
+  let task: Task(Int) = spawn work(number: 1)
+  let maybe: opt Task(Int) = spawn work(number: 2)
+  let job: Job = {}
+  let tasks: List(Task(Int)) = { task }  # ERROR
+  let optionals: List(opt Task(Int)) = { maybe, none }  # ERROR
+  let jobs: List(Job) = List(Job) { job }  # ERROR
+  let wrapped: List(opt Task(Int)) = { task }  # ERROR
+  let fine: List(opt Task(Int)) = { own task, spawn work(number: 3), own maybe }
+}

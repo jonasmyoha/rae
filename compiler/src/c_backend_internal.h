@@ -223,6 +223,9 @@ bool c_primitive_ref_has_wrapper(Str base);
 bool c_expr_is_pointer_list_ident(CFuncContext* ctx, const AstExpr* expr);
 void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source, int id, FILE* out);
+/* Does `plain` (an argument or element without its `own`) have to be wrapped to be a value of
+ * `opt_type`? Not `none`, and not what already is an optional. */
+bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, const AstExpr* plain);
 void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* elem_type,
                              bool elem_is_string, bool elem_is_any, FILE* out);
 // Write the pending temporary drops now (before a `return`).
