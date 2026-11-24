@@ -33,6 +33,7 @@ open ui/Scene
 open ui/SceneFile
 open ui/SceneInstance
 open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/ChromeSystem
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
@@ -49,6 +50,7 @@ open ui/fileBrowser/PreviewSystem
 open ui/fileBrowser/RenameSystem
 open ui/fileBrowser/RowsSystem
 open ui/fileBrowser/SelectionSystem
+open ui/fileBrowser/SidebarSystem
 open ui/fileBrowser/WatchSystem
 
 # The browser's scenes, those the app has not registered itself under the same name
@@ -60,6 +62,8 @@ func registerFileBrowserScenes(scenes: mod SceneRegistry) {
     "filePreview"
     "fileLargePreview"
     "fileTrailPart"
+    "fileSidebarRow"
+    "fileSidebarTitle"
     "fileRename"
     "fileOperation"
     "fileQuestion"
@@ -130,6 +134,7 @@ func openFileBrowser(
   let history: BrowserHistory = { memory: createStringMap(FolderMemory, cap: 16) }
   componentSet(this: systems.history, entityId: host, data: own history)
   componentSet(this: systems.previews, entityId: host, data: BrowserPreview {})
+  openSidebar(systems: systems, world: world, browser: host)
   let first: EntityId = openColumn(
     systems: systems
     world: world
@@ -211,6 +216,14 @@ func fileBrowserUpdate(
     uiSystems: uiSystems
     scenes: scenes
     input: input
+  ) or changed
+  changed = fileSidebarSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    input: input
+    windowFocused: windowFocused
   ) or changed
   changed = fileNavigationSystem(
     systems: systems
@@ -337,6 +350,9 @@ func authoredOptions(authored: view FileBrowser) ret BrowserOptions {
     openCountTint: authored.openCountTint
     columnWidth: authored.columnWidth
     previewWidth: authored.previewWidth
+    showSidebar: authored.showSidebar
+    sidebarWidth: authored.sidebarWidth
+    pinned: authored.pinned
     rowHeight: authored.rowHeight
     source: authored.source
   }
@@ -491,6 +507,13 @@ func fileBrowserState(
   }
   let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
   state.widths = mine.widths
+  state.root = "{mine.root}"
+  if componentHas(this: systems.sidebars, entityId: browser) {
+    let sidebar: view BrowserSidebar = componentView(this: systems.sidebars, entityId: browser)
+    state.sidebarWidth = sidebar.width
+    state.pinned = sidebar.pinned
+    state.recent = sidebar.recent
+  }
   let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
   state.selected = listSelectedOf(systems: systems, world: world, column: deepest)
   ret state
@@ -539,8 +562,31 @@ func restoreFileBrowser(
     }
   }
   staleBrowser(systems: systems, browser: browser)
+  # (a state saved without a sidebar leaves what the options pinned)
+  if state.sidebarWidth > 0.0 and componentHas(this: systems.sidebars, entityId: browser) {
+    let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+    sidebar.pinned = state.pinned
+    sidebar.recent = state.recent
+    sidebar.stale = true
+    setSidebarWidth(
+      systems: systems
+      world: world
+      browser: browser
+      width: state.sidebarWidth
+    )
+  }
   if state.folder.length() is 0 {
     ret true
+  }
+  if state.root.length() > 0 and browserOptions(systems: systems, browser: browser).allowAboveRoot {
+    let rooted: Bool = setBrowserRoot(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      root: state.root
+    )
   }
   let opened: Bool = openTrail(
     systems: systems
@@ -612,6 +658,7 @@ func closeBrowserNodes(
   componentRemove(this: systems.browsers, entityId: browser)
   componentRemove(this: systems.history, entityId: browser)
   componentRemove(this: systems.previews, entityId: browser)
+  componentRemove(this: systems.sidebars, entityId: browser)
 }
 
 func forgetBrowserNodes(systems: mod FileBrowserSystems, browser: view EntityId) {
@@ -625,6 +672,12 @@ func forgetBrowserNodes(systems: mod FileBrowserSystems, browser: view EntityId)
     let node: EntityId = componentEntityAt(this: systems.trailParts, i: i)
     if componentView(this: systems.trailParts, entityId: node).browser is browser {
       componentRemove(this: systems.trailParts, entityId: node)
+    }
+  }
+  loop var i: Int = componentCount(this: systems.placeRows) - 1, i >= 0, --i {
+    let node: EntityId = componentEntityAt(this: systems.placeRows, i: i)
+    if componentView(this: systems.placeRows, entityId: node).browser is browser {
+      componentRemove(this: systems.placeRows, entityId: node)
     }
   }
 }
@@ -671,5 +724,6 @@ func closeFileBrowsers(
   let ended: Bool = stopOperations(systems: systems, waitMs: 1000)
   closeWatches(systems: systems)
   let polled: Bool = stopPolling(systems: systems, waitMs: 1000)
-  ret stopFileListings(systems: systems, waitMs: 1000) and polled and ended
+  let placed: Bool = stopPlaces(systems: systems, waitMs: 1000)
+  ret stopFileListings(systems: systems, waitMs: 1000) and polled and placed and ended
 }

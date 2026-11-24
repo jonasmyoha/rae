@@ -1,0 +1,53 @@
+# The thread that looks which of a sidebar's folders are there and what disks are mounted
+# (lib/ui/fileBrowser/PlacesThread), several at once. Under ThreadSanitizer too.
+import Sys
+open Channel
+open ui/fileBrowser/PlacesThread
+
+func known(name: view String, folder: view String) ret KnownFolder {
+  ret KnownFolder { name: "{name}", icon: "mat:folder", folder: "{folder}" }
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  let file: String = "{temporary}/rae-places-{nowNs()}"
+  let written: Bool = Sys.writeFile(path: file, content: "a")
+  let answers: Channel(PlacesAnswer) = createChannel(PlacesAnswer)
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < 4, ++i {
+    let request: PlacesRequest = {
+      known: List(KnownFolder) {
+        known(name: "there", folder: temporary)
+        known(name: "a file", folder: file)
+        known(name: "missing", folder: "{file}/missing")
+      }
+      volumes: i is 0
+    }
+    tasks.add(value: spawn thread placesThread(answers: answers, request: own request))
+  }
+  var volumes: Int = 0
+  var left: Int = 4
+  loop var i: Int = 0, i < 20000 and left > 0, ++i {
+    if answers.pending() is 0 {
+      sleep(ms: 1)
+      continue
+    }
+    left = left - 1
+    let answer: PlacesAnswer = answers.receive()
+    if let first: view KnownFolder = answer.known.viewAt(index: 0) {
+      log("{answer.known.length} known: {first.name}")
+    }
+    volumes = volumes + answer.volumes.length
+  }
+  log("disks: {volumes > 0 or Target.os is Os.ios}")
+  loop var i: Int = 0, i < tasks.length, ++i {
+    if let task: view Task(Int) = tasks.viewAt(index: i) {
+      let count: Int = task.get()
+    }
+  }
+  answers.freeChannel()
+  let gone: Bool = Sys.delete(path: file)
+}

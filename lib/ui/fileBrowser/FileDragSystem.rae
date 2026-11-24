@@ -34,7 +34,9 @@ const dragOpenSeconds: Float64 = 0.7
 # Where a drag would be let go
 type FileDrop {
   browser: EntityId = noEntity()
-  # noEntity() on the trail
+  # the row of a sidebar
+  place: EntityId = noEntity()
+  # noEntity() on the trail and the sidebar
   column: EntityId = noEntity()
   # the folder's live row (noEntity() for the column's own folder), and its name
   row: EntityId = noEntity()
@@ -144,6 +146,13 @@ func fileDropOf(
     drop.folder = "{part.folder}"
     ret drop
   }
+  if componentHas(this: systems.placeRows, entityId: target) {
+    let placeRow: view PlaceRow = componentView(this: systems.placeRows, entityId: target)
+    drop.browser = placeRow.browser
+    drop.folder = "{placeRow.place.folder}"
+    drop.place = target
+    ret drop
+  }
   let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: target)
   drop.column = columnOfEvent(systems: systems, list: row.list)
   if isNone(this: drop.column) {
@@ -237,6 +246,7 @@ func showFileDrag(
 ) ret Bool {
   var row: EntityId = noEntity()
   var column: EntityId = noEntity()
+  var place: EntityId = noEntity()
   var opens: String = ""
   if dragRunning(world: world) {
     let drop: FileDrop = fileDropOf(
@@ -256,6 +266,7 @@ func showFileDrag(
       setDragEffect(world: world, effect: effect)
       if effect is not DragEffect.refused {
         row = drop.row
+        place = drop.place
         if isNone(this: row) {
           column = drop.column
         }
@@ -280,6 +291,7 @@ func showFileDrag(
     world: world
     row: row
     column: column
+    place: place
   )
 }
 
@@ -315,16 +327,29 @@ func stepDragOpen(
   )
 }
 
-# The folder row, or the column, that the drag would go into is marked
+# The folder row, the column or the place that the drag would go into is marked
 func markDropTarget(
   systems: mod FileBrowserSystems
   world: mod UiWorld
   row: view EntityId
   column: view EntityId
+  place: view EntityId
 ) ret Bool {
-  if systems.dropRow is row and systems.dropColumn is column {
+  if systems.dropRow is row and systems.dropColumn is column and systems.dropPlace is place {
     ret false
   }
+  markNode(
+    world: world
+    root: systems.dropPlace
+    nodeId: "FileSidebarDrop"
+    shown: false
+  )
+  markNode(
+    world: world
+    root: place
+    nodeId: "FileSidebarDrop"
+    shown: true
+  )
   markNode(
     world: world
     root: systems.dropRow
@@ -351,6 +376,7 @@ func markDropTarget(
   )
   systems.dropRow = row
   systems.dropColumn = column
+  systems.dropPlace = place
   ret true
 }
 

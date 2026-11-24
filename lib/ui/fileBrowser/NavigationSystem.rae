@@ -756,6 +756,51 @@ func openTrail(
   ret true
 }
 
+# Another root: its columns go, and the new root's is the first. False when the browser must stay in
+# its root.
+func setBrowserRoot(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  root: view String
+) ret Bool {
+  let folder: String = cleanPath(path: root)
+  if componentView(this: systems.browsers, entityId: browser).root is folder {
+    ret true
+  }
+  if browserOptions(systems: systems, browser: browser).allowAboveRoot is false {
+    ret false
+  }
+  var hadKeys: Bool = false
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    if componentView(this: systems.columns, entityId: column).body is world.keyFocus.entityId {
+      hadKeys = true
+    }
+  }
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: 0
+  )
+  componentMod(this: systems.browsers, entityId: browser).root = "{folder}"
+  let first: EntityId = openColumn(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+  if hadKeys and isNone(this: first) is false {
+    setKeyFocus(world: world, entityId: componentView(this: systems.columns, entityId: first).body)
+  }
+  ret true
+}
+
 # `name` is the open child of `column`, and its selection
 func selectChild(
   systems: mod FileBrowserSystems
@@ -835,6 +880,7 @@ func rememberColumn(
 
 # The browser is at another folder: one more to go back from
 func noteFolder(systems: mod FileBrowserSystems, browser: view EntityId, folder: view String) {
+  let root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
   let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
   let current: String = history.folders.copyAtFallback(index: history.at, fallback: "")
   if current is folder {
@@ -842,10 +888,13 @@ func noteFolder(systems: mod FileBrowserSystems, browser: view EntityId, folder:
   }
   loop history.folders.length > history.at + 1 {
     history.folders.removeAt(index: history.folders.length - 1)
+    history.roots.removeAt(index: history.roots.length - 1)
   }
   history.folders.add(value: "{folder}")
+  history.roots.add(value: own root)
   if history.folders.length > rememberedFolders {
     history.folders.removeAt(index: 0)
+    history.roots.removeAt(index: 0)
   }
   history.at = history.folders.length - 1
 }
@@ -865,6 +914,18 @@ func walkHistory(
   let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
   history.at = history.at + step
   let folder: String = history.folders.copyAtFallback(index: history.at, fallback: "")
+  let root: String = history.roots.copyAtFallback(index: history.at, fallback: "")
+  if browserOptions(systems: systems, browser: browser).allowAboveRoot {
+    # as it was shown then
+    let rooted: Bool = setBrowserRoot(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      root: root
+    )
+  }
   let opened: Bool = openTrail(
     systems: systems
     world: world

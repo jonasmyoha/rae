@@ -1,0 +1,40 @@
+# The thread that looks which of the sidebar's folders are there and what disks are mounted
+# (docs/file-browser-design.md §8): a disk may take its time. It knows no UI.
+import Files
+import ui/EventLoop
+open Channel
+
+# A known folder: what it is called, its icon, and where it is
+type KnownFolder {
+  name: String
+  icon: String
+  folder: String
+}
+
+type PlacesRequest {
+  known: List(KnownFolder) = {}
+  volumes: Bool = true
+}
+
+# The known folders that are there, and the mounted disks
+type PlacesAnswer {
+  known: List(KnownFolder) = {}
+  volumes: List(Volume) = {}
+}
+
+func placesThread(answers: own Channel(PlacesAnswer), request: own PlacesRequest) ret Int {
+  var answer: PlacesAnswer = {}
+  loop let place: view KnownFolder in request.known {
+    let status: PathStatus = Files.pathStatus(path: place.folder, follow: true)
+    if status.found and status.kind is EntryKind.folder {
+      answer.known.add(value: place)
+    }
+  }
+  if request.volumes {
+    answer.volumes = Files.mountedVolumes()
+  }
+  let count: Int = answer.known.length + answer.volumes.length
+  answers.channelSend(value: own answer)
+  EventLoop.wake()
+  ret count
+}

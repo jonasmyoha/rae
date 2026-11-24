@@ -39,7 +39,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `uiPageTransitions` | a page transition with a new world per screen, with a `SharedElement` bar that stays and a tile that morphs, through the real pipeline and `pageTransitionDraw`, and `RAE_ANIMATION_HOLD` pictures by `RAE_PAGE_KIND` and `RAE_PAGE_BACK`; `RAE_PAGE_DRAG` runs it from a held finger's share of the way (`docs/images/ui-pages/`) |
 | `perfHud` | the perf HUD (`ui/PerfHud`) over a frame loop that keeps the pool's workers busy: frames in its graph, a bar for the main thread and each worker, the save button's `.raeperf` reads back, and closing it ends its capture |
 | `osDrop` | SDL's drop events through the runtime to `Gpu2d.readOsDrop` (pushed by a C file beside it) |
-| `uiFileBrowser` | file browsers of lib/ui/fileBrowser: dark and light, wide and narrow, a preview, 100,000 entries with tints; a picture |
+| `uiFileBrowser` | file browsers of lib/ui/fileBrowser: dark and light, wide and narrow, a sidebar, a preview, 100,000 entries with tints; a picture |
 | `uiFileOperations` | what a file browser's operations show: a name edited, progress, a failure, the question of one that asks; a picture |
 | `uiPanes` | dividers and scrollbars: a pane sized by its divider, a list scrolled by its thumb, a strip with a track; a picture |
 | `uiTextField` | a focused text field wider than its place, scrolled to its caret with a part selected; a picture |

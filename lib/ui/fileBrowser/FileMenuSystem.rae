@@ -15,7 +15,9 @@ open ui/MenuSystem
 open ui/SceneInstance
 open ui/SelectionComponents
 open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/RenameSystem
@@ -186,6 +188,15 @@ func menuItemsOf(
       }
     )
   }
+  let folder: String = folderToPin(systems: systems, world: world, column: column)
+  if onRow and folder.length() > 0 {
+    addSeparator(items: items)
+    if isPinned(systems: systems, browser: browser, folder: folder) {
+      items.add(value: MenuItem { id: "unpin", text: "Remove from Sidebar" })
+    } else {
+      items.add(value: MenuItem { id: "pin", text: "Keep in Sidebar" })
+    }
+  }
   addAppItems(
     systems: systems
     world: world
@@ -194,6 +205,31 @@ func menuItemsOf(
     items: items
   )
   ret items
+}
+
+# The one folder selected, in a browser with a sidebar that has not got it already ("" none)
+func folderToPin(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  column: view EntityId
+) ret String {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  let name: String = names.copyAtFallback(index: 0, fallback: "")
+  if componentHas(this: systems.sidebars, entityId: browser) is false or names.length is not 1 {
+    ret ""
+  }
+  if entryOpensAsFolder(systems: systems, column: column, name: name) is false {
+    ret ""
+  }
+  let folder: String = pathIn(folder: folderOfColumn(systems: systems, column: column), name: name)
+  if isKnownFolder(systems: systems, folder: folder) {
+    ret ""
+  }
+  ret folder
 }
 
 # The app's items that fit what is selected
@@ -293,6 +329,13 @@ func chooseMenuItem(
     pasteInto(systems: systems, column: column, asMove: itemId is "pasteMove")
   } else if itemId is "trash" {
     trashSelection(systems: systems, world: world, column: column)
+  } else if itemId is "pin" or itemId is "unpin" {
+    pinFolder(
+      systems: systems
+      browser: componentView(this: systems.columns, entityId: column).browser
+      folder: folderToPin(systems: systems, world: world, column: column)
+      pinned: itemId is "pin"
+    )
   } else if itemId.startsWith(prefix: appItemPrefix) {
     let event: BrowserMenuChosen = {
       browser: componentView(this: systems.columns, entityId: column).browser

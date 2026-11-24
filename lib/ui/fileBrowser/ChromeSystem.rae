@@ -22,6 +22,7 @@ open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/SidebarSystem
 
 # A folder listed sooner shows no spinner
 const spinnerSeconds: Float64 = 0.15
@@ -57,6 +58,15 @@ func fileChromeSystem(
       scenes: scenes
       browser: browser
     ) or changed
+    if componentHas(this: systems.sidebars, entityId: browser) {
+      changed = showSidebar(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: browser
+      ) or changed
+    }
     changed = revealColumn(
       systems: systems
       world: world

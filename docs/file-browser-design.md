@@ -4,7 +4,7 @@ Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
 scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, 7b, its
-operations, and 7c, drags: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
+operations, 7c, drags, and of 7d the sidebar: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
 is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
@@ -264,7 +264,7 @@ component changes (case 1596). An app that reports unknown components before its
 `order` (in a scene `orderBy`, `descending`, `foldersFirst`), `showHidden`, `extensions`, `selection`
 (`none`, `single`, `multiple`), `returnKey`, `allowAboveRoot`, `showBar`, `showPreview`,
 `openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9), `allowOperations` (false: look
-and pick only). To come: `showSidebar` and `mode` (§8; 7d).
+and pick only), `showSidebar`, `sidebarWidth`, `pinned` (§18). To come: `mode` (§8).
 
 ### 4.2 Events
 
@@ -568,4 +568,19 @@ Step 7c:
   change anything gives copies and takes nothing.
 - A folder under a held drag opens after 0.7 s and is then selected; a canceled drag does not go back. What
   was dropped is selected only in the deepest column, so a column beyond it stays open.
-- Not by a finger yet (7d).
+- Not by a finger yet.
+
+Step 7d, the sidebar (search, pick and save, and touch are tasks of their own):
+
+- `SidebarSystem` (rows, clicks, menus, width) over `BrowserPlaces` (what is in it). Three sections, each
+  folder once: Favorites (the user's folders that are there, then the pinned ones), Recent (the last five
+  folders a file was opened in) and Disks. The row of the browser's folder is marked.
+- Which of the folders are there and what disks are mounted is looked at by `PlacesThread` (no UI, under
+  ThreadSanitizer, case 1626) when the first sidebar opens and when the window gets the focus. A program may
+  have its own folders (`setKnownFolders`) and no disks (`places.showVolumes`).
+- In a browser that may go anywhere (`allowAboveRoot`) a place becomes its root, so it is the first column, and
+  back and forward bring the root of then (`BrowserHistory.roots`); `setBrowserRoot` does it for a program. One
+  that is held to its root shows only the places inside it, and the columns lead there.
+- Pinned by the menu of a folder's row ("Keep in Sidebar") or of a recent place; a rename of ours is followed.
+  A row takes a drop. `fileBrowserState` keeps the root, the width, the pinned and the recent folders.
+- Scenes: `fileSidebarRow`, `fileSidebarTitle`. Case 1625; the picture is `checks/uiFileBrowser`.

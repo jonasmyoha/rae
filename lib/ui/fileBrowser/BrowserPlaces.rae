@@ -1,0 +1,311 @@
+# The folders of a browser's sidebar (docs/file-browser-design.md §8): the known ones and the disks,
+# which every browser shares and a thread looks at, and the pinned and recent ones of its own.
+import Files
+import Filesystem
+open Channel
+open ecs/ComponentTable
+open ecs/Entity
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PlacesThread
+
+# Folders a sidebar shows as recent
+const recentFolders: Int = 5
+
+# ----- known folders and disks, looked at on a thread --------------------------------------------
+func addKnown(
+  known: mod List(KnownFolder)
+  name: view String
+  icon: view String
+  folder: view String
+) {
+  if folder.length() > 0 {
+    known.add(
+      value: KnownFolder { name: "{name}", icon: "{icon}", folder: cleanPath(path: folder) }
+    )
+  }
+}
+
+# The user's own folders, as the OS has them
+func userFolders() ret List(KnownFolder) {
+  var known: List(KnownFolder) = {}
+  addKnown(
+    known: known
+    name: "Home"
+    icon: "mat:home"
+    folder: Filesystem.homeDir()
+  )
+  addKnown(
+    known: known
+    name: "Desktop"
+    icon: "mat:desktop_windows"
+    folder: Filesystem.desktopDir()
+  )
+  addKnown(
+    known: known
+    name: "Documents"
+    icon: "mat:description"
+    folder: Filesystem.documentsDir()
+  )
+  addKnown(
+    known: known
+    name: "Downloads"
+    icon: "mat:download"
+    folder: Filesystem.downloadsDir()
+  )
+  addKnown(
+    known: known
+    name: "Movies"
+    icon: "mat:movie"
+    folder: Filesystem.moviesDir()
+  )
+  addKnown(
+    known: known
+    name: "Music"
+    icon: "mat:music_note"
+    folder: Filesystem.musicDir()
+  )
+  addKnown(
+    known: known
+    name: "Pictures"
+    icon: "mat:image"
+    folder: Filesystem.picturesDir()
+  )
+  ret known
+}
+
+func takePlaces(systems: mod FileBrowserSystems) ret Bool {
+  var changed: Bool = false
+  loop systems.places.answers.pending() > 0 {
+    let answer: PlacesAnswer = systems.places.answers.receive()
+    # its thread is at its end, so dropping its task does not wait
+    systems.places.jobs.clear()
+    systems.places.known = answer.known
+    systems.places.volumes = answer.volumes
+    systems.places.stamp = systems.places.stamp + 1
+    changed = true
+  }
+  ret changed
+}
+
+# Look when the first sidebar is there, and when the window gets the focus again (a disk may have
+# come)
+func stepPlaces(systems: mod FileBrowserSystems, windowFocused: view Bool) ret Bool {
+  let changed: Bool = takePlaces(systems: systems)
+  let gained: Bool = windowFocused and systems.places.focused is false
+  systems.places.focused = windowFocused
+  if componentCount(this: systems.sidebars) is 0 or systems.places.jobs.length > 0 {
+    ret changed
+  }
+  if systems.places.asked and gained is false {
+    ret changed
+  }
+  if systems.places.asked is false and systems.places.ownFolders is false {
+    systems.places.candidates = userFolders()
+  }
+  systems.places.asked = true
+  let request: PlacesRequest = {
+    known: systems.places.candidates
+    volumes: systems.places.showVolumes
+  }
+  when Target.isNative {
+    let task: Task(Int) = spawn thread placesThread(
+      answers: systems.places.answers
+      request: own request
+    )
+    systems.places.jobs.add(value: FolderJob { generation: 0, task: own task })
+  } else {
+    let count: Int = placesThread(answers: systems.places.answers, request: own request)
+  }
+  ret changed
+}
+
+# Wait for the look that runs; false when a disk has not answered in `waitMs`
+func stopPlaces(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  loop var i: Int = 0, i < waitMs and systems.places.jobs.length > 0, ++i {
+    let taken: Bool = takePlaces(systems: systems)
+    if systems.places.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.places.jobs.length > 0 {
+    ret false
+  }
+  systems.places.answers.freeChannel()
+  ret true
+}
+
+# The folders a program wants in place of the user's own
+func setKnownFolders(systems: mod FileBrowserSystems, known: own List(KnownFolder)) {
+  systems.places.candidates = own known
+  systems.places.ownFolders = true
+  systems.places.asked = false
+}
+
+# ----- pinned and recent -----------------------------------------------------------------------
+# Is it one of the known folders shown?
+func isKnownFolder(systems: view FileBrowserSystems, folder: view String) ret Bool {
+  loop let known: view KnownFolder in systems.places.known {
+    if known.folder is folder {
+      ret true
+    }
+  }
+  ret false
+}
+
+func isPinned(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+) ret Bool {
+  if componentHas(this: systems.sidebars, entityId: browser) is false {
+    ret false
+  }
+  let sidebar: view BrowserSidebar = componentView(this: systems.sidebars, entityId: browser)
+  ret sidebar.pinned.contains(value: folder)
+}
+
+# Keep a folder in the sidebar, or not
+func pinFolder(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+  pinned: view Bool
+) {
+  if componentHas(this: systems.sidebars, entityId: browser) is false {
+    ret
+  }
+  let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+  if let at: Int = sidebar.pinned.indexOf(value: folder) {
+    if pinned is false {
+      sidebar.pinned.removeAt(index: at)
+    }
+  } else if pinned {
+    sidebar.pinned.add(value: "{folder}")
+  }
+  sidebar.stale = true
+}
+
+# A file of `folder` was opened: the folder is the first of the recent ones
+func noteRecent(systems: mod FileBrowserSystems, browser: view EntityId, folder: view String) {
+  if componentHas(this: systems.sidebars, entityId: browser) is false {
+    ret
+  }
+  let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+  var recent: List(String) = { "{folder}" }
+  loop let before: view String in sidebar.recent {
+    if before is not folder and recent.length < recentFolders {
+      recent.add(value: "{before}")
+    }
+  }
+  sidebar.recent = own recent
+  sidebar.stale = true
+}
+
+func forgetRecent(systems: mod FileBrowserSystems, browser: view EntityId, folder: view String) {
+  let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+  if let at: Int = sidebar.recent.indexOf(value: folder) {
+    sidebar.recent.removeAt(index: at)
+  }
+  sidebar.stale = true
+}
+
+# A folder of ours has another name: the sidebars know it by the new one
+func followPlaces(systems: mod FileBrowserSystems, from: view String, to: view String) {
+  loop var i: Int = 0, i < componentCount(this: systems.sidebars), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.sidebars, i: i)
+    let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+    sidebar.pinned = movedPaths(paths: sidebar.pinned, from: from, to: to)
+    sidebar.recent = movedPaths(paths: sidebar.recent, from: from, to: to)
+    sidebar.stale = true
+  }
+}
+
+func movedPaths(paths: view List(String), from: view String, to: view String) ret List(String) {
+  var moved: List(String) = {}
+  loop let path: view String in paths {
+    if pathInside(folder: from, path: path) {
+      moved.add(value: movedPath(path: path, from: from, to: to))
+    } else {
+      moved.add(value: "{path}")
+    }
+  }
+  ret moved
+}
+
+# ----- what a sidebar shows
+# --------------------------------------------------------------------------
+func hasPlace(places: view List(SidebarPlace), folder: view String) ret Bool {
+  loop let place: view SidebarPlace in places {
+    if place.folder is folder {
+      ret true
+    }
+  }
+  ret false
+}
+
+# The places of a browser's sidebar: those it may go to, each folder once
+func sidebarPlaces(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+) ret List(SidebarPlace) {
+  var places: List(SidebarPlace) = {}
+  if componentHas(this: systems.sidebars, entityId: browser) is false {
+    ret places
+  }
+  var wanted: List(SidebarPlace) = {}
+  loop let known: view KnownFolder in systems.places.known {
+    wanted.add(
+      value: SidebarPlace {
+        section: SidebarSection.favorites
+        title: "{known.name}"
+        icon: "{known.icon}"
+        folder: "{known.folder}"
+      }
+    )
+  }
+  let sidebar: view BrowserSidebar = componentView(this: systems.sidebars, entityId: browser)
+  loop let folder: view String in sidebar.pinned {
+    wanted.add(value: SidebarPlace {
+      section: SidebarSection.favorites
+      title: lastPart(path: folder)
+      icon: "mat:folder"
+      folder: "{folder}"
+      pinned: true
+    })
+  }
+  loop let folder: view String in sidebar.recent {
+    wanted.add(
+      value: SidebarPlace {
+        section: SidebarSection.recent
+        title: lastPart(path: folder)
+        icon: "mat:history"
+        folder: "{folder}"
+      }
+    )
+  }
+  loop let volume: view Volume in systems.places.volumes {
+    var icon: String = "mat:storage"
+    if volume.removable {
+      icon = "mat:usb"
+    }
+    wanted.add(
+      value: SidebarPlace {
+        section: SidebarSection.disks
+        title: "{volume.name}"
+        icon: own icon
+        folder: "{volume.path}"
+      }
+    )
+  }
+  let anywhere: Bool = browserOptions(systems: systems, browser: browser).allowAboveRoot
+  let root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
+  loop let place: view SidebarPlace in wanted {
+    let allowed: Bool = anywhere or pathInside(folder: root, path: place.folder)
+    if allowed and hasPlace(places: places, folder: place.folder) is false {
+      places.add(value: place)
+    }
+  }
+  ret places
+}

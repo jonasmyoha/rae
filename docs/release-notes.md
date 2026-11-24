@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.69, 2026-11-24: the file browser's sidebar
+
+- `showSidebar` (with `sidebarWidth` and `pinned`) gives a file browser a sidebar: the user's folders, pinned and
+  recent ones and the disks, as far as the browser may go to them. Where it may go anywhere a place becomes its
+  root (`setBrowserRoot`), and back and forward bring back the root of then (docs/file-browser-design.md section
+  18).
+- A folder is kept in it by its menu; a row takes a drop; `FileBrowserState` has its `root`, `sidebarWidth`,
+  `pinned` and `recent`. A program's own folders: `setKnownFolders`.
+- Cases 1625 and 1626 (the latter under ThreadSanitizer).
+
 ## 0.4.68, 2026-11-24: values in literals are checked, and `when` beside a function's name
 
 - Breaking: the value of a struct literal's field, and an element of a list literal, is checked against its type

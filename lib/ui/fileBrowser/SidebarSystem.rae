@@ -1,0 +1,384 @@
+# The sidebar of a browser (docs/file-browser-design.md §8): its rows, the clicks on them, their
+# menu
+# and its width.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/DividerSystem
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/MenuComponents
+open ui/MenuSystem
+open ui/PaneComponents
+open ui/SceneInstance
+open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/KeysSystem
+open ui/fileBrowser/NavigationSystem
+
+const placeMenuId: String = "fileBrowser.place"
+
+# A new browser's sidebar, when its options and its scene have one
+func openSidebar(systems: mod FileBrowserSystems, world: mod UiWorld, browser: view EntityId) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let scene: EntityId = componentView(this: systems.browsers, entityId: browser).scene
+  let pane: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserSidebar")
+  let divider: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserSidebarDivider")
+  showNode(world: world, entityId: pane, shown: options.showSidebar)
+  showNode(world: world, entityId: divider, shown: options.showSidebar)
+  if isNone(this: pane) or options.showSidebar is false {
+    ret
+  }
+  let sidebar: BrowserSidebar = {
+    pane: pane
+    divider: divider
+    list: nodeIn(world: world, root: scene, nodeId: "FileBrowserSidebarList")
+    width: options.sidebarWidth
+    pinned: options.pinned
+  }
+  componentSet(this: systems.sidebars, entityId: browser, data: own sidebar)
+  setSidebarWidth(
+    systems: systems
+    world: world
+    browser: browser
+    width: options.sidebarWidth
+  )
+}
+
+func setSidebarWidth(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+  width: view Float
+) {
+  if componentHas(this: systems.sidebars, entityId: browser) is false or width <= 0.0 {
+    ret
+  }
+  let sidebar: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+  sidebar.width = width
+  let pane: EntityId = sidebar.pane
+  let divider: EntityId = sidebar.divider
+  if componentHas(this: world.rects, entityId: pane) {
+    componentMod(this: world.rects, entityId: pane).size.x = width
+  }
+  if componentHas(this: world.dividers, entityId: divider) {
+    componentMod(this: world.dividers, entityId: divider).size = width
+  }
+}
+
+# Go to a place: where a browser may go anywhere it is the folder of the first column, else the
+# columns lead to it from the root
+func openPlace(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  folder: view String
+) ret Bool {
+  var opened: Bool = false
+  if browserOptions(systems: systems, browser: browser).allowAboveRoot {
+    opened = setBrowserRoot(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      root: folder
+    )
+  }
+  opened = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  ) or opened
+  focusDeepest(systems: systems, world: world, browser: browser)
+  ret opened
+}
+
+# One frame: the places looked at, the clicks, the menu and the divider; true when something changed
+func fileSidebarSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  input: view UiInput
+  windowFocused: view Bool
+) ret Bool {
+  var changed: Bool = stepPlaces(systems: systems, windowFocused: windowFocused)
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if let row: PlaceRow = componentCopy(this: systems.placeRows, entityId: action.entityId) {
+      if action.actionId is "fileBrowser.placeMenu" {
+        openPlaceMenu(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          input: input
+          node: action.entityId
+        )
+      } else {
+        let opened: Bool = openPlace(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          browser: row.browser
+          folder: row.place.folder
+        )
+      }
+      changed = true
+    }
+  }
+  loop var i: Int = 0, i < eventCount(MenuEvent, this: world.menuEvents), ++i {
+    let event: MenuEvent = eventAt(MenuEvent, this: world.menuEvents, i: i)
+    if event.kind is MenuEventKind.chosen and event.menuId is placeMenuId {
+      changed = choosePlaceItem(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        node: event.owner
+        itemId: event.itemId
+      ) or changed
+    }
+  }
+  loop var i: Int = 0, i < eventCount(DividerEvent, this: world.dividerEvents), ++i {
+    let event: DividerEvent = eventAt(DividerEvent, this: world.dividerEvents, i: i)
+    changed = takeSidebarWidth(systems: systems, world: world, event: event) or changed
+  }
+  ret changed
+}
+
+# A sidebar's divider was moved; a double click gives it the width of the options again
+func takeSidebarWidth(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  event: view DividerEvent
+) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: systems.sidebars), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.sidebars, i: i)
+    if componentView(this: systems.sidebars, entityId: browser).divider is event.divider {
+      var width: Float = event.size
+      if event.kind is DividerEventKind.doubleClicked {
+        width = browserOptions(systems: systems, browser: browser).sidebarWidth
+      }
+      setSidebarWidth(
+        systems: systems
+        world: world
+        browser: browser
+        width: width
+      )
+      ret true
+    }
+  }
+  ret false
+}
+
+# ----- the menu of a place ---------------------------------------------------------------------
+func openPlaceMenu(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  node: view EntityId
+) {
+  let place: SidebarPlace = placeOfRow(systems: systems, node: node)
+  var items: List(MenuItem) = { MenuItem { id: "open", text: "Open" } }
+  if place.pinned {
+    items.add(value: MenuItem { separator: true })
+    items.add(value: MenuItem { id: "unpin", text: "Remove from Sidebar" })
+  } else if place.section is SidebarSection.recent {
+    items.add(value: MenuItem { separator: true })
+    items.add(value: MenuItem { id: "pin", text: "Keep in Sidebar" })
+    items.add(value: MenuItem { id: "forget", text: "Remove from Recent" })
+  }
+  openMenu(
+    world: world
+    uiSystems: uiSystems
+    request: MenuRequest {
+      id: "{placeMenuId}"
+      owner: node
+      items: own items
+      x: input.pointer.x
+      y: input.pointer.y
+      touch: input.pointer.kind is InputKind.touch
+    }
+  )
+}
+
+func placeOfRow(systems: view FileBrowserSystems, node: view EntityId) ret SidebarPlace {
+  if let row: PlaceRow = componentCopy(this: systems.placeRows, entityId: node) {
+    ret row.place
+  }
+  ret SidebarPlace {}
+}
+
+func choosePlaceItem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  node: view EntityId
+  itemId: view String
+) ret Bool {
+  if componentHas(this: systems.placeRows, entityId: node) is false {
+    ret false
+  }
+  let browser: EntityId = componentView(this: systems.placeRows, entityId: node).browser
+  let folder: String = "{componentView(this: systems.placeRows, entityId: node).place.folder}"
+  if itemId is "open" {
+    let opened: Bool = openPlace(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      folder: folder
+    )
+  } else if itemId is "pin" or itemId is "unpin" {
+    pinFolder(
+      systems: systems
+      browser: browser
+      folder: folder
+      pinned: itemId is "pin"
+    )
+  } else if itemId is "forget" {
+    forgetRecent(systems: systems, browser: browser, folder: folder)
+  }
+  ret true
+}
+
+# ----- the rows --------------------------------------------------------------------------------
+func sectionTitle(section: copy SidebarSection) ret String {
+  match section {
+    case SidebarSection.favorites {
+      ret "Favorites"
+    }
+    case SidebarSection.recent {
+      ret "Recent"
+    }
+    case SidebarSection.disks {
+      ret "Disks"
+    }
+  }
+}
+
+# The rows made anew when the places changed, and the one of the browser's folder marked
+func showSidebar(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) ret Bool {
+  let folder: String = browserFolder(systems: systems, browser: browser)
+  let root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
+  let sidebar: view BrowserSidebar = componentView(this: systems.sidebars, entityId: browser)
+  let fill: Bool = sidebar.stale or sidebar.placesSeen is not systems.places.stamp or sidebar.rootSeen is not root
+  if fill is false and sidebar.marked is folder {
+    ret false
+  }
+  if fill {
+    fillSidebar(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      places: sidebarPlaces(systems: systems, browser: browser)
+    )
+  }
+  loop var i: Int = 0, i < componentCount(this: systems.placeRows), ++i {
+    let node: EntityId = componentEntityAt(this: systems.placeRows, i: i)
+    let row: view PlaceRow = componentView(this: systems.placeRows, entityId: node)
+    let marked: Bool = row.place.folder is folder
+    if row.browser is browser {
+      showNode(
+        world: world
+        entityId: nodeIn(world: world, root: node, nodeId: "FileSidebarHere")
+        shown: marked
+      )
+    }
+  }
+  let shown: mod BrowserSidebar = componentMod(this: systems.sidebars, entityId: browser)
+  shown.stale = false
+  shown.placesSeen = systems.places.stamp
+  shown.rootSeen = own root
+  shown.marked = own folder
+  ret true
+}
+
+func fillSidebar(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  places: view List(SidebarPlace)
+) {
+  let list: EntityId = componentView(this: systems.sidebars, entityId: browser).list
+  var old: List(EntityId) = {}
+  if componentHas(this: world.childrens, entityId: list) {
+    let children: view Children = componentView(this: world.childrens, entityId: list)
+    old = children.ids
+  }
+  loop let node: view EntityId in old {
+    componentRemove(this: systems.placeRows, entityId: node)
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+  loop var i: Int = 0, i < places.length, ++i {
+    if let place: view SidebarPlace = places.viewAt(index: i) {
+      var first: Bool = true
+      if let before: view SidebarPlace = places.viewAt(index: i - 1) {
+        first = before.section is not place.section
+      }
+      if first {
+        let title: EntityId = mountFileScene(
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          key: "fileSidebarTitle"
+          parent: list
+        )
+        setNodeText(
+          world: world
+          entityId: nodeIn(world: world, root: title, nodeId: "FileSidebarTitleText")
+          text: sectionTitle(section: place.section)
+        )
+      }
+      let node: EntityId = mountFileScene(
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        key: "fileSidebarRow"
+        parent: list
+      )
+      if isNone(this: node) {
+        ret
+      }
+      setNodeText(
+        world: world
+        entityId: nodeIn(world: world, root: node, nodeId: "FileSidebarName")
+        text: place.title
+      )
+      let icon: EntityId = nodeIn(world: world, root: node, nodeId: "FileSidebarIcon")
+      if componentHas(this: world.sprites, entityId: icon) {
+        componentMod(this: world.sprites, entityId: icon).textureKey = "{place.icon}"
+      }
+      componentSet(
+        this: systems.placeRows
+        entityId: node
+        data: PlaceRow { browser: browser, place: place }
+      )
+    }
+  }
+}

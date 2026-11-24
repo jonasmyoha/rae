@@ -1,6 +1,7 @@
 # Four file browsers (lib/ui/fileBrowser) in two worlds, painted: dark above, light below; a wide
 # one
-# with a preview (above), one scrolled far into 100,000 entries with tints (below), and a narrow
+# with a sidebar and a preview (above), one scrolled far into 100,000 entries with tints (below),
+# and a narrow
 # one of
 # each. The entries are the program's own, so that the picture is the same everywhere.
 #
@@ -32,9 +33,11 @@ open ui/ScrollRootSystem
 open ui/SelectionComponents
 open ui/Theme
 open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowser
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PlacesThread
 
 const designW: Int = 1100
 
@@ -127,7 +130,13 @@ func openAt(
     scenes: scenes
     host: nodeNamed(world: world, nodeId: node)
     root: "/Projects"
-    options: BrowserOptions { source: BrowserSource.app, openCountTint: true }
+    options: BrowserOptions {
+      source: BrowserSource.app
+      openCountTint: true
+      showSidebar: node is "Wide"
+      allowAboveRoot: true
+      pinned: List(String) { "/Projects/Film", "/Projects/A folder with quite a long name" }
+    }
   )
   let restored: Bool = restoreFileBrowser(
     systems: files
@@ -138,6 +147,33 @@ func openAt(
     state: FileBrowserState { folder: "{folder}", selected: own names }
   )
   ret browser
+}
+
+# The places of a sidebar, the same on every machine: not looked for
+func seedPlaces(files: mod FileBrowserSystems) {
+  files.places.asked = true
+  files.places.focused = true
+  files.places.known = List(KnownFolder) {
+    KnownFolder { name: "Home", icon: "mat:home", folder: "/Home" }
+    KnownFolder { name: "Documents", icon: "mat:description", folder: "/Home/Documents" }
+    KnownFolder { name: "Music", icon: "mat:music_note", folder: "/Home/Music" }
+  }
+  files.places.volumes = List(Volume) {
+    Volume {
+      name: "Disk"
+      path: "/"
+      readOnly: false
+      removable: false
+      freeBytes: 0
+    }
+    Volume {
+      name: "Stick"
+      path: "/Stick"
+      readOnly: false
+      removable: true
+      freeBytes: 0
+    }
+  }
 }
 
 # One world with its two browsers
@@ -169,6 +205,7 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     wide: noEntity()
     large: large
   }
+  seedPlaces(files: half.files)
   seedWorldTheme(world: half.world, res: half.resources)
   half.world.layoutW = designW.toFloat()
   half.world.layoutH = designH.toFloat()
@@ -199,6 +236,8 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     folder: folder
     names: own names
   )
+  noteRecent(systems: half.files, browser: half.wide, folder: "/Projects/Photos")
+  noteRecent(systems: half.files, browser: half.wide, folder: folder)
   let narrow: EntityId = openAt(
     files: half.files
     world: half.world

@@ -9,6 +9,7 @@ open ui/ListSelectionSystem
 open ui/SceneInstance
 open ui/SelectionComponents
 open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
@@ -147,6 +148,7 @@ func activateSelection(
   loop let name: view String in names {
     event.paths.add(value: pathIn(folder: folder, name: name))
   }
+  noteRecent(systems: systems, browser: event.browser, folder: folder)
   eventSend(this: systems.fileActivated, value: own event)
 }
 

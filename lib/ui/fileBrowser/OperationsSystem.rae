@@ -12,6 +12,7 @@ open ui/KeyFocusSystem
 open ui/ListSelectionSystem
 open ui/SelectionComponents
 open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
@@ -748,8 +749,13 @@ func followRename(
       if pathInside(folder: from, path: folder) {
         history.folders.set(index: at, value: movedPath(path: folder, from: from, to: to))
       }
+      let root: String = history.roots.copyAtFallback(index: at, fallback: "")
+      if pathInside(folder: from, path: root) {
+        history.roots.set(index: at, value: movedPath(path: root, from: from, to: to))
+      }
     }
   }
+  followPlaces(systems: systems, from: from, to: to)
 }
 
 func movedPath(path: view String, from: view String, to: view String) ret String {

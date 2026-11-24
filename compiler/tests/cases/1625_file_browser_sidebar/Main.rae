@@ -1,0 +1,363 @@
+# The sidebar of a file browser by scripted input: the known folders that are there, pinned and
+# recent ones, a place as the new root and back again, what a browser held to its root shows, the
+# menus, a drop, a folder renamed, its width, and what is kept of it.
+import Files
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ui/DividerSystem
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/Transform
+open ui/fileBrowser/BrowserPlaces
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+
+func shown(app: mod App, step: view String) {
+  show(app: app, step: step)
+  log("   sidebar: {sidebarText(app: app, browser: app.left)}")
+}
+
+func goTo(app: mod App, title: view String) {
+  clickNode(app: app, entityId: placeRow(app: app, browser: app.left, title: title))
+}
+
+func menuOf(app: mod App, title: view String) {
+  let at: WorldRect = centerOf(
+    app: app
+    entityId: placeRow(app: app, browser: app.left, title: title)
+  )
+  secondaryAt(app: app, x: at.x, y: at.y)
+  log("menu of {title}:{menuText(app: app)}")
+}
+
+func openFileOf(app: mod App, place: view Int, name: view String) {
+  pick(
+    app: app
+    browser: app.left
+    place: place
+    name: name
+  )
+  listKey(app: app, keys: ListSelectionKeys {})
+  press(app: app, keys: BrowserKeys { open: true })
+}
+
+func walking(app: mod App) {
+  shown(app: app, step: "opened")
+  goTo(app: app, title: "Documents")
+  shown(app: app, step: "to Documents")
+  goTo(app: app, title: "Film")
+  shown(app: app, step: "to Film, pinned")
+  press(app: app, keys: BrowserKeys { back: true })
+  shown(app: app, step: "back")
+  press(app: app, keys: BrowserKeys { back: true })
+  shown(app: app, step: "back to where it was opened")
+  press(app: app, keys: BrowserKeys { forward: true })
+  shown(app: app, step: "forward")
+  # a place it is in already, and below it
+  goTo(app: app, title: "Home")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Documents"
+  )
+  shown(app: app, step: "Home, and into Documents from it")
+  goTo(app: app, title: "Home")
+  shown(app: app, step: "Home again")
+}
+
+func recent(app: mod App) {
+  goTo(app: app, title: "Film")
+  openFileOf(app: app, place: 0, name: "cut.txt")
+  shown(app: app, step: "a file of a pinned folder was opened")
+  goTo(app: app, title: "Documents")
+  openFileOf(app: app, place: 0, name: "letter.txt")
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/other/Box"
+  )
+  settle(app: app)
+  openFileOf(app: app, place: 2, name: "there.txt")
+  shown(app: app, step: "and one of another folder")
+  menuOf(app: app, title: "Box")
+  chooseItem(app: app, id: "pin")
+  shown(app: app, step: "kept")
+  menuOf(app: app, title: "Box")
+  chooseItem(app: app, id: "unpin")
+  menuOf(app: app, title: "Box")
+  chooseItem(app: app, id: "forget")
+  shown(app: app, step: "not kept, and not recent")
+  menuOf(app: app, title: "Home")
+  chooseItem(app: app, id: "open")
+  shown(app: app, step: "Home by its menu")
+}
+
+func pinning(app: mod App) {
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Documents"
+  )
+  let row: Float = rowY(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Documents"
+  )
+  secondaryAt(app: app, x: rowX(app: app, browser: app.left, place: 0), y: row)
+  log("menu of a row:{menuText(app: app)}")
+  chooseItem(app: app, id: "pin")
+  shown(app: app, step: "a known folder is there once")
+}
+
+func dropping(app: mod App) {
+  goTo(app: app, title: "Documents")
+  let target: WorldRect = centerOf(
+    app: app
+    entityId: placeRow(app: app, browser: app.left, title: "Film")
+  )
+  lift(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "letter.txt"
+    )
+  )
+  carry(app: app, x: target.x, y: target.y)
+  log(
+    "over Film: {dragText(app: app)}, a place marked {isNone(this: app.files.dropPlace) is false}"
+  )
+  letGo(app: app)
+  shown(
+    app: app
+    step: "dropped on Film, a place marked {isNone(this: app.files.dropPlace) is false}"
+  )
+  log("   disk: {diskText(folder: "{app.base}/root")}")
+  # where it is already
+  lift(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "notes.txt"
+    )
+  )
+  let there: WorldRect = centerOf(
+    app: app
+    entityId: placeRow(app: app, browser: app.left, title: "Documents")
+  )
+  carry(app: app, x: there.x, y: there.y)
+  log("over its own folder: {dragText(app: app)}")
+  letGo(app: app)
+}
+
+func renaming(app: mod App) {
+  let opened: Bool = openPlaceOf(app: app, folder: "{app.base}/root")
+  let column: EntityId = columnAt(systems: app.files, browser: app.left, place: 0)
+  renameIn(
+    systems: app.files
+    column: column
+    name: "Film"
+    newName: "Movie"
+  )
+  settle(app: app)
+  shown(app: app, step: "a pinned folder renamed")
+}
+
+func openPlaceOf(app: mod App, folder: view String) ret Bool {
+  let opened: Bool = setBrowserRoot(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    root: folder
+  )
+  settle(app: app)
+  ret opened
+}
+
+func widthOf(app: view App) ret Float {
+  let pane: EntityId = componentView(this: app.files.sidebars, entityId: app.left).pane
+  ret boxOf(app: app, entityId: pane).w
+}
+
+func keeping(app: mod App) {
+  let divider: EntityId = componentView(this: app.files.sidebars, entityId: app.left).divider
+  let box: WorldRect = boxOf(app: app, entityId: divider)
+  log("width {widthOf(app: app)}")
+  pointTo(
+    app: app
+    x: box.x
+    y: box.y + 100.0
+    down: false
+  )
+  pointTo(
+    app: app
+    x: box.x
+    y: box.y + 100.0
+    down: true
+  )
+  pointTo(
+    app: app
+    x: box.x + 30.0
+    y: box.y + 100.0
+    down: true
+  )
+  pointTo(
+    app: app
+    x: box.x + 30.0
+    y: box.y + 100.0
+    down: false
+  )
+  settle(app: app)
+  log("divider moved: width {widthOf(app: app)}")
+  let state: FileBrowserState = fileBrowserState(
+    systems: app.files
+    world: app.world
+    browser: app.left
+  )
+  log(
+    "kept: root {Files.nameOf(path: state.root)}, folder {Files.nameOf(path: state.folder)}, width {state.sidebarWidth}, {state.pinned.length} pinned, {state.recent.length} recent"
+  )
+  closeFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: app.left
+  )
+  log(
+    "closed: {componentCount(this: app.files.sidebars)} sidebars, {componentCount(
+      this: app.files.placeRows
+    )} rows"
+  )
+  app.left = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Left")
+    root: "{app.base}/home"
+    options: BrowserOptions { showPreview: false, showSidebar: true, allowAboveRoot: true }
+  )
+  let restored: Bool = restoreFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    state: state
+  )
+  settle(app: app)
+  shown(app: app, step: "opened again, width {widthOf(app: app)}")
+}
+
+# A browser that may not leave its root, and one without a sidebar
+func held(app: mod App) {
+  app.right = openFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    host: nodeOf(world: app.world, nodeId: "Right")
+    root: "{app.base}/home"
+    options: BrowserOptions {
+      showPreview: false
+      showSidebar: true
+      sidebarWidth: 120.0
+      pinned: List(String) { "{app.base}/home/Documents/Old", "{app.base}/root" }
+    }
+  )
+  settle(app: app)
+  log("held to its root: {sidebarText(app: app, browser: app.right)}")
+  clickNode(app: app, entityId: placeRow(app: app, browser: app.right, title: "Old"))
+  let columns: List(EntityId) = browserColumns(systems: app.files, browser: app.right)
+  log(
+    "Old: {columns.length} columns, at {Files.nameOf(
+      path: browserFolder(systems: app.files, browser: app.right)
+    )}, {sidebarText(app: app, browser: app.right)}"
+  )
+  log("another root: {setBrowserRoot(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.right
+    root: "{app.base}/root"
+  )}")
+  let bare: Bool = restoreFileBrowser(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.right
+    state: FileBrowserState { folder: "{app.base}/home" }
+  )
+  settle(app: app)
+  log("a state without a sidebar: {sidebarText(app: app, browser: app.right)}")
+  setKnownFolders(systems: app.files, known: {})
+  settle(app: app)
+  log("no known folders: {sidebarText(app: app, browser: app.right)}")
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-sidebar-{nowNs()}"
+  makeFolder(path: base)
+  loop let folder: view String in List(String) {
+    "home"
+    "home/Documents"
+    "home/Documents/Old"
+    "other"
+    "other/Box"
+    "root"
+    "root/Film"
+  } {
+    makeFolder(path: "{base}/{folder}")
+  }
+  loop let name: view String in List(String) {
+    "home/Documents/letter.txt"
+    "home/Documents/notes.txt"
+    "other/Box/there.txt"
+    "root/Film/cut.txt"
+    "root/a.txt"
+  } {
+    writeFile(path: "{base}/{name}", text: name)
+  }
+  var app: App = makeApp(base: base)
+  app.files.operations.rules = OperationRules { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  settle(app: app)
+  walking(app: app)
+  recent(app: app)
+  pinning(app: app)
+  dropping(app: app)
+  renaming(app: app)
+  keeping(app: app)
+  held(app: app)
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

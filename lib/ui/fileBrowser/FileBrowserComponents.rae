@@ -14,6 +14,7 @@ open ui/SelectionComponents
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/OperationThread
+open ui/fileBrowser/PlacesThread
 
 enum BrowserSource { disk, app }
 
@@ -36,6 +37,11 @@ type BrowserOptions {
   openCountTint: Bool = false
   columnWidth: Float = 220.0
   previewWidth: Float = 260.0
+  # The sidebar: known folders, the pinned ones, recent ones and disks, those it may go to
+  showSidebar: Bool = false
+  sidebarWidth: Float = 170.0
+  # Folders pinned at first (pinFolder, and fileBrowserState to keep them)
+  pinned: List(String) = {}
   # none: it is walked by its bar and by the program only
   selection: ListSelectMode = ListSelectMode.multiple
   rowHeight: Float = 24.0
@@ -65,6 +71,9 @@ type FileBrowser {
   openCountTint: Bool = false
   columnWidth: Float = 220.0
   previewWidth: Float = 260.0
+  showSidebar: Bool = false
+  sidebarWidth: Float = 170.0
+  pinned: List(String) = {}
   rowHeight: Float = 24.0
   source: BrowserSource = BrowserSource.disk
 }
@@ -175,8 +184,9 @@ type FolderMemory {
 }
 
 type BrowserHistory {
-  # Folders the browser was at, and which it is at now
+  # Folders the browser was at with the root of each, and which it is at now
   folders: List(String) = {}
+  roots: List(String) = {}
   at: Int = -1
   memory: StringMap(FolderMemory)
   # Folders of `memory`, the one kept longest first
@@ -215,6 +225,58 @@ type BrowserPreview {
 type TrailPart {
   browser: EntityId
   folder: String
+}
+
+# ----- the sidebar ----------------------------------------------------------------
+enum SidebarSection { favorites, recent, disks }
+
+type SidebarPlace {
+  section: SidebarSection = SidebarSection.favorites
+  title: String = ""
+  icon: String = ""
+  folder: String = ""
+  # kept by the user, not known by the OS
+  pinned: Bool = false
+}
+
+# On a browser that shows one
+type BrowserSidebar {
+  pane: EntityId
+  divider: EntityId
+  # what its rows are in
+  list: EntityId
+  width: Float = 170.0
+  pinned: List(String) = {}
+  recent: List(String) = {}
+  # Its pinned or recent folders changed; and what its rows were made from besides: the look at the
+  # known folders, and the root
+  stale: Bool = true
+  placesSeen: Int = -1
+  rootSeen: String = ""
+  # The folder whose row is marked
+  marked: String = "-"
+}
+
+# A row of a sidebar
+type PlaceRow {
+  browser: EntityId
+  place: SidebarPlace
+}
+
+# The known folders and the disks, as they were looked at last (ui/fileBrowser/BrowserPlaces)
+type FileBrowserPlaces {
+  answers: Channel(PlacesAnswer)
+  jobs: List(FolderJob) = {}
+  # the folders that are looked for: the user's, or a program's own (setKnownFolders)
+  candidates: List(KnownFolder) = {}
+  ownFolders: Bool = false
+  # false: no disks are shown
+  showVolumes: Bool = true
+  asked: Bool = false
+  focused: Bool = false
+  known: List(KnownFolder) = {}
+  volumes: List(Volume) = {}
+  stamp: Int = 0
 }
 
 # The column of a list, and the browser of a button or a field
@@ -445,6 +507,8 @@ type FileBrowserSystems {
   history: ComponentTable(BrowserHistory)
   previews: ComponentTable(BrowserPreview)
   trailParts: ComponentTable(TrailPart)
+  sidebars: ComponentTable(BrowserSidebar)
+  placeRows: ComponentTable(PlaceRow)
   columnOfList: ComponentTable(ListOfColumn)
   buttons: ComponentTable(ButtonOfBrowser)
   renames: ComponentTable(RenameEdit)
@@ -453,6 +517,7 @@ type FileBrowserSystems {
   listing: ListingJobs
   watches: List(FolderWatch) = {}
   polling: FolderPolling
+  places: FileBrowserPlaces
   # columns came or went since the watches were set up
   watchesStale: Bool = false
   browsersMade: Int = 0
@@ -467,6 +532,7 @@ type FileBrowserSystems {
   # is held on and when that opens, and the browser whose own entries are dragged
   dropRow: EntityId = noEntity()
   dropColumn: EntityId = noEntity()
+  dropPlace: EntityId = noEntity()
   dragOpenFolder: String = ""
   dragOpenAt: Float64 = -1.0
   dragBrowser: EntityId = noEntity()
@@ -488,12 +554,15 @@ func createFileBrowsers() ret FileBrowserSystems {
   ret FileBrowserSystems {
     authored: AuthoredBrowsers { fileBrowsers: ComponentTable.create(FileBrowser) }
     polling: FolderPolling { answers: createChannel(FolderStamps) }
+    places: FileBrowserPlaces { answers: createChannel(PlacesAnswer) }
     browsers: ComponentTable.create(OpenBrowser)
     columns: ComponentTable.create(FileColumn)
     entries: ComponentTable.create(ColumnEntries)
     history: ComponentTable.create(BrowserHistory)
     previews: ComponentTable.create(BrowserPreview)
     trailParts: ComponentTable.create(TrailPart)
+    sidebars: ComponentTable.create(BrowserSidebar)
+    placeRows: ComponentTable.create(PlaceRow)
     columnOfList: ComponentTable.create(ListOfColumn)
     buttons: ComponentTable.create(ButtonOfBrowser)
     renames: ComponentTable.create(RenameEdit)
@@ -543,9 +612,15 @@ type BrowserKeys {
 
 # What an app saves of a browser (fileBrowserState), and gives back (restoreFileBrowser)
 type FileBrowserState {
+  # (restored where the browser may leave its root)
+  root: String = ""
   folder: String = ""
   selected: List(String) = {}
   widths: List(Float) = {}
   order: EntryOrder = {}
   showHidden: Bool = false
+  # Its sidebar's (a width of 0: it had none)
+  sidebarWidth: Float = 0.0
+  pinned: List(String) = {}
+  recent: List(String) = {}
 }
