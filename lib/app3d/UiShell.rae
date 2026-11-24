@@ -33,6 +33,7 @@ open ui/Components
 open ui/Registry
 open ui/InputSystem
 open ui/MenuSystem
+open ui/ListSelectionSystem
 open ui/TextFieldPointerSystem
 open ui/LayoutSystem
 open ui/RenderSystem
@@ -558,6 +559,7 @@ func mountUiScene(
 func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
   # The screen's safe area first (the OS's, or a simulator's), so the layout
   # keeps the UI clear of a notch and the home indicator
+  listSelectionLookSystem(world: world, uiSystems: uiSystems)
   feedSafeArea(world: world, uiSystems: uiSystems)
   measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
   layoutSystem(world: world, uiSystems: uiSystems)
@@ -589,6 +591,7 @@ func runScheduledUiSystems(
   # text hugs its glyphs on the first frame. Compare-before-write means a
   # stable string does not bump the table generation, so layout still skips
   # when nothing moved (measuredTexts is a declared layout read).
+  listSelectionLookSystem(world: world, uiSystems: uiSystems)
   feedSafeArea(world: world, uiSystems: uiSystems)
   measureTextForLayout(world: world, uiSystems: uiSystems, res: res)
   if uiShouldRun(

@@ -12,6 +12,7 @@ open text/TextEdit
 open ui/Components
 open ui/BindingComponents
 open ui/InputComponents
+open ui/SelectionComponents
 import ecs/Transform
 open ecs/Hierarchy
 open ecs/Entity
@@ -234,6 +235,47 @@ type ListRowSystem {
   listsSeen: ComponentTable(ListSyncSeen)
 }
 
+# listSelectionSystem's memory of a list: its rows' keys in order and which are selected, and what
+# they were made from (the stamps of its data, its ListView and its ListSelected)
+type ListSelectionSeen {
+  loaded: Bool = false
+  dataStamp: Int = -1
+  listStamp: Int = -1
+  selectedStamp: Int = -1
+  keys: List(String) = {}
+  flags: List(Bool) = {}
+  # Rows by index (-1 none): where a range starts, and the row moved to last
+  anchor: Int = -1
+  lead: Int = -1
+  # The selection of a list that lost all its rows, until it has rows again
+  held: List(String) = {}
+}
+
+# A node's colors as authored, before its selection's (ui/ListSelectionSystem)
+type SelectionAuthored {
+  fillSlot: String = ""
+  tintSlot: String = ""
+  hadOverride: Bool = false
+  override: StyleOverride
+}
+
+# How a live row is drawn: 0 not selected, 1 selected, 2 selected in a list without the keys
+type ListRowShown {
+  look: Int = 0
+}
+
+type ListSelectionSystem {
+  seen: ComponentTable(ListSelectionSeen)
+  rowsShown: ComponentTable(ListRowShown)
+  authored: ComponentTable(SelectionAuthored)
+  # Events until the next listSelectionSystem sends them
+  pending: List(ListEvent) = {}
+  # The row a press has selected already (its click does nothing more)
+  pressList: EntityId = noEntity()
+  pressKey: String = ""
+  pressDone: Bool = false
+}
+
 # touchStickSystem's output: each TouchStick node's state
 type TouchStickSystem {
   states: ComponentTable(TouchStickState)
@@ -249,6 +291,7 @@ type UiSystems {
   button: ButtonSystem
   textField: TextFieldSystem
   listRows: ListRowSystem
+  listSelection: ListSelectionSystem
   # where the clickable nodes are (ui/HitIndex, kept by ui/InputSystem/HitIndexQuery)
   hitIndex: HitIndex
 }
@@ -296,6 +339,11 @@ func createUiSystems() ret UiSystems {
       rowsBound: ComponentTable.create(ListRowBound)
       listsSeen: ComponentTable.create(ListSyncSeen)
     }
+    listSelection: ListSelectionSystem {
+      seen: ComponentTable.create(ListSelectionSeen)
+      rowsShown: ComponentTable.create(ListRowShown)
+      authored: ComponentTable.create(SelectionAuthored)
+    }
     hitIndex: emptyHitIndex()
     textField: TextFieldSystem {
       caretLineEntityId: noEntity()
@@ -338,5 +386,8 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.button.interactions, entityId: entityId)
   componentRemove(this: uiSystems.button.hoverFades, entityId: entityId)
   componentRemove(this: uiSystems.listRows.rowsBound, entityId: entityId)
+  componentRemove(this: uiSystems.listSelection.seen, entityId: entityId)
+  componentRemove(this: uiSystems.listSelection.rowsShown, entityId: entityId)
+  componentRemove(this: uiSystems.listSelection.authored, entityId: entityId)
   componentRemove(this: uiSystems.listRows.listsSeen, entityId: entityId)
 }

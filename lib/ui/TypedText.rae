@@ -1,0 +1,24 @@
+# What was typed this frame, for a search by typing (a menu's, a list's): the window's text input
+# while that is on (Gpu2dTextInput.setTextInput), else the letters, digits and spaces by their keys,
+# so that a list needs no text input (which would show a phone's keyboard).
+import Gpu2dTextInput
+import Keys
+import Sdl3
+import String
+
+func typedText() ret String {
+  var text: String = Gpu2dTextInput.textInput()
+  if text.length() > 0 {
+    ret text
+  }
+  let letters: String = "abcdefghijklmnopqrstuvwxyz1234567890"
+  loop var i: Int = 0, i < letters.length(), ++i {
+    if Sdl3.isKeyPressed(key: Keys.keyA + i) {
+      text = text.concat(other: letters.sub(start: i, len: 1))
+    }
+  }
+  if Sdl3.isKeyPressed(key: Keys.keySpace) {
+    text = text.concat(other: " ")
+  }
+  ret text
+}

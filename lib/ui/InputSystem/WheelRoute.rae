@@ -10,8 +10,8 @@ open ui/Transform
 open ecs/Entity
 open ecs/ComponentTable
 
-# What is looked for under the pointer: what takes the wheel, or what takes a secondary click
-enum UiRouteWant { wheel, secondaryClick }
+# What is looked for under the pointer: what takes the wheel, a secondary click, or the keys
+enum UiRouteWant { wheel, secondaryClick, keys }
 
 # One subtree's answer to "who takes the wheel here?". `blocked`: the pointer
 # landed on something painted or interactive in this subtree, so nodes painted
@@ -30,6 +30,27 @@ func uiRouteConsumerAt(
   y: view Float
   want: view UiRouteWant
 ) ret Bool {
+  if want is UiRouteWant.keys {
+    if componentHas(this: world.takesKeys, entityId: entityId) is false {
+      ret false
+    }
+    if componentHas(this: world.scrollRoots, entityId: entityId) {
+      ret uiPointInScrollWindow(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        x: x
+        y: y
+      )
+    }
+    ret uiPointInEntity(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+    )
+  }
   if want is UiRouteWant.secondaryClick {
     ret componentHas(this: world.onSecondaryClicks, entityId: entityId) and uiPointInEntity(
       world: world

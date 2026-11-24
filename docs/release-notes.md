@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.49, 2026-11-24: key focus and list selection
+
+- `TakesKeys` and `ui/KeyFocusSystem`: which node has the keys; a text field and a menu have them
+  meanwhile (docs/ui-scene-format.md section 48).
+- `ListSelection`, `SelectionStyle` and `ui/ListSelectionSystem`: selecting rows of any `ListView` by
+  their key, with clicks, toggles, ranges, the keys and typing, kept through a sort, a filter and
+  rows that go away (section 49). Events `selectionChanged`, `rowActivated`, `left`, `right`.
+- `requestScrollToRow` has the place `nearest` and works on a flow list. Case 1583.
+
 ## 0.4.48, 2026-11-24: a caret and a selection in text fields
 
 - A `TextField` has a caret moved by keys, words, a press and a drag, a selection that typing, paste,

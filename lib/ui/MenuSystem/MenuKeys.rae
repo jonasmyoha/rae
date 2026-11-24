@@ -1,9 +1,8 @@
 # The keys of an open menu: the arrows, Home and End, Return, Escape, and typing to find a row.
-import Gpu2dTextInput
 import Keys
 import Sdl3
-import String
 open text/NameOrder
+open ui/TypedText
 open ui/Ecs
 open ui/MenuComponents
 open ui/UiSystems
@@ -25,7 +24,7 @@ type MenuKeys {
 # This frame's from the keyboard. With the window's text input off (Gpu2dTextInput.setTextInput),
 # the letters and digits by their key.
 func menuKeysFromDevice() ret MenuKeys {
-  var keys: MenuKeys = {
+  let keys: MenuKeys = {
     up: Sdl3.isKeyPressed(key: Keys.keyUp)
     down: Sdl3.isKeyPressed(key: Keys.keyDown)
     left: Sdl3.isKeyPressed(key: Keys.keyLeft)
@@ -34,18 +33,7 @@ func menuKeysFromDevice() ret MenuKeys {
     end: Sdl3.isKeyPressed(key: Keys.keyEnd)
     choose: Sdl3.isKeyPressed(key: Keys.keyEnter) or Sdl3.isKeyPressed(key: Keys.keyKeypadEnter)
     escape: Sdl3.isKeyPressed(key: Keys.keyEscape)
-    text: Gpu2dTextInput.textInput()
-  }
-  if keys.text.length() is 0 {
-    let letters: String = "abcdefghijklmnopqrstuvwxyz1234567890"
-    loop var i: Int = 0, i < letters.length(), ++i {
-      if Sdl3.isKeyPressed(key: Keys.keyA + i) {
-        keys.text = keys.text.concat(other: letters.sub(start: i, len: 1))
-      }
-    }
-    if Sdl3.isKeyPressed(key: Keys.keySpace) {
-      keys.text = keys.text.concat(other: " ")
-    }
+    text: typedText()
   }
   ret keys
 }

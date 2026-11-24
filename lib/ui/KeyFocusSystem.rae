@@ -1,0 +1,130 @@
+# Who has the keys (docs/ui-scene-format.md "Key focus"). One node of a UiWorld has them: the
+# TakesKeys node pressed last, or the one a program named with setKeyFocus. While a text field has
+# the focus, or a menu is open, they are that one's; when it lets go they are the node's again. A
+# node that is gone, hidden or under a dialog has none.
+#
+# keyFocusSystem runs once a frame after updateUiInput (and menuSystem), before
+# textFieldPointerSystem: a press on a TakesKeys node takes the focus from a text field, unless it
+# is on a field.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+
+# Give the keys to `entityId` (noEntity() for none)
+func setKeyFocus(world: mod UiWorld, entityId: view EntityId) {
+  world.keyFocus.entityId = entityId
+}
+
+# Is the node itself shown: alive, and it and its ancestors active?
+func keyNodeShown(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret Bool {
+  if isAlive(world: world, entityId: entityId) is false {
+    ret false
+  }
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if uiEntityActive(world: world, entityId: at) is false {
+      ret false
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret true
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret true
+}
+
+# The node that has the keys now: the focused text field, else the key focus where it is shown and
+# not under a dialog; none while a menu is open
+func keyHolder(world: view UiWorld, uiSystems: view UiSystems) ret EntityId {
+  if world.menu.open {
+    ret noEntity()
+  }
+  let field: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: field) is false {
+    ret field
+  }
+  let entityId: EntityId = world.keyFocus.entityId
+  if isNone(this: entityId) or keyNodeShown(world: world, uiSystems: uiSystems, entityId: entityId) is false or dialogLayerCovers(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+  ) {
+    ret noEntity()
+  }
+  ret entityId
+}
+
+# The TakesKeys node that gets the keys of `entityId`: itself, or its nearest ancestor that takes
+# them
+func keysOwner(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret EntityId {
+  var at: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if componentHas(this: world.takesKeys, entityId: at) {
+      ret at
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret noEntity()
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret noEntity()
+}
+
+# The node a press at (x, y) gives the keys to
+func keysTarget(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  x: view Float
+  y: view Float
+) ret EntityId {
+  if componentCount(this: world.takesKeys) is 0 {
+    ret noEntity()
+  }
+  let route: UiWheelRoute = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: x
+    y: y
+    want: UiRouteWant.keys
+  )
+  if isNone(this: route.target) {
+    ret noEntity()
+  }
+  ret dialogLayerHolds(world: world, uiSystems: uiSystems, hit: route.target)
+}
+
+# This frame's press; true when the keys moved
+func keyFocusSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view UiInput) ret Bool {
+  let before: EntityId = world.keyFocus.entityId
+  if isNone(this: before) is false and isAlive(world: world, entityId: before) is false {
+    world.keyFocus.entityId = noEntity()
+  }
+  if input.pointer.pressed or input.pointer.middle.pressed or input.pointer.secondary.pressed {
+    let target: EntityId = keysTarget(
+      world: world
+      uiSystems: uiSystems
+      x: input.pointer.x
+      y: input.pointer.y
+    )
+    if isNone(this: target) is false {
+      world.keyFocus.entityId = target
+      if componentHas(this: world.textFields, entityId: input.hoveredEntityId) is false {
+        let dropped: Bool = focusTextField(world: world, entityId: noEntity())
+      }
+    }
+  }
+  ret world.keyFocus.entityId is not before
+}

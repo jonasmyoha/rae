@@ -1,0 +1,279 @@
+# The keys of a list that has them (ui/KeyFocusSystem): Up, Down, Page Up, Page Down, Home and End,
+# with Shift a range; Cmd+A (Ctrl+A); typing the start of a name; Return, Left and Right handed on
+# as events. With Cmd (Ctrl) the other keys are the program's.
+import Keys
+import Sdl3
+open ecs/ComponentTable
+open ecs/Entity
+open text/NameOrder
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/ScrollRootSystem
+open ui/ScrollToRow
+open ui/SelectionComponents
+open ui/TypedText
+open ui/UiSystems
+
+# The pause after which typing starts a new search
+const listTypeSeconds: Float64 = 1.0
+
+# Command selects one more row on a Mac, Control elsewhere (there Control-click is the second
+# button)
+const listCommandIsGui: Bool = Target.isApple
+
+# This frame's keys
+type ListSelectionKeys {
+  up: Bool = false
+  down: Bool = false
+  left: Bool = false
+  right: Bool = false
+  pageUp: Bool = false
+  pageDown: Bool = false
+  home: Bool = false
+  end: Bool = false
+  choose: Bool = false
+  selectAll: Bool = false
+  # Held: Command (Control), Shift
+  toggle: Bool = false
+  extend: Bool = false
+  # What was typed (UTF-8)
+  text: String = ""
+}
+
+func listCommandHeld() ret Bool {
+  when listCommandIsGui {
+    ret Sdl3.isKeyDown(key: Keys.keyLGui) or Sdl3.isKeyDown(key: Keys.keyRGui)
+  } else {
+    ret Sdl3.isKeyDown(key: Keys.keyLCtrl) or Sdl3.isKeyDown(key: Keys.keyRCtrl)
+  }
+}
+
+# This frame's from the keyboard (held arrows and pages repeat)
+func listKeysFromDevice() ret ListSelectionKeys {
+  let command: Bool = listCommandHeld()
+  let extend: Bool = Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift)
+  if command {
+    ret ListSelectionKeys {
+      toggle: true
+      extend: extend
+      selectAll: Sdl3.isKeyPressed(key: Keys.keyA)
+    }
+  }
+  ret ListSelectionKeys {
+    up: Sdl3.isKeyTyped(key: Keys.keyUp)
+    down: Sdl3.isKeyTyped(key: Keys.keyDown)
+    left: Sdl3.isKeyPressed(key: Keys.keyLeft)
+    right: Sdl3.isKeyPressed(key: Keys.keyRight)
+    pageUp: Sdl3.isKeyTyped(key: Keys.keyPageUp)
+    pageDown: Sdl3.isKeyTyped(key: Keys.keyPageDown)
+    home: Sdl3.isKeyPressed(key: Keys.keyHome)
+    end: Sdl3.isKeyPressed(key: Keys.keyEnd)
+    choose: Sdl3.isKeyPressed(key: Keys.keyEnter) or Sdl3.isKeyPressed(key: Keys.keyKeypadEnter)
+    extend: extend
+    text: typedText()
+  }
+}
+
+func stepListKeys(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  keys: view ListSelectionKeys
+  lists: view List(EntityId)
+  now: view Float64
+) {
+  let holder: EntityId = keyHolder(world: world, uiSystems: uiSystems)
+  if isNone(this: holder) or componentHas(this: world.takesKeys, entityId: holder) is false {
+    ret
+  }
+  loop let list: view EntityId in lists {
+    if keysOwner(world: world, uiSystems: uiSystems, entityId: list) is holder {
+      stepKeysOfList(
+        world: world
+        uiSystems: uiSystems
+        keys: keys
+        list: list
+        now: now
+      )
+      # one list to a node
+      ret
+    }
+  }
+}
+
+func stepKeysOfList(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  keys: view ListSelectionKeys
+  list: view EntityId
+  now: view Float64
+) {
+  if keys.left {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.left
+      list: list
+      key: listLeadKey(world: world, list: list)
+      byKey: true
+    )
+  }
+  if keys.right {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.right
+      list: list
+      key: listLeadKey(world: world, list: list)
+      byKey: true
+    )
+  }
+  if componentView(this: world.listSelections, entityId: list).mode is ListSelectMode.none {
+    ret
+  }
+  if keys.choose and listSelectedKeys(world: world, list: list).length > 0 {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.rowActivated
+      list: list
+      key: listLeadKey(world: world, list: list)
+      byKey: true
+    )
+  }
+  if keys.selectAll {
+    let all: Bool = selectAllListRows(world: world, uiSystems: uiSystems, list: list)
+  }
+  if not (keys.down or keys.up or keys.pageDown or keys.pageUp or keys.home or keys.end or keys.text.length() > 0) {
+    ret
+  }
+  var lead: Int = -1
+  var last: Int = -1
+  if componentHas(this: uiSystems.listSelection.seen, entityId: list) {
+    let seen: view ListSelectionSeen = componentView(
+      this: uiSystems.listSelection.seen
+      entityId: list
+    )
+    lead = seen.lead
+    last = seen.keys.length - 1
+  }
+  if last < 0 {
+    ret
+  }
+  let page: Int = listPageRows(world: world, uiSystems: uiSystems, list: list)
+  var target: Int = -1
+  var extend: Bool = keys.extend
+  if keys.down {
+    target = lead + 1
+  } else if keys.up {
+    target = lead - 1
+    if lead < 0 {
+      target = last
+    }
+  } else if keys.pageDown {
+    target = lead + page
+    if lead < 0 {
+      target = page - 1
+    }
+  } else if keys.pageUp {
+    target = lead - page
+    if lead < 0 {
+      target = last
+    }
+  } else if keys.home {
+    target = 0
+  } else if keys.end {
+    target = last
+  } else if keys.text.length() > 0 {
+    target = typedListRow(
+      world: world
+      uiSystems: uiSystems
+      list: list
+      text: keys.text
+      now: now
+    )
+    extend = false
+    if target < 0 {
+      ret
+    }
+  }
+  if target < 0 {
+    target = 0
+  }
+  if target > last {
+    target = last
+  }
+  let picked: Bool = pickListRow(
+    world: world
+    uiSystems: uiSystems
+    list: list
+    index: target
+    toggle: false
+    extend: extend
+  )
+  if isNone(this: scrollToRowRoot(world: world, uiSystems: uiSystems, listEntity: list)) is false {
+    requestScrollToRow(
+      world: world
+      listEntity: list
+      index: target
+      place: ScrollRowPlace.nearest
+    )
+  }
+}
+
+# How many rows the list's window shows
+func listPageRows(world: view UiWorld, uiSystems: view UiSystems, list: view EntityId) ret Int {
+  let listView: view ListView = componentView(this: world.listViews, entityId: list)
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  var rows: Int = listView.visibleItemCount
+  let root: EntityId = scrollToRowRoot(world: world, uiSystems: uiSystems, listEntity: list)
+  if isNone(this: root) is false and pitch > 0.0 {
+    let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: root)
+    if range.active {
+      rows = (range.window / pitch).toInt()
+    }
+  }
+  if rows < 1 {
+    ret 1
+  }
+  ret rows
+}
+
+# The first row whose name starts with what has been typed (case and accents do not count), or -1.
+# A space starts no search.
+func typedListRow(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  list: view EntityId
+  text: view String
+  now: view Float64
+) ret Int {
+  var typed: String = ""
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    let state: view ListSelected = componentView(this: world.listSelecteds, entityId: list)
+    if now - state.typedSeconds <= listTypeSeconds {
+      typed = "{state.typed}"
+    }
+  }
+  if typed.length() is 0 and text.startsWith(prefix: " ") {
+    ret -1
+  }
+  typed = typed.concat(other: text)
+  let fold: NameFold = createNameFold()
+  let wanted: String = foldedText(fold: fold, text: typed)
+  componentMod(this: world.listSelecteds, entityId: list).typed = typed
+  componentMod(this: world.listSelecteds, entityId: list).typedSeconds = now
+  let seen: view ListSelectionSeen = componentView(
+    this: uiSystems.listSelection.seen
+    entityId: list
+  )
+  loop var i: Int = 0, i < seen.keys.length, ++i {
+    let name: String = listRowName(
+      world: world
+      list: list
+      seen: seen
+      index: i
+    )
+    if foldedText(fold: fold, text: name).startsWith(prefix: wanted) {
+      ret i
+    }
+  }
+  ret -1
+}

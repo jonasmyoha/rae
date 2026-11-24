@@ -1653,3 +1653,64 @@ of `app3d/UiShell` call it. A world has one menu open at a time.
   `menuWaiting(world:)`.
 
 Case 1578 checks it with scripted input, `checks/uiMenu` is its picture.
+
+## 48. Key focus: `TakesKeys`
+
+One node of a world has the keys. `"TakesKeys": {}` marks a node that can: a press anywhere on it, on
+no nearer such node, gives them to it.
+
+- `keyHolder(world:, uiSystems:)` (`ui/KeyFocusSystem`) is who has them now: the focused text field,
+  which gives them back when it lets go, else the node; none while a menu is open, or while the node
+  is hidden, gone or under a dialog. `setKeyFocus(world:, entityId:)` moves them from code (a Tab key
+  is the program's).
+- `keyFocusSystem(world:, uiSystems:, input:)` runs after `updateUiInput` and `menuSystem`, before
+  `textFieldPointerSystem`. A press on a `TakesKeys` node also takes the focus from a text field,
+  unless the press is on a field.
+- A press that is on no `TakesKeys` node leaves the keys where they are.
+
+## 49. List selection: `ListSelection` and `SelectionStyle`
+
+```jsonc
+"Column": { "TakesKeys": {}, "Shape": {"kind": "Rect", "fill": "surface"}, "Children": ["Files"] },
+"Files": {
+  "ListView": { "itemSceneId": "FileRow", "itemKeyField": "name", "itemHeight": 24 },
+  "ScrollRoot": { "axis": "y", "floor": "content" },
+  "ListSelection": { "mode": "multiple" }
+}
+// the row's scene
+"Row": { "Shape": {"kind": "RoundedRect", "radius": 5}, "SelectionStyle": {}, "OnClick": {"actionId": "row", "label": "Row"} },
+"Name": { "Text": {"text": ""}, "SelectionStyle": {"selected": "accentText", "muted": ""} }
+```
+
+| component | field | default | |
+|---|---|---|---|
+| `ListSelection` | `mode` | `multiple` | `none`, `single`, `multiple` |
+| | `findField` | `""` | the row cell that typing looks in; `""` the key |
+| `SelectionStyle` | `selected` | `"accent"` | the slot of a selected row's node (a `Shape`'s fill, a `Text`'s color, a `Sprite`'s tint); `""` its own |
+| | `muted` | `"outline"` | the same in a list without the keys |
+
+- Rows are known by their key (`itemKeyField`), so the selection survives a rebind, a sort and a
+  filter, and rows that are not live. A key that goes away leaves it. When none is left, the row after
+  it takes it (the one that slid into its place), else the last one. A list that loses all its rows
+  has none selected until rows with those keys are back.
+- **Pointer**, on the row's root (it needs an `OnClick`): a press selects the row, Cmd (Ctrl) toggles
+  it, Shift selects from the anchor. A press on a row that is already selected waits for its click, so
+  a drag can take them all. A finger selects when it is lifted. A secondary press selects a row that is
+  not selected. A press beside the rows, on nothing else that is clicked, clears the selection.
+- **Keys**, for the list of the node that has them (one list to a `TakesKeys` node): Up, Down, Page Up,
+  Page Down, Home, End, with Shift a range; Cmd+A (Ctrl+A); the typed start of a name, case and accents
+  aside, forgotten after 1 s. The row is scrolled into view, as little as shows it. With Cmd (Ctrl) all
+  other keys are the program's.
+- `listSelectionSystem(world:, uiSystems:, input:, keys: listKeysFromDevice())` runs after
+  `keyFocusSystem` and `textFieldSystem`, then the program reads `world.listEvents`: `ListEvent` is
+  `selectionChanged`, `rowActivated` (a double click, or Return with `byKey`), `left` and `right`, which
+  are the list's owner's to answer. `listSelectionLookSystem` colors the live rows after
+  `listViewSystem`; `app3d/UiShell`'s pipelines call it.
+- From code: `listSelectedKeys`, `listLeadKey`, `setListSelection` (with no event),
+  `selectAllListRows`, `clearListSelection`.
+- A program that gives its `ListView` only a part of the rows sets `ListRowNames` on it: all rows'
+  keys in order, and the names typing looks in.
+- A list with no `TakesKeys` around it is never drawn muted, and takes no keys.
+
+`requestScrollToRow` has the place `nearest`, and works on a flow list too. Case 1583 checks all of it
+with scripted input; 10,000 rows cost 3 ms when their data changes and nothing on an idle frame.

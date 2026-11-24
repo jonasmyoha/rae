@@ -1,0 +1,142 @@
+# How the live rows of a selectable list are drawn: the SelectionStyle nodes of each row get its
+# colors when the row is selected, or selected in a list without the keys, and their own back.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/KeyFocusSystem
+open ui/SelectionComponents
+open ui/UiSystems
+
+# After listViewSystem (a row may show another item than in the last frame)
+func listSelectionLookSystem(world: mod UiWorld, uiSystems: mod UiSystems) {
+  let lists: List(EntityId) = selectableLists(world: world)
+  if lists.length is 0 {
+    ret
+  }
+  let holder: EntityId = keyHolder(world: world, uiSystems: uiSystems)
+  loop let list: view EntityId in lists {
+    syncListSelection(world: world, uiSystems: uiSystems, list: list)
+    let owner: EntityId = keysOwner(world: world, uiSystems: uiSystems, entityId: list)
+    # a list that takes no keys is never without them
+    let hasKeys: Bool = isNone(this: owner) or owner is holder
+    var rows: List(EntityId) = {}
+    if let children: Children = componentCopy(this: world.childrens, entityId: list) {
+      rows = children.ids
+    }
+    loop let row: view EntityId in rows {
+      if componentHas(this: uiSystems.listRows.rowsBound, entityId: row) {
+        let index: Int = componentView(this: uiSystems.listRows.rowsBound, entityId: row).dataIndex
+        var look: Int = 0
+        if listRowSelected(uiSystems: uiSystems, list: list, index: index) {
+          look = 2
+          if hasKeys {
+            look = 1
+          }
+        }
+        showListRow(
+          world: world
+          uiSystems: uiSystems
+          row: row
+          look: look
+        )
+      }
+    }
+  }
+}
+
+func showListRow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  row: view EntityId
+  look: view Int
+) {
+  var before: Int = 0
+  if componentHas(this: uiSystems.listSelection.rowsShown, entityId: row) {
+    before = componentView(this: uiSystems.listSelection.rowsShown, entityId: row).look
+  }
+  if before is look {
+    ret
+  }
+  componentSet(
+    this: uiSystems.listSelection.rowsShown
+    entityId: row
+    data: ListRowShown { look: look }
+  )
+  var nodes: List(EntityId) = {}
+  collectSubtree(childrens: world.childrens, node: row, out: nodes)
+  loop let node: view EntityId in nodes {
+    if let style: SelectionStyle = componentCopy(this: world.selectionStyles, entityId: node) {
+      var slot: String = ""
+      if look is 1 {
+        slot = "{style.selected}"
+      } else if look is 2 {
+        slot = "{style.muted}"
+      }
+      showSelectionNode(
+        world: world
+        uiSystems: uiSystems
+        node: node
+        slot: slot
+      )
+    }
+  }
+}
+
+# The color slot `slot` on a node, or its own colors for ""
+func showSelectionNode(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  node: view EntityId
+  slot: view String
+) {
+  if componentHas(this: uiSystems.listSelection.authored, entityId: node) is false {
+    var authored: SelectionAuthored = {}
+    if componentHas(this: world.shapes, entityId: node) {
+      authored.fillSlot = "{componentView(this: world.shapes, entityId: node).fillSlot}"
+    }
+    if componentHas(this: world.sprites, entityId: node) {
+      authored.tintSlot = "{componentView(this: world.sprites, entityId: node).tintSlot}"
+    }
+    if let style: StyleOverride = componentCopy(this: world.styleOverrides, entityId: node) {
+      authored.hadOverride = true
+      authored.override = own style
+    }
+    componentSet(this: uiSystems.listSelection.authored, entityId: node, data: own authored)
+  }
+  var mine: SelectionAuthored = {}
+  if let authored: SelectionAuthored = componentCopy(
+    this: uiSystems.listSelection.authored
+    entityId: node
+  ) {
+    mine = own authored
+  }
+  if componentHas(this: world.shapes, entityId: node) {
+    let shape: mod Shape = componentMod(this: world.shapes, entityId: node)
+    shape.fillSlot = "{mine.fillSlot}"
+    if slot.length() > 0 {
+      shape.fillSlot = "{slot}"
+    }
+  }
+  if componentHas(this: world.sprites, entityId: node) {
+    let sprite: mod Sprite = componentMod(this: world.sprites, entityId: node)
+    sprite.tintSlot = "{mine.tintSlot}"
+    if slot.length() > 0 {
+      sprite.tintSlot = "{slot}"
+    }
+  }
+  if componentHas(this: world.texts, entityId: node) {
+    if slot.length() > 0 {
+      var style: StyleOverride = mine.override
+      style.hasColor = true
+      style.colorSlot = "{slot}"
+      componentSet(this: world.styleOverrides, entityId: node, data: own style)
+    } else if mine.hadOverride {
+      let style: StyleOverride = mine.override
+      componentSet(this: world.styleOverrides, entityId: node, data: own style)
+    } else {
+      componentRemove(this: world.styleOverrides, entityId: node)
+    }
+  }
+}

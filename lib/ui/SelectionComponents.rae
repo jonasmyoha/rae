@@ -1,0 +1,58 @@
+# The data of list selections and of the keys (ui/ListSelectionSystem, ui/KeyFocusSystem).
+open ecs/Entity
+
+# Which node has the keys: the last TakesKeys node pressed, or the one setKeyFocus named. Ask
+# keyHolder (ui/KeyFocusSystem) who has them now: a focused text field or a menu has them meanwhile.
+type KeyFocus {
+  entityId: EntityId = noEntity()
+}
+
+enum ListSelectMode { none, single, multiple }
+
+# On a ListView: its rows can be selected. Rows are known by their key (the ListView's
+# itemKeyField). `findField` is the row cell that typing looks in ("" the key).
+#
+#     "Files": { "ListView": { "itemKeyField": "name", ... }, "ListSelection": { "mode": "multiple"
+#     } }
+type ListSelection {
+  mode: ListSelectMode = ListSelectMode.multiple
+  findField: String = ""
+}
+
+# On a node of a row's scene: the color slots it has while the row is selected, and while it is in a
+# list without the keys ("" its own): a Shape's fill, a Text's color, a Sprite's tint.
+#
+#     "Row": { "Shape": {"kind": "RoundedRect", "radius": 5}, "SelectionStyle": {} }
+#     "Name": { "Text": {...}, "SelectionStyle": {"selected": "accentText", "muted": ""} }
+type SelectionStyle {
+  selected: String = "accent"
+  muted: String = "outline"
+}
+
+# Runtime, set by the program: all the rows' keys of a ListView whose ListViewData holds only a part
+# of them, in order, and the names typing looks in (none: the keys)
+type ListRowNames {
+  keys: List(String) = {}
+  names: List(String) = {}
+}
+
+# Runtime: what is selected in a list, by key in the list's order, where a Shift range starts and
+# the row moved to last (ui/ListSelectionSystem; a program sets it with setListSelection)
+type ListSelected {
+  selected: List(String) = {}
+  anchor: String = ""
+  lead: String = ""
+  typed: String = ""
+  typedSeconds: Float64 = 0.0
+}
+
+enum ListEventKind { selectionChanged, rowActivated, left, right }
+
+# What a list's selection did: it changed; a row was activated (a double click, or Return: `byKey`);
+# Left or Right was pressed in it. `key` is the row moved to last.
+type ListEvent {
+  kind: ListEventKind
+  list: EntityId
+  key: String = ""
+  byKey: Bool = false
+}

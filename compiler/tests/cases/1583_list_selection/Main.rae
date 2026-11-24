@@ -1,0 +1,788 @@
+# ui/ListSelectionSystem and ui/KeyFocusSystem with scripted input: clicks, toggles, ranges, the
+# keys and
+# typing, a row scrolled into view, a press beside the rows, a sort, a removal and a lost list
+# under a selection, keys a program sets before the rows, two lists passing the keys, a text field
+# taking them, the rows' colors, double click, Return, Left and Right, a list with a part of its
+# rows.
+import SdfText
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/SelectionComponents
+open ui/Theme
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  scenes: SceneRegistry
+  left: EntityId
+  right: EntityId
+  field: EntityId
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+# One row for each letter of `names`, its key the letter, its name "<letter> row"
+func setRows(app: mod App, list: view EntityId, names: view String) {
+  var data: ListViewData = { rows: {} }
+  loop var i: Int = 0, i < names.length(), ++i {
+    let letter: String = names.sub(start: i, len: 1)
+    data.rows.add(
+      value: ListViewRow {
+        keys: List(String) { "key", "name" }
+        values: List(String) { "{letter}", "{letter} row" }
+      }
+    )
+  }
+  componentSet(this: app.world.listViewDatas, entityId: list, data: own data)
+}
+
+# The list's live rows: each key, with its color
+func rowsText(app: view App, list: view EntityId) ret String {
+  var text: String = ""
+  let children: view Children = componentView(this: app.world.childrens, entityId: list)
+  loop let row: view EntityId in children.ids {
+    let shape: view Shape = componentView(this: app.world.shapes, entityId: row)
+    var mark: String = ""
+    if shape.fillSlot is "accent" {
+      mark = "*"
+    } else if shape.fillSlot is "outline" {
+      mark = "~"
+    }
+    let name: view Children = componentView(this: app.world.childrens, entityId: row)
+    loop let child: view EntityId in name.ids {
+      let shown: String = componentView(this: app.world.texts, entityId: child).text.sub(
+        start: 0
+        len: 1
+      )
+      var color: String = ""
+      if componentHas(this: app.world.styleOverrides, entityId: child) {
+        color = "!"
+      }
+      text = text.concat(other: "{shown}{mark}{color} ")
+    }
+  }
+  ret text
+}
+
+func show(app: view App, step: view String) {
+  var text: String = ""
+  loop var i: Int = 0, i < eventCount(ListEvent, this: app.world.listEvents), ++i {
+    let event: ListEvent = eventAt(ListEvent, this: app.world.listEvents, i: i)
+    var which: String = "left"
+    if event.list is app.right {
+      which = "right"
+    }
+    if event.kind is ListEventKind.selectionChanged {
+      text = text.concat(other: " ({which} changed, at {event.key})")
+    } else if event.kind is ListEventKind.rowActivated {
+      text = text.concat(other: " ({which} activated {event.key}, by key {event.byKey})")
+    } else if event.kind is ListEventKind.left {
+      text = text.concat(other: " ({which} Left)")
+    } else {
+      text = text.concat(other: " ({which} Right)")
+    }
+  }
+  var holder: String = "none"
+  let keys: EntityId = keyHolder(world: app.world, uiSystems: app.uiSystems)
+  if keys is app.field {
+    holder = "field"
+  } else if keys is keysOwner(world: app.world, uiSystems: app.uiSystems, entityId: app.left) {
+    holder = "left"
+  } else if keys is keysOwner(world: app.world, uiSystems: app.uiSystems, entityId: app.right) {
+    holder = "right"
+  }
+  log(
+    "{step}: keys {holder}, left [{listSelectedKeys(world: app.world, list: app.left).join(sep: "")}] right [{listSelectedKeys(
+      world: app.world
+      list: app.right
+    ).join(sep: "")}]{text}"
+  )
+}
+
+func frame(
+  app: mod App
+  step: view String
+  pointer: view UiPointerState
+  keys: view ListSelectionKeys
+) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.1
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  let moved: Bool = keyFocusSystem(world: app.world, uiSystems: app.uiSystems, input: app.input)
+  let changed: Bool = textFieldSystem(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    actions: app.world.uiActions
+    input: TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+    now: app.input.nowSeconds
+  )
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: keys
+  )
+  paint(app: app)
+  if step.length() > 0 {
+    show(app: app, step: step)
+  }
+}
+
+func paint(app: mod App) {
+  let scrolled: Bool = scrollToRowSystem(world: app.world, uiSystems: app.uiSystems)
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func pointer(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+  clicks: view Int
+  toggle: view Bool
+  extend: view Bool
+  kind: view InputKind
+) {
+  var state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: kind
+  )
+  state.clicks = clicks
+  frame(
+    app: app
+    step: step
+    pointer: state
+    keys: ListSelectionKeys { toggle: toggle, extend: extend }
+  )
+}
+
+func secondary(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+) {
+  var state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: false
+    kind: InputKind.mouse
+  )
+  state.secondary = UiButtonState { down: true, pressed: true, released: false, clicks: 1 }
+  frame(
+    app: app
+    step: step
+    pointer: state
+    keys: ListSelectionKeys {}
+  )
+}
+
+func key(app: mod App, step: view String, keys: view ListSelectionKeys) {
+  let state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: false
+    kind: InputKind.mouse
+  )
+  frame(
+    app: app
+    step: step
+    pointer: state
+    keys: keys
+  )
+}
+
+func scrollY(app: view App, list: view EntityId) ret Float {
+  if componentHas(this: app.world.scrollStates, entityId: list) {
+    ret componentView(this: app.world.scrollStates, entityId: list).y
+  }
+  ret 0.0
+}
+
+func main() {
+  let scene: Scene = parseScene(source: embedText(file: "Page.raescene"))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    scenes: createSceneRegistry()
+    left: noEntity()
+    right: noEntity()
+    field: noEntity()
+  }
+  let row: Scene = parseScene(source: embedText(file: "Row.raescene"))
+  registerScene(reg: app.scenes, key: "Row", scene: own row)
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 200.0
+  app.input.nowSeconds = 100.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  app.left = nodeOf(world: app.world, nodeId: "Left")
+  app.right = nodeOf(world: app.world, nodeId: "Right")
+  app.field = nodeOf(world: app.world, nodeId: "Field")
+  setRows(app: app, list: app.left, names: "abcdefghijkl")
+  setRows(app: app, list: app.right, names: "xyz")
+  key(app: app, step: "start", keys: ListSelectionKeys {})
+  key(app: app, step: "a key with no one to take it", keys: ListSelectionKeys { down: true })
+
+  # clicks
+  pointer(
+    app: app
+    step: "press b"
+    x: 50.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 50.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  log("rows {rowsText(app: app, list: app.left)}")
+  pointer(
+    app: app
+    step: "Cmd press d"
+    x: 50.0
+    y: 70.0
+    down: true
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 70.0
+    down: false
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "Cmd press b, off"
+    x: 50.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "Shift press a, from b"
+    x: 50.0
+    y: 10.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 10.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "Shift press c, from b"
+    x: 50.0
+    y: 50.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 50.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "press c, selected with b"
+    x: 50.0
+    y: 50.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 50.0
+    y: 50.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  secondary(
+    app: app
+    step: "secondary press on a"
+    x: 50.0
+    y: 10.0
+  )
+  key(app: app, step: "", keys: ListSelectionKeys {})
+  pointer(
+    app: app
+    step: "click"
+    x: 50.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "second press"
+    x: 50.0
+    y: 30.0
+    down: true
+    clicks: 2
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "double click"
+    x: 50.0
+    y: 30.0
+    down: false
+    clicks: 2
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+
+  # keys
+  key(app: app, step: "Down", keys: ListSelectionKeys { down: true })
+  key(app: app, step: "Down", keys: ListSelectionKeys { down: true })
+  key(app: app, step: "Shift Down", keys: ListSelectionKeys { down: true, extend: true })
+  key(app: app, step: "Shift Down", keys: ListSelectionKeys { down: true, extend: true })
+  key(app: app, step: "Shift Up", keys: ListSelectionKeys { up: true, extend: true })
+  log("scrolled {scrollY(app: app, list: app.left)}, rows {rowsText(app: app, list: app.left)}")
+  key(app: app, step: "Page Down", keys: ListSelectionKeys { pageDown: true })
+  log("scrolled {scrollY(app: app, list: app.left)}")
+  key(app: app, step: "End", keys: ListSelectionKeys { end: true })
+  log("scrolled {scrollY(app: app, list: app.left)}, rows {rowsText(app: app, list: app.left)}")
+  key(app: app, step: "Down at the end", keys: ListSelectionKeys { down: true })
+  key(app: app, step: "Up", keys: ListSelectionKeys { up: true })
+  log("scrolled {scrollY(app: app, list: app.left)}")
+  key(app: app, step: "Home", keys: ListSelectionKeys { home: true })
+  log("scrolled {scrollY(app: app, list: app.left)}")
+  key(app: app, step: "typed g", keys: ListSelectionKeys { text: "g" })
+  key(app: app, step: "Return", keys: ListSelectionKeys { choose: true })
+  key(app: app, step: "Left", keys: ListSelectionKeys { left: true })
+  key(app: app, step: "Right", keys: ListSelectionKeys { right: true })
+  key(app: app, step: "a space starts no search", keys: ListSelectionKeys { text: " " })
+  key(app: app, step: "select all", keys: ListSelectionKeys { selectAll: true, toggle: true })
+
+  # two lists and a field
+  pointer(
+    app: app
+    step: "press y in the right list"
+    x: 200.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  log("rows {rowsText(app: app, list: app.left)}| {rowsText(app: app, list: app.right)}")
+  key(app: app, step: "Down there", keys: ListSelectionKeys { down: true })
+  key(app: app, step: "Shift Up, single", keys: ListSelectionKeys { up: true, extend: true })
+  key(app: app, step: "typed Z r", keys: ListSelectionKeys { text: "Z r" })
+  pointer(
+    app: app
+    step: "Cmd press z, off"
+    x: 200.0
+    y: 50.0
+    down: true
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 50.0
+    down: false
+    clicks: 1
+    toggle: true
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "press y"
+    x: 200.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "press the field"
+    x: 350.0
+    y: 20.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 350.0
+    y: 20.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  log("rows {rowsText(app: app, list: app.right)}")
+  key(app: app, step: "Down in the field", keys: ListSelectionKeys { down: true })
+  pointer(
+    app: app
+    step: "press x, the field lets go"
+    x: 200.0
+    y: 10.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 10.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  let moved: Bool = focusTextField(world: app.world, entityId: app.field)
+  key(app: app, step: "the field by code", keys: ListSelectionKeys {})
+  let given: Bool = focusTextField(world: app.world, entityId: noEntity())
+  key(app: app, step: "and it gives them back", keys: ListSelectionKeys {})
+  pointer(
+    app: app
+    step: "press below the rows"
+    x: 200.0
+    y: 90.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 90.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "press beside both columns"
+    x: 350.0
+    y: 150.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 350.0
+    y: 150.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+
+  # under a selection
+  pointer(
+    app: app
+    step: "press x"
+    x: 200.0
+    y: 10.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 200.0
+    y: 10.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.mouse
+  )
+  setListSelection(world: app.world, list: app.left, keys: List(String) { "c", "e" })
+  key(app: app, step: "set by the program", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "lkjihgfedcba")
+  key(app: app, step: "sorted the other way", keys: ListSelectionKeys {})
+  log("lead {listLeadKey(world: app.world, list: app.left)}")
+  setRows(app: app, list: app.left, names: "abcdghijkl")
+  key(app: app, step: "e gone", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "abdghijkl")
+  key(app: app, step: "c gone too, the next takes it", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "abghijkl")
+  key(app: app, step: "d gone", keys: ListSelectionKeys {})
+  setListSelection(world: app.world, list: app.left, keys: List(String) { "l" })
+  key(app: app, step: "l set", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "abghijk")
+  key(app: app, step: "l gone, the last takes it", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "")
+  key(app: app, step: "no rows", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "kba")
+  key(app: app, step: "rows again, with it", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "")
+  key(app: app, step: "no rows", keys: ListSelectionKeys {})
+  setRows(app: app, list: app.left, names: "mn")
+  key(app: app, step: "other rows", keys: ListSelectionKeys {})
+  setListSelection(world: app.world, list: app.left, keys: List(String) { "q", "r" })
+  setRows(app: app, list: app.left, names: "qrs")
+  key(app: app, step: "a new name set with its rows", keys: ListSelectionKeys {})
+
+  # a part of the rows live
+  let names: ListRowNames = {
+    keys: List(String) {
+      "q"
+      "r"
+      "s"
+      "t"
+      "u"
+    }
+    names: List(String) {
+      "quiet"
+      "red"
+      "sea"
+      "tall"
+      "under"
+    }
+  }
+  componentSet(this: app.world.listRowNames, entityId: app.left, data: names)
+  key(app: app, step: "the program names all rows", keys: ListSelectionKeys {})
+  setKeyFocus(world: app.world, entityId: nodeOf(world: app.world, nodeId: "LeftColumn"))
+  key(app: app, step: "typed und", keys: ListSelectionKeys { text: "und" })
+  key(app: app, step: "Shift Home", keys: ListSelectionKeys { home: true, extend: true })
+
+  # a finger's tap selects as it is lifted; a drag that scrolls selects nothing
+  setRows(app: app, list: app.left, names: "abcdefghijkl")
+  componentRemove(this: app.world.listRowNames, entityId: app.left)
+  key(app: app, step: "rows of its own again", keys: ListSelectionKeys {})
+  pointer(
+    app: app
+    step: "finger down on b"
+    x: 50.0
+    y: 30.0
+    down: true
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "lifted"
+    x: 50.0
+    y: 30.0
+    down: false
+    clicks: 1
+    toggle: false
+    extend: false
+    kind: InputKind.touch
+  )
+
+  # a flow list, every row live and laid out, scrolled to a row too
+  setRows(app: app, list: app.right, names: "")
+  key(app: app, step: "", keys: ListSelectionKeys {})
+  componentMod(this: app.world.listViews, entityId: app.right).mode = ListViewMode.flow
+  componentSet(
+    this: app.world.layouts
+    entityId: app.right
+    data: Layout {
+      kind: LayoutType.vertical
+      gap: 2.0
+      alignMain: AlignKind.start
+      alignCross: AlignKind.start
+      columns: 0
+      columnGap: 0.0
+      rowGap: 0.0
+    }
+  )
+  setRows(app: app, list: app.right, names: "opqrstuvwx")
+  setKeyFocus(world: app.world, entityId: nodeOf(world: app.world, nodeId: "RightColumn"))
+  key(app: app, step: "a flow list", keys: ListSelectionKeys {})
+  key(app: app, step: "Home", keys: ListSelectionKeys { home: true })
+  key(app: app, step: "End", keys: ListSelectionKeys { end: true })
+  log("rows {rowsText(app: app, list: app.right)}")
+  key(app: app, step: "after", keys: ListSelectionKeys {})
+  log("scrolled {scrollY(app: app, list: app.right)}")
+}

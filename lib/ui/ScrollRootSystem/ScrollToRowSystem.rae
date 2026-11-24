@@ -1,5 +1,5 @@
 # Scroll a list so a row is in view (ui/ScrollToRow): an app asks
-# with requestScrollToRow on a virtual `ListView`; scrollToRowSystem takes
+# with requestScrollToRow on a `ListView`; scrollToRowSystem takes
 # the request once, BEFORE the list binds its rows (so the rows bound are the
 # ones now in view), from the last layout (the scroll root's window) and the
 # list's data (its row count: a virtual list's content is rows x pitch). A
@@ -16,7 +16,7 @@ open ui/ListMotionSystem
 open ecs/Entity
 open ecs/ComponentTable
 
-# Ask for data row `index` of the virtual ListView `listEntity` in view, at
+# Ask for data row `index` of the ListView `listEntity` in view, at
 # the window's `place`; a newer request replaces an older one
 func requestScrollToRow(
   world: mod UiWorld
@@ -34,7 +34,8 @@ func requestScrollToRow(
 # The scroll position that puts a row whose top is `rowTop` (along the
 # content, from its start) and `rowHeight` long at the window's `place`, in
 # [floor, 0]; `window` is the root's length and `endInset` the band at its
-# end that content keeps clear of
+# end that content keeps clear of. `nearest` is as `start` here (it depends on
+# the position now: nearestRowPosition).
 func scrollRowPosition(
   rowTop: view Float
   rowHeight: view Float
@@ -54,6 +55,69 @@ func scrollRowPosition(
     position = floor
   }
   ret position
+}
+
+# The position nearest to `before` that shows the row wholly (its start, when it is longer than the
+# window)
+func nearestRowPosition(
+  rowTop: view Float
+  rowHeight: view Float
+  window: view Float
+  endInset: view Float
+  floor: view Float
+  before: view Float
+) ret Float {
+  let atStart: Float = scrollRowPosition(
+    rowTop: rowTop
+    rowHeight: rowHeight
+    window: window
+    endInset: endInset
+    floor: floor
+    place: ScrollRowPlace.start
+  )
+  let atEnd: Float = scrollRowPosition(
+    rowTop: rowTop
+    rowHeight: rowHeight
+    window: window
+    endInset: endInset
+    floor: floor
+    place: ScrollRowPlace.end
+  )
+  var position: Float = before
+  if position > atEnd {
+    position = atEnd
+  }
+  if position < atStart {
+    position = atStart
+  }
+  ret position
+}
+
+# Where data row `index` of a flow list is in it
+func flowRowBox(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  listEntity: view EntityId
+  index: view Int
+) ret Rect {
+  if componentHas(this: world.childrens, entityId: listEntity) {
+    let children: view Children = componentView(this: world.childrens, entityId: listEntity)
+    loop let child: view EntityId in children.ids {
+      if componentHas(this: uiSystems.listRows.rowsBound, entityId: child) and componentHas(
+        this: uiSystems.layout.computedRects
+        entityId: child
+      ) {
+        if componentView(this: uiSystems.listRows.rowsBound, entityId: child).dataIndex is index {
+          let box: view ComputedRect = componentView(
+            this: uiSystems.layout.computedRects
+            entityId: child
+          )
+          ret Rect { position: box.position, size: box.size }
+        }
+      }
+    }
+  }
+  ret Rect { position: { x: 0.0, y: 0.0 }, size: { x: 0.0, y: 0.0 } }
 }
 
 # The scroll root that moves `listEntity`: its own ScrollRoot, else its
@@ -116,9 +180,9 @@ func scrollToRowSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
     if let authored: ScrollRoot = componentCopy(this: world.scrollRoots, entityId: root) {
       scrollRoot = own authored
     }
-    if listView.mode is not ListViewMode.virtual or scrollRoot.axis is not ScrollAxis.y {
+    if scrollRoot.axis is not ScrollAxis.y {
       log(
-        "[ui] scrollToRow: entity {listEntity.index} is not a virtual list in a vertical scroll root; the request is dropped"
+        "[ui] scrollToRow: entity {listEntity.index} is not in a vertical scroll root; the request is dropped"
       )
       continue
     }
@@ -153,17 +217,43 @@ func scrollToRowSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
       ).position.y
     }
     let pitch: Float = listView.itemHeight + listView.itemGap
-    let position: Float = scrollRowPosition(
-      rowTop: listTop + index.toFloat() * pitch
-      rowHeight: listView.itemHeight
+    var rowTop: Float = index.toFloat() * pitch
+    var rowHeight: Float = listView.itemHeight
+    if listView.mode is ListViewMode.flow {
+      # every row is live: where the layout put it
+      let box: Rect = flowRowBox(
+        world: world
+        uiSystems: uiSystems
+        listEntity: listEntity
+        index: index
+      )
+      rowTop = box.position.y
+      rowHeight = box.size.y
+    }
+    var before: Float = 0.0
+    if componentHas(this: world.scrollStates, entityId: root) {
+      before = componentView(this: world.scrollStates, entityId: root).y
+    }
+    var position: Float = scrollRowPosition(
+      rowTop: listTop + rowTop
+      rowHeight: rowHeight
       window: range.window
       endInset: scrollRoot.endInset
       floor: range.floor
       place: request.place
     )
-    var before: Float = 0.0
-    if componentHas(this: world.scrollStates, entityId: root) {
-      before = componentView(this: world.scrollStates, entityId: root).y
+    if request.place is ScrollRowPlace.nearest {
+      position = nearestRowPosition(
+        rowTop: listTop + rowTop
+        rowHeight: rowHeight
+        window: range.window
+        endInset: scrollRoot.endInset
+        floor: range.floor
+        before: before
+      )
+      if position is before {
+        continue
+      }
     }
     # A list that animates its moves counts this jump in where its rows were drawn, when the row
     # it shows came in this frame (ui/ListMotionSystem): or each row would jump by it

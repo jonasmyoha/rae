@@ -1,0 +1,815 @@
+# ui/ListSelectionSystem — selecting rows of a ListView (docs/ui-scene-format.md "List selection").
+#
+# On the ListView's node: `ListSelection`; on it or a node around it: `TakesKeys`; on the nodes of
+# the
+# row's scene that show it: `SelectionStyle`. Rows are clicked on their root, which has an OnClick.
+#
+# Once a frame, after updateUiInput, menuSystem, keyFocusSystem and textFieldSystem:
+#
+#   listSelectionSystem(
+#     world: world  uiSystems: uiSystems  input: input  keys: listKeysFromDevice()
+#   )
+#   loop var i: Int = 0, i < eventCount(ListEvent, this: world.listEvents), ++i { ... }
+#
+# and after listViewSystem listSelectionLookSystem, which colors the live rows (app3d/UiShell's two
+# pipelines call it).
+#
+# The selection is kept by the rows' keys (the ListView's itemKeyField), so it survives a rebind, a
+# sort and a filter, and rows that are not live. A key that goes away leaves it; when none is left
+# the
+# row after it takes it (the one that slid into its place), else the last one. A list that loses all
+# its rows has none selected, until rows with those keys are back.
+import Math
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/KeyFocusSystem
+open ui/ListViewSystem
+open ui/SelectionComponents
+open ui/UiSystems
+
+# The rows selected in `list`, in its order
+func listSelectedKeys(world: view UiWorld, list: view EntityId) ret List(String) {
+  if let state: ListSelected = componentCopy(this: world.listSelecteds, entityId: list) {
+    ret state.selected
+  }
+  ret List(String) {}
+}
+
+# The row of `list` moved to last ("" none)
+func listLeadKey(world: view UiWorld, list: view EntityId) ret String {
+  if componentHas(this: world.listSelecteds, entityId: list) {
+    ret "{componentView(this: world.listSelecteds, entityId: list).lead}"
+  }
+  ret ""
+}
+
+# Select exactly the rows with these keys; the last is the row moved to last. Keys the list has not
+# are dropped, unless it has no rows yet. No event is sent for what a program sets itself.
+func setListSelection(world: mod UiWorld, list: view EntityId, keys: view List(String)) {
+  var state: ListSelected = {}
+  loop let key: view String in keys {
+    let mine: String = "{key}"
+    state.lead = "{key}"
+    state.selected.add(value: own mine)
+  }
+  state.anchor = "{state.lead}"
+  componentSet(this: world.listSelecteds, entityId: list, data: own state)
+}
+
+# ----- the rows' keys ---------------------------------------------------------
+
+# What the keys are made from: the program's ListRowNames, else the list's data
+func listKeysStamp(world: view UiWorld, list: view EntityId) ret Int {
+  if componentHas(this: world.listRowNames, entityId: list) {
+    ret componentModStamp(this: world.listRowNames, entityId: list)
+  }
+  ret componentModStamp(this: world.listViewDatas, entityId: list)
+}
+
+# All the rows' keys of `list`, in order
+func listKeysNow(world: view UiWorld, list: view EntityId) ret List(String) {
+  if let names: ListRowNames = componentCopy(this: world.listRowNames, entityId: list) {
+    ret names.keys
+  }
+  var keys: List(String) = {}
+  if componentHas(this: world.listViewDatas, entityId: list) is false {
+    ret keys
+  }
+  let listView: view ListView = componentView(this: world.listViews, entityId: list)
+  let data: view ListViewData = componentView(this: world.listViewDatas, entityId: list)
+  var index: Int = 0
+  loop let row: view ListViewRow in data.rows {
+    let key: String = listViewRowKeyOf(lv: listView, row: row, index: index)
+    keys.add(value: own key)
+    index = index + 1
+  }
+  ret keys
+}
+
+# The name typing looks in, of row `index`
+func listRowName(
+  world: view UiWorld
+  list: view EntityId
+  seen: view ListSelectionSeen
+  index: view Int
+) ret String {
+  if componentHas(this: world.listRowNames, entityId: list) {
+    let names: view ListRowNames = componentView(this: world.listRowNames, entityId: list)
+    if index < names.names.length {
+      ret names.names.copyAtFallback(index: index, fallback: "")
+    }
+    ret seen.keys.copyAtFallback(index: index, fallback: "")
+  }
+  let field: String = "{componentView(this: world.listSelections, entityId: list).findField}"
+  if field.length() > 0 and componentHas(this: world.listViewDatas, entityId: list) {
+    let data: view ListViewData = componentView(this: world.listViewDatas, entityId: list)
+    if let row: view ListViewRow = data.rows.viewAt(index: index) {
+      ret listRowValue(row: row, key: field)
+    }
+  }
+  ret seen.keys.copyAtFallback(index: index, fallback: "")
+}
+
+func keyPlaces(keys: view List(String)) ret StringMap(Int) {
+  var places: StringMap(Int) = createStringMap(Int, cap: keys.length * 2 + 16)
+  loop var i: Int = 0, i < keys.length, ++i {
+    if let key: view String = keys.viewAt(index: i) {
+      places.set(k: key, value: i)
+    }
+  }
+  ret places
+}
+
+func placeOf(places: view StringMap(Int), key: view String) ret Int {
+  if let found: Int = places.get(k: key) {
+    ret found
+  }
+  ret -1
+}
+
+# ----- the selection kept as the rows change -----------------------------------
+func sendListEvent(
+  uiSystems: mod UiSystems
+  kind: copy ListEventKind
+  list: view EntityId
+  key: view String
+  byKey: copy Bool
+) {
+  let event: ListEvent = { kind: kind, list: list, key: "{key}", byKey: byKey }
+  uiSystems.listSelection.pending.add(value: event)
+}
+
+# A copy of what the system knows of `list` (a first one when it has none)
+func listSeen(uiSystems: view UiSystems, list: view EntityId) ret ListSelectionSeen {
+  if let seen: ListSelectionSeen = componentCopy(this: uiSystems.listSelection.seen, entityId: list) {
+    ret seen
+  }
+  ret ListSelectionSeen {}
+}
+
+# Is what the system knows of `list` current?
+func listSeenCurrent(world: view UiWorld, uiSystems: view UiSystems, list: view EntityId) ret Bool {
+  if componentHas(this: uiSystems.listSelection.seen, entityId: list) is false {
+    ret false
+  }
+  let seen: view ListSelectionSeen = componentView(
+    this: uiSystems.listSelection.seen
+    entityId: list
+  )
+  ret seen.loaded and seen.dataStamp is listKeysStamp(world: world, list: list) and seen.listStamp is componentModStamp(
+    this: world.listViews
+    entityId: list
+  ) and seen.selectedStamp is componentModStamp(this: world.listSelecteds, entityId: list)
+}
+
+# Bring `list`'s selection up to its rows and to what a program set
+func syncListSelection(world: mod UiWorld, uiSystems: mod UiSystems, list: view EntityId) {
+  if listSeenCurrent(world: world, uiSystems: uiSystems, list: list) {
+    ret
+  }
+  if componentHas(this: world.listSelecteds, entityId: list) is false {
+    componentSet(this: world.listSelecteds, entityId: list, data: ListSelected {})
+  }
+  var seen: ListSelectionSeen = listSeen(uiSystems: uiSystems, list: list)
+  var state: ListSelected = ListSelected {}
+  if let current: ListSelected = componentCopy(this: world.listSelecteds, entityId: list) {
+    state = own current
+  }
+  let dataStamp: Int = listKeysStamp(world: world, list: list)
+  let listStamp: Int = componentModStamp(this: world.listViews, entityId: list)
+  var oldKeys: List(String) = seen.keys
+  if seen.loaded is false or seen.dataStamp is not dataStamp or seen.listStamp is not listStamp {
+    seen.keys = listKeysNow(world: world, list: list)
+  }
+  let places: StringMap(Int) = keyPlaces(keys: seen.keys)
+  let hadRows: Bool = oldKeys.length > 0
+  seen.flags = {}
+  loop var i: Int = 0, i < seen.keys.length, ++i {
+    seen.flags.add(value: false)
+  }
+  var changed: Bool = false
+  if seen.keys.length is 0 {
+    # none left (or none yet): held for when they are back
+    if state.selected.length > 0 {
+      seen.held = state.selected
+      changed = hadRows
+    }
+  } else {
+    var wanted: List(String) = state.selected
+    if hadRows is false and wanted.length is 0 {
+      wanted = seen.held
+      changed = wanted.length > 0
+    }
+    seen.held = {}
+    var kept: Int = 0
+    loop let key: view String in wanted {
+      let place: Int = placeOf(places: places, key: key)
+      if place >= 0 {
+        seen.flags.set(index: place, value: true)
+        kept = kept + 1
+      }
+    }
+    if kept < wanted.length {
+      changed = true
+    }
+    if kept is 0 and wanted.length > 0 {
+      let next: Int = handOnTo(oldKeys: oldKeys, gone: wanted, places: places)
+      if next >= 0 {
+        seen.flags.set(index: next, value: true)
+        state.lead = seen.keys.copyAtFallback(index: next, fallback: "")
+        state.anchor = "{state.lead}"
+      } else if hadRows {
+        let last: Int = seen.keys.length - 1
+        seen.flags.set(index: last, value: true)
+        state.lead = seen.keys.copyAtFallback(index: last, fallback: "")
+        state.anchor = "{state.lead}"
+      } else {
+        changed = changed and state.selected.length > 0
+      }
+    }
+  }
+  keepOnlyMode(
+    world: world
+    list: list
+    seen: seen
+    lead: state.lead
+  )
+  seen.lead = placeOf(places: places, key: state.lead)
+  seen.anchor = placeOf(places: places, key: state.anchor)
+  if seen.lead < 0 {
+    # gone while others are still selected: the first of those
+    seen.lead = firstSelected(seen: seen)
+  }
+  if seen.anchor < 0 {
+    seen.anchor = seen.lead
+  }
+  seen.loaded = true
+  seen.dataStamp = dataStamp
+  seen.listStamp = listStamp
+  writeListSelected(world: world, list: list, seen: seen)
+  componentSet(this: uiSystems.listSelection.seen, entityId: list, data: own seen)
+  if changed {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.selectionChanged
+      list: list
+      key: listLeadKey(world: world, list: list)
+      byKey: false
+    )
+  }
+}
+
+# The row that takes a selection whose rows are all gone: the one after the first of them that is
+# still there, -1 when there is none
+func handOnTo(
+  oldKeys: view List(String)
+  gone: view List(String)
+  places: view StringMap(Int)
+) ret Int {
+  let old: StringMap(Int) = keyPlaces(keys: oldKeys)
+  var first: Int = -1
+  loop let key: view String in gone {
+    let place: Int = placeOf(places: old, key: key)
+    if place >= 0 and (first < 0 or place < first) {
+      first = place
+    }
+  }
+  if first < 0 {
+    ret -1
+  }
+  loop var i: Int = first + 1, i < oldKeys.length, ++i {
+    if let key: view String = oldKeys.viewAt(index: i) {
+      let place: Int = placeOf(places: places, key: key)
+      if place >= 0 {
+        ret place
+      }
+    }
+  }
+  ret -1
+}
+
+func firstSelected(seen: view ListSelectionSeen) ret Int {
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    if seen.flags.copyAtFallback(index: i, fallback: false) {
+      ret i
+    }
+  }
+  ret -1
+}
+
+# One row at most in single mode (the one moved to last, else the first), none in none
+func keepOnlyMode(
+  world: view UiWorld
+  list: view EntityId
+  seen: mod ListSelectionSeen
+  lead: view String
+) {
+  let mode: ListSelectMode = componentView(this: world.listSelections, entityId: list).mode
+  if mode is ListSelectMode.multiple {
+    ret
+  }
+  var only: Int = -1
+  loop var i: Int = 0, i < seen.flags.length and mode is ListSelectMode.single, ++i {
+    if seen.flags.copyAtFallback(index: i, fallback: false) {
+      let key: String = seen.keys.copyAtFallback(index: i, fallback: "")
+      if only < 0 or key is lead {
+        only = i
+      }
+    }
+  }
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    seen.flags.set(index: i, value: i is only)
+  }
+}
+
+# Write the selection `seen` has to the list's ListSelected
+func writeListSelected(world: mod UiWorld, list: view EntityId, seen: mod ListSelectionSeen) {
+  var state: ListSelected = ListSelected {}
+  if let current: ListSelected = componentCopy(this: world.listSelecteds, entityId: list) {
+    state = own current
+  }
+  state.selected = {}
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    if seen.flags.copyAtFallback(index: i, fallback: false) {
+      let key: String = seen.keys.copyAtFallback(index: i, fallback: "")
+      state.selected.add(value: own key)
+    }
+  }
+  state.lead = seen.keys.copyAtFallback(index: seen.lead, fallback: "")
+  state.anchor = seen.keys.copyAtFallback(index: seen.anchor, fallback: "")
+  componentSet(this: world.listSelecteds, entityId: list, data: own state)
+  seen.selectedStamp = componentModStamp(this: world.listSelecteds, entityId: list)
+}
+
+# ----- what a click or a key does, on rows by index -----------------------------
+
+# Only row `index` (-1 none)
+func selectOnlyRow(seen: mod ListSelectionSeen, index: view Int) {
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    seen.flags.set(index: i, value: i is index)
+  }
+  seen.anchor = index
+  seen.lead = index
+}
+
+func toggleRow(seen: mod ListSelectionSeen, mode: view ListSelectMode, index: view Int) {
+  let on: Bool = seen.flags.copyAtFallback(index: index, fallback: false)
+  if mode is ListSelectMode.single and on is false {
+    selectOnlyRow(seen: seen, index: index)
+    ret
+  }
+  seen.flags.set(index: index, value: not on)
+  seen.anchor = index
+  seen.lead = index
+}
+
+# The rows from the anchor to `index`
+func selectRowRange(seen: mod ListSelectionSeen, mode: view ListSelectMode, index: view Int) {
+  if mode is ListSelectMode.single {
+    selectOnlyRow(seen: seen, index: index)
+    ret
+  }
+  if seen.anchor < 0 {
+    seen.anchor = 0
+  }
+  let from: Int = Math.min(a: seen.anchor, b: index)
+  let to: Int = Math.max(a: seen.anchor, b: index)
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    seen.flags.set(index: i, value: i >= from and i <= to)
+  }
+  seen.lead = index
+}
+
+# What changing a selection did
+enum ListPick { nothing, moved, changed }
+
+# `seen` as a click on row `index` (-1 none) with these modifiers leaves it, written to the list's
+# ListSelected. `moved`: the same rows, another row moved to last.
+func pickSeenRow(
+  world: mod UiWorld
+  list: view EntityId
+  seen: mod ListSelectionSeen
+  index: view Int
+  toggle: view Bool
+  extend: view Bool
+) ret ListPick {
+  let mode: ListSelectMode = componentView(this: world.listSelections, entityId: list).mode
+  if mode is ListSelectMode.none or index >= seen.keys.length {
+    ret ListPick.nothing
+  }
+  let before: List(Bool) = seen.flags
+  let leadBefore: Int = seen.lead
+  let anchorBefore: Int = seen.anchor
+  if index >= 0 and extend {
+    selectRowRange(seen: seen, mode: mode, index: index)
+  } else if index >= 0 and toggle {
+    toggleRow(seen: seen, mode: mode, index: index)
+  } else {
+    selectOnlyRow(seen: seen, index: index)
+  }
+  let changed: Bool = not flagsSame(a: before, b: seen.flags)
+  if changed is false and seen.lead is leadBefore and seen.anchor is anchorBefore {
+    ret ListPick.nothing
+  }
+  writeListSelected(world: world, list: list, seen: seen)
+  if changed {
+    ret ListPick.changed
+  }
+  ret ListPick.moved
+}
+
+# Change `list`'s selection: `index` the row, as a click with these modifiers does; -1 clears it.
+# True when it changed (its event is sent).
+func pickListRow(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  list: view EntityId
+  index: view Int
+  toggle: view Bool
+  extend: view Bool
+) ret Bool {
+  let pick: ListPick = pickSeenRow(
+    world: world
+    list: list
+    seen: componentMod(this: uiSystems.listSelection.seen, entityId: list)
+    index: index
+    toggle: toggle
+    extend: extend
+  )
+  if pick is not ListPick.changed {
+    ret false
+  }
+  sendListEvent(
+    uiSystems: uiSystems
+    kind: ListEventKind.selectionChanged
+    list: list
+    key: listLeadKey(world: world, list: list)
+    byKey: false
+  )
+  ret true
+}
+
+func flagsSame(a: view List(Bool), b: view List(Bool)) ret Bool {
+  if a.length is not b.length {
+    ret false
+  }
+  loop var i: Int = 0, i < a.length, ++i {
+    if a.copyAtFallback(index: i, fallback: false) is not b.copyAtFallback(
+      index: i
+      fallback: false
+    ) {
+      ret false
+    }
+  }
+  ret true
+}
+
+# Select all rows, in multiple mode
+func selectAllListRows(world: mod UiWorld, uiSystems: mod UiSystems, list: view EntityId) ret Bool {
+  syncListSelection(world: world, uiSystems: uiSystems, list: list)
+  if componentView(this: world.listSelections, entityId: list).mode is not ListSelectMode.multiple {
+    ret false
+  }
+  let changed: Bool = selectAllSeen(
+    world: world
+    list: list
+    seen: componentMod(this: uiSystems.listSelection.seen, entityId: list)
+  )
+  if changed {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.selectionChanged
+      list: list
+      key: listLeadKey(world: world, list: list)
+      byKey: false
+    )
+  }
+  ret changed
+}
+
+func selectAllSeen(world: mod UiWorld, list: view EntityId, seen: mod ListSelectionSeen) ret Bool {
+  var changed: Bool = false
+  loop var i: Int = 0, i < seen.flags.length, ++i {
+    if seen.flags.copyAtFallback(index: i, fallback: false) is false {
+      seen.flags.set(index: i, value: true)
+      changed = true
+    }
+  }
+  if changed is false {
+    ret false
+  }
+  if seen.lead < 0 {
+    seen.lead = 0
+    seen.anchor = 0
+  }
+  writeListSelected(world: world, list: list, seen: seen)
+  ret true
+}
+
+# Clear the selection
+func clearListSelection(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  list: view EntityId
+) ret Bool {
+  syncListSelection(world: world, uiSystems: uiSystems, list: list)
+  ret pickListRow(
+    world: world
+    uiSystems: uiSystems
+    list: list
+    index: -1
+    toggle: false
+    extend: false
+  )
+}
+
+# ----- the frame ----------------------------------------------------------------
+
+# The list and the index of the live row whose root is `entityId`
+type ListRowAt {
+  list: EntityId = noEntity()
+  index: Int = -1
+}
+
+func listRowAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret ListRowAt {
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) is false or componentHas(
+    this: uiSystems.listRows.rowsBound
+    entityId: entityId
+  ) is false or componentHas(this: world.leavings, entityId: entityId) {
+    ret ListRowAt {}
+  }
+  let list: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+  if componentHas(this: world.listSelections, entityId: list) is false or componentHas(
+    this: world.listViews
+    entityId: list
+  ) is false {
+    ret ListRowAt {}
+  }
+  let index: Int = componentView(this: uiSystems.listRows.rowsBound, entityId: entityId).dataIndex
+  ret ListRowAt { list: list, index: index }
+}
+
+# The key of a row as it is shown (what the last frame's data had)
+func shownKey(uiSystems: view UiSystems, row: view ListRowAt) ret String {
+  if componentHas(this: uiSystems.listSelection.seen, entityId: row.list) is false {
+    ret ""
+  }
+  ret componentView(this: uiSystems.listSelection.seen, entityId: row.list).keys.copyAtFallback(
+    index: row.index
+    fallback: ""
+  )
+}
+
+# The index of the row with `key` now (-1 none)
+func listRowIndex(uiSystems: view UiSystems, list: view EntityId, key: view String) ret Int {
+  if componentHas(this: uiSystems.listSelection.seen, entityId: list) is false {
+    ret -1
+  }
+  let seen: view ListSelectionSeen = componentView(
+    this: uiSystems.listSelection.seen
+    entityId: list
+  )
+  loop var i: Int = 0, i < seen.keys.length, ++i {
+    if let mine: view String = seen.keys.viewAt(index: i) {
+      if mine is key {
+        ret i
+      }
+    }
+  }
+  ret -1
+}
+
+func listRowSelected(uiSystems: view UiSystems, list: view EntityId, index: view Int) ret Bool {
+  ret componentHas(this: uiSystems.listSelection.seen, entityId: list) and componentView(
+    this: uiSystems.listSelection.seen
+    entityId: list
+  ).flags.copyAtFallback(index: index, fallback: false)
+}
+
+func selectableLists(world: view UiWorld) ret List(EntityId) {
+  var lists: List(EntityId) = {}
+  loop var i: Int = 0, i < componentCount(this: world.listSelections), ++i {
+    let list: EntityId = componentEntityAt(this: world.listSelections, i: i)
+    if componentHas(this: world.listViews, entityId: list) {
+      lists.add(value: list)
+    }
+  }
+  ret lists
+}
+
+# One frame: the pointer, the keys of the list that has them, and the events
+func listSelectionSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  keys: view ListSelectionKeys
+) {
+  frameAdvance(this: world.listEvents)
+  let lists: List(EntityId) = selectableLists(world: world)
+  if lists.length > 0 {
+    # the rows under the pointer by what they show, before the lists' new rows are taken in
+    let pressed: ListRowAt = listRowAt(
+      world: world
+      uiSystems: uiSystems
+      entityId: input.hoveredEntityId
+    )
+    let pressedKey: String = shownKey(uiSystems: uiSystems, row: pressed)
+    var clicked: List(ListClick) = listClicks(world: world, uiSystems: uiSystems)
+    loop let list: view EntityId in lists {
+      syncListSelection(world: world, uiSystems: uiSystems, list: list)
+    }
+    if world.menu.open is false {
+      stepListPress(
+        world: world
+        uiSystems: uiSystems
+        input: input
+        keys: keys
+        list: pressed.list
+        key: pressedKey
+        lists: lists
+      )
+      loop let click: view ListClick in clicked {
+        stepListClick(
+          world: world
+          uiSystems: uiSystems
+          click: click
+          keys: keys
+        )
+      }
+    }
+    stepListKeys(
+      world: world
+      uiSystems: uiSystems
+      keys: keys
+      lists: lists
+      now: input.nowSeconds
+    )
+  }
+  loop let event: view ListEvent in uiSystems.listSelection.pending {
+    let sent: ListEvent = event
+    eventSend(this: world.listEvents, value: own sent)
+  }
+  uiSystems.listSelection.pending.clear()
+}
+
+# A click on a row this frame
+type ListClick {
+  list: EntityId
+  key: String
+  clicks: Int
+}
+
+func listClicks(world: view UiWorld, uiSystems: view UiSystems) ret List(ListClick) {
+  var clicked: List(ListClick) = {}
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    let row: ListRowAt = listRowAt(world: world, uiSystems: uiSystems, entityId: action.entityId)
+    # the row's secondary click is not a click on it
+    if row.index >= 0 and not isSecondaryAction(world: world, action: action) {
+      clicked.add(
+        value: ListClick {
+          list: row.list
+          key: shownKey(uiSystems: uiSystems, row: row)
+          clicks: action.clicks
+        }
+      )
+    }
+  }
+  ret clicked
+}
+
+func isSecondaryAction(world: view UiWorld, action: view UiAction) ret Bool {
+  if componentHas(this: world.onSecondaryClicks, entityId: action.entityId) is false {
+    ret false
+  }
+  ret componentView(this: world.onSecondaryClicks, entityId: action.entityId).actionId is action.actionId
+}
+
+# A press selects at once (a finger's does not: its click does). One on a selected row waits for its
+# click, so that a drag can take the whole selection; a secondary one keeps it.
+func stepListPress(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  keys: view ListSelectionKeys
+  list: view EntityId
+  key: view String
+  lists: view List(EntityId)
+) {
+  let primary: Bool = input.pointer.pressed and input.pointer.kind is not InputKind.touch
+  if primary {
+    uiSystems.listSelection.pressList = list
+    uiSystems.listSelection.pressKey = "{key}"
+    uiSystems.listSelection.pressDone = false
+  }
+  if primary is false and input.pointer.secondary.pressed is false {
+    ret
+  }
+  if isNone(this: list) {
+    if primary and not keys.toggle and not keys.extend {
+      clearPressedList(
+        world: world
+        uiSystems: uiSystems
+        input: input
+        lists: lists
+      )
+    }
+    ret
+  }
+  let index: Int = listRowIndex(uiSystems: uiSystems, list: list, key: key)
+  if index < 0 {
+    ret
+  }
+  let selected: Bool = listRowSelected(uiSystems: uiSystems, list: list, index: index)
+  if primary is false {
+    if selected is false {
+      let picked: Bool = pickListRow(
+        world: world
+        uiSystems: uiSystems
+        list: list
+        index: index
+        toggle: false
+        extend: false
+      )
+    }
+    ret
+  }
+  if keys.toggle or keys.extend or selected is false {
+    uiSystems.listSelection.pressDone = true
+    let picked: Bool = pickListRow(
+      world: world
+      uiSystems: uiSystems
+      list: list
+      index: index
+      toggle: keys.toggle
+      extend: keys.extend
+    )
+  }
+}
+
+# A press beside the rows of a list, on nothing else that is clicked: its selection is cleared
+func clearPressedList(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  lists: view List(EntityId)
+) {
+  let target: EntityId = keysTarget(
+    world: world
+    uiSystems: uiSystems
+    x: input.pointer.x
+    y: input.pointer.y
+  )
+  if isNone(this: target) {
+    ret
+  }
+  loop let list: view EntityId in lists {
+    let hovered: EntityId = input.hoveredEntityId
+    let free: Bool = isNone(this: hovered) or hovered is list or hovered is target
+    if free and keysOwner(world: world, uiSystems: uiSystems, entityId: list) is target {
+      let cleared: Bool = clearListSelection(world: world, uiSystems: uiSystems, list: list)
+    }
+  }
+}
+
+func stepListClick(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  click: view ListClick
+  keys: view ListSelectionKeys
+) {
+  let index: Int = listRowIndex(uiSystems: uiSystems, list: click.list, key: click.key)
+  if index < 0 {
+    ret
+  }
+  let done: Bool = uiSystems.listSelection.pressDone and uiSystems.listSelection.pressList is click.list and uiSystems.listSelection.pressKey is click.key
+  if done is false {
+    let picked: Bool = pickListRow(
+      world: world
+      uiSystems: uiSystems
+      list: click.list
+      index: index
+      toggle: keys.toggle
+      extend: keys.extend
+    )
+  }
+  if click.clicks is 2 and not keys.toggle and not keys.extend {
+    sendListEvent(
+      uiSystems: uiSystems
+      kind: ListEventKind.rowActivated
+      list: click.list
+      key: click.key
+      byKey: false
+    )
+  }
+}
