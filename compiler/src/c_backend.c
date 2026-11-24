@@ -2615,6 +2615,8 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
                 const char* nested_fn = rae_mangle_specialized_function(ctx, nested_drop, inner);
                 fprintf(out, "      %s(&__entry->value);\n", nested_fn);
               }
+            } else if (str_eq_cstr(ebase, "Task")) {
+              fprintf(out, "      rae_task_drop(__entry->value);\n");
             } else if (!elem_is_container) {
               fprintf(out, "      rae_drop_struct_%s(&__entry->value);\n", elem_mangled);
             }

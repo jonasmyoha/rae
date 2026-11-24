@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.72, 2026-11-24: a Task removed from a list is joined
+
+- A `List(Task(T))` joins and frees a task it lets go of (`removeAt`, `remove`, `removeLast`, `swapRemove`, `set`,
+  `truncate`, `clear`), as it did at the end of its scope: the thread was never joined and its memory leaked.
+- `StringMap(Task(T))` and `IntMap(Task(T))` compile; a task they drop is joined.
+- Case 1631, under ThreadSanitizer too.
+
 ## 0.4.71, 2026-11-24: the file browser picks and saves
 
 - `mode` (`pickFile`, `pickFiles`, `pickFolder`, `save`) gives a file browser a footer with Cancel and Open, Choose or

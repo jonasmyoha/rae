@@ -1,0 +1,102 @@
+# A Task that a List or a map lets go of is joined and freed, as one is that goes out of scope
+# (docs/concurrency-model.md section 3): by removeAt, remove, removeLast, swapRemove, set, truncate
+# and
+# clear of a list, by removing a list of tasks from a list, and by remove, set and the end of a map.
+# Each task takes 30 ms before it counts, so a count right after says whether it was waited for;
+# under
+# ThreadSanitizer a thread that nobody joined is an error.
+open Atomic
+open collections/IntMap
+open collections/StringMap
+
+func slowCount(finished: own Atomic(Int), number: copy Int) ret Int {
+  sleep(ms: 30)
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret number
+}
+
+func started(finished: view Atomic(Int), number: copy Int) ret Task(Int) {
+  ret spawn thread slowCount(finished: finished, number: number)
+}
+
+func startedList(finished: view Atomic(Int), count: view Int) ret List(Task(Int)) {
+  var tasks: List(Task(Int)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: started(finished: finished, number: i))
+  }
+  ret own tasks
+}
+
+func oneOf(step: view String, count: view Int, finished: view Atomic(Int)) {
+  let before: Int = finished.load()
+  var tasks: List(Task(Int)) = startedList(finished: finished, count: count)
+  if step is "removeAt" {
+    tasks.removeAt(index: 1)
+  } else if step is "remove" {
+    tasks.remove(index: 0)
+  } else if step is "removeLast" {
+    tasks.removeLast()
+  } else if step is "swapRemove" {
+    tasks.swapRemove(index: 0)
+  } else if step is "swapRemove the last" {
+    tasks.swapRemove(index: count - 1)
+  } else if step is "set" {
+    tasks.set(index: 1, value: started(finished: finished, number: 9))
+  } else if step is "truncate" {
+    tasks.truncate(len: 1)
+  } else {
+    tasks.clear()
+  }
+  # those let go of have counted by now (the others may have)
+  let gone: Int = finished.load() - before
+  var text: String = ""
+  loop let task: view Task(Int) in tasks {
+    text = "{text} {task.get()}"
+  }
+  log("{step}: waited for {gone > 0}; left:{text}")
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  loop let step: view String in List(String) {
+    "removeAt"
+    "remove"
+    "removeLast"
+    "swapRemove"
+    "swapRemove the last"
+    "set"
+    "truncate"
+    "clear"
+  } {
+    oneOf(step: step, count: 3, finished: finished)
+  }
+  log("all: {finished.load()} of 25")
+
+  var lists: List(List(Task(Int))) = {}
+  lists.add(value: startedList(finished: finished, count: 2))
+  lists.add(value: startedList(finished: finished, count: 1))
+  lists.removeAt(index: 0)
+  log("a list removed from a list: waited for {finished.load() >= 27}")
+  lists.clear()
+  log("all: {finished.load()} of 28")
+
+  var byName: StringMap(Task(Int)) = create(cap: 4)
+  byName.set(k: "a", value: started(finished: finished, number: 1))
+  byName.remove(k: "a")
+  log("removed from a map: {finished.load()} of 29")
+  byName.set(k: "b", value: started(finished: finished, number: 2))
+  byName.set(k: "b", value: started(finished: finished, number: 3))
+  if let task: view Task(Int) = byName.viewGet(key: "b") {
+    log("set again: {task.get()}, {finished.load()} of 31")
+  }
+  byNumber(finished: finished)
+  log("a map at its end: {finished.load()} of 33")
+  finished.freeAtomic()
+}
+
+func byNumber(finished: view Atomic(Int)) {
+  var tasks: IntMap(Task(Int)) = create(cap: 4)
+  loop var i: Int = 0, i < 2, ++i {
+    tasks.set(k: i, value: started(finished: finished, number: i))
+  }
+}

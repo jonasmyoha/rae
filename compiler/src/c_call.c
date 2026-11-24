@@ -840,6 +840,16 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         Str ebase = get_base_type_name(elem_tr);
         bool elem_is_opt = elem_tr && elem_tr->is_opt;
         bool elem_is_string = !elem_is_opt && str_eq_cstr(ebase, "String");
+        // A Task is joined and freed, as List.drop does for each of its tasks
+        // (it has no struct drop, so type_needs_cascade_drop does not name it)
+        if (!elem_is_opt && str_eq_cstr(ebase, "Task")) {
+            fprintf(out, "rae_task_drop(*(RaeTask**)( (char*)(");
+            emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
+            fprintf(out, ") + (");
+            emit_expr(ctx, arg->next->value, out, PREC_LOWEST, false, false);
+            fprintf(out, ") * sizeof(RaeTask*) ))");
+            return true;
+        }
         // Only emit a drop when the element actually needs cascade
         // drop. Otherwise this is a no-op for primitives / c_struct.
         bool elem_needs = elem_is_string ||
