@@ -282,12 +282,30 @@ type CloudBakeShown {
   from1: CloudBakeFrom = CloudBakeFrom {}
 }
 
-func cloudBakeShown(state: view CloudBakeState, seconds: view Float64) ret CloudBakeShown {
+# A map this far off (m) is of other clouds (the date jumped): it stands still
+# instead of sliding, until the new one is baked
+const cloudBakeJumpMeters: Float = 2000.0
+
+# What a half was baked from, as the lighting slides it to `now`
+func cloudBakeSlidFrom(from: view CloudBakeFrom, now: view CloudBakeFrom) ret CloudBakeFrom {
+  var slid: CloudBakeFrom = from
+  if cloudBakeSlide(from: from, now: now) > cloudBakeJumpMeters {
+    slid.eye = now.eye
+    slid.drift = now.drift
+  }
+  ret slid
+}
+
+func cloudBakeShown(
+  state: view CloudBakeState
+  now: view CloudBakeFrom
+  seconds: view Float64
+) ret CloudBakeShown {
   ret CloudBakeShown {
     on: true
     opacity: cloudBakeOpacity(state: state, seconds: seconds)
     second: cloudBakeSecondShare(state: state, seconds: seconds)
-    from0: state.from0
-    from1: state.from1
+    from0: cloudBakeSlidFrom(from: state.from0, now: now)
+    from1: cloudBakeSlidFrom(from: state.from1, now: now)
   }
 }

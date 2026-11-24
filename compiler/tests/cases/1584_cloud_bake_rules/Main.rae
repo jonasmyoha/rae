@@ -132,4 +132,20 @@ func main() {
     )}"
   )
   log("sides: {cloudBakeSide(side: 1000)} {cloudBakeSide(side: 10)} {cloudBakeSide(side: 9999)}")
+  # the date jumps: the old map stands still until the new one, instead of sliding away
+  var jumped: CloudBakeFrom = base
+  jumped.drift = base.drift + 100.0
+  log(
+    "a jump of the drift: slid by {cloudBakeSlide(
+      from: cloudBakeSlidFrom(from: base, now: jumped)
+      now: jumped
+    )} m"
+  )
+  jumped.drift = base.drift + 0.1
+  log(
+    "the wind: slid by {cloudBakeSlide(
+      from: cloudBakeSlidFrom(from: base, now: jumped)
+      now: jumped
+    )} m"
+  )
 }

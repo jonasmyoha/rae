@@ -93,13 +93,14 @@ func cloudBakeFrame(
   }
   bake.on = true
   let seconds: Float64 = (nowNs() as Float64) / 1000000000.0
+  let now: CloudBakeFrom = cloudBakeFromNow(sky: sky, light: light, camera: camera)
   bake.work = cloudBakeStep(
     state: bake.state
-    now: cloudBakeFromNow(sky: sky, light: light, camera: camera)
+    now: now
     options: sky.cloudBake
     seconds: seconds
   )
-  ret cloudBakeShown(state: bake.state, seconds: seconds)
+  ret cloudBakeShown(state: bake.state, now: now, seconds: seconds)
 }
 
 # After it was written: a bake that begins keeps it as its own
