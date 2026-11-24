@@ -1116,11 +1116,12 @@ calls).
 most four spawn threads (`RAE_SPAWN_THREAD_CAP=4`).
 
 - 32 tasks each call a C function (the case's `hold.c`) that holds its
-  thread for 200 ms. Meanwhile 100 quick tasks run.
-- **Marked `blocking`:** the 32 calls overlap, and the quick tasks finish
-  while the calls block.
+  thread until it is released. Meanwhile 100 quick tasks run. Nothing is
+  timed, so a loaded machine gives the same answer.
+- **Marked `blocking`:** the 32 calls hold a thread at once, and the quick
+  tasks finish while they do.
 - **Unmarked (tried):** the tasks are spawn threads, capped at four. Neither
-  holds.
+  holds (the case gives up after 45 s and says so).
 - It also writes eight files and reads them back from tasks, with a String
   argument and a String result.
 - It is leak-checked and on the TSan list. `tsan-check.sh` now also compiles

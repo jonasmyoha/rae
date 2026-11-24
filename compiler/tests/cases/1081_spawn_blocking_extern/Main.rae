@@ -1,13 +1,20 @@
 # A call to a `blocking` extern from a task runs on a blocking-call thread
 # while the task suspends (docs/lightweight-spawn-design.md §17). Two
-# workers, at most four spawn threads: 32 calls that each hold their thread
-# for 200 ms overlap, and 100 quick tasks run meanwhile. Unmarked, the same
-# calls are spawn threads, capped at four: neither holds (tried). Also a
-# String argument and result: files written and read back in tasks.
+# workers, at most four spawn threads: 32 calls hold their threads at once
+# until they are released, and 100 quick tasks run meanwhile. Unmarked, the
+# same calls are spawn threads, capped at four: 32 are never held (tried).
+# Nothing is timed. Also a String argument and result: files written and read
+# back in tasks.
 
 # C that holds its thread (hold.c), and the runtime's file calls, marked
 # `blocking`
-func holdThread(ms: Int) blocking unsafe extern ret Int
+func holdThread(value: Int) blocking unsafe extern ret Int
+
+func waitForHeld(count: Int) unsafe extern ret Int
+
+func heldThreads() unsafe extern ret Int
+
+func releaseThreads() unsafe extern
 
 func writeText(
   path: String
@@ -18,11 +25,10 @@ func readText(path: String) blocking unsafe extern("rae_ext_rae_sys_read_file") 
 
 func deleteFile(path: String) blocking unsafe extern("rae_ext_rae_sys_delete") ret Bool
 
-func pauseTask(ms: copy Int) ret Int {
+func holdTask(value: copy Int) ret Int {
   unsafe {
-    let held: Int = holdThread(ms: ms)
+    ret holdThread(value: value)
   }
-  ret ms
 }
 
 func double(value: copy Int) ret Int {
@@ -54,30 +60,34 @@ func roundTrip(index: copy Int) ret Int {
 }
 
 func main() {
-  let pauses: Int = 32
-  let started: Int = nowNs()
-  var paused: List(Task(Int)) = {}
-  loop var i: Int = 0, i < pauses, ++i {
-    paused.add(value: spawn pauseTask(ms: 200))
+  let calls: Int = 32
+  var holding: List(Task(Int)) = {}
+  loop var i: Int = 0, i < calls, ++i {
+    holding.add(value: spawn holdTask(value: i))
   }
-  # Two workers, eight calls that each hold a thread for 200 ms: other tasks
-  # still run at once
+  var held: Int = 0
+  unsafe {
+    held = waitForHeld(count: calls)
+  }
+  # Two workers, and 32 calls that each hold a thread: other tasks still run
   var doubled: Int = 0
   loop var i: Int = 0, i < 100, ++i {
     let quick: Task(Int) = spawn double(value: i)
     doubled = doubled + quick.get()
   }
-  let quickMs: Int = (nowNs() - started) / 1000000
+  var heldAfter: Int = 0
+  unsafe {
+    heldAfter = heldThreads()
+    releaseThreads()
+  }
   var total: Int = 0
-  loop var i: Int = 0, i < paused.length, ++i {
-    if let task: view Task(Int) = paused.viewAt(index: i) {
+  loop var i: Int = 0, i < holding.length, ++i {
+    if let task: view Task(Int) = holding.viewAt(index: i) {
       total = total + task.get()
     }
   }
-  let allMs: Int = (nowNs() - started) / 1000000
-  log("quick tasks: {doubled}, done while the calls blocked: {quickMs < 150}")
-  # Held workers would take 4 rounds of 200 ms
-  log("{pauses} blocking calls of 200 ms overlapped: {allMs < 600} (total {total} ms of pauses)")
+  log("quick tasks: {doubled}, done while the calls blocked: {heldAfter is calls}")
+  log("{calls} blocking calls held a thread at once: {held is calls} (results {total})")
   var trips: List(Task(Int)) = {}
   loop var i: Int = 0, i < 8, ++i {
     trips.add(value: spawn roundTrip(index: i))
