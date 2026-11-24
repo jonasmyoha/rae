@@ -1,0 +1,90 @@
+# A destructor call on a value that something else owns would run it twice
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.id}")
+}
+
+type Owner {
+  handle: Handle
+  handles: List(Handle)
+}
+
+func makeHandle(id: view Int) ret Handle {
+  ret Handle { id: id }
+}
+
+func parameter(handle: mod Handle) {
+  handle.drop()  # ERROR: the caller owns it
+}
+
+func callForm(handle: mod Handle) {
+  drop(this: handle)  # ERROR
+}
+
+func field(owner: mod Owner) {
+  owner.handle.drop()  # ERROR: the owner drops its field
+  drop(this: owner.handle)  # ERROR
+}
+
+func ownedField() {
+  var owner: Owner = { handle: { id: 1 }, handles: {} }
+  owner.handle.drop()  # ERROR
+}
+
+func throughAlias() {
+  var handle: Handle = makeHandle(id: 2)
+  let other: mod Handle = handle
+  other.drop()  # ERROR
+}
+
+func hidden(flag: view Bool) {
+  var handle: Handle = makeHandle(id: 3)
+  var second: Handle = makeHandle(id: 4)
+  if flag {
+    let handle: mod Handle = second
+    handle.drop()  # ERROR: this one is the alias
+  }
+  handle.drop()
+}
+
+func element(owner: mod Owner) {
+  if let handle: mod Handle = owner.handles.modAt(index: 0) {
+    handle.drop()  # ERROR
+  }
+  loop let handle: mod Handle in owner.handles {
+    handle.drop()  # ERROR
+  }
+}
+
+func produced() {
+  makeHandle(id: 5).drop()  # ERROR: the statement drops what it produced
+}
+
+func afterCall() {
+  var handle: Handle = makeHandle(id: 6)
+  drop(this: handle)
+  log("{handle.id}")  # ERROR: dropped
+}
+
+func withOwn() {
+  var handle: Handle = makeHandle(id: 8)
+  drop(this: own handle)  # ERROR: not `own`
+}
+
+func main() {
+  var handle: Handle = makeHandle(id: 7)
+  parameter(handle: handle)
+  callForm(handle: handle)
+  generic(Handle, value: handle)
+  var names: List(String) = {}
+  generic(List(String), value: names)
+  ownedField()
+  throughAlias()
+  hidden(flag: true)
+  produced()
+  afterCall()
+  withOwn()
+}

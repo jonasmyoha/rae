@@ -101,6 +101,7 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+static void declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, FILE* out);
 static bool emit_defers_inner(CFuncContext* ctx, int min_depth, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
@@ -210,6 +211,9 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
     ctx->local_moved[local_index] = false;
     ctx->local_drop_flag[local_index] = false;
     ctx->local_struct_owns_heap[local_index] = !is_ref;
+    if (!is_ref)
+      declare_live_flag(ctx, binding->as.let_stmt.name,
+                        stmt->as.if_stmt.then_block ? stmt->as.if_stmt.then_block->first : NULL, out);
   }
   if (stmt->as.if_stmt.then_block) {
     for (const AstStmt* body_stmt = stmt->as.if_stmt.then_block->first;
@@ -1272,16 +1276,38 @@ void emit_stmt_temp_drops_now(CFuncContext* ctx, FILE* out) {
   temps->flushed = true;
 }
 
+/* The local an explicit destructor statement names: `x.drop()`, `drop(this:
+ * x)`, or the call qualified with the module of the type; NULL for any other
+ * expression. Whether x has a destructor is the caller's question. */
+static const AstExpr* explicit_drop_local(const AstExpr* e) {
+  if (!e) return NULL;
+  const AstExpr* target = NULL;
+  const AstCallArg* args = NULL;
+  if (e->kind == AST_EXPR_METHOD_CALL) {
+    if (!str_eq_cstr(e->as.method_call.method_name, "drop")) return NULL;
+    args = e->as.method_call.args;
+    if (!args) target = e->as.method_call.object;
+  } else if (e->kind == AST_EXPR_CALL && e->as.call.callee) {
+    const AstExpr* callee = e->as.call.callee;
+    bool member = callee->kind == AST_EXPR_MEMBER;
+    if (!(member && str_eq_cstr(callee->as.member.member, "drop"))
+        && !(callee->kind == AST_EXPR_IDENT && str_eq_cstr(callee->as.ident, "drop"))) return NULL;
+    args = e->as.call.args;
+    if (!args && member) target = callee->as.member.object;
+  }
+  if (args && !args->next) target = args->value;
+  while (target && target->kind == AST_EXPR_UNARY && target->as.unary.op == AST_UNARY_MOD)
+    target = target->as.unary.operand;
+  return target && target->kind == AST_EXPR_IDENT ? target : NULL;
+}
+
 static bool block_has_explicit_drop(const AstBlock* b, Str name);
 static bool stmt_has_explicit_drop(const AstStmt* s, Str name) {
   if (!s) return false;
   switch (s->kind) {
     case AST_STMT_EXPR: {
-      const AstExpr* e = s->as.expr_stmt;
-      return e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
-          && str_eq_cstr(e->as.method_call.method_name, "drop")
-          && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
-          && str_eq(e->as.method_call.object->as.ident, name);
+      const AstExpr* dropped = explicit_drop_local(s->as.expr_stmt);
+      return dropped && str_eq(dropped->as.ident, name);
     }
     case AST_STMT_IF:
       return stmt_has_explicit_drop(s->as.if_stmt.binding, name)
@@ -1417,6 +1443,28 @@ bool rest_moves_name_conditionally(const AstStmt* rest, Str name) {
   for (const AstStmt* s = rest; s; s = s->next)
     if (stmt_moves_name(s, name, false)) return true;
   return false;
+}
+
+/* The live flag (CFuncContext.local_drop_flag) of `name`, the local just
+ * registered, when the statements `rest` in its scope drop it explicitly
+ * (#885) or move it on SOME paths only (inside a branch, a loop, a match arm,
+ * the right of and / or; #55453128): it is still released on the others. The
+ * move clears the flag where it happens; the scope-exit drop is guarded by it. */
+static void declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, FILE* out) {
+  if (ctx->local_count == 0) return;
+  size_t local = ctx->local_count - 1;
+  if (!str_eq(ctx->locals[local], name) || ctx->local_drop_flag[local]) return;
+  const AstTypeRef* type = ctx->local_type_refs[local];
+  if (type && ctx->generic_params && ctx->generic_args)
+    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+  if (!type || type->is_view || type->is_mod) return;
+  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return;
+  bool explicit_drop = false;
+  if (type_has_user_drop(ctx->compiler_ctx, type))
+    for (const AstStmt* s = rest; s && !explicit_drop; s = s->next) explicit_drop = stmt_has_explicit_drop(s, name);
+  if (!explicit_drop && !rest_moves_name_conditionally(rest, name)) return;
+  ctx->local_drop_flag[local] = true;
+  fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)name.len, name.data);
 }
 
 /* The live flags of the parameters that own their value (`own`, `copy`) and
@@ -1717,9 +1765,11 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             ctx->local_is_ptr[local_index] = false;
             ctx->local_is_mod[local_index] = false;
             ctx->local_moved[local_index] = false;
-    ctx->local_drop_flag[local_index] = false;
+            ctx->local_drop_flag[local_index] = false;
             ctx->local_struct_owns_heap[local_index] = true;
             ctx->local_count++;
+            declare_live_flag(ctx, bind->as.let_stmt.name,
+                              stmt->as.if_stmt.then_block ? stmt->as.if_stmt.then_block->first : NULL, out);
         }
     } else {
         if (has_binding) {
@@ -2142,19 +2192,8 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // (`if keep { kept.add(value: record) }`) is still dropped at the
             // end of the iteration on the others, like a `let` (#55453128):
             // the move clears the flag, the per-iteration drop is guarded by it.
-            if (!binding_is_ref && stmt->as.loop_stmt.body) {
-                const AstTypeRef* element_type = binding_type;
-                if (ctx->generic_params && ctx->generic_args)
-                    element_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                       ctx->generic_args, (AstTypeRef*)element_type);
-                Str name = binding->as.let_stmt.name;
-                if (element_type
-                    && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element_type, 0)
-                    && rest_moves_name_conditionally(stmt->as.loop_stmt.body->first, name)) {
-                    ctx->local_drop_flag[local_index] = true;
-                    fprintf(out, "      int __rae_live_%.*s = 1;\n", (int)name.len, name.data);
-                }
-            }
+            if (!binding_is_ref && stmt->as.loop_stmt.body)
+                declare_live_flag(ctx, binding->as.let_stmt.name, stmt->as.loop_stmt.body->first, out);
         }
         // break/continue drop back to here (before the element binding), so a
         // non-local exit drops the current element too, matching the per-
@@ -2773,26 +2812,42 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
                 fprintf(out, ";\n");
             }
-            // #881: `value.drop()` on a local whose type has a destructor
-            // consumes the local — scope exit must not release it again.
-            // Sema rejects any later use in the same block.
+            // #881: `value.drop()` (or `drop(this: value)`) on a local whose
+            // type has a destructor consumes the local — scope exit must not
+            // release it again. Sema rejects any later use, and a call of a
+            // destructor on anything that is not an owned local.
             {
-                const AstExpr* e = stmt->as.expr_stmt;
-                if (e && e->kind == AST_EXPR_METHOD_CALL
-                    && str_eq_cstr(e->as.method_call.method_name, "drop")
-                    && !e->as.method_call.args
-                    && e->as.method_call.object
-                    && e->as.method_call.object->kind == AST_EXPR_IDENT) {
-                    Str name = e->as.method_call.object->as.ident;
+                const AstExpr* call = stmt->as.expr_stmt;
+                /* In a specialization emitted from its template the type of a
+                 * field is known only here (sema checks the rest). */
+                if (ctx->generic_params && call && call->kind == AST_EXPR_METHOD_CALL
+                    && str_eq_cstr(call->as.method_call.method_name, "drop") && !call->as.method_call.args
+                    && call->as.method_call.object->kind == AST_EXPR_MEMBER) {
+                    const AstTypeRef* field = infer_expr_type_ref(ctx, call->as.method_call.object);
+                    if (field && ctx->generic_args)
+                        field = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                                    (AstTypeRef*)field);
+                    if (type_has_user_drop(ctx->compiler_ctx, field))
+                        diag_error(c_source_file(ctx), (int)call->line, (int)call->column,
+                                   "cannot drop a field by hand: its owner drops it, so the destructor would run "
+                                   "twice; assign the field a new value to release the old one now");
+                }
+                const AstExpr* dropped = explicit_drop_local(call);
+                if (dropped) {
+                    Str name = dropped->as.ident;
                     for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
                         if (!str_eq(ctx->locals[i], name)) continue;
-                        if (type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[i])) {
+                        const AstTypeRef* dropped_type = ctx->local_type_refs[i];
+                        if (dropped_type && ctx->generic_params && ctx->generic_args)
+                            dropped_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
+                                                               ctx->generic_args, (AstTypeRef*)dropped_type);
+                        if (type_has_user_drop(ctx->compiler_ctx, dropped_type)) {
                             // The call above ran the destructor; the fields
                             // it left are released here, since scope exit
                             // skips the whole value.
                             fprintf(out, "  rae_drop_fields_%s%s(&%.*s);\n",
                                     rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                                                ctx->generic_args, ctx->local_type_refs[i]),
+                                                                ctx->generic_args, (AstTypeRef*)dropped_type),
                                     ctx->local_struct_owns_heap[i] ? "" : "_alias",
                                     (int)name.len, name.data);
                             if (ctx->local_drop_flag[i]) {
@@ -3174,6 +3229,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_moved[local_index] = false;
                     ctx->local_count++;
                 }
+                if (!is_ref_bind) declare_live_flag(ctx, stmt->as.let_stmt.name, stmt->next, out);
                 break;
             } else if (stmt->as.let_stmt.value) {
                 // Set expected type so generic call resolution can infer from let type
@@ -3462,33 +3518,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 }
                 ctx->local_count++;
             }
-            // #885: a local with a destructor that this body drops explicitly
-            // carries a runtime live flag (see CFuncContext.local_drop_flag).
-            if (!is_ref_bind && ctx->func_decl && ctx->func_decl->body && ctx->local_count > 0) {
-                size_t li = ctx->local_count - 1;
-                Str ln = stmt->as.let_stmt.name;
-                bool explicit_drop = type_has_user_drop(ctx->compiler_ctx, ctx->local_type_refs[li])
-                    && block_has_explicit_drop(ctx->func_decl->body, ln);
-                // #55453128: a local moved into a call on SOME paths only (inside
-                // a branch, a loop, a match arm, the right of and/or) must still
-                // be released on the others. The move clears the flag where it
-                // happens (c_call.c); the scope-exit drop is guarded by it.
-                bool conditional_move = false;
-                if (!explicit_drop && ctx->local_type_refs[li]) {
-                    const AstTypeRef* lt = ctx->local_type_refs[li];
-                    if (lt && ctx->generic_params && ctx->generic_args)
-                        lt = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                 ctx->generic_args, (AstTypeRef*)lt);
-                    conditional_move = lt && !lt->is_view && !lt->is_mod
-                        && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, lt, 0)
-                        && rest_moves_name_conditionally(stmt->next, ln);
-                }
-                if (str_eq(ctx->locals[li], ln) && !ctx->local_drop_flag[li]
-                    && (explicit_drop || conditional_move)) {
-                    ctx->local_drop_flag[li] = true;
-                    fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)ln.len, ln.data);
-                }
-            }
+            if (!is_ref_bind) declare_live_flag(ctx, stmt->as.let_stmt.name, stmt->next, out);
             break;
         }
         case AST_STMT_ASSIGN: {

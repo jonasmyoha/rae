@@ -1,0 +1,42 @@
+tests/cases/1607_drop_by_hand_rejected/Main.rae:20:14: cannot drop 'handle' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    20 |   handle.drop()  # ERROR: the caller owns it
+       |              ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:24:7: cannot drop 'handle' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    24 |   drop(this: handle)  # ERROR
+       |       ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:28:20: cannot drop the field 'handle' by hand: its owner drops it, so the destructor would run twice; assign the field a new value to release the old one now
+    28 |   owner.handle.drop()  # ERROR: the owner drops its field
+       |                    ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:29:7: cannot drop the field 'handle' by hand: its owner drops it, so the destructor would run twice; assign the field a new value to release the old one now
+    29 |   drop(this: owner.handle)  # ERROR
+       |       ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:34:20: cannot drop the field 'handle' by hand: its owner drops it, so the destructor would run twice; assign the field a new value to release the old one now
+    34 |   owner.handle.drop()  # ERROR
+       |                    ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:40:13: cannot drop 'other' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    40 |   other.drop()  # ERROR
+       |             ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:48:16: cannot drop 'handle' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    48 |     handle.drop()  # ERROR: this one is the alias
+       |                ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:55:16: cannot drop 'handle' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    55 |     handle.drop()  # ERROR
+       |                ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:58:16: cannot drop 'handle' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now
+    58 |     handle.drop()  # ERROR
+       |                ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:63:25: cannot drop this value by hand: its owner drops it, so the destructor would run twice; only a local or an 'own' parameter can be dropped early
+    63 |   makeHandle(id: 5).drop()  # ERROR: the statement drops what it produced
+       |                         ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:69:6: use of 'handle' after 'handle.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
+    69 |   log("{handle.id}")  # ERROR: dropped
+       |      ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:74:7: a destructor takes the value as 'mod', and an explicit drop of a local consumes it; leave out the 'own'
+    74 |   drop(this: own handle)  # ERROR: not `own`
+       |       ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:81:10: unknown function 'generic': no function by that name is loaded here — did you forget to `import`/`open` its module?
+    81 |   generic(Handle, value: handle)
+       |          ^~~~
+tests/cases/1607_drop_by_hand_rejected/Main.rae:83:10: unknown function 'generic': no function by that name is loaded here — did you forget to `import`/`open` its module?
+    83 |   generic(List(String), value: names)
+       |          ^~~~

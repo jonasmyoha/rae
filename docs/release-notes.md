@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.63, 2026-11-24: a destructor run by hand runs once
+
+- Breaking: an explicit drop of a value the function does not own is an error: a field
+  (`owner.handle.drop()`), a list element, a `mod` parameter or alias, a produced value. The owner drops it
+  again, so its destructor ran twice. Assign a new value to release the old one early.
+- `drop(this: handle)` and `Module.drop(this: handle)` consume an owned local as `handle.drop()` does, and so
+  does a drop of a local or `own` parameter of type `T` in a generic function, for the concrete type. A use
+  after a drop in a generic function is an error too.
+- A binding of `if let`, `if var`, a collection loop or a list literal that is moved or dropped on one path
+  only is freed on the others.
+- Cases 1607 to 1609; 1608 is in the AddressSanitizer gate (docs/constructors-and-destructors.md section 4.3).
+
 ## 0.4.62, 2026-11-24: an explicit drop releases the fields
 
 - `handle.drop()` on a local or an `own` parameter runs the destructor and then releases the fields, at that

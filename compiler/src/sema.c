@@ -1015,20 +1015,97 @@ typedef struct LifecycleFlow {
     CompilerContext* ctx;
     AstModule* module;
     const char* file;
-    // names declared with a type that has a destructor (params + lets)
-    Str hook_names[128]; int hook_count;
+    // names declared with a type that has a destructor (params + lets), and
+    // whether the name owns the value or borrows it (`mod`)
+    Str hook_names[128]; bool hook_owned[128]; int hook_count;
+    // the type arguments, when the body is a generic template checked for one
+    // specialization (sema_check_specialization_drops): nothing in it has a
+    // resolved type, so names are judged by their declared types
+    const AstIdentifierPart* generic_params;
+    const AstTypeRef* generic_args;
+    // the destructor call of the statement at hand that consumes its local
+    const AstExpr* consuming_drop;
     // (line, column) already reported, so a second loop pass stays quiet
     size_t reported_lines[64]; size_t reported_cols[64]; int reported_count;
 } LifecycleFlow;
 
 static bool flow_is_hook_name(const LifecycleFlow* flow, Str name) {
-    for (int i = 0; i < flow->hook_count; i++) if (str_eq(flow->hook_names[i], name)) return true;
+    for (int i = 0; i < flow->hook_count; i++)
+        if (str_eq(flow->hook_names[i], name)) return flow->hook_owned[i];
     return false;
 }
+static bool flow_is_borrowed_name(const LifecycleFlow* flow, Str name) {
+    for (int i = 0; i < flow->hook_count; i++)
+        if (str_eq(flow->hook_names[i], name)) return !flow->hook_owned[i];
+    return false;
+}
+static void flow_undeclare(LifecycleFlow* flow, Str name) {
+    for (int i = flow->hook_count - 1; i >= 0; i--)
+        if (str_eq(flow->hook_names[i], name)) {
+            --flow->hook_count;
+            flow->hook_names[i] = flow->hook_names[flow->hook_count];
+            flow->hook_owned[i] = flow->hook_owned[flow->hook_count];
+        }
+}
+/* A new binding of `name`: it owns a value with a destructor, or (a `mod`
+ * alias, another type) it hides an outer one that does. The type of a local
+ * in a specialization is still written `T`; its resolved type is concrete. */
 static void flow_declare(LifecycleFlow* flow, Str name, const AstTypeRef* type) {
-    if (!type || type->is_view || type->is_mod || type->is_opt || type->generic_args) return;
-    if (!find_user_drop_for(flow->ctx, get_base_type_name(type))) return;
-    if (flow->hook_count < 128) flow->hook_names[flow->hook_count++] = name;
+    flow_undeclare(flow, name);
+    if (!type || type->is_opt) return;
+    bool owned = !type->is_view && !type->is_mod;
+    Str base;
+    if (flow->generic_params) {
+        const AstTypeRef* concrete = substitute_type_ref(flow->ctx, flow->generic_params, flow->generic_args,
+                                                         (AstTypeRef*)type);
+        if (!concrete || concrete->is_opt || concrete->generic_args) return;
+        base = get_base_type_name(concrete);
+    } else {
+        if (type->generic_args) return;
+        const TypeInfo* resolved = type->resolved_type;
+        base = resolved && resolved->kind == TYPE_STRUCT ? resolved->name : get_base_type_name(type);
+    }
+    if (!find_user_drop_for(flow->ctx, base) || flow->hook_count >= 128) return;
+    flow->hook_names[flow->hook_count] = name;
+    flow->hook_owned[flow->hook_count++] = owned;
+}
+/* The value a call of a destructor (`func drop(this: mod T)`) drops, or NULL
+ * when `e` is another expression: `x.drop()`, `drop(this: x)`, and the call
+ * qualified with the module of the type. */
+static const AstExpr* flow_destructor_target(const LifecycleFlow* flow, const AstExpr* e) {
+    if (!e) return NULL;
+    const AstExpr* target = NULL;
+    const AstCallArg* args = NULL;
+    if (e->kind == AST_EXPR_METHOD_CALL) {
+        if (!str_eq_cstr(e->as.method_call.method_name, "drop")) return NULL;
+        args = e->as.method_call.args;
+        if (!args) target = e->as.method_call.object;
+    } else if (e->kind == AST_EXPR_CALL) {
+        const AstExpr* callee = e->as.call.callee;
+        bool named = callee
+            && ((callee->kind == AST_EXPR_IDENT && str_eq_cstr(callee->as.ident, "drop"))
+                || (callee->kind == AST_EXPR_MEMBER && str_eq_cstr(callee->as.member.member, "drop")));
+        if (!named) return NULL;
+        args = e->as.call.args;
+        if (!args && callee->kind == AST_EXPR_MEMBER) target = callee->as.member.object;
+    } else {
+        return NULL;
+    }
+    if (args && !args->next) target = args->value;
+    while (target && ((target->kind == AST_EXPR_UNARY && target->as.unary.op == AST_UNARY_MOD)
+                      || target->kind == AST_EXPR_UNBOX))
+        target = target->as.unary.operand;
+    if (!target) return NULL;
+    if (flow->generic_params)
+        return target->kind == AST_EXPR_IDENT
+            && (flow_is_hook_name(flow, target->as.ident) || flow_is_borrowed_name(flow, target->as.ident))
+            ? target : NULL;
+    const AstExpr* place = target->kind == AST_EXPR_OWN ? target->as.unary.operand : target;
+    const TypeInfo* type = place->resolved_type;
+    while (type && (type->kind == TYPE_REF || type->kind == TYPE_OPT))
+        type = type->kind == TYPE_REF ? type->as.ref.base : type->as.opt.base;
+    if (!type || type->kind != TYPE_STRUCT || type->as.structure.generic_count > 0) return NULL;
+    return find_user_drop_for(flow->ctx, type->name) ? target : NULL;
 }
 static void flow_report(LifecycleFlow* flow, size_t line, size_t col, const char* text) {
     for (int i = 0; i < flow->reported_count; i++)
@@ -1062,19 +1139,51 @@ static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const Dropped
         flow_report(flow, e->line ? e->line : line, e->line ? e->column : col, buf);
     }
 }
+/* A destructor call that does not consume an owned local: the owner of the
+ * value drops it too, so the destructor would run twice. */
+static void flow_check_destructor_call(LifecycleFlow* flow, const AstExpr* e) {
+    const AstExpr* target = e == flow->consuming_drop ? NULL : flow_destructor_target(flow, e);
+    if (!target) return;
+    char buf[420];
+    if (target->kind == AST_EXPR_OWN) {
+        snprintf(buf, sizeof buf,
+                 "a destructor takes the value as 'mod', and an explicit drop of a local consumes it; "
+                 "leave out the 'own'");
+    } else if (target->kind == AST_EXPR_IDENT) {
+        Str name = target->as.ident;
+        snprintf(buf, sizeof buf,
+                 "cannot drop '%.*s' by hand: it does not own the value, and the owner drops it, so the "
+                 "destructor would run twice; assign it a new value to release the old one now",
+                 (int)name.len, name.data);
+    } else if (target->kind == AST_EXPR_MEMBER) {
+        Str name = target->as.member.member;
+        snprintf(buf, sizeof buf,
+                 "cannot drop the field '%.*s' by hand: its owner drops it, so the destructor would run "
+                 "twice; assign the field a new value to release the old one now",
+                 (int)name.len, name.data);
+    } else {
+        snprintf(buf, sizeof buf,
+                 "cannot drop this value by hand: its owner drops it, so the destructor would run twice; "
+                 "only a local or an 'own' parameter can be dropped early");
+    }
+    flow_report(flow, e->line, e->column, buf);
+}
 static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e);
 static void flow_sweep_create_args(LifecycleFlow* flow, const AstCallArg* a) {
     for (; a; a = a->next) flow_sweep_create(flow, a->value);
 }
 static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
     if (!e) return;
-    if (sema_is_pending_create(e)) {
+    if (!flow->generic_params && sema_is_pending_create(e)) {
         if (!sema_create_was_attempted(e))
             flow_report(flow, e->line, e->column,
                         "'create(...)' has no expected type here; bind it ('let x: T = create(...)') or write 'T.create(...)'");
         flow_sweep_create_args(flow, e->as.call.args);
         return;
     }
+    /* `spawn drop(this: x)` has its own error: a task cannot take a `mod` */
+    if (e->kind == AST_EXPR_UNARY && e->as.unary.op == AST_UNARY_SPAWN) flow->consuming_drop = e->as.unary.operand;
+    flow_check_destructor_call(flow, e);
     switch (e->kind) {
         case AST_EXPR_BINARY: flow_sweep_create(flow, e->as.binary.lhs); flow_sweep_create(flow, e->as.binary.rhs); break;
         case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
@@ -1138,15 +1247,39 @@ static void flow_sweep_moves_args(DroppedSet* set, const AstCallArg* a) {
 }
 
 static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
+static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set);
+/* The names a statement's own blocks bind end with it, so that one hiding an
+ * outer name leaves it as it was. */
 static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
     if (!s) return;
+    if (s->kind != AST_STMT_IF && s->kind != AST_STMT_LOOP && s->kind != AST_STMT_MATCH
+        && s->kind != AST_STMT_DEFER && s->kind != AST_STMT_UNSAFE) {
+        flow_stmt_inner(flow, s, set);
+        return;
+    }
+    Str saved_names[128];
+    bool saved_owned[128];
+    int saved_count = flow->hook_count;
+    memcpy(saved_names, flow->hook_names, sizeof saved_names);
+    memcpy(saved_owned, flow->hook_owned, sizeof saved_owned);
+    /* `mainLoop state`: in the body `state` is an alias of the local */
+    if (s->kind == AST_STMT_LOOP && s->as.loop_stmt.is_main_loop) {
+        for (int i = 0; i < flow->hook_count; i++)
+            if (str_eq(flow->hook_names[i], s->as.loop_stmt.main_loop_state)) flow->hook_owned[i] = false;
+    }
+    flow_stmt_inner(flow, s, set);
+    memcpy(flow->hook_names, saved_names, sizeof saved_names);
+    memcpy(flow->hook_owned, saved_owned, sizeof saved_owned);
+    flow->hook_count = saved_count;
+}
+static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
     switch (s->kind) {
         case AST_STMT_LET:
             flow_sweep_create(flow, s->as.let_stmt.value);
             flow_check_expr(flow, s->as.let_stmt.value, set, s->line, s->column);
             flow_sweep_moves(set, s->as.let_stmt.value);
             dropped_remove(set, s->as.let_stmt.name);   /* a new binding is live */
-            if (!s->as.let_stmt.is_bind) flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
+            flow_declare(flow, s->as.let_stmt.name, s->as.let_stmt.type);
             break;
         case AST_STMT_DESTRUCT:
             flow_sweep_create(flow, s->as.destruct_stmt.call);
@@ -1164,13 +1297,14 @@ static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
         }
         case AST_STMT_EXPR: {
             const AstExpr* e = s->as.expr_stmt;
+            const AstExpr* target = flow_destructor_target(flow, e);
+            if (target && !(target->kind == AST_EXPR_IDENT && flow_is_hook_name(flow, target->as.ident)))
+                target = NULL;
+            flow->consuming_drop = target ? e : NULL;
             flow_sweep_create(flow, e);
-            bool is_drop = e && e->kind == AST_EXPR_METHOD_CALL && !e->as.method_call.args
-                && str_eq_cstr(e->as.method_call.method_name, "drop")
-                && e->as.method_call.object && e->as.method_call.object->kind == AST_EXPR_IDENT
-                && flow_is_hook_name(flow, e->as.method_call.object->as.ident);
+            flow->consuming_drop = NULL;
             flow_check_expr(flow, e, set, s->line, s->column);   /* dropping twice is a use */
-            if (is_drop) dropped_add(set, e->as.method_call.object->as.ident);
+            if (target) dropped_add(set, target->as.ident);
             flow_sweep_moves(set, e);
             break;
         }
@@ -1243,16 +1377,38 @@ static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* s
         flow_stmt(flow, s, set);
 }
 
+static void flow_function(LifecycleFlow* flow, const AstFuncDecl* fd, const AstBlock* body) {
+    for (const AstParam* p = fd->params; p; p = p->next) {
+        int before = flow->hook_count;
+        flow_declare(flow, p->name, p->type);
+        /* a parameter without a mode is a borrow */
+        if (flow->hook_count > before && !p->type->is_own && !p->type->is_copy) flow->hook_owned[before] = false;
+    }
+    DroppedSet set = {0};
+    flow_block(flow, body, &set);
+}
+
 static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, const char* file,
                                      const AstFuncDecl* fd) {
     if (!fd || !fd->body) return;
     LifecycleFlow flow = {0};
     flow.ctx = ctx; flow.module = module; flow.file = file;
-    for (const AstParam* p = fd->params; p; p = p->next) {
-        if (p->type && p->type->is_own) flow_declare(&flow, p->name, p->type);
-    }
-    DroppedSet set = {0};
-    flow_block(&flow, fd->body, &set);
+    flow_function(&flow, fd, fd->body);
+}
+
+/* The same check of explicit drops for one specialization of a generic
+ * function (c_backend.c emits it from the template, whose body sema has not
+ * analyzed for these arguments): a destructor call on a borrowed name, and a
+ * use after a drop. True when it reported an error. */
+bool sema_check_specialization_drops(CompilerContext* ctx, const AstModule* module, const char* file,
+                                     const AstFuncDecl* fd, const AstBlock* body,
+                                     const AstIdentifierPart* generic_params, const AstTypeRef* generic_args) {
+    if (!body || !generic_params || !generic_args) return false;
+    LifecycleFlow flow = {0};
+    flow.ctx = ctx; flow.module = (AstModule*)module; flow.file = file;
+    flow.generic_params = generic_params; flow.generic_args = generic_args;
+    flow_function(&flow, fd, body);
+    return flow.reported_count > 0;
 }
 
 // Defined further down (near the statement analyzer); used earlier by the

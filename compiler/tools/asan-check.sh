@@ -8,7 +8,8 @@
 # subject is that heap is freed exactly once (1236: list-literal elements are
 # copies; 1238: a move on a path that returns; 1603: an owned local moved into
 # an optional; 1604: lists inside generic types; 1605: a parameter moved on one
-# path only; 1606: the fields after an explicit drop). Each is the
+# path only; 1606: the fields after an explicit drop; 1608: every
+# form of one). Each is the
 # fixture's own program — the C the compiler emits plus the runtime — built
 # with clang -fsanitize=address,undefined and run as `rae run` would, with the
 # case's config.cmd flags that change the C (`--float4-scalar`). A case fails
@@ -25,7 +26,7 @@ CC="${RAE_ASAN_CC:-clang}"
 TMP="$(mktemp -d -t rae_asan_XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 
-CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar 1236_list_literal_copies_places 1238_move_in_returning_branch 1603_own_into_optional 1604_generic_of_lists 1605_own_parameter_moved_on_one_path 1606_explicit_drop_fields"
+CASES="1085_float4_masked_tail 1086_float4_masked_tail_scalar 1236_list_literal_copies_places 1238_move_in_returning_branch 1603_own_into_optional 1604_generic_of_lists 1605_own_parameter_moved_on_one_path 1606_explicit_drop_fields 1608_drop_by_hand_once"
 if [ -n "${RAE_ASAN_FILTER:-}" ]; then CASES="$RAE_ASAN_FILTER"; fi
 
 printf 'int main(void) { return 0; }\n' > "$TMP/probe.c"

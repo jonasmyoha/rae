@@ -1,0 +1,165 @@
+# An explicit drop in every accepted form runs the destructor once
+import Lib
+
+type Handle {
+  name: String
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.name}")
+}
+
+type Copied {
+  name: String
+}
+
+func drop(this: mod Copied) {
+  log("drop copied {this.name}")
+}
+
+func copy(this: view Copied) ret Copied {
+  ret Copied { name: "{this.name} again" }
+}
+
+func makeHandle(name: view String) ret Handle {
+  ret Handle { name: "{name}" }
+}
+
+func maybeHandle(name: view String) ret opt Handle {
+  ret makeHandle(name: name)
+}
+
+func takeHandle(handle: own Handle) {
+  log("take {handle.name}")
+}
+
+func takeNames(names: own List(String)) ret Int {
+  ret names.length
+}
+
+func callForm(early: view Bool) {
+  var handle: Handle = makeHandle(name: "call {early}")
+  if early {
+    drop(this: handle)
+    log("early")
+  }
+  log("end")
+}
+
+func parameter(handle: own Handle, early: view Bool) {
+  if early {
+    drop(this: handle)
+  }
+  log("end")
+}
+
+func copied(value: copy Copied, early: view Bool) {
+  if early {
+    value.drop()
+  }
+  log("end")
+}
+
+func generic(T: type, value: own T, early: view Bool) {
+  var kept: T = own value
+  if early {
+    kept.drop()
+  }
+  log("end")
+}
+
+func genericParameter(T: type, value: own T, early: view Bool) {
+  if early {
+    drop(this: value)
+  }
+  log("end")
+}
+
+# The local that an alias hid is dropped, not the alias
+func hidden(flag: view Bool) {
+  var handle: Handle = makeHandle(name: "outer {flag}")
+  var second: Handle = makeHandle(name: "second {flag}")
+  if flag {
+    let handle: mod Handle = second
+    handle.name = "renamed {flag}"
+  }
+  handle.drop()
+  log("end")
+}
+
+# The owner's way to release a field early
+func released() {
+  var handles: List(Handle) = {}
+  handles.add(makeHandle(name: "element"))
+  if let handle: mod Handle = handles.modAt(index: 0) {
+    handle = makeHandle(name: "replaced")
+  }
+  log("end")
+}
+
+func narrowed(early: view Bool) {
+  if var handle: Handle = maybeHandle(name: "narrowed {early}") {
+    if early {
+      handle.drop()
+    }
+    log("end")
+  }
+}
+
+func narrowedMove(early: view Bool) {
+  if let handle: Handle = maybeHandle(name: "moved {early}") {
+    if early {
+      takeHandle(handle: own handle)
+    }
+    log("end")
+  }
+}
+
+func element(early: view Bool) {
+  let names: List(List(String)) = { { "one {early}" }, { "two {early}", "three" } }
+  if let first: List(String) = names.copyAt(index: 1) {
+    if early {
+      log("{takeNames(names: own first)}")
+    }
+  }
+}
+
+func literal(early: view Bool) {
+  let names: List(String) = { "one {early}", "two" }
+  if early {
+    log("{takeNames(names: own names)}")
+  }
+}
+
+func loops() {
+  let values: List(Copied) = { Copied { name: "first" }, Copied { name: "second" } }
+  loop var value: Copied in values {
+    if value.name is "first again" {
+      value.drop()
+    }
+    log("pass")
+  }
+}
+
+func main() {
+  loop var pass: Int = 0, pass < 2, ++pass {
+    let early: Bool = pass is 0
+    callForm(early: early)
+    parameter(handle: makeHandle(name: "parameter {early}"), early: early)
+    let value: Copied = { name: "copied {early}" }
+    copied(value: value, early: early)
+    generic(Handle, value: makeHandle(name: "generic {early}"), early: early)
+    generic(List(String), value: List(String) { "a {early}" }, early: early)
+    genericParameter(Handle, value: makeHandle(name: "generic parameter {early}"), early: early)
+    hidden(flag: early)
+    narrowed(early: early)
+    narrowedMove(early: early)
+    element(early: early)
+    literal(early: early)
+  }
+  released()
+  loops()
+  var other: Lib.Other = { name: "qualified {1}" }
+  Lib.drop(this: other)
+  log("end")
+}

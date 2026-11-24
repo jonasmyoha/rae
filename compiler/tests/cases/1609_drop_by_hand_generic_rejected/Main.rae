@@ -1,0 +1,48 @@
+# The same in a generic function, for a type argument that has a destructor
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("drop {this.id}")
+}
+
+type Box(T: type) {
+  value: T
+}
+
+func borrowed(T: type, value: mod T) {
+  value.drop()  # ERROR for a Handle: the caller owns it
+}
+
+func callForm(T: type, value: mod T) {
+  drop(this: value)  # ERROR for a Handle
+}
+
+func throughAlias(T: type, value: own T) {
+  var kept: T = own value
+  let other: mod T = kept
+  other.drop()  # ERROR for a Handle
+}
+
+func twice(T: type, value: own T) {
+  value.drop()
+  value.drop()  # ERROR for a Handle: dropped
+}
+
+func field(T: type, box: mod Box(T)) {
+  box.value.drop()  # ERROR for a Handle: the box drops it
+}
+
+func main() {
+  var handle: Handle = { id: 1 }
+  borrowed(Handle, value: handle)
+  callForm(Handle, value: handle)
+  throughAlias(Handle, value: Handle { id: 2 })
+  twice(Handle, value: Handle { id: 3 })
+  var box: Box(Handle) = { value: Handle { id: 4 } }
+  field(Handle, box: box)
+  # A List has no destructor of its own: an explicit drop empties it
+  var names: List(String) = { "a" }
+  borrowed(List(String), value: names)
+}

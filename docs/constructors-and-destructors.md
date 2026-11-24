@@ -242,6 +242,13 @@ it live again on that path; dropping a dropped value counts as a use. At run
 time a local that is dropped explicitly anywhere carries a live flag, so scope
 exit and reassignment release it exactly once whichever path ran.
 
+Only a value the function owns can be dropped by hand: a local, or an `own` or
+`copy` parameter, as `water.drop()`, `drop(this: water)` or with the module's
+name. A field, a list element, a `mod` parameter or alias, and a value an
+expression produced belong to something that drops them, so the destructor
+would run twice: each is a compile error. To release such a value early, assign
+a new one. In a generic function the same holds for the concrete type.
+
 A type may still offer `close` or `shutdown` for a partial, resumable release
 (stop accepting work, keep the value alive). That is an ordinary method with no
 language meaning.
@@ -416,7 +423,7 @@ Rejected programs, each a separate compile error:
 let second: WaterSystem = app.waterSystem        # ERROR: WaterSystem has a destructor and no copy
 func drop(this: own WaterSystem) { }             # ERROR: `drop` is reserved: must be `func drop(this: mod WaterSystem)`
 func drop(this: mod WaterSystem) ret Bool { }    # ERROR: same
-app.waterSystem.drop()  app.waterSystem.step()   # ERROR: use of dropped value
+app.waterSystem.drop()                           # ERROR: the app owns its field and drops it
 let anything: Int = create(cap: 4)               # ERROR: no `create` returns Int
 ```
 

@@ -2625,6 +2625,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
       if (instantiated) body_to_emit = instantiated;
   }
+  sema_check_specialization_drops(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args);
   declare_param_live_flags(&tctx, body_to_emit, out);
   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
