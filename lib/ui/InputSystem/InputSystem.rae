@@ -5,8 +5,9 @@
 # priority over world/camera input without hard-coding widget identities.
 #
 # The scroll wheel is ROUTED, not broadcast: each frame `updateUiInput` hands
-# the wheel to exactly one consumer — the nearest `ScrollRoot` or `WheelTarget`
-# (ui/InputComponents) on the path to the topmost node under the pointer — and
+# the wheel to exactly one consumer — the nearest vertical `ScrollRoot` or `WheelTarget`
+# (ui/InputComponents) on the path to the topmost node under the pointer, the sideways
+# scroll to the nearest sideways `ScrollRoot` or `WheelTarget` — and
 # systems take their share with `uiWheelFor(input, entityId)`. A world camera
 # behind the UI is the fallback consumer and takes `uiWheelUnclaimed(input)`:
 # the notch only when no UI consumed it and the pointer is not over UI.
@@ -33,6 +34,7 @@ open ui/Layer
 open ui/UiLayers
 import Gpu2d
 import Gpu2dGestures
+import Gpu2dWheel
 import Math
 open ecs/Entity
 open ecs/ComponentTable
@@ -65,6 +67,9 @@ type UiPointerState {
 # UI action events are no longer a list on UiInput (#943): they live in the
 # `uiActions` EventQueue resource on UiWorld — produced here, drained by the
 # app's UI dispatch. UiInput now carries only pointer + hover/press tracking.
+# The axis a trackpad's gesture scrolls scroll roots along
+enum UiWheelAxis { both, x, y }
+
 type UiInput {
   pointer: UiPointerState
   hoveredEntityId: EntityId
@@ -88,9 +93,16 @@ type UiInput {
   # The finger SDL makes the pointer of (Gpu2d.touchId), -1 while none is
   # down: its press is the pointer's, not one more finger's
   pointerFingerId: Int = -1
-  # This frame's sideways scroll and trackpad pinch (scale change, 1 none), routed with the wheel
-  # to `wheelTarget` (a chart pans and zooms by them)
+  # This frame's sideways scroll (positive to the right), routed to `wheelXTarget`, and trackpad
+  # pinch (scale change, 1 none), routed with the wheel to `wheelTarget`
   wheelX: Float = 0.0
+  wheelXTarget: EntityId = noEntity()
+  # The scroll came in fractions (a trackpad): its gesture keeps its axis (stepWheelAxis)
+  wheelPrecise: Bool = false
+  wheelAxis: UiWheelAxis = UiWheelAxis.both
+  wheelSeconds: Float64 = -1.0
+  wheelSumX: Float = 0.0
+  wheelSumY: Float = 0.0
   pinch: Float = 1.0
   # Two fingers on a touch screen (uiTwoFingerStep): whether two are down, how far their middle
   # moved sideways this frame, how much their spread grew (1 none), and where their middle is
@@ -408,7 +420,17 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
   Device.deviceChanged(watch: input.deviceWatch)
   input.nowSeconds = Gpu2d.nowSeconds()
   let pointer: UiPointerState = devicePointer(input: input)
+  var wheel: Float = Gpu2d.wheelMove()
   input.wheelX = Gpu2dGestures.wheelMoveX()
+  let wheelKind: Int = Gpu2dWheel.wheelKind()
+  if wheelKind is not Gpu2dWheel.wheelKindNone {
+    input.wheelPrecise = wheelKind is Gpu2dWheel.wheelKindPrecise
+  }
+  if shiftedWheel(wheel: wheel, wheelX: input.wheelX) {
+    # Shift+wheel is sideways (macOS makes it so itself)
+    input.wheelX = -wheel
+    wheel = 0.0
+  }
   input.pinch = Gpu2dGestures.pinchScale()
   let fingers: Int = Gpu2d.touchCount()
   if fingers >= 2 {
@@ -435,7 +457,7 @@ func updateUiInput(input: mod UiInput, world: mod UiWorld, uiSystems: mod UiSyst
     world: world
     uiSystems: uiSystems
     pointer: pointer
-    wheel: Gpu2d.wheelMove()
+    wheel: wheel
     deviceFingers: true
   )
 }
@@ -720,6 +742,8 @@ func suppressUiPress(input: mod UiInput, world: mod UiWorld) {
   input.longPress.phase = UiLongPressPhase.idle
   input.wheel = 0.0
   input.wheelTarget = noEntity()
+  input.wheelX = 0.0
+  input.wheelXTarget = noEntity()
   input.wheelBlocked = false
 }
 

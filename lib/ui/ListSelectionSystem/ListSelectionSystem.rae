@@ -30,6 +30,7 @@ open ui/InputKind
 open ui/InputSystem
 open ui/KeyFocusSystem
 open ui/ListViewSystem
+open ui/ListWindow
 open ui/SelectionComponents
 open ui/UiSystems
 
@@ -74,11 +75,16 @@ func listKeysStamp(world: view UiWorld, list: view EntityId) ret Int {
 
 # All the rows' keys of `list`, in order
 func listKeysNow(world: view UiWorld, list: view EntityId) ret List(String) {
-  if let names: ListRowNames = componentCopy(this: world.listRowNames, entityId: list) {
+  if componentHas(this: world.listRowNames, entityId: list) {
+    let names: view ListRowNames = componentView(this: world.listRowNames, entityId: list)
     ret names.keys
   }
   var keys: List(String) = {}
-  if componentHas(this: world.listViewDatas, entityId: list) is false {
+  # a part of the rows cannot be selected in without ListRowNames
+  if componentHas(this: world.listViewDatas, entityId: list) is false or listIsWindowed(
+    world: world
+    list: list
+  ) {
     ret keys
   }
   let listView: view ListView = componentView(this: world.listViews, entityId: list)

@@ -9,6 +9,7 @@ open text/NameOrder
 open ui/Components
 open ui/Ecs
 open ui/KeyFocusSystem
+open ui/ListWindow
 open ui/ScrollRootSystem
 open ui/ScrollToRow
 open ui/SelectionComponents
@@ -222,7 +223,7 @@ func stepKeysOfList(
 func listPageRows(world: view UiWorld, uiSystems: view UiSystems, list: view EntityId) ret Int {
   let listView: view ListView = componentView(this: world.listViews, entityId: list)
   let pitch: Float = listView.itemHeight + listView.itemGap
-  var rows: Int = listView.visibleItemCount
+  var rows: Int = listVisibleRows(world: world, uiSystems: uiSystems, list: list)
   let root: EntityId = scrollToRowRoot(world: world, uiSystems: uiSystems, listEntity: list)
   if isNone(this: root) is false and pitch > 0.0 {
     let range: ScrollRange = scrollRootRange(world: world, uiSystems: uiSystems, entityId: root)

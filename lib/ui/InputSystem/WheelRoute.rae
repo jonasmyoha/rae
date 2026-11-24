@@ -7,11 +7,13 @@ open ui/UiLayers
 open ui/UiSystems
 open ui/ZOrder
 open ui/Transform
+import Math
 open ecs/Entity
 open ecs/ComponentTable
 
-# What is looked for under the pointer: what takes the wheel, a secondary click, or the keys
-enum UiRouteWant { wheel, secondaryClick, keys }
+# What is looked for under the pointer: what takes the wheel, what takes its sideways scroll, a
+# secondary click, or the keys
+enum UiRouteWant { wheel, wheelX, secondaryClick, keys }
 
 # One subtree's answer to "who takes the wheel here?". `blocked`: the pointer
 # landed on something painted or interactive in this subtree, so nodes painted
@@ -70,7 +72,9 @@ func uiRouteConsumerAt(
     )
   }
   if componentHas(this: world.scrollRoots, entityId: entityId) {
-    ret uiPointInScrollWindow(
+    # a scroll root takes the scroll along its own axis only
+    let sideways: Bool = componentView(this: world.scrollRoots, entityId: entityId).axis is ScrollAxis.x
+    ret sideways is (want is UiRouteWant.wheelX) and uiPointInScrollWindow(
       world: world
       uiSystems: uiSystems
       entityId: entityId
@@ -79,6 +83,27 @@ func uiRouteConsumerAt(
     )
   }
   ret false
+}
+
+# A scroll root of the other axis under the pointer: what is painted under it gets no scroll
+func uiScrollRootBlocks(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  x: view Float
+  y: view Float
+  want: view UiRouteWant
+) ret Bool {
+  ret (want is UiRouteWant.wheel or want is UiRouteWant.wheelX) and componentHas(
+    this: world.scrollRoots
+    entityId: entityId
+  ) and uiPointInScrollWindow(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    x: x
+    y: y
+  )
 }
 
 # The window a ScrollRoot scrolls inside: its parent's box when it has a laid-out
@@ -175,6 +200,16 @@ func uiRouteEntity(
         ret UiWheelRoute { blocked: true, target: entityId }
       }
     }
+    if route.blocked is false and uiScrollRootBlocks(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      x: x
+      y: y
+      want: want
+    ) {
+      route.blocked = true
+    }
     if route.blocked is false and inside {
       if componentHas(this: world.shapes, entityId: entityId) or componentHas(
         this: world.onClicks
@@ -241,9 +276,11 @@ func uiRouteAt(
   }
 }
 
-# Hand this frame's `wheel` delta to the consumer under `input.pointer`. Called
-# by `updateUiInput` with the device's delta; a headless driver calls it with a
-# scripted one, so a test goes through the same routing as a real notch.
+# Hand this frame's `wheel` delta (and the sideways one, input.wheelX) to the consumers under
+# `input.pointer`, each to the nearest of its axis. Called by `updateUiInput` with the device's
+# delta; a
+# headless driver calls it with a scripted one, so a test goes through the same routing as a real
+# notch.
 func routeUiWheel(
   input: mod UiInput
   world: view UiWorld
@@ -252,8 +289,10 @@ func routeUiWheel(
 ) {
   input.wheel = wheel
   input.wheelTarget = noEntity()
+  input.wheelXTarget = noEntity()
   input.wheelBlocked = false
-  if wheel is not 0.0 or input.wheelX is not 0.0 or input.pinch is not 1.0 {
+  stepWheelAxis(input: input)
+  if wheel is not 0.0 or input.pinch is not 1.0 {
     let route: UiWheelRoute = uiWheelRoute(
       world: world
       uiSystems: uiSystems
@@ -263,6 +302,77 @@ func routeUiWheel(
     input.wheelTarget = route.target
     input.wheelBlocked = route.blocked and isNone(this: route.target)
   }
+  if input.wheelX is not 0.0 {
+    input.wheelXTarget = uiRouteAt(
+      world: world
+      uiSystems: uiSystems
+      x: input.pointer.x
+      y: input.pointer.y
+      want: UiRouteWant.wheelX
+    ).target
+  }
+}
+
+# Seconds without a scroll event that end a trackpad's gesture (its momentum goes on being one), and
+# how far a gesture moves (in the wheel's units) before its axis is settled
+const wheelGestureSeconds: Float64 = 0.2
+
+const wheelGestureSettle: Float = 1.0
+
+# A trackpad's gesture scrolls along the axis it began on: a scroll root of the other axis gets
+# nothing
+# of it (a WheelTarget, such as a canvas, gets both). A wheel's notches have no axis to keep.
+func stepWheelAxis(input: mod UiInput) {
+  if input.wheelPrecise is false {
+    input.wheelAxis = UiWheelAxis.both
+    ret
+  }
+  if input.wheel is 0.0 and input.wheelX is 0.0 {
+    if input.nowSeconds - input.wheelSeconds > wheelGestureSeconds {
+      input.wheelAxis = UiWheelAxis.both
+    }
+    ret
+  }
+  if input.nowSeconds - input.wheelSeconds > wheelGestureSeconds {
+    input.wheelSumX = 0.0
+    input.wheelSumY = 0.0
+  }
+  input.wheelSeconds = input.nowSeconds
+  if input.wheelSumX + input.wheelSumY < wheelGestureSettle {
+    input.wheelSumX = input.wheelSumX + Math.abs(value: input.wheelX)
+    input.wheelSumY = input.wheelSumY + Math.abs(value: input.wheel)
+    input.wheelAxis = UiWheelAxis.y
+    if input.wheelSumX > input.wheelSumY {
+      input.wheelAxis = UiWheelAxis.x
+    }
+  }
+}
+
+# This frame's scroll of the scroll root `entityId` along its own axis, as its content moves
+# (positive toward its start), 0 when it is not its
+func uiScrollWheelFor(
+  input: view UiInput
+  entityId: view EntityId
+  axis: view ScrollAxis
+) ret Float {
+  if axis is ScrollAxis.x {
+    if input.wheelAxis is UiWheelAxis.y {
+      ret 0.0
+    }
+    ret -uiWheelXFor(input: input, entityId: entityId)
+  }
+  if input.wheelAxis is UiWheelAxis.x {
+    ret 0.0
+  }
+  ret uiWheelFor(input: input, entityId: entityId)
+}
+
+# This frame's sideways scroll if it was routed to `entityId` (positive to the right), else 0
+func uiWheelXFor(input: view UiInput, entityId: view EntityId) ret Float {
+  if isNone(this: entityId) or input.wheelXTarget is not entityId {
+    ret 0.0
+  }
+  ret input.wheelX
 }
 
 # This frame's wheel delta if it was routed to `entityId`, else 0. The one way a

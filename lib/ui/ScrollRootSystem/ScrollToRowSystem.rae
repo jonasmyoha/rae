@@ -13,6 +13,7 @@ open ui/Components
 open ui/ScrollToRow
 open ui/UiSystems
 open ui/ListMotionSystem
+open ui/ListWindow
 open ecs/Entity
 open ecs/ComponentTable
 
@@ -186,10 +187,7 @@ func scrollToRowSystem(world: mod UiWorld, uiSystems: mod UiSystems) ret Bool {
       )
       continue
     }
-    var count: Int = 0
-    if componentHas(this: world.listViewDatas, entityId: listEntity) {
-      count = componentView(this: world.listViewDatas, entityId: listEntity).rows.length
-    }
+    let count: Int = listRowCount(world: world, list: listEntity)
     if count is 0 {
       continue
     }

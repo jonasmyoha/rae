@@ -30,6 +30,7 @@
 import ui/Components
 import Math
 import Haptics
+open ui/ListWindow
 open ui/Ecs
 open ui/UiSystems
 open ui/ListReorder
@@ -312,7 +313,7 @@ func listReorderStep(
   let wasIdle: Bool = drag.phase is ListReorderPhase.idle
 
   if drag.phase is ListReorderPhase.idle {
-    if pointer.pressed and reorder.enabled and count > 1 and pitch > 0.0 and listView.mode is ListViewMode.virtual and presentedPageBlocks(
+    if pointer.pressed and reorder.enabled and not listIsWindowed(world: world, list: listEntity) and count > 1 and pitch > 0.0 and listView.mode is ListViewMode.virtual and presentedPageBlocks(
       world: world
       uiSystems: uiSystems
       entityId: listEntity

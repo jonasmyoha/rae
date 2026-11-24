@@ -226,3 +226,10 @@ func uiSecondaryStep(input: mod UiInput, world: mod UiWorld, uiSystems: view UiS
     }
   }
 }
+
+# The wheel turned with Shift held: a sideways scroll
+func shiftedWheel(wheel: view Float, wheelX: view Float) ret Bool {
+  ret wheel is not 0.0 and wheelX is 0.0 and (Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(
+    key: Keys.keyRShift
+  ))
+}

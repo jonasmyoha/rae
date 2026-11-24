@@ -205,7 +205,7 @@ func createTouchStickState() ret TouchStickState {
 }
 
 # What a ListView's pooled row was last bound to (listViewSystem): the data row's index and the
-# generations of the ListView and ListViewData tables then. The same three again mean the row
+# stamps of its list's ListView and ListViewData then. The same three again mean the row
 # already shows that data, so its bindings are not applied again: the Strings they build (the
 # value, the row's page, the node key) were every visible row's every frame.
 type ListRowBound {
@@ -214,13 +214,16 @@ type ListRowBound {
   listGeneration: Int = -1
 }
 
-# What a ListView's last reconcile saw (ui/ListViewSystem): the list and data tables'
-# generations, the children table's (rows built, destroyed or reordered), the rows still leaving,
+# What a ListView's last reconcile saw (ui/ListViewSystem): the stamps of its list, its data and its
+# ListWindow, how many rows are in view, the children table's generation (rows built, destroyed or
+# reordered), the rows still leaving,
 # the list motion's (a drag holding the list, the motion states), the row size the container
 # gives, the scroll and the sub-scenes registered
 type ListSyncSeen {
   listGeneration: Int = -1
   dataGeneration: Int = -1
+  windowStamp: Int = -1
+  visible: Int = -1
   childrenGeneration: Int = -1
   leaving: Int = -1
   motionGeneration: Int = -1

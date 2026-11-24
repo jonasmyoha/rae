@@ -1714,3 +1714,46 @@ no nearer such node, gives them to it.
 
 `requestScrollToRow` has the place `nearest`, and works on a flow list too. Case 1583 checks all of it
 with scripted input; 10,000 rows cost 3 ms when their data changes and nothing on an idle frame.
+
+## 50. A window of rows: `ListWindow`, and `visibleItemCount` 0
+
+A virtual `ListView` keeps only the rows in view live, but its `ListViewData` holds every row. For a
+long list the owner gives only the rows in view (`ui/ListWindow`; runtime, never authored):
+
+```rae
+updateScrollRoots(...), scrollToRowSystem(...)
+let wanted: ListRange = listWindowWanted(world: world, uiSystems: uiSystems, list: list, count: total)
+if not listWindowHas(world: world, list: list, wanted: wanted, count: total) {
+  # make the rows wanted.first .. wanted.first + wanted.count - 1
+  setListWindowRows(world: world, list: list, count: total, first: wanted.first, rows: own rows)
+}
+listViewSystem(...)
+```
+
+- The list's length, its scroll range and `requestScrollToRow` go by `count`. An owner that fills after
+  the scroll step and before `listViewSystem` shows no blank row; a row not given is not live.
+- Such a list has no list motion and no `ListReorder`, and its selection needs `ListRowNames` (section
+  49). A flow list ignores its window.
+- `"visibleItemCount": 0` keeps as many rows live as the list's height holds (its own box or its
+  parent's inside the padding, the smaller), so a column that is resized fills. A list with 0 that
+  hugs its height is as tall as all its rows.
+
+Case 1586: 100,000 rows with 21 live, scrolled, jumped in and resized.
+
+## 51. Several scroll roots, and the wheel's two axes
+
+- The vertical wheel goes to the nearest vertical `ScrollRoot` or `WheelTarget` on the path to the
+  topmost node under the pointer, the sideways scroll (`UiInput.wheelX`) to the nearest sideways
+  `ScrollRoot` or `WheelTarget`, each its own (`wheelTarget`, `wheelXTarget`; `uiWheelFor`,
+  `uiWheelXFor`). A `ScrollRoot` takes its own axis only, so the vertical wheel does not move a
+  sideways one; Shift with the wheel does.
+- A trackpad's gesture scrolls along the axis it began on: a root of the other axis gets nothing of it
+  until the trackpad has been quiet for 0.2 s. A `WheelTarget` (a canvas) gets both axes.
+- `updateScrollRoots(world:, uiSystems:, input:, deltaTime:)` steps every shown root, for a program
+  with several (a list inside a strip, two panels); `scrollRootsSettling` says whether its event loop
+  keeps rendering. A press drags the nearest root of each axis under it, until the pointer moves along
+  one of them; then that root alone has it. A root at rest with nothing for it costs a comparison.
+  `updateScrollRoot` (one root) stays, and lets go when another root's drag has the press.
+- `ScrollMemory` keeps a page's first root (`findScrollRoot`'s); its other roots start at their start.
+
+Case 1585: two lists inside a sideways strip, by wheel, trackpad, mouse drag and finger.

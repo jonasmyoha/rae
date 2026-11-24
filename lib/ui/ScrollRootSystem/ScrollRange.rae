@@ -1,0 +1,191 @@
+# How far a scroll root can scroll: its content's length against the window its parent shows. See
+# ScrollRootSystem.rae.
+open ui/Ecs
+open ui/Components
+open ui/LayoutSystem
+open ui/ListWindow
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Hierarchy
+open ui/UiSystems
+
+# The scroll bounds of one root this frame. `active` is false until the root
+# is laid out or when its content fits — a root with nothing to scroll is
+# inert, and an app's physics skips it. `floor` is the most-negative position
+# (<= 0); `window` the visible length along the axis, the rubber-band's
+# reference dimension; `rest` where a root whose content fits sits: 0 (its
+# start) unless it is anchored at its end, then the room left over, so the
+# content's end meets the window's end (less `endInset`).
+type ScrollRange {
+  active: Bool
+  floor: Float
+  window: Float
+  rest: Float = 0.0
+}
+
+func axisLength(root: view ScrollRoot, size: view Vec2) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret size.x
+  }
+  ret size.y
+}
+
+func axisFarEdge(root: view ScrollRoot, rect: view ComputedRect) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret rect.position.x + rect.size.x
+  }
+  ret rect.position.y + rect.size.y
+}
+
+func axisPaddingEnd(root: view ScrollRoot, insets: view Insets) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret insets.r
+  }
+  ret insets.b
+}
+
+func axisPaddingSum(root: view ScrollRoot, insets: view Insets) ret Float {
+  if root.axis is ScrollAxis.x {
+    ret insets.l + insets.r
+  }
+  ret insets.t + insets.b
+}
+
+# How far the root's content reaches from the root's start edge: the far edge
+# of the children its layout placed (in the root's own coordinates, so a
+# `Fill` body whose grid overflows it measures the grid, not the body) plus
+# the root's end padding after the last child; the root's own length when it
+# has no children. A VIRTUAL `ListView` host keeps only a window of rows live,
+# so its content is the whole data list: rows × pitch (ui/ListViewSystem
+# places row i at i × pitch).
+func scrollContentExtent(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  root: view ScrollRoot
+) ret Float {
+  let padEnd: Float = axisPaddingEnd(
+    root: root
+    insets: entityPadding(world: world, uiSystems: uiSystems, entityId: entityId)
+  )
+  var extent: Float = 0.0
+  var measured: Bool = false
+  if componentHas(this: world.listViews, entityId: entityId) {
+    # Views, not a copy: this runs every frame for every scrolling list, and a
+    # copy (componentCopy) is a deep copy of the list's whole row data just to read
+    # its length (#32786425 — it also leaked that copy until the compiler fix).
+    let listView: view ListView = componentView(this: world.listViews, entityId: entityId)
+    if listView.mode is ListViewMode.virtual {
+      let count: Int = listRowCount(world: world, list: entityId)
+      if count > 0 {
+        let pitch: Float = listView.itemHeight + listView.itemGap
+        extent = count.toFloat() * pitch - listView.itemGap + padEnd
+        measured = true
+      }
+    }
+  }
+  if componentHas(this: world.childrens, entityId: entityId) {
+    let children: view Children = componentView(this: world.childrens, entityId: entityId)
+    loop var i: Int = 0, i < children.ids.length, ++i {
+      let child: EntityId = children.ids.copyAtFallback(index: i, fallback: noEntity())
+      # a child switched off keeps its last box but takes no place, as in the layout
+      if layoutActive(world: world, entityId: child) and componentHas(
+        this: uiSystems.layout.computedRects
+        entityId: child
+      ) {
+        let rect: view ComputedRect = componentView(
+          this: uiSystems.layout.computedRects
+          entityId: child
+        )
+        let far: Float = axisFarEdge(root: root, rect: rect) + padEnd
+        if far > extent {
+          extent = far
+        }
+        measured = true
+      }
+    }
+  }
+  if measured is false {
+    let ownRect: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: entityId
+    )
+    extent = axisLength(root: root, size: ownRect.size)
+  }
+  ret extent
+}
+
+# The length of the root the parent shows: the smaller of the root's own box
+# and the parent's content box (a Hug content taller than its clipped
+# viewport scrolls by the viewport's height; a Fill body by its own).
+func scrollWindowLength(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  root: view ScrollRoot
+) ret Float {
+  let ownRect: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  )
+  var window: Float = axisLength(root: root, size: ownRect.size)
+  if componentHas(this: uiSystems.hierarchy.parents, entityId: entityId) {
+    let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: entityId).parent
+    if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
+      let parentRect: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: parent
+      )
+      let parentBox: Float = axisLength(root: root, size: parentRect.size) - axisPaddingSum(
+        root: root
+        insets: entityPadding(world: world, uiSystems: uiSystems, entityId: parent)
+      )
+      if parentBox < window {
+        window = parentBox
+      }
+    }
+  }
+  ret window
+}
+
+func scrollRootRange(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+) ret ScrollRange {
+  let inert: ScrollRange = { active: false, floor: 0.0, window: 1.0 }
+  if isNone(this: entityId) {
+    ret inert
+  }
+  if componentHas(this: world.scrollRoots, entityId: entityId) is false {
+    ret inert
+  }
+  if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) is false {
+    ret inert
+  }
+  let root: view ScrollRoot = componentView(this: world.scrollRoots, entityId: entityId)
+  let window: Float = scrollWindowLength(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    root: root
+  )
+  if root.floor is ScrollFloorMode.fixed {
+    ret ScrollRange { active: root.fixedFloor < 0.0, floor: root.fixedFloor, window: window }
+  }
+  let extent: Float = scrollContentExtent(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    root: root
+  )
+  let overflow: Float = extent - (window - root.endInset)
+  if overflow <= 0.0 {
+    var rest: Float = 0.0
+    if root.anchor is ScrollAnchor.end {
+      rest = 0.0 - overflow
+    }
+    ret ScrollRange { active: false, floor: 0.0, window: window, rest: rest }
+  }
+  ret ScrollRange { active: true, floor: 0.0 - overflow, window: window }
+}

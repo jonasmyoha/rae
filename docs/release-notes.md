@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.52, 2026-11-24: a list's rows in view only, and several scroll roots
+
+- `ui/ListWindow`: a virtual `ListView` given only the rows in view, so 100,000 rows cost what 20 do
+  (docs/ui-scene-format.md section 50). `visibleItemCount` 0: as many as the list's height holds.
+- `updateScrollRoots`: every shown scroll root, a press dragging the nearest one of its axis (section
+  51). The sideways scroll has its own target, `UiInput.wheelXTarget`: a program that read
+  `input.wheelTarget` for `wheelX` reads `uiWheelXFor`. The vertical wheel no longer moves a sideways
+  `ScrollRoot`; Shift with the wheel does. A trackpad's gesture keeps its axis.
+- `ScrollMemory` keeps one root per page (two roots on one page overwrote each other's position).
+  Cases 1585, 1586.
+
 ## 0.4.50, 2026-11-24: baked clouds
 
 - The volumetric clouds can be baked into a map of the sky, baked again once a minute and shown for

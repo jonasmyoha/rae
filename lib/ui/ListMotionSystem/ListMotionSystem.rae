@@ -19,6 +19,7 @@
 # first fill only, and a log line says so once.
 open ecs/ComponentTable
 open ecs/Entity
+open ui/ListWindow
 open ui/AnimationComponents
 open ui/Components
 open ui/Ecs
@@ -83,9 +84,14 @@ func listRowHasMotion(world: view UiWorld, rowEntityId: view EntityId) ret Bool 
 
 func listMotionWanted(
   world: view UiWorld
+  listEntityId: view EntityId
   listView: view ListView
   pool: view List(EntityId)
 ) ret Bool {
+  # its data is a part of its rows: what left and what came cannot be told (ui/ListWindow)
+  if listIsWindowed(world: world, list: listEntityId) {
+    ret false
+  }
   if listView.animateMoves {
     ret true
   }
@@ -249,12 +255,17 @@ func listMotionBeforeRows(
   let wanted: Bool = changing or (componentHas(
     this: uiSystems.animation.listMotions
     entityId: listEntityId
-  ) and listMotionWanted(world: world, listView: listView, pool: pool))
+  ) and listMotionWanted(
+    world: world
+    listEntityId: listEntityId
+    listView: listView
+    pool: pool
+  ))
   if wanted is false or listIsHeld(world: world, listEntityId: listEntityId) {
     ret plan
   }
   listMotionEnsureState(uiSystems: uiSystems, listEntityId: listEntityId)
-  let generation: Int = componentTableGeneration(this: world.listViewDatas)
+  let generation: Int = componentModStamp(this: world.listViewDatas, entityId: listEntityId)
   let state: view ListMotionState = componentView(
     this: uiSystems.animation.listMotions
     entityId: listEntityId
@@ -371,7 +382,12 @@ func listMotionAfterRows(
 ) {
   let pool: List(EntityId) = listMotionPool(world: world, listEntityId: listEntityId)
   let changing: Bool = componentHas(this: world.listChanges, entityId: listEntityId)
-  if listMotionWanted(world: world, listView: listView, pool: pool) is false and not changing {
+  if listMotionWanted(
+    world: world
+    listEntityId: listEntityId
+    listView: listView
+    pool: pool
+  ) is false and not changing {
     ret
   }
   listMotionEnsureState(uiSystems: uiSystems, listEntityId: listEntityId)
@@ -382,7 +398,7 @@ func listMotionAfterRows(
       animationDropMotion(uiSystems: uiSystems, entityId: rowEntityId)
     }
   }
-  let generation: Int = componentTableGeneration(this: world.listViewDatas)
+  let generation: Int = componentModStamp(this: world.listViewDatas, entityId: listEntityId)
   let state: view ListMotionState = componentView(
     this: uiSystems.animation.listMotions
     entityId: listEntityId
@@ -507,7 +523,7 @@ func listMotionAskRows(
           index: index
           scrollY: scrollY
           pitch: pitch
-          visibleItemCount: listView.visibleItemCount
+          visibleItemCount: listVisibleRows(world: world, uiSystems: uiSystems, list: listEntityId)
         ) {
           visibleCount = visibleCount + 1
         }
@@ -531,7 +547,7 @@ func listMotionAskRows(
       index: first + slot
       scrollY: scrollY
       pitch: pitch
-      visibleItemCount: listView.visibleItemCount
+      visibleItemCount: listVisibleRows(world: world, uiSystems: uiSystems, list: listEntityId)
     ) {
       if componentHas(this: world.staggers, entityId: listEntityId) {
         let stagger: view Stagger = componentView(this: world.staggers, entityId: listEntityId)
@@ -574,10 +590,12 @@ func listFlowAfterRows(
   ordered: view List(EntityId)
   hadRows: view Bool
 ) {
-  if listMotionWanted(world: world, listView: listView, pool: ordered) is false and componentHas(
-    this: world.listChanges
-    entityId: listEntityId
-  ) is false {
+  if listMotionWanted(
+    world: world
+    listEntityId: listEntityId
+    listView: listView
+    pool: ordered
+  ) is false and componentHas(this: world.listChanges, entityId: listEntityId) is false {
     ret
   }
   listMotionEnsureState(uiSystems: uiSystems, listEntityId: listEntityId)

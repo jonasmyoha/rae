@@ -1,0 +1,551 @@
+# Several scroll roots in view (updateScrollRoots): two lists scrolling up and down inside a strip
+# scrolling sideways. The wheel goes to the root of its axis under the pointer, Shift+wheel and a
+# trackpad's sideways scroll to the strip, a trackpad's gesture keeps its axis; a drag, by mouse
+# and by
+# finger, moves one root; a hidden list is left alone; a root at rest is not stepped.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/LayoutSystem
+open ui/ListViewSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  scenes: SceneRegistry
+  layoutCache: LayoutCache
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+func at(app: view App, nodeId: view String) ret Float {
+  ret scrollPositionOf(world: app.world, entityId: nodeOf(world: app.world, nodeId: nodeId))
+}
+
+func show(app: view App, step: view String) {
+  log(
+    "{step}: strip {at(app: app, nodeId: "Strip")}, A {at(app: app, nodeId: "ListA")}, B {at(
+      app: app
+      nodeId: "ListB"
+    )}"
+  )
+}
+
+func frame(app: mod App, pointer: view UiPointerState, wheel: view Float) {
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: wheel
+  )
+  let moved: Bool = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.016
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  let laidOut: Bool = ifDirty(world: app.world, uiSystems: app.uiSystems, cache: app.layoutCache)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# A wheel event after `wait` seconds of none (and the spring and momentum settled)
+func wheel(
+  app: mod App
+  step: view String
+  x: view Float
+  wheel: view Float
+  wheelX: view Float
+  precise: view Bool
+  wait: view Float64
+) {
+  app.input.nowSeconds = app.input.nowSeconds + wait
+  app.input.wheelX = wheelX
+  app.input.wheelPrecise = precise
+  frame(
+    app: app
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: 150.0
+      down: false
+      kind: InputKind.mouse
+    )
+    wheel: wheel
+  )
+  app.input.wheelX = 0.0
+  show(app: app, step: step)
+}
+
+func pointer(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+  kind: view InputKind
+) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.016
+  frame(
+    app: app
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: x
+      y: y
+      down: down
+      kind: kind
+    )
+    wheel: 0.0
+  )
+  if step.length() > 0 {
+    show(app: app, step: step)
+  }
+}
+
+# Everything at rest, where it is
+func rest(app: mod App) {
+  var frames: Int = 0
+  loop scrollRootsSettling(world: app.world, uiSystems: app.uiSystems) and frames < 1000 {
+    pointer(
+      app: app
+      step: ""
+      x: app.input.pointer.x
+      y: app.input.pointer.y
+      down: false
+      kind: InputKind.mouse
+    )
+    frames = frames + 1
+  }
+  log("at rest {frames < 1000}")
+}
+
+func rows(app: mod App, nodeId: view String, count: view Int) {
+  var data: ListViewData = { rows: {} }
+  loop var i: Int = 0, i < count, ++i {
+    data.rows.add(
+      value: ListViewRow { keys: List(String) { "key" }, values: List(String) { "{i}" } }
+    )
+  }
+  componentSet(
+    this: app.world.listViewDatas
+    entityId: nodeOf(world: app.world, nodeId: nodeId)
+    data: own data
+  )
+}
+
+func main() {
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    scenes: createSceneRegistry()
+    layoutCache: createLayoutCache()
+  }
+  app.world.layoutW = 400.0
+  app.world.layoutH = 300.0
+  app.input.nowSeconds = 10.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  rows(app: app, nodeId: "ListA", count: 100)
+  rows(app: app, nodeId: "ListB", count: 100)
+  var memory: ScrollMemory = createScrollMemory()
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+  scrollRootSystem(world: app.world, uiSystems: app.uiSystems, memory: memory)
+  pointer(
+    app: app
+    step: "start"
+    x: 50.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+
+  # the wheel
+  wheel(
+    app: app
+    step: "a notch over A"
+    x: 50.0
+    wheel: -1.0
+    wheelX: 0.0
+    precise: false
+    wait: 0.5
+  )
+  wheel(
+    app: app
+    step: "a notch over B"
+    x: 250.0
+    wheel: -1.0
+    wheelX: 0.0
+    precise: false
+    wait: 0.5
+  )
+  wheel(
+    app: app
+    step: "sideways over A"
+    x: 50.0
+    wheel: 0.0
+    wheelX: 1.0
+    precise: false
+    wait: 0.5
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "a notch over C, no list there"
+    x: 390.0
+    wheel: -1.0
+    wheelX: 0.0
+    precise: false
+    wait: 0.5
+  )
+  log("blocked {app.input.wheelBlocked}, unclaimed {uiWheelUnclaimed(input: app.input)}")
+  # a trackpad
+  wheel(
+    app: app
+    step: "a gesture down"
+    x: 50.0
+    wheel: -1.5
+    wheelX: 0.2
+    precise: true
+    wait: 0.5
+  )
+  wheel(
+    app: app
+    step: "that drifts sideways"
+    x: 50.0
+    wheel: -0.2
+    wheelX: 1.5
+    precise: true
+    wait: 0.016
+  )
+  wheel(
+    app: app
+    step: "a new one sideways"
+    x: 50.0
+    wheel: -0.2
+    wheelX: 1.5
+    precise: true
+    wait: 0.5
+  )
+  wheel(
+    app: app
+    step: "that drifts down"
+    x: 50.0
+    wheel: -1.5
+    wheelX: 0.2
+    precise: true
+    wait: 0.016
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "a mouse's two axes have no gesture"
+    x: 50.0
+    wheel: -1.0
+    wheelX: 0.0
+    precise: false
+    wait: 0.016
+  )
+  wheel(
+    app: app
+    step: "at once sideways"
+    x: 50.0
+    wheel: 0.0
+    wheelX: 1.0
+    precise: false
+    wait: 0.016
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "back to the strip's start"
+    x: 50.0
+    wheel: 0.0
+    wheelX: -9.0
+    precise: false
+    wait: 0.5
+  )
+  rest(app: app)
+  # a drag by mouse over A, up
+  pointer(
+    app: app
+    step: "press"
+    x: 50.0
+    y: 150.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 8"
+    x: 50.0
+    y: 142.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 30"
+    x: 52.0
+    y: 120.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 60, and across"
+    x: 90.0
+    y: 90.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 90.0
+    y: 90.0
+    down: false
+    kind: InputKind.mouse
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "the strip's start again"
+    x: 50.0
+    wheel: 0.0
+    wheelX: -9.0
+    precise: false
+    wait: 0.5
+  )
+  rest(app: app)
+  # a drag by mouse over B, sideways
+  pointer(
+    app: app
+    step: "press"
+    x: 250.0
+    y: 150.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 15 across, 12 down"
+    x: 235.0
+    y: 162.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 40"
+    x: 210.0
+    y: 165.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "moved 40, far down"
+    x: 210.0
+    y: 260.0
+    down: true
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 210.0
+    y: 260.0
+    down: false
+    kind: InputKind.mouse
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "the strip's start again"
+    x: 50.0
+    wheel: 0.0
+    wheelX: -9.0
+    precise: false
+    wait: 0.5
+  )
+  rest(app: app)
+  # a drag by touch over B, sideways
+  pointer(
+    app: app
+    step: "press"
+    x: 250.0
+    y: 150.0
+    down: true
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "moved 15 across, 12 down"
+    x: 235.0
+    y: 162.0
+    down: true
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "moved 40"
+    x: 210.0
+    y: 165.0
+    down: true
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "moved 40, far down"
+    x: 210.0
+    y: 260.0
+    down: true
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 210.0
+    y: 260.0
+    down: false
+    kind: InputKind.touch
+  )
+  rest(app: app)
+  wheel(
+    app: app
+    step: "the strip's start again"
+    x: 50.0
+    wheel: 0.0
+    wheelX: -9.0
+    precise: false
+    wait: 0.5
+  )
+  rest(app: app)
+  # a hidden list lets go
+  pointer(
+    app: app
+    step: "press on A"
+    x: 20.0
+    y: 150.0
+    down: true
+    kind: InputKind.touch
+  )
+  pointer(
+    app: app
+    step: "dragging A"
+    x: 20.0
+    y: 100.0
+    down: true
+    kind: InputKind.touch
+  )
+  componentSet(
+    this: app.world.actives
+    entityId: nodeOf(world: app.world, nodeId: "ColumnA")
+    data: Active { value: false }
+  )
+  pointer(
+    app: app
+    step: "A hidden"
+    x: 20.0
+    y: 50.0
+    down: true
+    kind: InputKind.touch
+  )
+  log(
+    "A dragging {scrollRootDragging(
+      world: app.world
+      entityId: nodeOf(world: app.world, nodeId: "ListA")
+    )}"
+  )
+  pointer(
+    app: app
+    step: "let go"
+    x: 20.0
+    y: 50.0
+    down: false
+    kind: InputKind.touch
+  )
+  componentSet(
+    this: app.world.actives
+    entityId: nodeOf(world: app.world, nodeId: "ColumnA")
+    data: Active { value: true }
+  )
+  rest(app: app)
+  show(app: app, step: "at rest")
+  # a root at rest is not stepped
+  loop var i: Int = 0, i < 3, ++i {
+    pointer(
+      app: app
+      step: ""
+      x: 50.0
+      y: 150.0
+      down: false
+      kind: InputKind.mouse
+    )
+  }
+  let drags: Int = componentTableGeneration(this: app.world.scrollDrags)
+  pointer(
+    app: app
+    step: ""
+    x: 50.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: ""
+    x: 51.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+  log("steps of roots at rest {componentTableGeneration(this: app.world.scrollDrags) - drags}")
+  rows(app: app, nodeId: "ListA", count: 5)
+  pointer(
+    app: app
+    step: ""
+    x: 51.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+  pointer(
+    app: app
+    step: "A has five rows now"
+    x: 51.0
+    y: 150.0
+    down: false
+    kind: InputKind.mouse
+  )
+}

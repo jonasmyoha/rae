@@ -83,6 +83,7 @@ func isRuntimeTable(name: view String) ret Bool {
     "MenuRow"
     "ListRowNames"
     "ListSelected"
+    "ListWindow"
   ]
   var i: Int = 0
   loop i < runtime.length() {
@@ -273,7 +274,9 @@ func applyComponentByName(
       table
     ) is not "StyleOverride" and typeName(table) is not "BundleRefs" and typeName(table) is not "SceneSource" and typeName(
       table
-    ) is not "MenuRow" and typeName(table) is not "ListRowNames" and typeName(table) is not "ListSelected" {
+    ) is not "MenuRow" and typeName(table) is not "ListRowNames" and typeName(table) is not "ListSelected" and typeName(
+      table
+    ) is not "ListWindow" {
       # `OverflowPolicy` is accepted as well as the authored `Overflow`
       if name is authoredNameOf(typeName: typeName(table)) or name is typeName(table) {
         decodeComponent(

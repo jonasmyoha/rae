@@ -1,0 +1,320 @@
+# A ListView given only the rows in view (ui/ListWindow): 100,000 rows with a few live ones and a
+# few rows of data, scrolled by wheel, to a row and to the end, with no blank row and nothing left
+# over; as many rows as the list's height holds (visibleItemCount 0), also after a resize; an owner
+# that is late; a selection by ListRowNames; no motion and no reordering.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/LayoutSystem
+open ui/ListMotionSystem
+open ui/ListReorderSystem
+open ui/ListSelectionSystem
+open ui/ListViewSystem
+open ui/ListWindow
+open ui/KeyFocusSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/ScrollRootSystem
+open ui/ScrollToRow
+open ui/SelectionComponents
+open ui/Transform
+open ui/UiSystems
+
+const rowTotal: Int = 100000
+
+func rae_ext_rae_mem_alloc_total() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_outstanding() unsafe extern ret Int
+
+func rae_ext_rae_mem_stats_buf_outstanding() unsafe extern ret Int
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  scenes: SceneRegistry
+  list: EntityId
+  column: EntityId
+  # how often the rows were filled, and how many that made
+  fills: Int = 0
+  made: Int = 0
+}
+
+func fill(app: mod App) {
+  let wanted: ListRange = listWindowWanted(
+    world: app.world
+    uiSystems: app.uiSystems
+    list: app.list
+    count: rowTotal
+  )
+  if listWindowHas(
+    world: app.world
+    list: app.list
+    wanted: wanted
+    count: rowTotal
+  ) {
+    ret
+  }
+  var rows: List(ListViewRow) = {}
+  loop var i: Int = wanted.first, i < wanted.first + wanted.count, ++i {
+    rows.add(
+      value: ListViewRow { keys: List(String) { "key" }, values: List(String) { "file {i}" } }
+    )
+  }
+  app.fills = app.fills + 1
+  app.made = app.made + rows.length
+  setListWindowRows(
+    world: app.world
+    list: app.list
+    count: rowTotal
+    first: wanted.first
+    rows: own rows
+  )
+}
+
+func frame(app: mod App, wheel: view Float, filled: view Bool) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.016
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 50.0
+      y: 50.0
+      down: false
+      kind: InputKind.mouse
+    )
+    wheel: wheel
+  )
+  let moved: Bool = updateScrollRoots(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    deltaTime: 0.016
+  )
+  let scrolled: Bool = scrollToRowSystem(world: app.world, uiSystems: app.uiSystems)
+  if filled {
+    fill(app: app)
+  }
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  listSelectionLookSystem(world: app.world, uiSystems: app.uiSystems)
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+# The live rows: how many, the first and the last, whether each shows its own data, and whether the
+# rows in view (0 to 310) are all there
+func show(app: view App, step: view String) {
+  var low: Int = rowTotal
+  var high: Int = -1
+  var live: Int = 0
+  var wrong: Int = 0
+  let children: view Children = componentView(this: app.world.childrens, entityId: app.list)
+  loop let row: view EntityId in children.ids {
+    let index: Int = componentView(this: app.uiSystems.listRows.rowsBound, entityId: row).dataIndex
+    if componentView(this: app.world.texts, entityId: row).text is not "file {index}" {
+      wrong = wrong + 1
+    }
+    live = live + 1
+    if index < low {
+      low = index
+    }
+    if index > high {
+      high = index
+    }
+  }
+  let position: Float = scrollPositionOf(world: app.world, entityId: app.list)
+  let covered: Bool = live is high - low + 1 and low.toFloat() * 20.0 <= -position and (high is rowTotal - 1 or (high + 1).toFloat() * 20.0 >= 310.0 - position)
+  let held: Int = componentView(this: app.world.listViewDatas, entityId: app.list).rows.length
+  log(
+    "{step}: at {position}, live {live} ({low}..{high}), data {held}, wrong {wrong}, view covered {covered}"
+  )
+}
+
+func main() {
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    scenes: createSceneRegistry()
+    list: noEntity()
+    column: noEntity()
+  }
+  let row: Scene = parseScene(source: embedText(file: "Row.raescene"))
+  registerScene(reg: app.scenes, key: "Row", scene: own row)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 400.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Files") {
+    app.list = nodeEntityId(world: app.world, index: raw)
+  }
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Column") {
+    app.column = nodeEntityId(world: app.world, index: raw)
+  }
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  frame(app: app, wheel: 0.0, filled: true)
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "opened")
+  let range: ScrollRange = scrollRootRange(
+    world: app.world
+    uiSystems: app.uiSystems
+    entityId: app.list
+  )
+  log("floor {range.floor}")
+  loop var i: Int = 0, i < 10, ++i {
+    frame(app: app, wheel: -1.0, filled: true)
+  }
+  show(app: app, step: "ten notches down")
+  var strings: Int = 0
+  var buffers: Int = 0
+  unsafe {
+    strings = rae_ext_rae_mem_stats_outstanding()
+    buffers = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  log("held in all: under 400 strings {strings < 400}")
+  app.fills = 0
+  app.made = 0
+  var allocsBefore: Int = 0
+  unsafe {
+    allocsBefore = rae_ext_rae_mem_alloc_total()
+  }
+  loop var i: Int = 0, i < 400, ++i {
+    frame(app: app, wheel: -1.0, filled: true)
+  }
+  var allocsAfter: Int = 0
+  unsafe {
+    allocsAfter = rae_ext_rae_mem_alloc_total()
+  }
+  # each frame makes the rows in view anew and binds them, never the 100,000
+  let allocsAFrame: Int = (allocsAfter - allocsBefore) / 400
+  log("under 2000 allocations a frame {allocsAFrame < 2000}")
+  if allocsAFrame >= 2000 {
+    log("allocations a frame {allocsAFrame}")
+  }
+  show(app: app, step: "four hundred more")
+  log("fills {app.fills}, rows made a fill {app.made / app.fills}")
+  var stringsAfter: Int = 0
+  var buffersAfter: Int = 0
+  unsafe {
+    stringsAfter = rae_ext_rae_mem_stats_outstanding()
+    buffersAfter = rae_ext_rae_mem_stats_buf_outstanding()
+  }
+  log("grown by {stringsAfter - strings} strings, {buffersAfter - buffers} buffers")
+  loop var i: Int = 0, i < 30, ++i {
+    frame(app: app, wheel: 0.0, filled: true)
+  }
+  app.fills = 0
+  frame(app: app, wheel: 0.0, filled: true)
+  log(
+    "at rest: fills {app.fills}, settling {scrollRootsSettling(
+      world: app.world
+      uiSystems: app.uiSystems
+    )}"
+  )
+  requestScrollToRow(
+    world: app.world
+    listEntity: app.list
+    index: 70000
+    place: ScrollRowPlace.start
+  )
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "to row 70,000")
+  requestScrollToRow(
+    world: app.world
+    listEntity: app.list
+    index: rowTotal - 1
+    place: ScrollRowPlace.end
+  )
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "to the last")
+  requestScrollToRow(
+    world: app.world
+    listEntity: app.list
+    index: 50000
+    place: ScrollRowPlace.start
+  )
+  frame(app: app, wheel: 0.0, filled: true)
+  requestScrollToRow(
+    world: app.world
+    listEntity: app.list
+    index: 50010
+    place: ScrollRowPlace.start
+  )
+  frame(app: app, wheel: 0.0, filled: false)
+  show(app: app, step: "ten rows on, the owner late")
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "and there")
+
+  # a taller column holds more rows
+  componentMod(this: app.world.rects, entityId: app.column).size.y = 390.0
+  frame(app: app, wheel: 0.0, filled: true)
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "taller")
+
+  # a selection needs all the keys
+  setListSelection(world: app.world, list: app.list, keys: List(String) { "file 50012" })
+  frame(app: app, wheel: 0.0, filled: true)
+  log("selected without the names {listSelectedKeys(world: app.world, list: app.list).length}")
+  var names: ListRowNames = {}
+  loop var i: Int = 0, i < rowTotal, ++i {
+    names.keys.add(value: "file {i}")
+  }
+  componentSet(this: app.world.listRowNames, entityId: app.list, data: own names)
+  setListSelection(world: app.world, list: app.list, keys: List(String) { "file 50012", "file 7" })
+  frame(app: app, wheel: 0.0, filled: true)
+  log("with them {listSelectedKeys(world: app.world, list: app.list).join(sep: ", ")}")
+  setKeyFocus(world: app.world, entityId: app.column)
+  listSelectionSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    keys: ListSelectionKeys { home: true }
+  )
+  frame(app: app, wheel: 0.0, filled: true)
+  frame(app: app, wheel: 0.0, filled: true)
+  show(app: app, step: "Home")
+  log("selected {listSelectedKeys(world: app.world, list: app.list).join(sep: ", ")}")
+
+  # no motion, no reordering: a row pressed and held is not lifted
+  var lifted: Bool = false
+  loop var i: Int = 0, i < 10, ++i {
+    updateUiInputWith(
+      input: app.input
+      world: app.world
+      uiSystems: app.uiSystems
+      pointer: uiPointerScriptFrame(
+        previous: app.input.pointer
+        x: 50.0
+        y: 50.0
+        down: true
+        kind: InputKind.touch
+      )
+      wheel: 0.0
+    )
+    let unused: Bool = listReorderSystem(
+      world: app.world
+      uiSystems: app.uiSystems
+      input: app.input
+      nowSeconds: i as Float64 * 0.1
+    )
+    lifted = lifted or listIsHeld(world: app.world, listEntityId: app.list)
+  }
+  log("a row lifted {lifted}")
+  log(
+    "motion tracks {componentCount(this: app.uiSystems.animation.tracks)}, list motions {componentCount(
+      this: app.uiSystems.animation.listMotions
+    )}, reorder drags {componentCount(this: app.world.listReorderDrags)}"
+  )
+}

@@ -1,0 +1,180 @@
+# A virtual ListView that is given only the rows in view (docs/ui-scene-format.md "A window of
+# rows"):
+# with a ListWindow on it, its ListViewData holds the rows from `first` on only, of `count` in all.
+# Its length, its scroll range and ScrollToRow go by `count`, so a list of 100,000 rows costs what
+# the rows in view cost.
+#
+#   updateScrollRoots(...), scrollToRowSystem(...)
+#   let wanted: ListRange = listWindowWanted(world: world, uiSystems: uiSystems, list: list, count:
+#   n)
+#   if not listWindowHas(world: world, list: list, wanted: wanted, count: n) {
+#     setListWindowRows(world: world, list: list, count: n, first: wanted.first, rows: own rows)
+#   }
+#   listViewSystem(...)
+#
+# An owner that does so each frame never shows a blank row. Rows that are not given are not live.
+# Such
+# a list is not animated (ListMotion) and not reordered (ListReorder), and its selection needs
+# ListRowNames (ui/SelectionComponents). A flow list ignores its ListWindow.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/ListWindowComponents
+open ui/LayoutSystem
+open ui/UiSystems
+
+# Is `list` a virtual list given a part of its rows?
+func listIsWindowed(world: view UiWorld, list: view EntityId) ret Bool {
+  ret componentHas(this: world.listWindows, entityId: list) and componentHas(
+    this: world.listViews
+    entityId: list
+  ) and componentView(this: world.listViews, entityId: list).mode is ListViewMode.virtual
+}
+
+# How many rows `list` has in all
+func listRowCount(world: view UiWorld, list: view EntityId) ret Int {
+  if listIsWindowed(world: world, list: list) {
+    ret componentView(this: world.listWindows, entityId: list).count
+  }
+  if componentHas(this: world.listViewDatas, entityId: list) {
+    ret componentView(this: world.listViewDatas, entityId: list).rows.length
+  }
+  ret 0
+}
+
+# The index, of all rows, of the first one in the list's data
+func listDataFirst(world: view UiWorld, list: view EntityId) ret Int {
+  if listIsWindowed(world: world, list: list) {
+    ret componentView(this: world.listWindows, entityId: list).first
+  }
+  ret 0
+}
+
+# How many rows are in view at once: the authored `visibleItemCount`, or with 0 as many as the
+# list's
+# height holds (a part of a row counts), by the last layout: the list's own box or its parent's
+# inside
+# its padding, the smaller; before the first layout its authored height, else the world's
+func listVisibleRows(world: view UiWorld, uiSystems: view UiSystems, list: view EntityId) ret Int {
+  let listView: view ListView = componentView(this: world.listViews, entityId: list)
+  if listView.visibleItemCount > 0 {
+    ret listView.visibleItemCount
+  }
+  let pitch: Float = listView.itemHeight + listView.itemGap
+  if pitch <= 0.0 {
+    ret 0
+  }
+  var height: Float = 0.0
+  if componentHas(this: uiSystems.layout.computedRects, entityId: list) {
+    height = componentView(this: uiSystems.layout.computedRects, entityId: list).size.y
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: list) {
+      let parent: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: list).parent
+      if componentHas(this: uiSystems.layout.computedRects, entityId: parent) {
+        let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: parent)
+        let inner: Float = componentView(this: uiSystems.layout.computedRects, entityId: parent).size.y - padding.t - padding.b
+        if inner < height {
+          height = inner
+        }
+      }
+    }
+  } else {
+    if componentHas(this: world.rects, entityId: list) {
+      height = componentView(this: world.rects, entityId: list).size.y
+    }
+    if height <= 0.0 {
+      height = world.layoutH
+    }
+  }
+  if height <= 0.0 {
+    ret 1
+  }
+  let whole: Int = (height / pitch).toInt()
+  if whole.toFloat() * pitch < height {
+    ret whole + 1
+  }
+  ret whole
+}
+
+# Topmost data-row index to build for a scroll offset, with `overscanRows` of
+# lead-in above the viewport. scrollY <= 0 (content scrolled up).
+func listFirstRow(lv: view ListView, scrollY: view Float, count: view Int) ret Int {
+  let pitch: Float = lv.itemHeight + lv.itemGap
+  if pitch <= 0.0 {
+    ret 0
+  }
+  var top: Float = 0.0 - scrollY
+  if top < 0.0 {
+    top = 0.0
+  }
+  var first: Int = (top / pitch).toInt() - lv.overscanRows
+  if first < 0 {
+    first = 0
+  }
+  if first > count {
+    first = count
+  }
+  ret first
+}
+
+# Some of a list's rows
+type ListRange {
+  first: Int = 0
+  count: Int = 0
+}
+
+# The rows a virtual list of `count` rows keeps live now: those in view at its scroll, plus its
+# overscan on each side, plus one for a row partly in view
+func listWindowWanted(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  list: view EntityId
+  count: view Int
+) ret ListRange {
+  let listView: view ListView = componentView(this: world.listViews, entityId: list)
+  var scrollY: Float = 0.0
+  if componentHas(this: world.scrollStates, entityId: list) {
+    scrollY = componentView(this: world.scrollStates, entityId: list).y
+  }
+  let first: Int = listFirstRow(lv: listView, scrollY: scrollY, count: count)
+  var rows: Int = listVisibleRows(world: world, uiSystems: uiSystems, list: list) + listView.overscanRows * 2 + 1
+  if rows > count - first {
+    rows = count - first
+  }
+  ret ListRange { first: first, count: rows }
+}
+
+# Does `list`, of `count` rows, hold the rows of `wanted`?
+func listWindowHas(
+  world: view UiWorld
+  list: view EntityId
+  wanted: view ListRange
+  count: view Int
+) ret Bool {
+  if listIsWindowed(world: world, list: list) is false or componentHas(
+    this: world.listViewDatas
+    entityId: list
+  ) is false {
+    ret false
+  }
+  let window: view ListWindow = componentView(this: world.listWindows, entityId: list)
+  let held: Int = componentView(this: world.listViewDatas, entityId: list).rows.length
+  ret window.count is count and wanted.first >= window.first and wanted.first + wanted.count <= window.first + held
+}
+
+# Give `list` its rows from `first` on, of `count` in all
+func setListWindowRows(
+  world: mod UiWorld
+  list: view EntityId
+  count: view Int
+  first: view Int
+  rows: own List(ListViewRow)
+) {
+  componentSet(
+    this: world.listWindows
+    entityId: list
+    data: ListWindow { count: count, first: first }
+  )
+  let data: ListViewData = { rows: own rows }
+  componentSet(this: world.listViewDatas, entityId: list, data: own data)
+}

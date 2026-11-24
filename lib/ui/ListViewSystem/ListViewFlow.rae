@@ -214,6 +214,7 @@ func listViewSyncFlow(
       listViewApplyFlowRow(
         world: world
         uiSystems: uiSystems
+        listEntityId: entityId
         rowRoot: rowRoot
         lv: lv
         distinct: distinct
@@ -305,6 +306,7 @@ func listViewSyncFlow(
 func listViewApplyFlowRow(
   world: mod UiWorld
   uiSystems: mod UiSystems
+  listEntityId: view EntityId
   rowRoot: view EntityId
   lv: view ListView
   distinct: view List(String)
@@ -315,8 +317,8 @@ func listViewApplyFlowRow(
   unsafe {
     let bound: ListRowBound = {
       dataIndex: dataIndex
-      dataGeneration: componentTableGeneration(this: world.listViewDatas)
-      listGeneration: componentTableGeneration(this: world.listViews)
+      dataGeneration: componentModStamp(this: world.listViewDatas, entityId: listEntityId)
+      listGeneration: componentModStamp(this: world.listViews, entityId: listEntityId)
     }
     if componentHas(this: uiSystems.listRows.rowsBound, entityId: rowRoot) {
       let last: view ListRowBound = componentView(

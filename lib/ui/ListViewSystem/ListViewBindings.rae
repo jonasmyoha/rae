@@ -1,0 +1,253 @@
+# A row's bindings (ListView.bindings): a cell of the row written onto a field of one of the row's
+# nodes, only when it changes. See ListViewSystem.rae.
+open ui/Ecs
+import ui/Components
+open ui/ClickTargets
+open ui/SceneInstance
+open ecs/Entity
+open ecs/ComponentTable
+open ui/RegistryGeneric
+
+# Look up a row cell by field key. The row stores parallel keys/values lists
+# (Components.rae ListViewRow); scan keys and return the matching value, or "".
+func listRowValue(row: view ListViewRow, key: view String) ret String {
+  unsafe {
+    let n: Int = row.keys.length
+    var i: Int = 0
+    loop i < n {
+      let k: String = rae_ext_rae_buf_get(buf: row.keys.data, index: i)
+      if k is key {
+        ret "{rae_ext_rae_buf_get(buf: row.values.data, index: i)}"
+      }
+      i = i + 1
+    }
+    ret ""
+  }
+}
+
+# Write one binding onto its child entity from the row's data.
+func listViewApplyBinding(
+  world: mod UiWorld
+  child: view EntityId
+  binding: view ListViewBinding
+  row: view ListViewRow
+) {
+  let raw: String = listRowValue(row: row, key: binding.itemField)
+  let value: String = "{binding.prefix}{raw}{binding.suffix}"
+  let textName: String = "Text"
+  if binding.componentName is textName {
+    let t: Text = { text: value, styleId: "", wrapWidthMode: WrapWidthMode.none }
+    componentSet(this: world.texts, entityId: child, data: t)
+    ret
+  }
+  if binding.componentName is "OnClick" {
+    setOnClickField(
+      world: world
+      entityId: child
+      fieldName: binding.fieldName
+      value: value
+      create: true
+    )
+    ret
+  }
+}
+
+# Is the binding's target already holding `value`? Compared BEFORE the write so
+# an unchanged row does not bump a table generation (and so trigger a relayout)
+# on every frame.
+func listViewSceneBindingCurrent(
+  world: view UiWorld
+  entityId: view EntityId
+  binding: view ListViewBinding
+  value: view String
+) ret Bool {
+  let textName: String = "Text"
+  let spriteName: String = "Sprite"
+  let activeName: String = "Active"
+  if binding.componentName is textName {
+    if componentHas(this: world.texts, entityId: entityId) is false {
+      ret true
+    }
+    let cur: view Text = componentView(this: world.texts, entityId: entityId)
+    let textField: String = "text"
+    if binding.fieldName is textField {
+      ret cur.text is value
+    }
+    ret cur.styleId is value
+  }
+  if binding.componentName is spriteName {
+    if componentHas(this: world.sprites, entityId: entityId) is false {
+      ret true
+    }
+    let cur: view Sprite = componentView(this: world.sprites, entityId: entityId)
+    let textureField: String = "textureKey"
+    if binding.fieldName is textureField {
+      ret cur.textureKey is value
+    }
+    ret false
+  }
+  if binding.componentName is "OnClick" {
+    if componentHas(this: world.onClicks, entityId: entityId) is false {
+      ret true
+    }
+    let cur: view OnClick = componentView(this: world.onClicks, entityId: entityId)
+    ret onClickFieldIs(click: cur, fieldName: binding.fieldName, value: value)
+  }
+  if binding.componentName is activeName {
+    if componentHas(this: world.actives, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view Active = componentView(this: world.actives, entityId: entityId)
+    let trueStr: String = "true"
+    ret cur.value is (value is trueStr)
+  }
+  let heroName: String = "HeroWidget"
+  if binding.componentName is heroName {
+    if componentHas(this: world.heroWidgets, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view HeroWidget = componentView(this: world.heroWidgets, entityId: entityId)
+    ret cur.key is value
+  }
+  let widgetIdName: String = "WidgetId"
+  if binding.componentName is widgetIdName {
+    if componentHas(this: world.widgetIds, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view WidgetId = componentView(this: world.widgetIds, entityId: entityId)
+    if binding.fieldName is "id" {
+      ret cur.id is value
+    }
+    ret cur.kind is value
+  }
+  let cornerName: String = "CornerRadius"
+  if binding.componentName is cornerName {
+    let wanted: Float = value.toFloat()
+    if componentHas(this: world.cornerRadiuses, entityId: entityId) is false {
+      ret wanted <= 0.0
+    }
+    let cur: view CornerRadius = componentView(this: world.cornerRadiuses, entityId: entityId)
+    ret cur.radius is wanted
+  }
+  let widgetStateName: String = "WidgetState"
+  if binding.componentName is widgetStateName {
+    if componentHas(this: world.widgetStates, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view WidgetState = componentView(this: world.widgetStates, entityId: entityId)
+    let trueStr: String = "true"
+    let wanted: Bool = value is trueStr
+    if binding.fieldName is "enabled" {
+      ret cur.enabled is wanted
+    }
+    if binding.fieldName is "selected" {
+      ret cur.selected is wanted
+    }
+    if binding.fieldName is "loading" {
+      ret cur.loading is wanted
+    }
+    ret cur.error is wanted
+  }
+  let shapeName: String = "Shape"
+  if binding.componentName is shapeName {
+    if componentHas(this: world.shapes, entityId: entityId) is false {
+      ret true
+    }
+    let cur: view Shape = componentView(this: world.shapes, entityId: entityId)
+    if binding.fieldName is "fillSlot" {
+      ret cur.fillSlot is value
+    }
+    if binding.fieldName is "radius" {
+      ret cur.radius is value.toFloat()
+    }
+    if let kind: ShapeKind = enumFromName(ShapeKind, name: authoredEnumName(text: value)) {
+      ret cur.kind is kind
+    }
+    ret true
+  }
+  let gradientName: String = "GradientFill"
+  if binding.componentName is gradientName {
+    if componentHas(this: world.gradientFills, entityId: entityId) is false {
+      ret true
+    }
+    let current: view GradientFill = componentView(this: world.gradientFills, entityId: entityId)
+    if binding.fieldName is "fromSlot" {
+      ret current.fromSlot is value
+    }
+    if binding.fieldName is "toSlot" {
+      ret current.toSlot is value
+    }
+    ret true
+  }
+  let stateStyleName: String = "StateStyle"
+  if binding.componentName is stateStyleName {
+    if componentHas(this: world.stateStyles, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view StateStyle = componentView(this: world.stateStyles, entityId: entityId)
+    let wanted: Float = value.toFloat()
+    if binding.fieldName is "disabledAlpha" {
+      ret cur.disabledAlpha is wanted
+    }
+    if binding.fieldName is "loadingAlpha" {
+      ret cur.loadingAlpha is wanted
+    }
+    ret cur.errorAlpha is wanted
+  }
+  let paddingName: String = "Padding"
+  if binding.componentName is paddingName {
+    if componentHas(this: world.paddings, entityId: entityId) is false {
+      ret false
+    }
+    let cur: view Padding = componentView(this: world.paddings, entityId: entityId)
+    let wanted: Float = value.toFloat()
+    if binding.fieldName is "l" {
+      ret cur.insets.l is wanted
+    }
+    if binding.fieldName is "t" {
+      ret cur.insets.t is wanted
+    }
+    if binding.fieldName is "r" {
+      ret cur.insets.r is wanted
+    }
+    ret cur.insets.b is wanted
+  }
+  ret true
+}
+
+# Write one binding onto a sub-scene row: resolve the authored node inside this
+# row's page and apply it as a SceneOverride (the same in-place field writes
+# scene instances use), skipping writes that would not change anything.
+func listViewApplySceneBinding(
+  world: mod UiWorld
+  rowRoot: view EntityId
+  binding: view ListViewBinding
+  row: view ListViewRow
+) ret Bool {
+  let raw: String = listRowValue(row: row, key: binding.itemField)
+  let value: String = "{binding.prefix}{raw}{binding.suffix}"
+  let page: String = listViewRowPage(rowRoot: rowRoot)
+  var index: Int = -1
+  if let found: Int = findNodeInPage(world: world, pageId: page, nodeId: binding.nodeId) {
+    index = found
+  } else {
+    ret false
+  }
+  let target: EntityId = nodeEntityId(world: world, index: index)
+  if listViewSceneBindingCurrent(
+    world: world
+    entityId: target
+    binding: binding
+    value: value
+  ) {
+    ret true
+  }
+  let override: SceneOverride = {
+    nodeId: "{binding.nodeId}"
+    componentName: "{binding.componentName}"
+    fieldName: "{binding.fieldName}"
+    valueString: value
+  }
+  applyOverride(world: world, entityId: target, override: override)
+  ret true
+}

@@ -2,7 +2,7 @@
 
 Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder,
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
-menus, text editing, key focus and list selection (steps 4, 4b, 5). The steps are the `[file browser ...]` tasks in
+menus, text editing, key focus, list selection, the row window and the scrolling (steps 4 to 5b). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -328,8 +328,8 @@ nothing running it does no work per column beyond comparing generations, and the
 | history | 200 folders' scroll and focus |
 
 Why rows must be windowed: building today's `ListViewData` for 100,000 entries took 50 ms in a
-release build and copying it 93 ms (600,000 Strings). §10 changes the list to take only the rows in
-view.
+release build and copying it 93 ms (600,000 Strings). A list now takes only the rows in view
+(`ui/ListWindow`, case 1586).
 
 ## 7. Live update
 
@@ -386,10 +386,10 @@ None of these is about files; each is its own module with its own cases.
 
 | piece | today | needed |
 |---|---|---|
-| **row window** | `ListViewData` holds every row; its count is `rows.length` in the list, the layout, the scroll range and `ScrollToRow` | a `ListWindow { count, first }` component: with it, `rows` are the rows `first...` only, and those four read `count`; `listWindowWanted` says which the list needs now. `ListReorder` and list motion refuse a windowed list for now |
-| **live row count** | `visibleItemCount` is authored | 0 means "as many as fit", from the list's height, so a resized column fills |
-| **sideways wheel** | `updateScrollRoot` reads the vertical wheel on both axes; `wheelX` goes to the one `wheelTarget` | each axis goes to the nearest scroll root of that axis under the pointer; Shift+wheel is sideways; a trackpad gesture keeps the axis it began on |
-| **several scroll roots** | `findScrollRoot` answers one per page | `updateScrollRoots`: every shown root is stepped; those at rest and not under the pointer cost a comparison |
+| **row window** | built (docs/ui-scene-format.md section 50), was: `ListViewData` holds every row; its count is `rows.length` in the list, the layout, the scroll range and `ScrollToRow` | a `ListWindow { count, first }` component: with it, `rows` are the rows `first...` only, and those four read `count`; `listWindowWanted` says which the list needs now. `ListReorder` and list motion refuse a windowed list for now |
+| **live row count** | built (section 50), was: `visibleItemCount` is authored | 0 means "as many as fit", from the list's height, so a resized column fills |
+| **sideways wheel** | built (section 51), was: `updateScrollRoot` reads the vertical wheel on both axes; `wheelX` goes to the one `wheelTarget` | each axis goes to the nearest scroll root of that axis under the pointer; Shift+wheel is sideways; a trackpad gesture keeps the axis it began on |
+| **several scroll roots** | built (section 51), was: `findScrollRoot` answers one per page | `updateScrollRoots`: every shown root is stepped; those at rest and not under the pointer cost a comparison |
 | **key focus** | built (docs/ui-scene-format.md section 48) | `KeyFocus`, a resource naming the entity that has the keys; a press on a node marked `TakesKeys` moves it; a text field has it while focused and gives it back |
 | **list selection** | built (section 49) | `ListSelection` and `listSelectionSystem` (§1.2), keyed by `itemKeyField` |
 | **pointer buttons, double click** | built (docs/ui-scene-format.md section 46) | press, release and click count per button through `UiInput` and captures; Control+click and a long press as the second button |

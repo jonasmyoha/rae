@@ -1,0 +1,196 @@
+# Every scroll root of a world, stepped together: updateScrollRoots, for a program with more than
+# one
+# in view (a list inside a sideways strip, two panels).
+open ui/AnimationComponents
+open ui/AnimationSystem
+open ui/Components
+open ui/Ecs
+open ui/InputSystem
+open ui/ListReorder
+open ecs/Query
+open ui/ScrollDrag
+open ui/UiSystems
+open ecs/ComponentTable
+open ecs/Entity
+
+# What the range of any root depends on, as one number
+func scrollGeometry(world: view UiWorld, uiSystems: view UiSystems) ret Int {
+  ret componentTableGeneration(this: uiSystems.layout.computedRects) + componentTableGeneration(
+    this: world.listViewDatas
+  ) + componentTableGeneration(this: world.listWindows) + componentTableGeneration(
+    this: world.listViews
+  ) + componentTableGeneration(this: world.actives) + componentTableGeneration(this: world.paddings)
+}
+
+# The scroll root of `axis` a press at the pointer drags: the nearest one on the path to the topmost
+# node there, unless something nearer takes the wheel itself (a canvas)
+func pressedScrollRoot(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+  axis: view ScrollAxis
+) ret EntityId {
+  var want: UiRouteWant = UiRouteWant.wheel
+  if axis is ScrollAxis.x {
+    want = UiRouteWant.wheelX
+  }
+  let target: EntityId = uiRouteAt(
+    world: world
+    uiSystems: uiSystems
+    x: input.pointer.x
+    y: input.pointer.y
+    want: want
+  ).target
+  if componentHas(this: world.scrollRoots, entityId: target) is false {
+    ret noEntity()
+  }
+  ret target
+}
+
+# Is the root where its last step left it, at rest, with nothing of this frame for it?
+func scrollRootIdle(
+  world: view UiWorld
+  input: view UiInput
+  entityId: view EntityId
+  geometry: view Int
+) ret Bool {
+  if componentHas(this: world.scrollDrags, entityId: entityId) is false or input.wheelTarget is entityId or input.wheelXTarget is entityId {
+    ret false
+  }
+  let drag: view ScrollDrag = componentView(this: world.scrollDrags, entityId: entityId)
+  ret drag.restGeometry is geometry and drag.restStamp is componentModStamp(
+    this: world.scrollStates
+    entityId: entityId
+  ) and drag.dragging is false and drag.active is false
+}
+
+# One frame of every shown scroll root: each takes the wheel along its own axis that was routed to
+# it,
+# and a press drags the nearest root of each axis until it moves along one of them. A root at rest
+# with
+# nothing for it costs a comparison. True when one moved.
+func updateScrollRoots(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  deltaTime: view Float
+) ret Bool {
+  var pressedX: EntityId = noEntity()
+  var pressedY: EntityId = noEntity()
+  if input.pointer.pressed and componentCount(this: world.scrollRoots) > 0 {
+    pressedX = pressedScrollRoot(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      axis: ScrollAxis.x
+    )
+    pressedY = pressedScrollRoot(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      axis: ScrollAxis.y
+    )
+  }
+  let geometry: Int = scrollGeometry(world: world, uiSystems: uiSystems)
+  # a lifted row or a swipe from the edge takes the press from every root
+  let pressTaken: Bool = world.edgeSwipe.phase is EdgeSwipePhase.active or anyRowHeld(world: world)
+  var moved: Bool = false
+  loop var i: Int = 0, i < componentCount(this: world.scrollRoots), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    let pressed: Bool = entityId is pressedX or entityId is pressedY
+    if pressTaken is false and pressed is false and scrollRootIdle(
+      world: world
+      input: input
+      entityId: entityId
+      geometry: geometry
+    ) {
+      continue
+    }
+    if shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) is false {
+      releaseScrollDrag(world: world, entityId: entityId)
+      continue
+    }
+    moved = stepScrollRoot(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      input: input
+      deltaTime: deltaTime
+      takesPress: pressed
+    ) or moved
+    markScrollRest(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+      geometry: geometry
+    )
+  }
+  ret moved
+}
+
+# Is a row of any list pressed to be lifted, or lifted (ui/ListReorder)?
+func anyRowHeld(world: view UiWorld) ret Bool {
+  loop var i: Int = 0, i < componentCount(this: world.listReorderDrags), ++i {
+    if queryViewAt(table: world.listReorderDrags, denseIndex: i).phase is not ListReorderPhase.idle {
+      ret true
+    }
+  }
+  ret false
+}
+
+# A root that is not shown any more lets go of its drag
+func releaseScrollDrag(world: mod UiWorld, entityId: view EntityId) {
+  if componentHas(this: world.scrollDrags, entityId: entityId) is false {
+    ret
+  }
+  let held: view ScrollDrag = componentView(this: world.scrollDrags, entityId: entityId)
+  if held.dragging or held.active {
+    let drag: mod ScrollDrag = componentMod(this: world.scrollDrags, entityId: entityId)
+    drag.dragging = false
+    drag.active = false
+  }
+}
+
+# Note that the root has come to rest, or that it has not
+func markScrollRest(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  geometry: view Int
+) {
+  if componentHas(this: world.scrollDrags, entityId: entityId) is false {
+    ret
+  }
+  var restGeometry: Int = -1
+  if scrollRootSettling(world: world, uiSystems: uiSystems, entityId: entityId) is false {
+    restGeometry = geometry
+  }
+  let stamp: Int = componentModStamp(this: world.scrollStates, entityId: entityId)
+  let drag: mod ScrollDrag = componentMod(this: world.scrollDrags, entityId: entityId)
+  drag.restGeometry = restGeometry
+  drag.restStamp = stamp
+}
+
+# Does any shown root move, or may it without new input (an event loop keeps rendering)?
+func scrollRootsSettling(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
+  let geometry: Int = scrollGeometry(world: world, uiSystems: uiSystems)
+  loop var i: Int = 0, i < componentCount(this: world.scrollRoots), ++i {
+    let entityId: EntityId = componentEntityAt(this: world.scrollRoots, i: i)
+    var rests: Bool = false
+    if componentHas(this: world.scrollDrags, entityId: entityId) {
+      let drag: view ScrollDrag = componentView(this: world.scrollDrags, entityId: entityId)
+      rests = drag.restGeometry is geometry and drag.restStamp is componentModStamp(
+        this: world.scrollStates
+        entityId: entityId
+      ) and drag.dragging is false
+    }
+    if rests is false and shownInTree(world: world, uiSystems: uiSystems, entityId: entityId) and scrollRootSettling(
+      world: world
+      uiSystems: uiSystems
+      entityId: entityId
+    ) {
+      ret true
+    }
+  }
+  ret false
+}
