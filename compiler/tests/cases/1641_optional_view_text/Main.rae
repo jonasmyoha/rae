@@ -1,0 +1,257 @@
+# The text of an optional reference: what it points at as that type is written (an enum by its
+# name),
+# or `none`. Of one that `if let` narrowed, and of one that is not narrowed (a parameter, a loop
+# row, a
+# call's answer), in an interpolation and in log, for every kind of type. Nothing leaks.
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+  kind: opt Kind = none
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+func narrowed(kind: opt view Kind) ret String {
+  if let there: view Kind = kind {
+    ret "{there}"
+  }
+  ret "nothing"
+}
+
+func written(kind: opt view Kind) ret String {
+  ret "{kind}"
+}
+
+func change(kind: opt mod Kind) {
+  if let there: mod Kind = kind {
+    there = Kind.small
+    log("changed to {there}")
+  }
+}
+
+func show(T: type, title: view String, value: opt view T) {
+  if let there: view T = value {
+    log("{title}: {there}")
+  }
+  log("{title}, not narrowed: {value}")
+}
+
+func enums() {
+  var maybe: opt Kind = Kind.large
+  if let kind: view Kind = maybe {
+    let text: String = "{kind}"
+    let copied: Kind = kind
+    log("view {kind} {text} {copied} {kind is Kind.large}")
+    log(kind)
+  }
+  if let kind: mod Kind = maybe {
+    log("mod {kind}")
+    log(kind)
+  }
+  log("parameter: {narrowed(kind: maybe)} {narrowed(kind: none)}")
+  log("not narrowed: {written(kind: maybe)} {written(kind: none)}")
+  let note: Note = { kind: Kind.large }
+  if let kind: view Kind = note.kind {
+    log("field {kind}")
+  }
+  let kinds: List(Kind) = { Kind.large }
+  let held: opt view Kind = kinds.viewAt(index: 0)
+  let missing: opt view Kind = kinds.viewAt(index: 5)
+  if let kind: view Kind = held {
+    log("held {kind}")
+  }
+  log("bound {held} {missing}")
+  log(held)
+  log(missing)
+  change(kind: maybe)
+  log("now {maybe}")
+}
+
+func enumRows() {
+  var rows: List(opt Kind) = { Kind.large, none }
+  loop let row: opt view Kind in rows {
+    if let there: view Kind = row {
+      log("enum {there}")
+    }
+    log("enum, not narrowed: {row}")
+  }
+  if let there: mod Kind = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func intRows() {
+  var rows: List(opt Int) = { 7, none }
+  loop let row: opt view Int in rows {
+    if let there: view Int = row {
+      log("Int {there}")
+    }
+    log("Int, not narrowed: {row}")
+  }
+  if let there: mod Int = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func uint8Rows() {
+  var rows: List(opt UInt8) = { 200, none }
+  loop let row: opt view UInt8 in rows {
+    if let there: view UInt8 = row {
+      log("UInt8 {there}")
+    }
+    log("UInt8, not narrowed: {row}")
+  }
+  if let there: mod UInt8 = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func uint64Rows() {
+  var rows: List(opt UInt64) = { 18000000000000000000, none }
+  loop let row: opt view UInt64 in rows {
+    if let there: view UInt64 = row {
+      log("UInt64 {there}")
+    }
+    log("UInt64, not narrowed: {row}")
+  }
+  if let there: mod UInt64 = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func floatRows() {
+  var rows: List(opt Float) = { 1.5, none }
+  loop let row: opt view Float in rows {
+    if let there: view Float = row {
+      log("Float {there}")
+    }
+    log("Float, not narrowed: {row}")
+  }
+  if let there: mod Float = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func float64Rows() {
+  var rows: List(opt Float64) = { 2.5, none }
+  loop let row: opt view Float64 in rows {
+    if let there: view Float64 = row {
+      log("Float64 {there}")
+    }
+    log("Float64, not narrowed: {row}")
+  }
+  if let there: mod Float64 = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func boolRows() {
+  var rows: List(opt Bool) = { true, none }
+  loop let row: opt view Bool in rows {
+    if let there: view Bool = row {
+      log("Bool {there}")
+    }
+    log("Bool, not narrowed: {row}")
+  }
+  if let there: mod Bool = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func charRows() {
+  var rows: List(opt Char) = { 'x', none }
+  loop let row: opt view Char in rows {
+    if let there: view Char = row {
+      log("Char {there}")
+    }
+    log("Char, not narrowed: {row}")
+  }
+  if let there: mod Char = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func stringRows() {
+  var rows: List(opt String) = { "hi {1}", none }
+  loop let row: opt view String in rows {
+    if let there: view String = row {
+      log("String {there}")
+    }
+    log("String, not narrowed: {row}")
+  }
+  if let there: mod String = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func structRows() {
+  var rows: List(opt Note) = { Note { text: "n {1}", kind: Kind.small }, none }
+  loop let row: opt view Note in rows {
+    if let there: view Note = row {
+      log("struct {there}")
+    }
+    log("struct, not narrowed: {row}")
+  }
+  if let there: mod Note = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func listRows() {
+  var rows: List(opt List(String)) = { List(String) { "a {1}" }, none }
+  loop let row: opt view List(String) in rows {
+    if let there: view List(String) = row {
+      log("list {there}")
+    }
+    log("list, not narrowed: {row}")
+  }
+  if let there: mod List(String) = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func genericRows() {
+  var rows: List(opt Pair(Int)) = { Pair(Int) { first: 1 }, none }
+  loop let row: opt view Pair(Int) in rows {
+    if let there: view Pair(Int) = row {
+      log("generic {there}")
+    }
+    log("generic, not narrowed: {row}")
+  }
+  if let there: mod Pair(Int) = rows.modAt(index: 0) {
+    log("mod {there}, a call's {rows.viewAt(index: 0)} {rows.viewAt(index: 9)}")
+    log(there)
+  }
+}
+
+func main() {
+  enums()
+  enumRows()
+  intRows()
+  uint8Rows()
+  uint64Rows()
+  floatRows()
+  float64Rows()
+  boolRows()
+  charRows()
+  stringRows()
+  structRows()
+  listRows()
+  genericRows()
+  let kind: opt Kind = Kind.large
+  show(title: "a generic function's enum", value: kind)
+}

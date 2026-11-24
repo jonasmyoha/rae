@@ -1702,6 +1702,8 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     static AstTypeRef kBool_tr = { .parts = &kBool_part };
     static AstIdentifierPart kString_part = { .text = { .data = "String", .len = 6 } };
     static AstTypeRef kString_tr = { .parts = &kString_part };
+    static AstIdentifierPart kChar_part = { .text = { .data = "Char", .len = 4 } };
+    static AstTypeRef kChar_tr = { .parts = &kChar_part };
     switch (expr->kind) {
         /* A cast's type IS its target — this is what stops the backend
          * re-inferring the operand's (pre-conversion) type. */
@@ -1773,6 +1775,7 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
         case AST_EXPR_FLOAT: return &kFloat_tr;
         case AST_EXPR_BOOL: return &kBool_tr;
         case AST_EXPR_STRING: return &kString_tr;
+        case AST_EXPR_CHAR: return &kChar_tr;
         /* A binary op's result type is its (sema-)resolved type — String for
          * `+` concat, Int/Float for arithmetic, Bool for comparisons. Surfacing
          * it is what lets an owned-String destination wrap the concat result in
