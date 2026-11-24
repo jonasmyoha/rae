@@ -1,0 +1,142 @@
+# What a browser remembers (docs/file-browser-design.md §4): the scroll and the selection of folders
+# it showed, and the folders to go back and forward to, each with the root of then.
+open collections/StringMap
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+
+# Folders whose scroll and selection a browser keeps, and folders it can go back to
+const rememberedFolders: Int = 200
+
+# ----- memory and history ---------------------------------------------------------------
+func rememberedFolder(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  folder: view String
+) ret FolderMemory {
+  if componentHas(this: systems.history, entityId: browser) {
+    let history: view BrowserHistory = componentView(this: systems.history, entityId: browser)
+    if let memory: FolderMemory = history.memory.get(k: folder) {
+      ret memory
+    }
+  }
+  ret FolderMemory {}
+}
+
+# What a column is scrolled to, and its selection, kept for when its folder opens again
+func rememberColumn(
+  systems: mod FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+  column: view EntityId
+) {
+  let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
+  if mine.listed is false or mine.results {
+    ret
+  }
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  let folder: String = folderOfColumn(systems: systems, column: column)
+  var memory: FolderMemory = {}
+  if componentHas(this: world.scrollStates, entityId: list) {
+    memory.scroll = componentView(this: world.scrollStates, entityId: list).y
+  }
+  # a selection of thousands is not worth keeping
+  if selectedCount(world: world, list: list) <= rememberedFolders {
+    memory.selected = listSelectedKeys(world: world, list: list)
+  }
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  let empty: Bool = memory.selected.length is 0
+  if empty {
+    # an unselected folder keeps the row it was left at
+    if let before: FolderMemory = history.memory.get(k: folder) {
+      memory.selected = before.selected
+    }
+  }
+  if history.memory.has(k: folder) is false {
+    history.kept.add(value: "{folder}")
+    if history.kept.length > rememberedFolders {
+      let oldest: String = history.kept.copyAtFallback(index: 0, fallback: "")
+      history.kept.removeAt(index: 0)
+      history.memory.remove(k: oldest)
+    }
+  }
+  history.memory.set(k: folder, value: own memory)
+}
+
+# The browser is at another folder: one more to go back from
+func noteFolder(systems: mod FileBrowserSystems, browser: view EntityId, folder: view String) {
+  let root: String = "{componentView(this: systems.browsers, entityId: browser).root}"
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  let current: String = history.folders.copyAtFallback(index: history.at, fallback: "")
+  if current is folder {
+    ret
+  }
+  loop history.folders.length > history.at + 1 {
+    history.folders.removeAt(index: history.folders.length - 1)
+    history.roots.removeAt(index: history.roots.length - 1)
+  }
+  history.folders.add(value: "{folder}")
+  history.roots.add(value: own root)
+  if history.folders.length > rememberedFolders {
+    history.folders.removeAt(index: 0)
+    history.roots.removeAt(index: 0)
+  }
+  history.at = history.folders.length - 1
+}
+
+# Back (-1) or forward (1)
+func walkHistory(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  step: view Int
+) {
+  if canWalkHistory(systems: systems, browser: browser, step: step) is false {
+    ret
+  }
+  let history: mod BrowserHistory = componentMod(this: systems.history, entityId: browser)
+  history.at = history.at + step
+  let folder: String = history.folders.copyAtFallback(index: history.at, fallback: "")
+  let root: String = history.roots.copyAtFallback(index: history.at, fallback: "")
+  if browserOptions(systems: systems, browser: browser).allowAboveRoot {
+    # as it was shown then
+    let rooted: Bool = setBrowserRoot(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+      root: root
+    )
+  }
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+}
+
+func canWalkHistory(
+  systems: view FileBrowserSystems
+  browser: view EntityId
+  step: view Int
+) ret Bool {
+  if componentHas(this: systems.history, entityId: browser) is false {
+    ret false
+  }
+  let history: view BrowserHistory = componentView(this: systems.history, entityId: browser)
+  let to: Int = history.at + step
+  ret to >= 0 and to < history.folders.length
+}

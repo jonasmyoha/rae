@@ -15,6 +15,7 @@ open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/OperationThread
 open ui/fileBrowser/PlacesThread
+open ui/fileBrowser/SearchThread
 
 enum BrowserSource { disk, app }
 
@@ -42,6 +43,8 @@ type BrowserOptions {
   sidebarWidth: Float = 170.0
   # Folders pinned at first (pinFolder, and fileBrowserState to keep them)
   pinned: List(String) = {}
+  # The search field in the bar, for files on the disk
+  showSearch: Bool = false
   # none: it is walked by its bar and by the program only
   selection: ListSelectMode = ListSelectMode.multiple
   rowHeight: Float = 24.0
@@ -74,6 +77,7 @@ type FileBrowser {
   showSidebar: Bool = false
   sidebarWidth: Float = 170.0
   pinned: List(String) = {}
+  showSearch: Bool = false
   rowHeight: Float = 24.0
   source: BrowserSource = BrowserSource.disk
 }
@@ -107,6 +111,13 @@ type OpenBrowser {
   pathField: EntityId = noEntity()
   # The action the path field sends on Return
   pathAction: String = ""
+  # The search's field, what it sends on Return, the count beside it, and the words taken last
+  searchField: EntityId = noEntity()
+  searchAction: String = ""
+  searchCount: EntityId = noEntity()
+  searchSeen: String = ""
+  # The width of the column of what was found
+  resultsWidth: Float = 340.0
   # Its columns, left to right
   columns: List(EntityId) = {}
   # Their widths by place, 0 for the option's
@@ -147,6 +158,8 @@ type FileColumn {
   askedSeconds: Float64 = 0.0
   stale: Bool = true
   listed: Bool = false
+  # What a search found: its names are paths from its folder (ui/fileBrowser/SearchSystem)
+  results: Bool = false
   # Its nodes
   body: EntityId = noEntity()
   list: EntityId = noEntity()
@@ -324,6 +337,37 @@ type FolderPolling {
   # The window had the focus; when to look next while it has
   focused: Bool = false
   nextSeconds: Float64 = 0.0
+}
+
+# ----- search -----------------------------------------------------------------------
+
+# On a browser while it searches
+type BrowserSearch {
+  words: String = ""
+  # What is searched, where the browser was; and the real folder of its root ("" any)
+  folder: String
+  limit: String = ""
+  # The column of what was found
+  column: EntityId
+  # When to begin (below 0: it has), and the search that runs or ran last
+  startAt: Float64 = -1.0
+  generation: Int = 0
+  running: Bool = false
+  # more were found than are shown
+  capped: Bool = false
+}
+
+type SearchJob {
+  generation: Int
+  browser: EntityId
+  stop: Signal
+  task: opt Task(Int) = none
+}
+
+type SearchJobs {
+  answers: Channel(SearchAnswer)
+  jobs: List(SearchJob) = {}
+  nextGeneration: Int = 1
 }
 
 # ----- operations ------------------------------------------------------------------
@@ -509,6 +553,7 @@ type FileBrowserSystems {
   trailParts: ComponentTable(TrailPart)
   sidebars: ComponentTable(BrowserSidebar)
   placeRows: ComponentTable(PlaceRow)
+  searches: ComponentTable(BrowserSearch)
   columnOfList: ComponentTable(ListOfColumn)
   buttons: ComponentTable(ButtonOfBrowser)
   renames: ComponentTable(RenameEdit)
@@ -518,6 +563,7 @@ type FileBrowserSystems {
   watches: List(FolderWatch) = {}
   polling: FolderPolling
   places: FileBrowserPlaces
+  search: SearchJobs
   # columns came or went since the watches were set up
   watchesStale: Bool = false
   browsersMade: Int = 0
@@ -555,6 +601,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     authored: AuthoredBrowsers { fileBrowsers: ComponentTable.create(FileBrowser) }
     polling: FolderPolling { answers: createChannel(FolderStamps) }
     places: FileBrowserPlaces { answers: createChannel(PlacesAnswer) }
+    search: SearchJobs { answers: createChannel(SearchAnswer) }
     browsers: ComponentTable.create(OpenBrowser)
     columns: ComponentTable.create(FileColumn)
     entries: ComponentTable.create(ColumnEntries)
@@ -563,6 +610,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     trailParts: ComponentTable.create(TrailPart)
     sidebars: ComponentTable.create(BrowserSidebar)
     placeRows: ComponentTable.create(PlaceRow)
+    searches: ComponentTable.create(BrowserSearch)
     columnOfList: ComponentTable.create(ListOfColumn)
     buttons: ComponentTable.create(ButtonOfBrowser)
     renames: ComponentTable.create(RenameEdit)
@@ -595,6 +643,9 @@ type BrowserKeys {
   back: Bool = false
   forward: Bool = false
   hidden: Bool = false
+  # Cmd with F, and with R (what was found, in its folder)
+  search: Bool = false
+  reveal: Bool = false
   space: Bool = false
   escape: Bool = false
   # Return: the answer of the dialog that changes nothing

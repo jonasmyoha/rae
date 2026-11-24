@@ -4,7 +4,7 @@ Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
 scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, 7b, its
-operations, 7c, drags, and of 7d the sidebar: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
+operations, 7c, drags, and of 7d the sidebar and the search: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
 is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
@@ -76,7 +76,8 @@ shown. Nothing is ported.
 | Cmd+Backspace | to the trash |
 | Cmd+Z, Cmd+Shift+Z | undo, redo the last operation |
 | Cmd+Shift+. | show hidden files |
-| Cmd+F | the search field |
+| Cmd+F | the search field; Return goes to what was found |
+| Cmd+R | in what was found: the entry in its folder |
 | Escape | ends a rename, a drag, a search, then clears the selection |
 
 A fast walk with Down held does not list every folder it passes: a folder's column opens once the
@@ -264,7 +265,7 @@ component changes (case 1596). An app that reports unknown components before its
 `order` (in a scene `orderBy`, `descending`, `foldersFirst`), `showHidden`, `extensions`, `selection`
 (`none`, `single`, `multiple`), `returnKey`, `allowAboveRoot`, `showBar`, `showPreview`,
 `openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9), `allowOperations` (false: look
-and pick only), `showSidebar`, `sidebarWidth`, `pinned` (§18). To come: `mode` (§8).
+and pick only), `showSidebar`, `sidebarWidth`, `pinned`, `showSearch` (§18). To come: `mode` (§8).
 
 ### 4.2 Events
 
@@ -570,7 +571,7 @@ Step 7c:
   was dropped is selected only in the deepest column, so a column beyond it stays open.
 - Not by a finger yet.
 
-Step 7d, the sidebar (search, pick and save, and touch are tasks of their own):
+Step 7d, the sidebar (pick and save, and touch are tasks of their own):
 
 - `SidebarSystem` (rows, clicks, menus, width) over `BrowserPlaces` (what is in it). Three sections, each
   folder once: Favorites (the user's folders that are there, then the pinned ones), Recent (the last five
@@ -584,3 +585,21 @@ Step 7d, the sidebar (search, pick and save, and touch are tasks of their own):
 - Pinned by the menu of a folder's row ("Keep in Sidebar") or of a recent place; a rename of ours is followed.
   A row takes a drop. `fileBrowserState` keeps the root, the width, the pinned and the recent folders.
 - Scenes: `fileSidebarRow`, `fileSidebarTitle`. Case 1625; the picture is `checks/uiFileBrowser`.
+
+Step 7e, the search:
+
+- `SearchSystem`, over `SearchThread` (no UI, under ThreadSanitizer, case 1627). What is typed is searched
+  0.15 s after the last letter, in the folder the browser is at and below it, level by level; case and accents
+  aside. The thread before is told to stop (a Signal). 2000 are shown at most. Hidden files and the extensions
+  are as the browser shows them; folders opened as a file, and symlinks, are not looked into. The root limit
+  holds. A browser of a program's own entries has no field.
+- What was found is one column in place of the others (`FileColumn.results`). Its folder is the searched one and
+  its names are paths from there, so selecting, the preview, opening, copying, the trash and drags need nothing
+  of their own. Nothing is made, pasted, duplicated or renamed in it, and nothing dropped on it but on a folder's
+  row. Its width is kept apart (`resultsWidth`).
+- It ends by Escape, by emptying the field, and by going anywhere (`openTrail`, `setBrowserRoot`). Escape brings
+  back the folder it began in; "Show in Its Folder" (Cmd+R) opens the trail to the entry and selects it.
+- It is searched again when an operation ends, or the folder itself was changed on the disk. A folder below it
+  is not watched.
+- `BrowserMemory` is what was the end of `NavigationSystem`. Case 1628; the picture is `checks/uiFileBrowser`
+  with `RAE_FILE_SEARCH=1`.

@@ -16,6 +16,7 @@ open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/SearchSystem
 open ui/fileBrowser/OperationThread
 
 const operationsAtOnce: Int = 2
@@ -115,6 +116,9 @@ func addOperation(
 }
 
 func newFolderIn(systems: mod FileBrowserSystems, column: view EntityId) {
+  if isResults(systems: systems, column: column) {
+    ret
+  }
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
   let folder: String = folderOfColumn(systems: systems, column: column)
   if mayOperate(systems: systems, browser: browser) is false or sendRequest(
@@ -193,6 +197,9 @@ func duplicateSelection(
   world: view UiWorld
   column: view EntityId
 ) {
+  if isResults(systems: systems, column: column) {
+    ret
+  }
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
   let folder: String = folderOfColumn(systems: systems, column: column)
   let paths: List(String) = pathsInColumn(systems: systems, world: world, column: column)
@@ -228,6 +235,9 @@ func copySelection(systems: mod FileBrowserSystems, world: view UiWorld, column:
 
 # What is on the clipboard is copied into the column's folder, or moved there
 func pasteInto(systems: mod FileBrowserSystems, column: view EntityId, asMove: view Bool) {
+  if isResults(systems: systems, column: column) {
+    ret
+  }
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
   let paths: List(String) = systems.operations.clipboard
   let put: Bool = putFiles(
@@ -596,6 +606,7 @@ func finishOperation(
     results: update.results
     undone: undoing or redoing
   }
+  searchesAgain(systems: systems)
   eventSend(this: systems.operationDone, value: own done)
   # the job ends, or stays as a notice, or as a question
   if let job: mod OperationJob = systems.operations.jobs.modAt(index: index) {

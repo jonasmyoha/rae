@@ -1,0 +1,164 @@
+# The file browser's search thread (lib/ui/fileBrowser/SearchThread): the folder itself first and
+# then
+# what is below it, level by level; case and accents aside; hidden files, extensions, folders opened
+# as a file, symlinks (a loop, and one that leads out), the limit, the cap, and a search that is
+# stopped. Under ThreadSanitizer too.
+import Files
+import Sys
+open Channel
+open Signal
+open ui/fileBrowser/SearchThread
+
+func rae_ext_Files_makeLink(target: String, path: String) unsafe extern ret Int
+
+func makeFolder(path: view String) {
+  let made: Bool = Sys.makeDir(path: path)
+}
+
+func writeFile(path: view String) {
+  let written: Bool = Sys.writeFile(path: path, content: "text")
+}
+
+func removeTree(folder: view String) {
+  loop let entry: view FileEntry in Files.readFolder(folder: folder).entries {
+    if entry.kind is EntryKind.folder {
+      removeTree(folder: "{folder}/{entry.name}")
+    } else {
+      let gone: Bool = Sys.delete(path: "{folder}/{entry.name}")
+    }
+  }
+  let gone: Bool = Sys.delete(path: folder)
+}
+
+# One search to its end, or stopped when its first answer came
+func search(request: copy SearchRequest, stopAtFirst: view Bool) ret SearchAnswer {
+  let answers: Channel(SearchAnswer) = createChannel(SearchAnswer)
+  let stop: Signal = createSignal()
+  var all: SearchAnswer = { generation: request.generation }
+  var firsts: Int = 0
+  if stopAtFirst {
+    stop.post()
+  }
+  let task: Task(Int) = spawn thread searchThread(
+    answers: answers
+    stop: stop
+    request: own request
+  )
+  loop var i: Int = 0, i < 20000 and all.finished is false, ++i {
+    if answers.pending() is 0 {
+      sleep(ms: 1)
+      continue
+    }
+    let answer: SearchAnswer = answers.receive()
+    if answer.first {
+      firsts = firsts + 1
+    }
+    all.finished = answer.finished
+    all.capped = answer.capped
+    all.outside = answer.outside
+    loop let entry: view FileEntry in answer.entries {
+      all.entries.add(value: entry)
+    }
+  }
+  let count: Int = task.get()
+  stop.freeSignal()
+  answers.freeChannel()
+  if firsts is not 1 {
+    log("first answers: {firsts}")
+  }
+  ret all
+}
+
+func show(title: view String, answer: view SearchAnswer) {
+  var names: List(String) = {}
+  var sized: Int = 0
+  loop let entry: view FileEntry in answer.entries {
+    names.add(value: "{entry.name}")
+    if entry.size >= 0 {
+      sized = sized + 1
+    }
+  }
+  log(
+    "{title}: {names.join(sep: ", ")} (finished {answer.finished}, capped {answer.capped}, outside {answer.outside}, {sized} with sizes)"
+  )
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  let base: String = "{temporary}/rae-search-{nowNs()}"
+  let root: String = "{base}/root"
+  loop let folder: view String in List(String) {
+    ""
+    "/root"
+    "/root/Sounds"
+    "/root/Sounds/Old sounds"
+    "/root/Pictures"
+    "/root/Tool.app"
+    "/root/.hidden"
+    "/root/Many"
+    "/outside"
+  } {
+    makeFolder(path: "{base}{folder}")
+  }
+  loop let name: view String in List(String) {
+    "root/Sound.txt"
+    "root/zebra sound.wav"
+    "root/notes.txt"
+    "root/Sounds/door SOUND.wav"
+    "root/Sounds/Old sounds/first sound.mp3"
+    "root/Pictures/Söund.png"
+    "root/Tool.app/sound.txt"
+    "root/.hidden/sound.txt"
+    "root/.sound"
+    "outside/sound.txt"
+  } {
+    writeFile(path: "{base}/{name}")
+  }
+  loop var i: Int = 0, i < 30, ++i {
+    writeFile(path: "{root}/Many/part {i + 10}.bin")
+  }
+  unsafe {
+    let loopLink: Int = rae_ext_Files_makeLink(target: root, path: "{root}/Sounds/again")
+    let outLink: Int = rae_ext_Files_makeLink(target: "{base}/outside", path: "{root}/sound link")
+  }
+  let words: SearchRequest = {
+    generation: 3
+    folder: root
+    words: "sound"
+    closed: List(String) { "app" }
+  }
+  show(title: "sound", answer: search(request: words, stopAtFirst: false))
+  var hidden: SearchRequest = words
+  hidden.showHidden = true
+  show(title: "with hidden", answer: search(request: hidden, stopAtFirst: false))
+  var only: SearchRequest = words
+  only.extensions = List(String) { "mp3", "wav" }
+  show(title: "only sounds", answer: search(request: only, stopAtFirst: false))
+  var nothing: SearchRequest = words
+  nothing.words = "nowhere"
+  show(title: "nowhere", answer: search(request: nothing, stopAtFirst: false))
+  var below: SearchRequest = words
+  below.folder = "{root}/Sounds"
+  show(title: "in Sounds", answer: search(request: below, stopAtFirst: false))
+  var many: SearchRequest = words
+  many.words = "part"
+  many.most = 4
+  show(title: "four at most", answer: search(request: many, stopAtFirst: false))
+  var exact: SearchRequest = words
+  exact.words = "part 1"
+  exact.most = 10
+  let ten: SearchAnswer = search(request: exact, stopAtFirst: false)
+  log("as many as may be: {ten.entries.length}, capped {ten.capped}")
+  var limited: SearchRequest = words
+  limited.limit = Files.realPath(path: root)
+  limited.folder = "{root}/sound link"
+  show(title: "out by a symlink", answer: search(request: limited, stopAtFirst: false))
+  var gone: SearchRequest = words
+  gone.folder = "{root}/missing"
+  show(title: "missing", answer: search(request: gone, stopAtFirst: false))
+  show(title: "stopped", answer: search(request: words, stopAtFirst: true))
+  removeTree(folder: base)
+}

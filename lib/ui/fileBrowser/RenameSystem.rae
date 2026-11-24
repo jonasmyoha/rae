@@ -21,6 +21,7 @@ open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/SearchSystem
 open ui/textFieldSystem/TextFieldSystem
 
 # Where in a row its name begins, and how much wider than the name the field is at its left
@@ -58,7 +59,10 @@ func beginRename(
 ) {
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
   let index: Int = entryIndex(systems: systems, column: column, name: name)
-  if mayOperate(systems: systems, browser: browser) is false or index < 0 {
+  if mayOperate(systems: systems, browser: browser) is false or index < 0 or isResults(
+    systems: systems
+    column: column
+  ) {
     ret
   }
   endRename(

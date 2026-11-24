@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.70, 2026-11-24: the file browser's search
+
+- `showSearch` gives a file browser a search field (Cmd+F): the folder it is at first, then what is below it, on a
+  thread that is stopped when more is typed. What was found is a column of its own; "Show in Its Folder" (Cmd+R)
+  opens an entry's folder (docs/file-browser-design.md section 18).
+- Cases 1627 (the thread, under ThreadSanitizer) and 1628.
+
 ## 0.4.69, 2026-11-24: the file browser's sidebar
 
 - `showSidebar` (with `sidebarWidth` and `pinned`) gives a file browser a sidebar: the user's folders, pinned and

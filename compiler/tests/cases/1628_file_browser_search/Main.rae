@@ -1,0 +1,268 @@
+# The search of a file browser by scripted input: its field by Cmd+F, this folder first and then
+# below
+# it, the words changed while a search runs, what was found selected, opened, dragged and shown in
+# its
+# folder, what cannot be done there, the ways a search ends, a change on the disk, and a browser
+# held
+# to its root.
+import Files
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/Transform
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/SearchSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func shown(app: mod App, step: view String) {
+  show(app: app, step: step)
+  log("   {searchText(app: app)}")
+}
+
+func typing(app: mod App) {
+  shown(app: app, step: "opened")
+  focusFileBrowser(systems: app.files, world: app.world, browser: app.left)
+  settle(app: app)
+  press(app: app, keys: BrowserKeys { search: true })
+  shown(app: app, step: "Cmd+F")
+  typeText(app: app, text: "sou", erased: 0)
+  shown(app: app, step: "sou")
+  typeText(app: app, text: "nd", erased: 0)
+  shown(app: app, step: "sound")
+  typeText(app: app, text: "x", erased: 0)
+  shown(app: app, step: "soundx: {stateOf(app: app)}")
+  typeText(app: app, text: "", erased: 1)
+  typeEnter(app: app)
+  shown(app: app, step: "Return: in the rows, preview {previewName(app: app)}")
+  listKey(app: app, keys: ListSelectionKeys { down: true })
+  listKey(app: app, keys: ListSelectionKeys { down: true })
+  shown(app: app, step: "two down, preview {previewName(app: app)}")
+}
+
+func using(app: mod App) {
+  press(app: app, keys: BrowserKeys { open: true })
+  shown(app: app, step: "opened a file")
+  # a folder of what was found opens its column, held to the root
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Sounds"
+  )
+  shown(app: app, step: "a folder")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Sounds/Old sounds"
+  )
+  shown(app: app, step: "a folder below")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Sounds/door sound.wav"
+  )
+  secondaryAt(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Sounds/door sound.wav"
+    )
+  )
+  log("menu:{menuText(app: app)}")
+  chooseItem(app: app, id: "reveal")
+  shown(app: app, step: "shown in its folder, preview {previewName(app: app)}")
+  press(app: app, keys: BrowserKeys { back: true })
+  shown(app: app, step: "back")
+}
+
+func find(app: mod App, text: view String) {
+  let focused: Bool = focusSearch(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: app.left
+  )
+  typeText(app: app, text: text, erased: 0)
+}
+
+func notThere(app: mod App) {
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/root"
+  )
+  settle(app: app)
+  find(app: app, text: "sound")
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "sound.txt"
+  )
+  app.lines.clear()
+  press(app: app, keys: BrowserKeys { newFolder: true })
+  press(app: app, keys: BrowserKeys { duplicate: true })
+  press(app: app, keys: BrowserKeys { copyFiles: true })
+  press(app: app, keys: BrowserKeys { paste: true })
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  press(app: app, keys: BrowserKeys { parent: true })
+  listKey(app: app, keys: ListSelectionKeys { left: true })
+  shown(
+    app: app
+    step: "no new folder, duplicate, paste or rename: {componentCount(this: app.files.renames)} edits, {app.files.operations.clipboard.length} copied"
+  )
+  log("   disk: {diskText(folder: "{app.base}/root")}")
+  # onto a folder of them, and onto their column
+  lift(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "sound.txt"
+    )
+  )
+  carry(app: app, x: rowX(app: app, browser: app.left, place: 0), y: 330.0)
+  log("over the column: {dragText(app: app)}")
+  carry(
+    app: app
+    x: rowX(app: app, browser: app.left, place: 0)
+    y: rowY(
+      app: app
+      browser: app.left
+      place: 0
+      name: "Sounds/Old sounds"
+    )
+  )
+  log("over a folder: {dragText(app: app)}")
+  letGo(app: app)
+  shown(app: app, step: "dropped on it")
+  press(app: app, keys: BrowserKeys { undo: true })
+  shown(app: app, step: "undone")
+  # one to the trash
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "sound.txt"
+  )
+  press(app: app, keys: BrowserKeys { trash: true })
+  shown(app: app, step: "trashed")
+}
+
+func ending(app: mod App) {
+  press(app: app, keys: BrowserKeys { escape: true })
+  shown(app: app, step: "Escape")
+  find(app: app, text: "door")
+  shown(app: app, step: "door")
+  press(app: app, keys: BrowserKeys { escape: true })
+  shown(app: app, step: "Escape in the field")
+  # from a folder below, so that is what is searched
+  let opened: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/root/Sounds"
+  )
+  settle(app: app)
+  find(app: app, text: "o")
+  shown(app: app, step: "o, in Sounds")
+  typeText(app: app, text: "", erased: 1)
+  shown(app: app, step: "the field emptied")
+  find(app: app, text: "old")
+  let elsewhere: Bool = setBrowserFolder(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    scenes: app.scenes
+    browser: app.left
+    folder: "{app.base}/root"
+  )
+  settle(app: app)
+  shown(app: app, step: "gone to another folder")
+}
+
+# Rows of the first column
+func columnCount(app: view App) ret Int {
+  let column: EntityId = columnAt(systems: app.files, browser: app.left, place: 0)
+  ret componentView(this: app.files.entries, entityId: column).entries.length
+}
+
+func onDisk(app: mod App) {
+  find(app: app, text: "new")
+  shown(app: app, step: "new")
+  writeFile(path: "{app.base}/root/new thing.txt", text: "a")
+  loop var i: Int = 0, i < 4000 and columnCount(app: app) is 0, ++i {
+    sleep(ms: 5)
+    idle(app: app)
+  }
+  settle(app: app)
+  shown(app: app, step: "one was made on the disk")
+  press(app: app, keys: BrowserKeys { escape: true })
+  app.lines.clear()
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-search-{nowNs()}"
+  makeFolder(path: base)
+  loop let folder: view String in List(String) {
+    "trash"
+    "outside"
+    "root"
+    "root/Film"
+    "root/Sounds"
+    "root/Sounds/Old sounds"
+  } {
+    makeFolder(path: "{base}/{folder}")
+  }
+  loop let name: view String in List(String) {
+    "outside/sound.txt"
+    "root/a.txt"
+    "root/sound.txt"
+    "root/Film/film sound.mp3"
+    "root/Sounds/door sound.wav"
+    "root/Sounds/Old sounds/first.mp3"
+  } {
+    writeFile(path: "{base}/{name}", text: name)
+  }
+  var app: App = makeApp(base: base)
+  app.files.operations.rules = OperationRules { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  settle(app: app)
+  typing(app: app)
+  using(app: app)
+  notThere(app: app)
+  ending(app: app)
+  onDisk(app: app)
+  find(app: app, text: "sound")
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}, {componentCount(this: app.files.searches)} searches")
+  removeTree(folder: base)
+}

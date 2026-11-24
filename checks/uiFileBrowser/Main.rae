@@ -8,8 +8,12 @@
 #   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/files.bmp \
 #     compiler/bin/rae run checks/uiFileBrowser/Main.rae
 #
+# With RAE_FILE_SEARCH=1 the browser above left is one of files on the disk (a small tree it makes),
+# with a search in it.
+#
 # The behavior is checked in compiler/tests/cases/1592_file_browser. Exit 0 when it drew.
 import Gpu2d
+import Sys
 import ui/Scene
 open app3d/UiShell
 open ecs/ComponentTable
@@ -38,6 +42,7 @@ open ui/fileBrowser/FileBrowser
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/PlacesThread
+open ui/textFieldSystem/TextFieldSystem
 
 const designW: Int = 1100
 
@@ -176,6 +181,50 @@ func seedPlaces(files: mod FileBrowserSystems) {
   }
 }
 
+# A browser of a small tree on the disk, with words in its search field
+func openSearched(
+  files: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret EntityId {
+  let base: String = "/tmp/rae-ui-file-search/Projects"
+  loop let folder: view String in List(String) {
+    ""
+    "/Film"
+    "/Film/Old takes"
+    "/Sounds"
+    "/Sounds/Rain at night"
+  } {
+    let made: Bool = Sys.makeDir(path: "{base}{folder}")
+  }
+  loop let name: view String in List(String) {
+    "rain.wav"
+    "notes.txt"
+    "Film/a train in the rain.mov"
+    "Film/Old takes/rainbow over the second unit, take four.mov"
+    "Sounds/door.wav"
+    "Sounds/Rain at night/first.wav"
+    "Sounds/Rain at night/rain 2.wav"
+  } {
+    let written: Bool = Sys.writeFile(path: "{base}/{name}", content: "a")
+  }
+  let browser: EntityId = openFileBrowser(
+    systems: files
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    host: nodeNamed(world: world, nodeId: "Wide")
+    root: base
+    options: BrowserOptions {
+      showSidebar: true
+      showSearch: true
+      pinned: List(String) { "{base}/Film" }
+    }
+  )
+  ret browser
+}
+
 # One world with its two browsers
 type Half {
   world: UiWorld
@@ -227,6 +276,15 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     folder = "/Projects/Many"
     names = List(String) { "recording 160008.wav", "recording 160009.wav" }
   }
+  if large is false and Sys.getEnv(name: "RAE_FILE_SEARCH") is "1" {
+    half.wide = openSearched(
+      files: half.files
+      world: half.world
+      uiSystems: half.uiSystems
+      scenes: scenes
+    )
+    ret half
+  }
   half.wide = openAt(
     files: half.files
     world: half.world
@@ -252,6 +310,13 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
 
 func stepHalf(half: mod Half, scenes: view SceneRegistry, frames: view Int) {
   var input: UiInput = idleInput(nowSeconds: frames as Float64 * 0.016)
+  let shown: Bool = textFieldSystem(
+    world: half.world
+    textFieldSystem: half.uiSystems.textField
+    actions: half.world.uiActions
+    input: TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+    now: input.nowSeconds
+  )
   let changed: Bool = fileBrowserUpdate(
     systems: half.files
     world: half.world
@@ -275,6 +340,19 @@ func stepHalf(half: mod Half, scenes: view SceneRegistry, frames: view Int) {
       entityId: listOfColumn(systems: half.files, column: column)
       position: -60000.0 * 24.0
     )
+  }
+  let field: EntityId = componentView(this: half.files.browsers, entityId: half.wide).searchField
+  if frames is 20 and isNone(this: field) is false {
+    componentMod(this: half.world.textFields, entityId: field).text = "rain"
+  }
+  if frames is 45 and isNone(this: field) is false {
+    let column: EntityId = columnAt(systems: half.files, browser: half.wide, place: 0)
+    setListSelection(
+      world: half.world
+      list: listOfColumn(systems: half.files, column: column)
+      keys: List(String) { "Sounds/Rain at night/rain 2.wav" }
+    )
+    focusFileBrowser(systems: half.files, world: half.world, browser: half.wide)
   }
   if frames is 2 and half.large is false {
     focusFileBrowser(systems: half.files, world: half.world, browser: half.wide)
@@ -350,7 +428,8 @@ func main() ret Int {
   ended = closeFileBrowsers(systems: light.files, world: light.world, uiSystems: light.uiSystems) and ended
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
-  if columns is not 2 or ended is false {
+  let searched: Bool = Sys.getEnv(name: "RAE_FILE_SEARCH") is "1"
+  if (columns is not 2 and searched is false) or ended is false {
     log("UI FILE BROWSER FAILED: {columns} columns")
     ret 1
   }

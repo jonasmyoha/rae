@@ -1,0 +1,172 @@
+# The thread of one search (docs/file-browser-design.md §8): the entries of a folder whose name has
+# the words, then those below it, level by level, over a channel in batches. A post of its signal
+# ends it. Symlinks are not followed. It knows no UI.
+import Files
+import ui/EventLoop
+open Channel
+open Signal
+open text/NameOrder
+open ui/fileBrowser/FileBrowserPaths
+
+# How often what was found is sent, and how many at most at once
+const searchBatchMs: Int = 100
+
+const searchBatchSize: Int = 200
+
+# Folders a search keeps in mind at most: a tree without an end ends there
+const searchFolders: Int = 200000
+
+type SearchRequest {
+  generation: Int = 0
+  folder: String = ""
+  # A part of the name, case and accents aside
+  words: String = ""
+  showHidden: Bool = false
+  # lowercase, without dots; none for any
+  extensions: List(String) = {}
+  # Extensions of the folders that are opened as a file: not looked into
+  closed: List(String) = {}
+  # A path outside this real folder is refused ("" for any)
+  limit: String = ""
+  # As many are found at most
+  most: Int = 2000
+}
+
+type SearchAnswer {
+  generation: Int = 0
+  # the first of its search: what an earlier one found goes
+  first: Bool = false
+  # nothing more comes
+  finished: Bool = false
+  # not inside its limit
+  outside: Bool = false
+  # there are more than `most`
+  capped: Bool = false
+  # Their names are paths from the folder of the search
+  entries: List(FileEntry) = {}
+}
+
+type SearchRun {
+  generation: Int
+  sent: Int = 0
+  found: Int = 0
+  sentMs: Int = 0
+  entries: List(FileEntry) = {}
+}
+
+func sendFound(
+  answers: view Channel(SearchAnswer)
+  run: mod SearchRun
+  finished: view Bool
+  capped: view Bool
+) {
+  let answer: SearchAnswer = {
+    generation: run.generation
+    first: run.sent is 0
+    finished: finished
+    capped: capped
+    entries: own run.entries
+  }
+  run.sent = run.sent + 1
+  run.sentMs = nowMs()
+  answers.channelSend(value: own answer)
+  EventLoop.wake()
+}
+
+func searchThread(
+  answers: own Channel(SearchAnswer)
+  stop: own Signal
+  request: own SearchRequest
+) ret Int {
+  var run: SearchRun = { generation: request.generation, sentMs: nowMs() }
+  let real: String = Files.realPath(path: request.folder)
+  if request.limit.length() > 0 and real.length() > 0 and pathInside(
+    folder: request.limit
+    path: real
+  ) is false {
+    answers.channelSend(
+      value: SearchAnswer {
+        generation: request.generation
+        first: true
+        finished: true
+        outside: true
+      }
+    )
+    EventLoop.wake()
+    ret 0
+  }
+  let fold: NameFold = createNameFold()
+  let filter: EntryFilter = {
+    showHidden: request.showHidden
+    namePart: request.words
+    extensions: request.extensions
+  }
+  let words: String = foldedText(fold: fold, text: request.words)
+  # folders to look into, as paths from the folder of the search; one level after the other
+  var folders: List(String) = { "" }
+  var capped: Bool = false
+  var stopped: Bool = false
+  loop var at: Int = 0, at < folders.length and capped is false and stopped is false, ++at {
+    stopped = stop.tryWait()
+    if stopped {
+      break
+    }
+    let below: String = folders.copyAtFallback(index: at, fallback: "")
+    var path: String = "{request.folder}"
+    if below.length() > 0 {
+      path = pathIn(folder: path, name: below)
+    }
+    var listing: FolderListing = Files.readFolder(folder: path)
+    Files.orderEntries(fold: fold, order: EntryOrder {}, entries: listing.entries)
+    loop let entry: mod FileEntry in listing.entries {
+      if entry.hidden and request.showHidden is false {
+        continue
+      }
+      let closed: Bool = request.closed.contains(value: Files.extensionOf(name: entry.name))
+      var name: String = "{entry.name}"
+      if below.length() > 0 {
+        name = "{below}/{entry.name}"
+      }
+      if entry.kind is EntryKind.folder and closed is false and folders.length < searchFolders {
+        folders.add(value: "{name}")
+      }
+      if capped or Files.passesFilter(
+        fold: fold
+        filter: filter
+        foldedPart: words
+        entry: entry
+      ) is false {
+        continue
+      }
+      if run.found >= request.most {
+        capped = true
+        continue
+      }
+      Files.readEntryDetails(folder: path, entry: entry)
+      if entry.hidden and request.showHidden is false {
+        # what the OS's own flag hides
+        continue
+      }
+      entry.name = own name
+      run.entries.add(value: entry)
+      run.found = run.found + 1
+    }
+    let due: Bool = run.entries.length >= searchBatchSize or nowMs() - run.sentMs >= searchBatchMs
+    if run.entries.length > 0 and (due or at is 0) {
+      # what is in the folder itself comes at once
+      sendFound(
+        answers: answers
+        run: run
+        finished: false
+        capped: false
+      )
+    }
+  }
+  sendFound(
+    answers: answers
+    run: run
+    finished: true
+    capped: capped
+  )
+  ret run.found
+}

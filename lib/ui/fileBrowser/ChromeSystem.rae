@@ -17,11 +17,13 @@ open ui/RenderSystem
 open ui/TextStyle
 open ui/ThemeResolved
 open ui/UiSystems
+open ui/fileBrowser/BrowserMemory
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/SearchSystem
 open ui/fileBrowser/SidebarSystem
 
 # A folder listed sooner shows no spinner
@@ -121,6 +123,11 @@ func takeWidths(
       width = componentView(this: world.dividers, entityId: event.divider).size
     }
     let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
+    if isResults(systems: systems, column: column) {
+      mine.resultsWidth = width
+      changed = true
+      continue
+    }
     loop mine.widths.length <= place {
       mine.widths.add(value: 0.0)
     }
@@ -286,10 +293,13 @@ func widestLetter(font: view SdfFont, size: view Float) ret Float {
 func stateTextOf(systems: view FileBrowserSystems, column: view EntityId) ret String {
   let mine: view FileColumn = componentView(this: systems.columns, entityId: column)
   if mine.state is ColumnState.ready {
-    if componentView(this: systems.entries, entityId: column).entries.length is 0 {
-      ret "Empty folder"
+    if componentView(this: systems.entries, entityId: column).entries.length > 0 {
+      ret ""
     }
-    ret ""
+    if mine.results {
+      ret emptySearchText(systems: systems, browser: mine.browser)
+    }
+    ret "Empty folder"
   }
   if mine.state is ColumnState.listing {
     if systems.now - mine.askedSeconds > spinnerSeconds {
@@ -314,6 +324,17 @@ func stateTextOf(systems: view FileBrowserSystems, column: view EntityId) ret St
     ret "This folder is gone"
   }
   ret "This folder could not be read"
+}
+
+# What a search that has found nothing says
+func emptySearchText(systems: view FileBrowserSystems, browser: view EntityId) ret String {
+  if searching(systems: systems, browser: browser) {
+    let search: view BrowserSearch = componentView(this: systems.searches, entityId: browser)
+    if search.running or search.startAt >= 0.0 {
+      ret "spinner"
+    }
+  }
+  ret "Nothing found"
 }
 
 func showColumnState(

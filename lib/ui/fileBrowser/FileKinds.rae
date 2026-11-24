@@ -44,7 +44,8 @@ func defaultFileKinds() ret List(FileKind) {
 
 # The kind of an entry (a plain file's when no kind lists it)
 func kindOfEntry(kinds: view List(FileKind), entry: view FileEntry) ret FileKind {
-  let extension: String = Files.extensionOf(name: entry.name)
+  # (what a search found has a path as its name)
+  let extension: String = Files.extensionOf(name: Files.nameOf(path: entry.name))
   let folder: Bool = Files.isFolder(entry: entry)
   if extension.length() > 0 {
     loop let kind: view FileKind in kinds {

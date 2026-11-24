@@ -21,6 +21,7 @@ open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/RenameSystem
+open ui/fileBrowser/SearchSystem
 open ui/fileBrowser/SelectionSystem
 
 const browserMenuId: String = "fileBrowser"
@@ -124,12 +125,25 @@ func menuItemsOf(
 ) ret List(MenuItem) {
   var items: List(MenuItem) = {}
   let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let found: Bool = isResults(systems: systems, column: column)
   let operate: Bool = mayOperate(systems: systems, browser: browser)
+  # nothing is made or renamed in what was found
+  let make: Bool = operate and found is false
   let count: Int = selectedCount(world: world, list: listOfColumn(systems: systems, column: column))
   if onRow {
     items.add(value: MenuItem { id: "open", text: "Open", shortcut: shortcutText(key: "O") })
   }
-  if operate {
+  if onRow and found {
+    items.add(
+      value: MenuItem {
+        id: "reveal"
+        text: "Show in Its Folder"
+        shortcut: shortcutText(key: "R")
+        enabled: count is 1
+      }
+    )
+  }
+  if make {
     addSeparator(items: items)
     items.add(
       value: MenuItem {
@@ -140,7 +154,7 @@ func menuItemsOf(
       }
     )
   }
-  if operate and onRow {
+  if make and onRow {
     addSeparator(items: items)
     items.add(value: MenuItem { id: "rename", text: "Rename", enabled: count is 1 })
     items.add(
@@ -151,7 +165,7 @@ func menuItemsOf(
     addSeparator(items: items)
     items.add(value: MenuItem { id: "copy", text: "Copy", shortcut: shortcutText(key: "C") })
   }
-  if operate {
+  if make {
     if onRow is false {
       addSeparator(items: items)
     }
@@ -287,7 +301,7 @@ func menuItemFits(
       ret false
     }
     if folder is false and item.extensions.length > 0 and item.extensions.contains(
-      value: Files.extensionOf(name: name)
+      value: Files.extensionOf(name: Files.nameOf(path: name))
     ) is false {
       ret false
     }
@@ -305,6 +319,14 @@ func chooseMenuItem(
 ) {
   if itemId is "open" {
     activateSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  } else if itemId is "reveal" {
+    let shown: Bool = revealSelected(
       systems: systems
       world: world
       uiSystems: uiSystems

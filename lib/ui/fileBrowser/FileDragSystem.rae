@@ -20,6 +20,7 @@ open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FileMenuSystem
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/SearchSystem
 open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/SelectionSystem
 
@@ -102,7 +103,7 @@ func beginFileDrag(
   }
   var payload: UiDragPayload = {
     kind: "{filesKind}"
-    label: "{key}"
+    label: lastPart(path: key)
     source: source
     note: componentView(this: systems.columns, entityId: column).device
   }
@@ -181,6 +182,10 @@ func fileDropEffect(
   moveAsked: view Bool
 ) ret DragEffect {
   if isNone(this: drop.browser) or mayOperate(systems: systems, browser: drop.browser) is false {
+    ret DragEffect.refused
+  }
+  if isNone(this: drop.row) and isResults(systems: systems, column: drop.column) {
+    # what was found is no folder to put things in
     ret DragEffect.refused
   }
   let ownEntries: Bool = payload.kind is ownFilesKind

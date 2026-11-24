@@ -49,6 +49,7 @@ open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/PreviewSystem
 open ui/fileBrowser/RenameSystem
 open ui/fileBrowser/RowsSystem
+open ui/fileBrowser/SearchSystem
 open ui/fileBrowser/SelectionSystem
 open ui/fileBrowser/SidebarSystem
 open ui/fileBrowser/WatchSystem
@@ -135,6 +136,7 @@ func openFileBrowser(
   componentSet(this: systems.history, entityId: host, data: own history)
   componentSet(this: systems.previews, entityId: host, data: BrowserPreview {})
   openSidebar(systems: systems, world: world, browser: host)
+  openSearchField(systems: systems, world: world, browser: host)
   let first: EntityId = openColumn(
     systems: systems
     world: world
@@ -196,12 +198,21 @@ func fileBrowserUpdate(
     uiSystems: uiSystems
     scenes: scenes
   ) or changed
+  # (an Escape that ends a search does nothing else)
+  var left: BrowserKeys = keys
+  changed = fileSearchSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: left
+  ) or changed
   changed = fileKeysSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
-    keys: keys
+    keys: left
   ) or changed
   changed = fileMenuSystem(
     systems: systems
@@ -245,14 +256,14 @@ func fileBrowserUpdate(
     world: world
     uiSystems: uiSystems
     scenes: scenes
-    escape: keys.escape
+    escape: left.escape
   ) or changed
   changed = fileOperationRowsSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
     scenes: scenes
-    keys: keys
+    keys: left
   ) or changed
   changed = filePreviewSystem(
     systems: systems
@@ -297,6 +308,7 @@ func fileBrowserDeadline(systems: view FileBrowserSystems) ret Float64 {
   )
   deadline = earlier(first: deadline, second: operationDeadline(systems: systems))
   deadline = earlier(first: deadline, second: dragOpenDeadline(systems: systems))
+  deadline = earlier(first: deadline, second: searchDeadline(systems: systems))
   loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
     let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
     deadline = earlier(
@@ -353,6 +365,7 @@ func authoredOptions(authored: view FileBrowser) ret BrowserOptions {
     showSidebar: authored.showSidebar
     sidebarWidth: authored.sidebarWidth
     pinned: authored.pinned
+    showSearch: authored.showSearch
     rowHeight: authored.rowHeight
     source: authored.source
   }
@@ -631,6 +644,12 @@ func closeBrowserNodes(
   if componentHas(this: systems.browsers, entityId: browser) is false {
     ret
   }
+  let searched: Bool = leaveSearch(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
   dropLargePreview(
     systems: systems
     world: world
@@ -725,5 +744,6 @@ func closeFileBrowsers(
   closeWatches(systems: systems)
   let polled: Bool = stopPolling(systems: systems, waitMs: 1000)
   let placed: Bool = stopPlaces(systems: systems, waitMs: 1000)
-  ret stopFileListings(systems: systems, waitMs: 1000) and polled and placed and ended
+  let searched: Bool = stopSearches(systems: systems, waitMs: 1000)
+  ret stopFileListings(systems: systems, waitMs: 1000) and polled and placed and searched and ended
 }

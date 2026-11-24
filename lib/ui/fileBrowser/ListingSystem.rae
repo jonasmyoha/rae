@@ -16,6 +16,7 @@ open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/SearchSystem
 
 const listingsAtOnce: Int = 4
 
@@ -332,6 +333,10 @@ func askForColumn(systems: mod FileBrowserSystems, column: view EntityId) ret Bo
       mine.state = ColumnState.notAnswering
     }
     ret late
+  }
+  if mine.results {
+    staleResults(systems: systems, column: column)
+    ret false
   }
   let generation: Int = systems.listing.nextGeneration
   systems.listing.nextGeneration = generation + 1

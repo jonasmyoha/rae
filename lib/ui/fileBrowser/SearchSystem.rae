@@ -1,0 +1,704 @@
+# The search of a browser (docs/file-browser-design.md §8). What is typed in its field is searched
+# in
+# the folder it is at and below; what is found is one column in place of the others. That column's
+# folder is the one searched, and its entries' names are paths from there ("Cuts/door.wav"), so that
+# selecting, the preview, opening, copying and dragging work as they do in any column.
+import Files
+open Channel
+open Signal
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/EscapeHold
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/FolderListing
+open ui/fileBrowser/KeysSystem
+open ui/fileBrowser/ListingSystem
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PreviewSystem
+open ui/fileBrowser/SearchThread
+open ui/textFieldSystem/TextFieldSystem
+
+# How long after the last letter a search begins, and how long after a change on the disk again
+const searchWaitSeconds: Float64 = 0.15
+
+const searchAgainSeconds: Float64 = 0.6
+
+# As many are shown at most
+const searchMost: Int = 2000
+
+# ----- what there is
+# ---------------------------------------------------------------------------------
+func searching(systems: view FileBrowserSystems, browser: view EntityId) ret Bool {
+  ret componentHas(this: systems.searches, entityId: browser)
+}
+
+# Is it the column of what a search found? (Its names are paths, so nothing is made or renamed in
+# it.)
+func isResults(systems: view FileBrowserSystems, column: view EntityId) ret Bool {
+  if componentHas(this: systems.columns, entityId: column) is false {
+    ret false
+  }
+  ret componentView(this: systems.columns, entityId: column).results
+}
+
+# ----- beginning and ending
+# ---------------------------------------------------------------------------------
+
+# A browser's search field, when its options and its scene have one
+func openSearchField(systems: mod FileBrowserSystems, world: mod UiWorld, browser: view EntityId) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let scene: EntityId = componentView(this: systems.browsers, entityId: browser).scene
+  let box: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserSearch")
+  let count: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserSearchCount")
+  let field: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserSearchField")
+  # a program's own entries are the program's to search
+  let shown: Bool = options.showSearch and options.source is BrowserSource.disk
+  showNode(world: world, entityId: box, shown: shown)
+  showNode(world: world, entityId: count, shown: false)
+  if shown is false or componentHas(this: world.textFields, entityId: field) is false {
+    ret
+  }
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.searchField = field
+  mine.searchCount = count
+  mine.searchAction = "{mine.pathAction}.search"
+  componentMod(this: world.textFields, entityId: field).actionId = "{mine.searchAction}"
+}
+
+# The keys go to a browser's search field, all of its text selected; false when it has none
+func focusSearch(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) ret Bool {
+  let field: EntityId = componentView(this: systems.browsers, entityId: browser).searchField
+  if isNone(this: field) or componentHas(this: world.textFields, entityId: field) is false {
+    ret false
+  }
+  let length: Int = componentView(this: world.textFields, entityId: field).text.length()
+  ret setTextFieldSelection(
+    world: world
+    textFieldSystem: uiSystems.textField
+    entityId: field
+    start: 0
+    end: length
+  )
+}
+
+# The columns make place for what is found
+func beginSearch(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) {
+  let folder: String = browserFolder(systems: systems, browser: browser)
+  let real: String = rootLimit(systems: systems, browser: browser)
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: 0
+  )
+  let column: EntityId = openColumn(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+  if isNone(this: column) {
+    ret
+  }
+  let width: Float = componentView(this: systems.browsers, entityId: browser).resultsWidth
+  let mine: mod FileColumn = componentMod(this: systems.columns, entityId: column)
+  mine.results = true
+  mine.stale = false
+  # what is opened from it is held to the root
+  mine.realFolder = "{real}"
+  mine.wantScroll = 0.0
+  setColumnWidth(
+    world: world
+    uiSystems: uiSystems
+    body: mine.body
+    divider: mine.divider
+    width: width
+  )
+  let search: BrowserSearch = { folder: "{folder}", column: column, limit: own real }
+  componentSet(this: systems.searches, entityId: browser, data: own search)
+  holdEscape(world: world)
+}
+
+# The thread of a browser's search is told to stop
+func stopSearchOf(systems: mod FileBrowserSystems, browser: view EntityId) {
+  loop let job: view SearchJob in systems.search.jobs {
+    if job.browser is browser {
+      job.stop.post()
+    }
+  }
+}
+
+# The search is no more, nor its column; the trail is not brought back. True when the column, or
+# what was beyond it, had the keys.
+func leaveSearch(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) ret Bool {
+  if searching(systems: systems, browser: browser) is false {
+    ret false
+  }
+  stopSearchOf(systems: systems, browser: browser)
+  componentRemove(this: systems.searches, entityId: browser)
+  releaseEscape(world: world)
+  var hadKeys: Bool = false
+  loop let column: view EntityId in browserColumns(systems: systems, browser: browser) {
+    if componentView(this: systems.columns, entityId: column).body is world.keyFocus.entityId {
+      hadKeys = true
+    }
+  }
+  dropColumnsFrom(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+    place: 0
+  )
+  let mine: mod OpenBrowser = componentMod(this: systems.browsers, entityId: browser)
+  mine.searchSeen = ""
+  let field: EntityId = mine.searchField
+  let count: EntityId = mine.searchCount
+  if isAlive(world: world, entityId: field) and componentHas(
+    this: world.textFields
+    entityId: field
+  ) {
+    if focusedTextFieldEntityId(world: world) is field {
+      let left: Bool = focusTextField(world: world, entityId: noEntity())
+    }
+    componentMod(this: world.textFields, entityId: field).text = ""
+    showNode(world: world, entityId: count, shown: false)
+  }
+  ret hadKeys
+}
+
+# The search ends, and the columns are as before it
+func endSearch(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) {
+  if searching(systems: systems, browser: browser) is false {
+    ret
+  }
+  let folder: String = "{componentView(this: systems.searches, entityId: browser).folder}"
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: folder
+  )
+  focusDeepest(systems: systems, world: world, browser: browser)
+}
+
+# The one entry selected among what was found is shown in its folder: the search ends
+func revealSelected(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+) ret Bool {
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  if isResults(systems: systems, column: column) is false or selectedCount(world: world, list: list) is not 1 {
+    ret false
+  }
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let path: String = pathIn(
+    folder: folderOfColumn(systems: systems, column: column)
+    name: firstSelectedName(world: world, list: list)
+  )
+  let opened: Bool = openTrail(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    browser: browser
+    folder: parentPath(path: path)
+  )
+  let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
+  if opened and isNone(this: deepest) is false {
+    componentMod(this: systems.columns, entityId: deepest).wantSelected = List(String) {
+      lastPart(path: path)
+    }
+  }
+  focusDeepest(systems: systems, world: world, browser: browser)
+  ret opened
+}
+
+# ----- the frame
+# ---------------------------------------------------------------------------------
+
+# The fields, the keys, the answers and the threads. True when something changed; Escape that ended
+# a
+# search is taken from `keys`.
+func fileSearchSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: mod BrowserKeys
+) ret Bool {
+  var changed: Bool = stepSearchKeys(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: keys
+  )
+  loop var i: Int = 0, i < componentCount(this: systems.browsers), ++i {
+    changed = stepSearchField(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: componentEntityAt(this: systems.browsers, i: i)
+    ) or changed
+  }
+  changed = takeSearchAnswers(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  ) or changed
+  loop var i: Int = 0, i < componentCount(this: systems.searches), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.searches, i: i)
+    startSearch(systems: systems, browser: browser)
+    changed = showSearchCount(systems: systems, world: world, browser: browser) or changed
+  }
+  ret changed
+}
+
+# Cmd+F, Cmd+R, and Escape in a search field or in what was found
+func stepSearchKeys(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: mod BrowserKeys
+) ret Bool {
+  let column: EntityId = columnWithKeys(systems: systems, world: world, uiSystems: uiSystems)
+  var changed: Bool = false
+  if keys.escape and isNone(this: systems.operations.question.node) {
+    let field: EntityId = focusedTextFieldEntityId(world: world)
+    loop var i: Int = componentCount(this: systems.browsers) - 1, i >= 0, --i {
+      let browser: EntityId = componentEntityAt(this: systems.browsers, i: i)
+      let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
+      let inField: Bool = isNone(this: field) is false and mine.searchField is field
+      let inColumn: Bool = isNone(this: column) is false and browser is browserOfColumn(
+        systems: systems
+        column: column
+      ) and keysTaken(world: world, uiSystems: uiSystems) is false and largePreviewOpen(
+        systems: systems
+        browser: browser
+      ) is false
+      if inField and searching(systems: systems, browser: browser) is false {
+        let left: Bool = focusTextField(world: world, entityId: noEntity())
+        focusDeepest(systems: systems, world: world, browser: browser)
+        keys.escape = false
+        changed = true
+      } else if (inField or inColumn) and searching(systems: systems, browser: browser) {
+        endSearch(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          browser: browser
+        )
+        keys.escape = false
+        changed = true
+      }
+    }
+  }
+  if changed or isNone(this: column) or keysTaken(world: world, uiSystems: uiSystems) {
+    ret changed
+  }
+  if keys.search {
+    ret focusSearch(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browserOfColumn(systems: systems, column: column)
+    )
+  }
+  if keys.reveal {
+    ret revealSelected(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+    )
+  }
+  ret false
+}
+
+func browserOfColumn(systems: view FileBrowserSystems, column: view EntityId) ret EntityId {
+  if componentHas(this: systems.columns, entityId: column) {
+    ret componentView(this: systems.columns, entityId: column).browser
+  }
+  ret noEntity()
+}
+
+# What was typed is searched; nothing ends the search; Return goes to what was found
+func stepSearchField(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) ret Bool {
+  let mine: view OpenBrowser = componentView(this: systems.browsers, entityId: browser)
+  let field: EntityId = mine.searchField
+  if isNone(this: field) or componentHas(this: world.textFields, entityId: field) is false {
+    ret false
+  }
+  let entered: Bool = actionSent(world: world, actionId: mine.searchAction)
+  let text: String = componentView(this: world.textFields, entityId: field).text.trim()
+  var changed: Bool = false
+  if mine.searchSeen is not text {
+    changed = true
+    if text.length() is 0 {
+      let typing: Bool = focusedTextFieldEntityId(world: world) is field
+      endSearch(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        scenes: scenes
+        browser: browser
+      )
+      if typing {
+        # emptied by its keys, so more may come
+        let focused: Bool = focusSearch(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          browser: browser
+        )
+      }
+    } else {
+      let held: Bool = browserOptions(systems: systems, browser: browser).allowAboveRoot is false
+      if searching(systems: systems, browser: browser) is false and held and rootLimit(
+        systems: systems
+        browser: browser
+      ).length() is 0 {
+        # the root's real folder is not known yet
+        ret false
+      }
+      if searching(systems: systems, browser: browser) is false {
+        beginSearch(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          browser: browser
+        )
+      }
+      if searching(systems: systems, browser: browser) {
+        componentMod(this: systems.searches, entityId: browser).words = "{text}"
+        searchAgain(systems: systems, browser: browser, seconds: searchWaitSeconds)
+      }
+    }
+    componentMod(this: systems.browsers, entityId: browser).searchSeen = "{text}"
+  }
+  if entered and searching(systems: systems, browser: browser) {
+    changed = true
+    let left: Bool = focusTextField(world: world, entityId: noEntity())
+    goToResults(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      browser: browser
+    )
+  }
+  ret changed
+}
+
+# The keys go to what was found, to its first row
+func goToResults(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+) {
+  let column: EntityId = componentView(this: systems.searches, entityId: browser).column
+  let body: EntityId = componentView(this: systems.columns, entityId: column).body
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  setKeyFocus(world: world, entityId: body)
+  let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+  var first: String = ""
+  if let entry: view FileEntry = held.entries.viewAt(index: 0) {
+    first = "{entry.name}"
+  }
+  if first.length() > 0 and selectedCount(world: world, list: list) is 0 {
+    setListSelection(world: world, list: list, keys: List(String) { "{first}" })
+    showColumnSelection(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      later: true
+    )
+  }
+}
+
+# Search once more, in a while
+func searchAgain(systems: mod FileBrowserSystems, browser: view EntityId, seconds: view Float64) {
+  let search: mod BrowserSearch = componentMod(this: systems.searches, entityId: browser)
+  search.startAt = systems.now + seconds
+}
+
+# An operation is over: what was found may be somewhere else now
+func searchesAgain(systems: mod FileBrowserSystems) {
+  loop var i: Int = 0, i < componentCount(this: systems.searches), ++i {
+    searchAgain(
+      systems: systems
+      browser: componentEntityAt(this: systems.searches, i: i)
+      seconds: searchWaitSeconds
+    )
+  }
+}
+
+# The folder that is searched was changed on the disk
+func staleResults(systems: mod FileBrowserSystems, column: view EntityId) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  componentMod(this: systems.columns, entityId: column).stale = false
+  if searching(systems: systems, browser: browser) {
+    let search: view BrowserSearch = componentView(this: systems.searches, entityId: browser)
+    if search.startAt < 0.0 and search.running is false {
+      searchAgain(systems: systems, browser: browser, seconds: searchAgainSeconds)
+    }
+  }
+}
+
+# Extensions of the folders that are opened as a file
+func closedExtensions(kinds: view List(FileKind)) ret List(String) {
+  var closed: List(String) = {}
+  loop let kind: view FileKind in kinds {
+    if kind.asFile {
+      let parts: List(String) = kind.extensions.split(sep: " ")
+      loop let extension: view String in parts {
+        if extension.length() > 0 {
+          closed.add(value: "{extension}")
+        }
+      }
+    }
+  }
+  ret closed
+}
+
+# The thread of a search that is due; the one before it is told to stop
+func startSearch(systems: mod FileBrowserSystems, browser: view EntityId) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let search: view BrowserSearch = componentView(this: systems.searches, entityId: browser)
+  if search.startAt < 0.0 or systems.now < search.startAt {
+    ret
+  }
+  var limit: String = ""
+  if options.allowAboveRoot is false {
+    limit = "{search.limit}"
+  }
+  let generation: Int = systems.search.nextGeneration
+  systems.search.nextGeneration = generation + 1
+  let request: SearchRequest = {
+    generation: generation
+    folder: "{search.folder}"
+    words: "{search.words}"
+    showHidden: options.showHidden
+    extensions: options.extensions
+    closed: closedExtensions(kinds: systems.kinds)
+    limit: own limit
+    most: searchMost
+  }
+  stopSearchOf(systems: systems, browser: browser)
+  let begun: mod BrowserSearch = componentMod(this: systems.searches, entityId: browser)
+  begun.startAt = -1.0
+  begun.generation = generation
+  begun.running = true
+  begun.capped = false
+  let column: EntityId = begun.column
+  componentMod(this: systems.columns, entityId: column).askedSeconds = systems.now
+  let stop: Signal = createSignal()
+  when Target.isNative {
+    let task: Task(Int) = spawn thread searchThread(
+      answers: systems.search.answers
+      stop: stop
+      request: own request
+    )
+    systems.search.jobs.add(
+      value: SearchJob { generation: generation, browser: browser, stop: stop, task: own task }
+    )
+  } else {
+    # a browser build has no threads
+    let count: Int = searchThread(answers: systems.search.answers, stop: stop, request: own request)
+    stop.freeSignal()
+  }
+}
+
+# The thread of `generation` has sent its last answer: it is at its end, so dropping its task does
+# not wait
+func finishSearch(systems: mod FileBrowserSystems, generation: view Int) {
+  loop var i: Int = systems.search.jobs.length - 1, i >= 0, --i {
+    var mine: Bool = false
+    var stop: Signal = { handle: 0 }
+    if let job: view SearchJob = systems.search.jobs.viewAt(index: i) {
+      mine = job.generation is generation
+      stop = job.stop
+    }
+    if mine {
+      systems.search.jobs.removeAt(index: i)
+      stop.freeSignal()
+    }
+  }
+}
+
+# The browser whose search is `generation` (noEntity() when it is another now, or over)
+func browserOfSearch(systems: view FileBrowserSystems, generation: view Int) ret EntityId {
+  loop var i: Int = 0, i < componentCount(this: systems.searches), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.searches, i: i)
+    if componentView(this: systems.searches, entityId: browser).generation is generation {
+      ret browser
+    }
+  }
+  ret noEntity()
+}
+
+func takeSearchAnswers(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop systems.search.answers.pending() > 0 {
+    let answer: SearchAnswer = systems.search.answers.receive()
+    if answer.finished {
+      finishSearch(systems: systems, generation: answer.generation)
+    }
+    let browser: EntityId = browserOfSearch(systems: systems, generation: answer.generation)
+    if isNone(this: browser) {
+      continue
+    }
+    changed = true
+    let search: mod BrowserSearch = componentMod(this: systems.searches, entityId: browser)
+    search.running = answer.finished is false
+    search.capped = answer.capped
+    let column: EntityId = search.column
+    if answer.outside {
+      componentMod(this: systems.columns, entityId: column).state = ColumnState.outside
+      continue
+    }
+    var entries: List(FileEntry) = {}
+    if answer.first is false {
+      let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
+      entries = held.entries
+    }
+    loop let entry: view FileEntry in answer.entries {
+      entries.add(value: entry)
+    }
+    let names: List(String) = namesOf(entries: entries)
+    setEntries(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      entries: own entries
+      names: own names
+    )
+  }
+  ret changed
+}
+
+# How many were found, beside the field
+func showSearchCount(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+) ret Bool {
+  let search: view BrowserSearch = componentView(this: systems.searches, entityId: browser)
+  let count: Int = componentView(this: systems.entries, entityId: search.column).entries.length
+  var text: String = "{count} found"
+  if search.capped {
+    text = "the first {count}"
+  } else if search.running or search.startAt >= 0.0 {
+    text = "{count} ..."
+  }
+  let node: EntityId = componentView(this: systems.browsers, entityId: browser).searchCount
+  if componentHas(this: world.texts, entityId: node) is false {
+    ret false
+  }
+  let same: Bool = componentView(this: world.texts, entityId: node).text is text
+  showNode(world: world, entityId: node, shown: true)
+  setNodeText(world: world, entityId: node, text: text)
+  ret same is false
+}
+
+# When a search is to begin (below 0: none)
+func searchDeadline(systems: view FileBrowserSystems) ret Float64 {
+  var deadline: Float64 = -1.0
+  loop var i: Int = 0, i < componentCount(this: systems.searches), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.searches, i: i)
+    let at: Float64 = componentView(this: systems.searches, entityId: browser).startAt
+    if at >= 0.0 and (deadline < 0.0 or at < deadline) {
+      deadline = at
+    }
+  }
+  ret deadline
+}
+
+# Every search is over; false when a disk has not answered in `waitMs`
+func stopSearches(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  loop let job: view SearchJob in systems.search.jobs {
+    job.stop.post()
+  }
+  loop var i: Int = 0, i < waitMs and systems.search.jobs.length > 0, ++i {
+    loop systems.search.answers.pending() > 0 {
+      let answer: SearchAnswer = systems.search.answers.receive()
+      if answer.finished {
+        finishSearch(systems: systems, generation: answer.generation)
+      }
+    }
+    if systems.search.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.search.jobs.length > 0 {
+    ret false
+  }
+  systems.search.answers.freeChannel()
+  ret true
+}
