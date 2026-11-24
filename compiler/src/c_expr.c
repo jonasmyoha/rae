@@ -209,6 +209,31 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         }
     }
     Str base = get_base_type_name(tr);
+    /* An optional REFERENCE (`opt view T`: a parameter, a loop row, and what an
+     * `if let x: view T` binding is registered as) is a nullable pointer, in a
+     * rae_View_* wrapper for a primitive or String: the text of what it points
+     * at, or `none`. It is read through without a test otherwise, as whatever
+     * C type it has (an enum printed its number). */
+    const AstExpr* reference = operand->kind == AST_EXPR_UNBOX ? operand->as.unary.operand : operand;
+    if (tr && tr->is_opt && (tr->is_view || tr->is_mod)
+        && (reference->kind == AST_EXPR_IDENT || reference->kind == AST_EXPR_CALL
+            || reference->kind == AST_EXPR_METHOD_CALL)) {
+        AstTypeRef payload = *tr;
+        payload.is_opt = false; payload.is_view = false; payload.is_mod = false;
+        payload.next = NULL; payload.resolved_type = NULL;
+        bool wrapper = reference->kind == AST_EXPR_IDENT && c_primitive_ref_has_wrapper(base);
+        int rid = ctx->temp_counter++;
+        char pointee[48];
+        snprintf(pointee, sizeof pointee, "*__oref%d", rid);
+        fprintf(out, "(__extension__ ({ const ");
+        emit_type_ref_as_c_type(ctx, &payload, out, false);
+        fprintf(out, "* __oref%d = (", rid);
+        emit_expr(ctx, reference, out, PREC_LOWEST, false, true);
+        fprintf(out, wrapper ? ").ptr; __oref%d ? " : "); __oref%d ? ", rid);
+        rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, pointee, false, out);
+        fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
+        return;
+    }
     // A direct enum member access `Enum.member` may not infer to the enum type;
     // recover the enum name from the object so it stringifies to the name too.
     if (base.len == 0 && operand->kind == AST_EXPR_MEMBER
@@ -339,23 +364,6 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         && !has_property(d->as.type_decl.properties, "c_struct")
         && !d->as.type_decl.generic_params
         && !(tr && tr->is_opt);
-    /* An optional REFERENCE to a user struct (`opt view Track` — what an
-     * `if let x: view Track =>` binding is registered as) is a nullable
-     * `const rae_Track*`: format the struct when it is there, `none` when it
-     * is not. It used to reach the generic text macro and fail to compile. */
-    bool is_opt_struct_ref = d && d->kind == AST_DECL_TYPE
-        && !has_property(d->as.type_decl.properties, "c_struct")
-        && !d->as.type_decl.generic_params
-        && tr && tr->is_opt && (tr->is_view || tr->is_mod);
-    if (is_opt_struct_ref) {
-        const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &(AstTypeRef){.parts = &(AstIdentifierPart){.text = base}});
-        int rid = ctx->temp_counter++;
-        fprintf(out, "(__extension__ ({ const %s* __sref%d = (", mangled, rid);
-        emit_expr(ctx, operand, out, PREC_LOWEST, false, true);
-        fprintf(out, "); __sref%d ? rae_to_str_%s_(__sref%d) : (rae_String){(uint8_t*)\"none\", 4}; }))",
-                rid, mangled, rid);
-        return;
-    }
     // Integers by their Rae type (rae_int_to_str_expr): the _Generic below sees
     // only C types, where UInt32 is Char's uint32_t and Int8 may be Bool's
     // int8_t.

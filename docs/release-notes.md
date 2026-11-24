@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.76, 2026-11-25: the text of an optional reference
+
+- `"{kind}"` and `log(kind)` of an `opt view Kind` that `if let` narrowed is the enum's name; it was its number. Of a
+  List or a generic struct it was an error of the C compiler.
+- One that is not narrowed (a parameter, a loop row, a call's answer) is `none` or that text, for every type; it
+  crashed, was empty, or was an error of the C compiler.
+- `let letter: opt Char = 'x'` compiles.
+- Case 1641.
+
 ## 0.4.75, 2026-11-25: reading a list of optionals
 
 - A `List(opt T)` can be read: `viewAt`, `modAt`, `copyAt`, `copyAtFallback`, `copyAtDefault`, `pop`, a loop over
