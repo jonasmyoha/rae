@@ -1,0 +1,372 @@
+# The pointer in text fields, and their scroll to the caret. Apart from ui/textFieldSystem, which
+# needs no window and no font.
+#
+# Once a frame, after updateUiInput (and menuSystem), before textFieldSystem:
+#
+#   let moved: Bool = textFieldPointerSystem(
+#     world: world  uiSystems: uiSystems  input: input  res: gpuUi  extend: shiftHeld()  now: now
+#   )
+#
+# A mouse or a pen: a press on a field gives it the focus and puts its caret there (with `extend`,
+# Shift, it selects to there), a drag selects, a double click a word and by words, a triple click
+# all. Such a press is the field's: input.pointer.pressed is false after it, so that nothing else
+# (a list's scroll) takes the drag. A finger: a tap puts the caret there, a double tap selects a
+# word
+# and shows the edit menu (iOS); dragging scrolls what is behind, as anywhere.
+#
+# textFieldScrollSystem runs after the transforms (app3d/UiShell's pipelines call it): a focused
+# text wider than its place is scrolled so that its caret is seen.
+import Gpu2dTextInput
+import Keys
+import Sdl3
+open ecs/ComponentTable
+open ecs/Entity
+open text/TextEdit
+open ui/BindingComponents
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/RenderSystem
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+
+# How far a finger may move and still tap, in points
+const textFieldTapPoints: Float = 10.0
+
+# Is a Shift key held?
+func shiftHeld() ret Bool {
+  ret Sdl3.isKeyDown(key: Keys.keyLShift) or Sdl3.isKeyDown(key: Keys.keyRShift)
+}
+
+# True when the focus, the caret or the selection changed
+func textFieldPointerSystem(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  res: view Gpu2dUi
+  extend: view Bool
+  now: view Float64
+) ret Bool {
+  # a press is over in the frame after its end (textFieldSystem reads it in that one)
+  let held: EntityId = uiSystems.textField.press.fieldEntityId
+  if uiSystems.textField.press.ended or isAlive(world: world, entityId: held) is false {
+    uiSystems.textField.press = TextFieldPress {}
+  }
+  var changed: Bool = false
+  if input.pointer.pressed and world.menu.open is false {
+    let target: EntityId = input.hoveredEntityId
+    if componentHas(this: world.textFields, entityId: target) and componentHas(
+      this: world.leavings
+      entityId: target
+    ) is false {
+      changed = pressTextField(
+        world: world
+        uiSystems: uiSystems
+        input: input
+        res: res
+        fieldEntityId: target
+        extend: extend
+      )
+    }
+  }
+  if isNone(this: uiSystems.textField.press.fieldEntityId) {
+    ret changed
+  }
+  if uiSystems.textField.press.touch {
+    changed = stepTextFieldTap(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      res: res
+    ) or changed
+  } else if input.pointer.down {
+    changed = dragTextField(
+      world: world
+      uiSystems: uiSystems
+      input: input
+      res: res
+    ) or changed
+  }
+  if input.pointer.down is false {
+    uiSystems.textField.press.ended = true
+  }
+  if changed {
+    # the caret shows at once
+    uiSystems.textField.caretEpoch = now
+  }
+  ret changed
+}
+
+# The byte offset of the field's text at `x`
+func textFieldAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  res: view Gpu2dUi
+  fieldEntityId: view EntityId
+  x: view Float
+) ret Int {
+  let lineEntityId: EntityId = textFieldLineEntityId(world: world, fieldEntityId: fieldEntityId)
+  if let line: TextFieldLine = textFieldLine(
+    world: world
+    uiSystems: uiSystems
+    fieldEntityId: fieldEntityId
+    lineEntityId: lineEntityId
+    res: res
+  ) {
+    # past an end of a scrolled text by a little at most, so that a drag held there scrolls on at
+    # about a character a frame
+    var inside: Float = x
+    if line.scrolls {
+      let reach: Float = line.size * 0.4
+      if inside < line.left - reach {
+        inside = line.left - reach
+      }
+      if inside > line.right + reach {
+        inside = line.right + reach
+      }
+    }
+    ret textFieldOffsetAt(
+      line: line
+      res: res
+      text: componentView(this: world.textFields, entityId: fieldEntityId).text
+      x: inside
+    )
+  }
+  ret componentView(this: world.textFields, entityId: fieldEntityId).text.length()
+}
+
+# The focus on the field, and its edit current
+func takeTextFieldFocus(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  fieldEntityId: view EntityId
+) {
+  let moved: Bool = focusTextField(world: world, entityId: fieldEntityId)
+  syncTextFieldEdit(
+    world: world
+    textFieldSystem: uiSystems.textField
+    fieldEntityId: fieldEntityId
+  )
+}
+
+# Put the caret at `at`, or select the word there (2 clicks) or all (3): what a drag goes on from
+func selectInTextField(
+  uiSystems: mod UiSystems
+  at: view Int
+  clicks: view Int
+  extend: view Bool
+) {
+  let text: String = "{uiSystems.textField.edit.text}"
+  if clicks is 1 {
+    placeCaret(edit: uiSystems.textField.edit, at: at, extend: extend)
+    uiSystems.textField.press.start = uiSystems.textField.edit.anchor
+    uiSystems.textField.press.end = uiSystems.textField.edit.anchor
+    ret
+  }
+  var span: TextSpan = { start: 0, end: text.length() }
+  if clicks is 2 {
+    span = wordAround(text: text, at: at)
+  }
+  selectText(edit: uiSystems.textField.edit, start: span.start, end: span.end)
+  uiSystems.textField.press.start = span.start
+  uiSystems.textField.press.end = span.end
+}
+
+func pressTextField(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: mod UiInput
+  res: view Gpu2dUi
+  fieldEntityId: view EntityId
+  extend: view Bool
+) ret Bool {
+  let touch: Bool = input.pointer.kind is InputKind.touch
+  uiSystems.textField.press = TextFieldPress {
+    fieldEntityId: fieldEntityId
+    touch: touch
+    x: input.pointer.x
+    y: input.pointer.y
+    clicks: input.pressClicks
+  }
+  if touch {
+    ret false
+  }
+  takeTextFieldFocus(world: world, uiSystems: uiSystems, fieldEntityId: fieldEntityId)
+  let at: Int = textFieldAt(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    fieldEntityId: fieldEntityId
+    x: input.pointer.x
+  )
+  selectInTextField(
+    uiSystems: uiSystems
+    at: at
+    clicks: input.pressClicks
+    extend: extend
+  )
+  input.pointer.pressed = false
+  ret true
+}
+
+# The mouse held: what is from the press to the pointer is selected, by words after a double click
+func dragTextField(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  res: view Gpu2dUi
+) ret Bool {
+  let press: TextFieldPress = uiSystems.textField.press
+  if press.clicks > 2 or (press.moved is false and input.pointer.x is press.x) {
+    ret false
+  }
+  # the field's text was set or the focus taken away meanwhile: the drag is off
+  if uiSystems.textField.editEntityId is not press.fieldEntityId or focusedTextFieldEntityId(
+    world: world
+  ) is not press.fieldEntityId {
+    ret false
+  }
+  uiSystems.textField.press.moved = true
+  let at: Int = textFieldAt(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    fieldEntityId: press.fieldEntityId
+    x: input.pointer.x
+  )
+  let caret: Int = uiSystems.textField.edit.caret
+  let anchor: Int = uiSystems.textField.edit.anchor
+  if press.clicks is 2 {
+    let span: TextSpan = wordAround(text: uiSystems.textField.edit.text, at: at)
+    if at < press.start {
+      selectText(edit: uiSystems.textField.edit, start: press.end, end: span.start)
+    } else if at > press.end {
+      selectText(edit: uiSystems.textField.edit, start: press.start, end: span.end)
+    } else {
+      selectText(edit: uiSystems.textField.edit, start: press.start, end: press.end)
+    }
+  } else {
+    selectText(edit: uiSystems.textField.edit, start: press.start, end: at)
+  }
+  ret uiSystems.textField.edit.caret is not caret or uiSystems.textField.edit.anchor is not anchor
+}
+
+# A finger on a field: lifted where it came down, and not after the edit menu, it is a tap
+func stepTextFieldTap(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  input: view UiInput
+  res: view Gpu2dUi
+) ret Bool {
+  let press: TextFieldPress = uiSystems.textField.press
+  let deltaX: Float = input.pointer.x - press.x
+  let deltaY: Float = input.pointer.y - press.y
+  let reach: Float = uiUnitsFromPoints(input: input, points: textFieldTapPoints)
+  if deltaX * deltaX + deltaY * deltaY > reach * reach or uiPressClaimed(input: input, world: world) {
+    uiSystems.textField.press.moved = true
+  }
+  if input.pointer.down or uiSystems.textField.press.moved or uiSystems.textField.pressMenuShown {
+    ret false
+  }
+  takeTextFieldFocus(world: world, uiSystems: uiSystems, fieldEntityId: press.fieldEntityId)
+  let at: Int = textFieldAt(
+    world: world
+    uiSystems: uiSystems
+    res: res
+    fieldEntityId: press.fieldEntityId
+    x: press.x
+  )
+  selectInTextField(
+    uiSystems: uiSystems
+    at: at
+    clicks: press.clicks
+    extend: false
+  )
+  if press.clicks > 1 and hasSelection(edit: uiSystems.textField.edit) {
+    showSelectionMenu(
+      world: world
+      uiSystems: uiSystems
+      res: res
+      fieldEntityId: press.fieldEntityId
+    )
+  }
+  ret true
+}
+
+# The system's edit menu over the selection (iOS)
+func showSelectionMenu(
+  world: view UiWorld
+  uiSystems: mod UiSystems
+  res: view Gpu2dUi
+  fieldEntityId: view EntityId
+) {
+  let lineEntityId: EntityId = textFieldLineEntityId(world: world, fieldEntityId: fieldEntityId)
+  if let line: TextFieldLine = textFieldLine(
+    world: world
+    uiSystems: uiSystems
+    fieldEntityId: fieldEntityId
+    lineEntityId: lineEntityId
+    res: res
+  ) {
+    let text: String = "{uiSystems.textField.edit.text}"
+    let from: Float = textFieldOffsetX(
+      line: line
+      res: res
+      text: text
+      at: selectionStart(edit: uiSystems.textField.edit)
+    )
+    let to: Float = textFieldOffsetX(
+      line: line
+      res: res
+      text: text
+      at: selectionEnd(edit: uiSystems.textField.edit)
+    )
+    Gpu2dTextInput.showEditMenu(
+      x: (from + to) / 2.0
+      y: line.top
+      canPaste: textFieldClipboard(textFieldSystem: uiSystems.textField).length() > 0
+      canCopy: true
+    )
+    uiSystems.textField.menuShows = uiSystems.textField.menuShows + 1
+  }
+}
+
+# Scroll the focused field's text so that its caret is in its place, and not past the text's end
+func textFieldScrollSystem(world: view UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+  let fieldEntityId: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: fieldEntityId) or fieldEntityId is not uiSystems.textField.editEntityId {
+    ret
+  }
+  let lineEntityId: EntityId = textFieldLineEntityId(world: world, fieldEntityId: fieldEntityId)
+  if let line: TextFieldLine = textFieldLine(
+    world: world
+    uiSystems: uiSystems
+    fieldEntityId: fieldEntityId
+    lineEntityId: lineEntityId
+    res: res
+  ) {
+    if line.scrolls is false {
+      uiSystems.textField.scroll = 0.0
+      ret
+    }
+    let room: Float = line.right - line.left
+    let caret: Float = textFieldOffsetX(
+      line: line
+      res: res
+      text: uiSystems.textField.edit.text
+      at: uiSystems.textField.edit.caret
+    ) - line.x
+    var scroll: Float = uiSystems.textField.scroll
+    if caret + line.caretWidth - scroll > room {
+      scroll = caret + line.caretWidth - room
+    }
+    if caret < scroll {
+      scroll = caret
+    }
+    let most: Float = line.width + line.caretWidth - room
+    if scroll > most {
+      scroll = most
+    }
+    uiSystems.textField.scroll = scroll
+  }
+}

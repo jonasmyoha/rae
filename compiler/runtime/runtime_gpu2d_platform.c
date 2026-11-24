@@ -580,6 +580,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
     if (g_rae_browser_stop_requested) return 1;
 #endif
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
+    memset(g_sdl_repeated, 0, sizeof(g_sdl_repeated));
     memset(g_sdl_mouse_pressed, 0, sizeof(g_sdl_mouse_pressed));
     memset(g_sdl_mouse_released, 0, sizeof(g_sdl_mouse_released));
     for (int ti = 0; ti < g_g2d_touch_n; ti++) g_g2d_touch[ti].pressed = 0;   /* clear edge */
@@ -610,6 +611,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
                 if (e.key.scancode < SDL_SCANCODE_COUNT) {
                     g_sdl_keydown[e.key.scancode] = 1;
                     if (!e.key.repeat) g_sdl_pressed[e.key.scancode] = 1;  /* edge */
+                    else g_sdl_repeated[e.key.scancode] = 1;
                 }
                 break;
             case SDL_EVENT_KEY_UP:

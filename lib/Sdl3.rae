@@ -191,6 +191,16 @@ func isKeyPressed(key: copy Int) ret Bool {
   }
 }
 
+func nativeIsKeyRepeated(key: Int) mainThread unsafe extern("rae_ext_Sdl3_isKeyRepeated") ret Bool
+
+# `key` was pressed this frame, or is held and the system repeated it this frame: what a text
+# editing key (an arrow, Backspace) goes by
+func isKeyTyped(key: copy Int) ret Bool {
+  unsafe {
+    ret nativeIsKeyPressed(key: key) or nativeIsKeyRepeated(key: key)
+  }
+}
+
 # --- Native file-open dialog ---------------------------------------------
 # The OS "open file" panel, on SDL3's SDL_ShowOpenFileDialog. It is ASYNC:
 # `openFileDialog` requests ONE panel and returns immediately; the choice

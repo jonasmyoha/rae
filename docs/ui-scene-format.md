@@ -454,9 +454,39 @@ and that every `OnClick` id has a label.
 - OS text input is on only while a field has focus (on a phone that is what
   shows the keyboard), and `uiSystems.textField.keyboardHeight` is the
   keyboard's height in points so a layout can keep the field above it.
-- Cmd+V (Ctrl+V) pastes the clipboard's text at the caret (the field's end;
-  line breaks dropped, as the field is one line). Cmd+C copies and Cmd+X cuts
-  the field's whole text. `readTextInputFrame` reads those keys into the
+- The focused field has a caret and a selection (`text/TextEdit`, kept in
+  `uiSystems.textField.edit`). The caret starts at the text's end, and when
+  something else sets the text. Keys: Left, Right, Home and End; with Alt or
+  Ctrl Left and Right go by words, with Command to the line's ends; Shift with
+  each selects; Cmd+A (Ctrl+A) selects all. Held keys repeat. Backspace and
+  Delete take the selection, else a character, with Alt or Ctrl a word, with
+  Command all to that end. Cmd+Z undoes and Shift+Cmd+Z or Ctrl+Y redoes,
+  until the focus moves; what is typed without a pause of a second is one step.
+  `readTextInputFrame` reads them into the frame's `move`, `extend`,
+  `selectAll`, `deletes`, `deleteWord`, `deleteLine`, `undo` and `redo`.
+- A character is what a person sees as one (`text/Graphemes`): a letter with
+  its marks, a whole emoji, a flag. The caret never stands inside one.
+- The pointer: `textFieldPointerSystem(world:, uiSystems:, input:, res:,
+  extend:, now:)` (`ui/TextFieldPointerSystem`), after `updateUiInput` and
+  before `textFieldSystem`, with `extend: shiftHeld()`. A mouse's press focuses
+  the field and places the caret, a drag selects, a Shift press selects to
+  there, a double click a word (a drag on by words), a triple click all. The
+  press is the field's then: `input.pointer.pressed` is false after it, and
+  the focus stays when the drag ends elsewhere. A finger's tap places the
+  caret, a double tap selects a word and shows the edit menu. A program that
+  does not call it has the caret at the end and the keys.
+- A focused text wider than its place is clipped and scrolled to its caret
+  (`textFieldScrollSystem`, in `app3d/UiShell`'s pipelines): its own box, or,
+  when the line hugs its text, the field's inside its padding. The selection is
+  a band of the slot `accent` behind the text.
+- `setTextFieldSelection(world:, textFieldSystem:, entityId:, start:, end:)`
+  focuses a field with a part selected (a rename selects the name without its
+  extension); `textFieldSelection` reads it. Byte offsets.
+- While a menu is open (section 47) the keys are the menu's.
+- Cmd+V (Ctrl+V) pastes the clipboard's text in place of the selection or at
+  the caret (line breaks dropped, as the field is one line). Cmd+C copies and
+  Cmd+X cuts the selection, or with nothing selected the field's whole text.
+  `readTextInputFrame` reads those keys into the
   frame's `paste` / `copy` / `cut`. The clipboard is the system's
   (`Gpu2dTextInput.clipboardText` / `setClipboardText`, SDL3 over
   NSPasteboard and UIPasteboard; never touched under a headless run). A test
@@ -470,14 +500,18 @@ and that every `OnClick` id has a label.
   pointer (the app's `UiInput.pointer`), detects the press and calls
   `Gpu2dTextInput.showEditMenu` (a
   UIEditMenuInteraction, iOS 16+) with Paste when the clipboard has text and
-  Copy and Cut when the field has some. The item picked is polled by the next
+  Copy and Cut when the field has some, which act on the selection or, with
+  none, on the whole text. The item picked is polled by the next
   `readTextInputFrame` (`Gpu2dTextInput.editMenuChoice`) and arrives as that
   frame's `paste` / `copy` / `cut`. Elsewhere the menu is a no-op (case 1311
-  checks when it is shown). A double tap does not open it.
-- The caret is drawn by the renderer after the text, not written into it;
-  it blinks every 0.53 s from the last edit, and `textFieldDeadlineSeconds` is
+  checks when it is shown). A double tap opens it over the word it selects.
+- The caret is drawn by the renderer, not written into the text; it is hidden
+  while something is selected and
+  blinks every 0.53 s from the last edit, and `textFieldDeadlineSeconds` is
   when it next changes, for the event loop's heartbeat
   (`earliestDeadlineSeconds` combines it with another deadline).
+- Cases 1581 (characters and editing), 1582 (keys, pointer, scroll), check
+  `uiTextField`.
 
 ## 12. `ListReorder`: drag to reorder a list's rows
 

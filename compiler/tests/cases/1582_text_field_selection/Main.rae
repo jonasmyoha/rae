@@ -1,0 +1,674 @@
+# A text field's caret and selection (ui/textFieldSystem, ui/TextFieldPointerSystem): the keys, the
+# clipboard on the selection, undo, a mouse's press, drag, Shift press, double and triple click, a
+# finger's taps, setTextFieldSelection, the scroll of a text wider than its field, and the focus
+# kept while a press drags out of the field.
+import Math
+import SdfText
+open app3d/UiShell
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open text/TextEdit
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/InputKind
+open ui/InputSystem
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneLoader
+open ui/TextFieldPointerSystem
+open ui/Theme
+open ui/ThemeParse
+open ui/ThemeResolved
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  resources: Gpu2dUi
+  name: EntityId
+  other: EntityId
+  now: Float64 = 10.0
+}
+
+func pageText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"page\",\"root\":\"Page\",\"nodes\":\{\"Page\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":400,\"h\":200\},\"Layout\":\{\"type\":\"Vertical\",\"gap\":10\},\"Children\":[\"Name\",\"Other\"]\},\"Name\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"Layout\":\{\"type\":\"Horizontal\",\"alignCross\":\"Center\"\},\"Padding\":\{\"l\":10,\"t\":0,\"r\":10,\"b\":0\},\"TextField\":\{\"placeholder\":\"Name\",\"actionId\":\"name.set\"\},\"OnClick\":\{\"label\":\"Name\"\},\"Children\":[\"NameLine\"]\},\"NameLine\":\{\"Size\":\{\"w\":\{\"mode\":\"Hug\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Text\":\{\"text\":\"\"\}\},\"Other\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"TextField\":\{\},\"OnClick\":\{\"label\":\"Other\"\},\"Children\":[\"OtherLine\"]\},\"OtherLine\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":40\},\"Text\":\{\"text\":\"\"\}\}\}\}"
+}
+
+func quiet() ret TextInputFrame {
+  ret TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+}
+
+func show(app: view App, step: view String) {
+  let focused: EntityId = focusedTextFieldEntityId(world: app.world)
+  if isNone(this: focused) {
+    log(
+      "{step}: no focus, Name '{componentView(this: app.world.textFields, entityId: app.name).text}'"
+    )
+    ret
+  }
+  var which: String = "Name"
+  if focused is app.other {
+    which = "Other"
+  }
+  let text: String = "{componentView(this: app.world.textFields, entityId: focused).text}"
+  if let span: TextSpan = textFieldSelection(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+  ) {
+    let before: String = text.sub(start: 0, len: span.start)
+    let selected: String = text.sub(start: span.start, len: span.end - span.start)
+    let after: String = text.sub(start: span.end, len: text.length() - span.end)
+    var mark: String = "|"
+    if span.end > span.start {
+      mark = "[{selected}]"
+    }
+    log("{step}: {which} {before}{mark}{after}, caret shows {app.uiSystems.textField.caretVisible}")
+  }
+}
+
+func frame(
+  app: mod App
+  step: view String
+  pointer: view UiPointerState
+  extend: view Bool
+  keys: view TextInputFrame
+) {
+  app.now = app.now + 0.05
+  app.input.nowSeconds = app.now
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  let pressed: Bool = app.input.pointer.pressed
+  let moved: Bool = textFieldPointerSystem(
+    world: app.world
+    uiSystems: app.uiSystems
+    input: app.input
+    res: app.resources
+    extend: extend
+    now: app.now
+  )
+  # a program that takes every press as a tap, as one may
+  var input: TextInputFrame = keys
+  input.tapped = pressed
+  let changed: Bool = textFieldSystem(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    actions: app.world.uiActions
+    input: input
+    now: app.now
+  )
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+  if step.length() > 0 {
+    show(app: app, step: step)
+  }
+}
+
+func key(app: mod App, step: view String, keys: view TextInputFrame) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: app.input.pointer.x
+    y: app.input.pointer.y
+    down: false
+    kind: InputKind.mouse
+  )
+  frame(
+    app: app
+    step: step
+    pointer: pointer
+    extend: false
+    keys: keys
+  )
+}
+
+func typed(app: mod App, text: view String) {
+  var keys: TextInputFrame = quiet()
+  keys.typed = "{text}"
+  key(app: app, step: "typed {text}", keys: keys)
+}
+
+func move(
+  app: mod App
+  step: view String
+  move: view TextMove
+  extend: view Bool
+) {
+  var keys: TextInputFrame = quiet()
+  keys.move = move
+  keys.extend = extend
+  key(app: app, step: step, keys: keys)
+}
+
+func mouse(
+  app: mod App
+  step: view String
+  x: view Float
+  y: view Float
+  down: view Bool
+  clicks: view Int
+  extend: view Bool
+  kind: view InputKind
+) {
+  var pointer: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: kind
+  )
+  pointer.clicks = clicks
+  frame(
+    app: app
+    step: step
+    pointer: pointer
+    extend: extend
+    keys: quiet()
+  )
+}
+
+# Where byte `at` of the Name field's text is, or a little to its right
+func atByte(app: view App, at: view Int) ret Float {
+  if let line: TextFieldLine = textFieldLine(
+    world: app.world
+    uiSystems: app.uiSystems
+    fieldEntityId: app.name
+    lineEntityId: textFieldLineEntityId(world: app.world, fieldEntityId: app.name)
+    res: app.resources
+  ) {
+    ret textFieldOffsetX(
+      line: line
+      res: app.resources
+      text: componentView(this: app.world.textFields, entityId: app.name).text
+      at: at
+    ) + 1.0
+  }
+  ret -1.0
+}
+
+func scrollText(app: view App) ret String {
+  if let line: TextFieldLine = textFieldLine(
+    world: app.world
+    uiSystems: app.uiSystems
+    fieldEntityId: app.name
+    lineEntityId: textFieldLineEntityId(world: app.world, fieldEntityId: app.name)
+    res: app.resources
+  ) {
+    let caret: Float = textFieldOffsetX(
+      line: line
+      res: app.resources
+      text: app.uiSystems.textField.edit.text
+      at: app.uiSystems.textField.edit.caret
+    )
+    ret "scrolls {line.scrolls}, place {Math.round(x: line.left)}..{Math.round(x: line.right)}, caret at {Math.round(
+      x: caret
+    )}, text from {Math.round(x: line.x)}"
+  }
+  ret "no line"
+}
+
+func main() {
+  let scene: Scene = parseScene(source: pageText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    resources: resources
+    name: noEntity()
+    other: noEntity()
+  }
+  seedWorldTheme(world: app.world, res: app.resources)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 200.0
+  let root: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Name") {
+    app.name = nodeEntityId(world: app.world, index: raw)
+  }
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: "Other") {
+    app.other = nodeEntityId(world: app.world, index: raw)
+  }
+  setTextFieldClipboard(textFieldSystem: app.uiSystems.textField, text: "")
+  runUiSystems(world: app.world, uiSystems: app.uiSystems, res: app.resources)
+
+  # keys
+  componentMod(this: app.world.textFields, entityId: app.name).text = "Photo one.png"
+  let focusedNow: Bool = focusTextField(world: app.world, entityId: app.name)
+  key(app: app, step: "focus", keys: quiet())
+  move(
+    app: app
+    step: "Left"
+    move: TextMove.left
+    extend: false
+  )
+  typed(app: app, text: "X")
+  var keys: TextInputFrame = quiet()
+  keys.backspaces = 1
+  key(app: app, step: "Backspace", keys: keys)
+  move(
+    app: app
+    step: "word left"
+    move: TextMove.wordLeft
+    extend: false
+  )
+  move(
+    app: app
+    step: "Shift word left"
+    move: TextMove.wordLeft
+    extend: true
+  )
+  keys = quiet()
+  keys.copy = true
+  key(app: app, step: "copy", keys: keys)
+  log("clipboard '{app.uiSystems.textField.clipboardText}'")
+  move(
+    app: app
+    step: "End"
+    move: TextMove.end
+    extend: false
+  )
+  keys = quiet()
+  keys.paste = true
+  key(app: app, step: "paste", keys: keys)
+  keys = quiet()
+  keys.undo = true
+  key(app: app, step: "undo", keys: keys)
+  keys = quiet()
+  keys.redo = true
+  key(app: app, step: "redo", keys: keys)
+  keys = quiet()
+  keys.backspaces = 1
+  keys.deleteWord = true
+  key(app: app, step: "word Backspace", keys: keys)
+  move(
+    app: app
+    step: "Home"
+    move: TextMove.start
+    extend: false
+  )
+  keys = quiet()
+  keys.deletes = 1
+  key(app: app, step: "Delete", keys: keys)
+  keys = quiet()
+  keys.selectAll = true
+  key(app: app, step: "select all", keys: keys)
+  keys = quiet()
+  keys.cut = true
+  key(app: app, step: "cut", keys: keys)
+  log("clipboard '{app.uiSystems.textField.clipboardText}'")
+  keys = quiet()
+  keys.cut = true
+  key(app: app, step: "cut of nothing", keys: keys)
+  log("clipboard '{app.uiSystems.textField.clipboardText}'")
+
+  # a rename selects the name without its extension
+  componentMod(this: app.world.textFields, entityId: app.name).text = "Photo one.png"
+  log("set {setTextFieldSelection(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    entityId: app.name
+    start: 0
+    end: 9
+  )} {setTextFieldSelection(
+    world: app.world
+    textFieldSystem: app.uiSystems.textField
+    entityId: root
+    start: 0
+    end: 9
+  )}")
+  key(app: app, step: "the name selected", keys: quiet())
+  typed(app: app, text: "Trip")
+  keys = quiet()
+  keys.enter = true
+  key(app: app, step: "Return", keys: keys)
+
+  # the mouse
+  componentMod(this: app.world.textFields, entityId: app.name).text = "Photo one.png"
+  key(app: app, step: "", keys: quiet())
+  let y: Float = 20.0
+  mouse(
+    app: app
+    step: "press at 3"
+    x: atByte(app: app, at: 3)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "drag to 8"
+    x: atByte(app: app, at: 8)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "drag out of the field"
+    x: 390.0
+    y: 190.0
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "let go there"
+    x: 390.0
+    y: 190.0
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  key(app: app, step: "after", keys: quiet())
+  mouse(
+    app: app
+    step: "press at 2"
+    x: atByte(app: app, at: 2)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: ""
+    x: atByte(app: app, at: 2)
+    y: y
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "Shift press at 7"
+    x: atByte(app: app, at: 7)
+    y: y
+    down: true
+    clicks: 1
+    extend: true
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: ""
+    x: atByte(app: app, at: 7)
+    y: y
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "double click in one"
+    x: atByte(app: app, at: 7)
+    y: y
+    down: true
+    clicks: 2
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "dragged back into Photo"
+    x: atByte(app: app, at: 2)
+    y: y
+    down: true
+    clicks: 2
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "let go"
+    x: atByte(app: app, at: 2)
+    y: y
+    down: false
+    clicks: 2
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "triple click"
+    x: atByte(app: app, at: 7)
+    y: y
+    down: true
+    clicks: 3
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: ""
+    x: atByte(app: app, at: 7)
+    y: y
+    down: false
+    clicks: 3
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "press on the other field"
+    x: 60.0
+    y: 70.0
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "let go"
+    x: 60.0
+    y: 70.0
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "press outside"
+    x: 390.0
+    y: 190.0
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: ""
+    x: 390.0
+    y: 190.0
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+
+  # a finger
+  mouse(
+    app: app
+    step: "finger down"
+    x: atByte(app: app, at: 5)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.touch
+  )
+  mouse(
+    app: app
+    step: "lifted"
+    x: atByte(app: app, at: 5)
+    y: y
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.touch
+  )
+  mouse(
+    app: app
+    step: "finger down again"
+    x: atByte(app: app, at: 1)
+    y: y
+    down: true
+    clicks: 2
+    extend: false
+    kind: InputKind.touch
+  )
+  mouse(
+    app: app
+    step: "a double tap"
+    x: atByte(app: app, at: 1)
+    y: y
+    down: false
+    clicks: 2
+    extend: false
+    kind: InputKind.touch
+  )
+  log("edit menus shown {app.uiSystems.textField.menuShows}")
+  mouse(
+    app: app
+    step: "finger down"
+    x: atByte(app: app, at: 1)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.touch
+  )
+  mouse(
+    app: app
+    step: "dragged"
+    x: atByte(app: app, at: 9)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.touch
+  )
+  mouse(
+    app: app
+    step: "lifted there"
+    x: atByte(app: app, at: 9)
+    y: y
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.touch
+  )
+
+  # wider than the field
+  key(app: app, step: "", keys: quiet())
+  componentMod(this: app.world.textFields, entityId: app.name).text = "A name that is much too long for the field.png"
+  let again: Bool = focusTextField(world: app.world, entityId: app.name)
+  key(app: app, step: "a long name", keys: quiet())
+  log(scrollText(app: app))
+  move(
+    app: app
+    step: "word left"
+    move: TextMove.wordLeft
+    extend: false
+  )
+  log(scrollText(app: app))
+  move(
+    app: app
+    step: "Home"
+    move: TextMove.start
+    extend: false
+  )
+  log(scrollText(app: app))
+  mouse(
+    app: app
+    step: "press"
+    x: atByte(app: app, at: 4)
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "drag past the end"
+    x: 230.0
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "held there"
+    x: 230.0
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  mouse(
+    app: app
+    step: "held there"
+    x: 230.0
+    y: y
+    down: true
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  log(scrollText(app: app))
+  mouse(
+    app: app
+    step: ""
+    x: 230.0
+    y: y
+    down: false
+    clicks: 1
+    extend: false
+    kind: InputKind.mouse
+  )
+  keys = quiet()
+  keys.deletes = 1
+  key(app: app, step: "Delete", keys: keys)
+  log(scrollText(app: app))
+}

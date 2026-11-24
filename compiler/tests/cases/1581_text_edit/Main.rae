@@ -1,0 +1,146 @@
+# text/Graphemes and text/TextEdit: whole characters (marks, emoji sequences, flags, Korean), the
+# caret's moves by character and word, selecting, replacing, deleting, undo and redo.
+open text/Graphemes
+open text/TextEdit
+
+func boundaries(text: view String) ret String {
+  var ends: String = ""
+  var at: Int = 0
+  loop at < text.length() {
+    let next: Int = nextGrapheme(text: text, at: at)
+    let back: Int = previousGrapheme(text: text, at: next)
+    if back is not at {
+      ends = ends.concat(other: "(back {back})")
+    }
+    at = next
+    ends = ends.concat(other: " {at}")
+  }
+  ret ends
+}
+
+func show(step: view String, edit: view TextEdit) {
+  let start: Int = selectionStart(edit: edit)
+  let end: Int = selectionEnd(edit: edit)
+  let before: String = edit.text.sub(start: 0, len: start)
+  let after: String = edit.text.sub(start: end, len: edit.text.length() - end)
+  if hasSelection(edit: edit) {
+    log("{step}: {before}[{selectedText(edit: edit)}]{after}")
+  } else {
+    log("{step}: {before}|{after}")
+  }
+}
+
+func main() {
+  log("plain{boundaries(text: "abc")}")
+  log("composed and not{boundaries(text: "é é")}")
+  log("family, skin tone, flags{boundaries(text: "👩‍👩‍👧👍🏽🇫🇮🇸🇪")}")
+  log("keycap, heart{boundaries(text: "1️⃣❤️")}")
+  log("Korean{boundaries(text: "한국각")}")
+  log(
+    "inside {graphemeBoundary(text: "a👍🏽b", at: 5)} {graphemeBoundary(text: "a👍🏽b", at: 9)} {graphemeBoundary(
+      text: "ab"
+      at: 9
+    )}"
+  )
+  log("joined by nothing{boundaries(text: "❤‍‍😀")}")
+
+  var edit: TextEdit = createTextEdit(text: "one two.three")
+  show(step: "new", edit: edit)
+  moveCaret(edit: edit, move: TextMove.wordLeft, extend: false)
+  show(step: "word left", edit: edit)
+  moveCaret(edit: edit, move: TextMove.wordLeft, extend: true)
+  show(step: "Shift word left", edit: edit)
+  moveCaret(edit: edit, move: TextMove.right, extend: false)
+  show(step: "right", edit: edit)
+  moveCaret(edit: edit, move: TextMove.left, extend: true)
+  moveCaret(edit: edit, move: TextMove.left, extend: true)
+  show(step: "Shift left twice", edit: edit)
+  moveCaret(edit: edit, move: TextMove.left, extend: false)
+  show(step: "left", edit: edit)
+  moveCaret(edit: edit, move: TextMove.start, extend: false)
+  moveCaret(edit: edit, move: TextMove.wordRight, extend: false)
+  show(step: "start, word right", edit: edit)
+  moveCaret(edit: edit, move: TextMove.end, extend: true)
+  show(step: "Shift end", edit: edit)
+
+  # typing over it, undone as one edit with what was typed after it
+  let over: Bool = replaceSelection(
+    edit: edit
+    text: "s"
+    kind: TextEditKind.typed
+    now: 1.0
+  )
+  let more: Bool = replaceSelection(
+    edit: edit
+    text: "!"
+    kind: TextEditKind.typed
+    now: 1.2
+  )
+  show(step: "typed s!", edit: edit)
+  let later: Bool = replaceSelection(
+    edit: edit
+    text: "?"
+    kind: TextEditKind.typed
+    now: 5.0
+  )
+  show(step: "typed ? after a pause", edit: edit)
+  let undone: Bool = undoEdit(edit: edit)
+  show(step: "undo", edit: edit)
+  let twice: Bool = undoEdit(edit: edit)
+  show(step: "undo", edit: edit)
+  log("undo left {undoEdit(edit: edit)}")
+  let redone: Bool = redoEdit(edit: edit)
+  show(step: "redo", edit: edit)
+  moveCaret(edit: edit, move: TextMove.start, extend: false)
+  let typed: Bool = replaceSelection(
+    edit: edit
+    text: "x"
+    kind: TextEditKind.typed
+    now: 6.0
+  )
+  log("redo after an edit {redoEdit(edit: edit)}")
+  show(step: "typed x", edit: edit)
+
+  # deleting
+  var name: TextEdit = createTextEdit(text: "Mäki 👩‍👩‍👧é")
+  let first: Bool = deleteBy(edit: name, move: TextMove.left, now: 1.0)
+  show(step: "Backspace", edit: name)
+  let second: Bool = deleteBy(edit: name, move: TextMove.left, now: 1.1)
+  show(step: "Backspace", edit: name)
+  let back: Bool = undoEdit(edit: name)
+  show(step: "undo both", edit: name)
+  let word: Bool = deleteBy(edit: name, move: TextMove.wordLeft, now: 9.0)
+  show(step: "word", edit: name)
+  moveCaret(edit: name, move: TextMove.start, extend: false)
+  let forward: Bool = deleteBy(edit: name, move: TextMove.right, now: 10.0)
+  show(step: "Delete", edit: name)
+  log("Backspace at the start {deleteBy(edit: name, move: TextMove.left, now: 10.0)}")
+  selectText(edit: name, start: 1, end: 99)
+  show(step: "select inside a character", edit: name)
+  let gone: Bool = deleteBy(edit: name, move: TextMove.left, now: 11.0)
+  show(step: "Backspace on it", edit: name)
+
+  # a mark after a letter
+  var marked: TextEdit = createTextEdit(text: "e")
+  let mark: Bool = replaceSelection(
+    edit: marked
+    text: "́"
+    kind: TextEditKind.typed
+    now: 1.0
+  )
+  log("e and a mark: caret {marked.caret} of {marked.text.length()}")
+
+  # words
+  let around: List(Int) = {
+    0
+    3
+    4
+    7
+    8
+    13
+  }
+  loop let at: copy Int in around {
+    let span: TextSpan = wordAround(text: "one  two.three", at: at)
+    log("word at {at}: {span.start}..{span.end}")
+  }
+}

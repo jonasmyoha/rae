@@ -439,7 +439,19 @@ func paintEntityG(
   }
   # text too small to read under a zoomed-out camera is not drawn (RenderPaintCache)
   if componentHas(this: world.texts, entityId: entityId) and not paintTextTooSmall(wt: wt, cr: cr) {
-    if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
+    if entityId is uiSystems.textField.caretLineEntityId {
+      # the focused text field's line: its selection, text and caret (RenderTextField)
+      paintTextFieldLine(
+        world: world
+        uiSystems: uiSystems
+        entityId: entityId
+        wt: wt
+        cr: cr
+        chain255: chain255
+        res: res
+        canvas: canvas
+      )
+    } else if componentHas(this: uiSystems.animation.textGhosts, entityId: entityId) {
       paintTextWithGhost(
         world: world
         uiSystems: uiSystems
@@ -462,17 +474,6 @@ func paintEntityG(
         content: componentView(this: world.texts, entityId: entityId).text
       )
     }
-    # the focused text field's caret, after its text (ui/textFieldSystem)
-    paintCaretG(
-      world: world
-      uiSystems: uiSystems
-      entityId: entityId
-      wt: wt
-      cr: cr
-      chain255: chain255
-      res: res
-      canvas: canvas
-    )
   }
   # gpu2d has separate box/image/text pipelines; the canvas flushes by itself where a later item
   # would otherwise draw under an earlier one (Gpu2dCanvasFrame canvasKeepOrder), so a node needs no

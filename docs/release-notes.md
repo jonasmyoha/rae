@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.48, 2026-11-24: a caret and a selection in text fields
+
+- A `TextField` has a caret moved by keys, words, a press and a drag, a selection that typing, paste,
+  copy, cut and the deleting keys act on, undo and redo, and scrolls to its caret when its text is
+  wider (docs/ui-scene-format.md section 11). Copy and cut with nothing selected still take it all.
+  The pointer needs `textFieldPointerSystem` (`ui/TextFieldPointerSystem`) called before
+  `textFieldSystem`. `setTextFieldSelection`, `textFieldSelection`.
+- `text/Graphemes` (whole characters: marks, emoji sequences, flags, Korean) and `text/TextEdit`.
+- `Sdl3.isKeyTyped`: pressed or repeated by the system; a held Backspace deletes on.
+- `withoutLastCharacter` of `ui/textFieldSystem` is gone: use `previousGrapheme`. Cases 1581, 1582,
+  check `uiTextField`.
+
 ## 0.4.47, 2026-11-24: `mod` is no operator, and a mode starts no statement
 
 - `x mod y` on one line is an error that says the remainder is `%`. It was read as `x` and a

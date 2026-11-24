@@ -2,7 +2,8 @@ open ui/Ecs
 # SearchSystems (#976) — the Search page around its lib text field.
 #
 #   searchFieldSystem   runs lib/ui's textFieldSystem (a tap on the field
-#                       gives it focus, typing edits it, the caret blinks),
+#                       gives it focus, typing edits it, the caret blinks, a
+#                       press or a drag moves it),
 #                       then shows the page's search results container while
 #                       the field has text (the EmptyState node is toggled
 #                       by emptyStateSystem).
@@ -19,9 +20,9 @@ open ecs/Entity
 open ecs/ComponentTable
 open ecs/Query
 open ui/UiSystems
+open ui/RenderSystem
+open ui/TextFieldPointerSystem
 open ui/textFieldSystem/TextFieldSystem
-import Sdl3
-open Keys
 
 # True when the page holding `entityId` is active (visible). A page root with no
 # Active component counts as active, like layout does.
@@ -85,14 +86,20 @@ func searchFieldSystem(
   world: mod UiWorld
   uiSystems: mod UiSystems
   input: mod InputSystem
+  resources: view Gpu2dUi
   now: view Float64
 ) ret Bool {
-  var textInput: TextInputFrame = {
-    typed: "{input.typedText}"
-    backspaces: input.backspaces
-    enter: Sdl3.isKeyPressed(key: keyEnter)
-    tapped: input.ui.pointer.released
-  }
+  # a press, a drag or a tap moves the field's caret
+  let moved: Bool = textFieldPointerSystem(
+    world: world
+    uiSystems: uiSystems
+    input: input.ui
+    res: resources
+    extend: shiftHeld()
+    now: now
+  )
+  var textInput: TextInputFrame = readTextInputFrame(tapped: input.ui.pointer.released)
+  textInput.typed = "{input.typedText}"
   # Typing with no field focused (a scripted RAE_UI_TYPE run) goes to the
   # field on the page on screen, as a tap on it would
   if textInput.typed.length() > 0 and isNone(this: focusedTextFieldEntityId(world: world)) {
@@ -100,7 +107,7 @@ func searchFieldSystem(
     loop var i: Int = 0, i < count, ++i {
       let field: EntityId = componentEntityAt(this: world.textFields, i: i)
       if entityPageActive(world: world, uiSystems: uiSystems, entityId: field) {
-        let moved: Bool = focusTextField(world: world, entityId: field)
+        let focused: Bool = focusTextField(world: world, entityId: field)
         break
       }
     }
@@ -125,7 +132,7 @@ func searchFieldSystem(
       active: hasQuery
     )
   }
-  ret changed
+  ret changed or moved
 }
 
 # The text of the `TextField` on `page` ("" when the page has none) — what

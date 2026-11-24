@@ -1,0 +1,246 @@
+# Graphemes — the characters a person sees, in a UTF-8 text: a letter with its combining marks, an
+# emoji made of several code points, a flag, a Korean syllable (the extended grapheme clusters of
+# Unicode 17's UAX #29, without its rule for Indic conjuncts). A caret moves from one boundary to
+# the next, and Backspace takes away one whole.
+#
+#     let end: Int = nextGrapheme(text: name, at: 0)         # byte offsets
+#     let last: Int = previousGrapheme(text: name, at: name.length())
+open text/NameOrder
+
+# What joins to the character before it (combining marks, variation selectors, skin tones, tags)
+const joiningRanges: String = "003000036f004830048900591005bd005bf005bf005c1005c2005c4005c5005c7005c7006100061a0064b0065f0067000670006d6006dc006df006e4006e7006e8006ea006ed0071100711007300074a007a6007b0007eb007f3007fd007fd00816008190081b008230082500827008290082d008590085b008970089f008ca008e1008e3009030093a0093c0093e0094f009510095700962009630098100983009bc009bc009be009c4009c7009c8009cb009cd009d7009d7009e2009e3009fe009fe00a0100a0300a3c00a3c00a3e00a4200a4700a4800a4b00a4d00a5100a5100a7000a7100a7500a7500a8100a8300abc00abc00abe00ac500ac700ac900acb00acd00ae200ae300afa00aff00b0100b0300b3c00b3c00b3e00b4400b4700b4800b4b00b4d00b5500b5700b6200b6300b8200b8200bbe00bc200bc600bc800bca00bcd00bd700bd700c0000c0400c3c00c3c00c3e00c4400c4600c4800c4a00c4d00c5500c5600c6200c6300c8100c8300cbc00cbc00cbe00cc400cc600cc800cca00ccd00cd500cd600ce200ce300cf300cf300d0000d0300d3b00d3c00d3e00d4400d4600d4800d4a00d4d00d5700d5700d6200d6300d8100d8300dca00dca00dcf00dd400dd600dd600dd800ddf00df200df300e3100e3100e3300e3a00e4700e4e00eb100eb100eb300ebc00ec800ece00f1800f1900f3500f3500f3700f3700f3900f3900f3e00f3f00f7100f8400f8600f8700f8d00f9700f9900fbc00fc600fc60102d01037010390103e01056010590105e010600107101074010820108201084010860108d0108d0109d0109d0135d0135f0171201715017320173401752017530177201773017b4017d3017dd017dd0180b0180d0180f0180f0188501886018a9018a9019200192b019300193b01a1701a1b01a5501a5e01a6001a6001a6201a6201a6501a7c01a7f01a7f01ab001add01ae001aeb01b0001b0401b3401b4401b6b01b7301b8001b8201ba101bad01be601bf301c2401c3701cd001cd201cd401ce801ced01ced01cf401cf401cf701cf901dc001dff0200c0200c020d0020f002cef02cf102d7f02d7f02de002dff0302a0302f030990309a0a66f0a6720a6740a67d0a69e0a69f0a6f00a6f10a8020a8020a8060a8060a80b0a80b0a8230a8270a82c0a82c0a8800a8810a8b40a8c50a8e00a8f10a8ff0a8ff0a9260a92d0a9470a9530a9800a9830a9b30a9c00a9e50a9e50aa290aa360aa430aa430aa4c0aa4d0aa7c0aa7c0aab00aab00aab20aab40aab70aab80aabe0aabf0aac10aac10aaeb0aaef0aaf50aaf60abe30abea0abec0abed0fb1e0fb1e0fe000fe0f0fe200fe2f0ff9e0ff9f101fd101fd102e0102e0103761037a10a0110a0310a0510a0610a0c10a0f10a3810a3a10a3f10a3f10ae510ae610d2410d2710d6910d6d10eab10eac10efa10eff10f4610f5010f8210f8511000110021103811046110701107011073110741107f11082110b0110ba110c2110c211100111021112711134111451114611173111731118011182111b3111c0111c9111cc111ce111cf1122c112371123e1123e1124111241112df112ea11300113031133b1133c1133e1134411347113481134b1134d11357113571136211363113661136c1137011374113b8113c0113c2113c2113c5113c5113c7113ca113cc113d0113d2113d2113e1113e211435114461145e1145e114b0114c3115af115b5115b8115c0115dc115dd1163011640116ab116b71171d1171f117221172b1182c1183a119301193511937119381193b1193e11940119401194211943119d1119d7119da119e0119e4119e411a0111a0a11a3311a3911a3b11a3e11a4711a4711a5111a5b11a8a11a9911b6011b6711c2f11c3611c3811c3f11c9211ca711ca911cb611d3111d3611d3a11d3a11d3c11d3d11d3f11d4511d4711d4711d8a11d8e11d9011d9111d9311d9711ef311ef611f0011f0111f0311f0311f3411f3a11f3e11f4211f5a11f5a134401344013447134551611e1612f16af016af416b3016b3616f4f16f4f16f5116f8716f8f16f9216fe416fe416ff016ff11bc9d1bc9e1cf001cf2d1cf301cf461d1651d1691d16d1d1721d17b1d1821d1851d18b1d1aa1d1ad1d2421d2441da001da361da3b1da6c1da751da751da841da841da9b1da9f1daa11daaf1e0001e0061e0081e0181e01b1e0211e0231e0241e0261e02a1e08f1e08f1e1301e1361e2ae1e2ae1e2ec1e2ef1e4ec1e4ef1e5ee1e5ef1e6e31e6e31e6e61e6e61e6ee1e6ef1e6f51e6f51e8d01e8d61e9441e94a1f3fb1f3ffe0020e007fe0100e01ef"
+
+# The pictures (Extended_Pictographic)
+const pictureRanges: String = "000a9000a9000ae000ae0203c0203c0204902049021220212202139021390219402199021a9021aa0231a0231b02328023280238802388023cf023cf023e9023f3023f8023fa024c2024c2025aa025ab025b6025b6025c0025c0025fb025fe02600026050260702612026140268502690027050270802712027140271402716027160271d0271d027210272102728027280273302734027440274402747027470274c0274c0274e0274e0275302755027570275702763027670279502797027a1027a1027b0027b0027bf027bf029340293502b0502b0702b1b02b1c02b5002b5002b5502b5503030030300303d0303d032970329703299032991f0001f0ff1f10d1f10f1f12f1f12f1f16c1f1711f17e1f17f1f18e1f18e1f1911f19a1f1ad1f1e51f2011f20f1f21a1f21a1f22f1f22f1f2321f23a1f23c1f23f1f2491f3fa1f4001f53d1f5461f64f1f6801f6ff1f7741f77f1f7d51f7ff1f80c1f80f1f8481f84f1f85a1f85f1f8881f88f1f8ae1f8ff1f90c1f93a1f93c1f9451f9471faff1fc001fffd"
+
+# What joins to the character after it
+const prependRanges: String = "0060000605006dd006dd0070f0070f0089000891008e2008e200d4e00d4e110bd110bd110cd110cd111c2111c31193f1193f119411194111a3a11a3a11a8411a8911d4611d46"
+
+enum GraphemeClass {
+  other
+  carriageReturn
+  lineFeed
+  control
+  joining
+  joiner
+  prepend
+  region
+  picture
+  hangulL
+  hangulV
+  hangulT
+  hangulLv
+  hangulLvt
+}
+
+func hexDigit(byte: view Int) ret Int {
+  if byte >= 97 {
+    ret byte - 87
+  }
+  ret byte - 48
+}
+
+# The number of 5 hexadecimal digits at `at`
+func hexNumber(table: view String, at: view Int) ret Int {
+  var number: Int = 0
+  loop var i: Int = 0, i < 5, ++i {
+    number = number * 16 + hexDigit(byte: table.byteAt(index: at + i))
+  }
+  ret number
+}
+
+# Is `code` in one of the sorted ranges of `table` (each 10 digits, its first and last)?
+func inRanges(table: view String, code: view Int) ret Bool {
+  var low: Int = 0
+  var high: Int = table.length() / 10
+  loop low < high {
+    let middle: Int = (low + high) / 2
+    if code > hexNumber(table: table, at: middle * 10 + 5) {
+      low = middle + 1
+    } else if code < hexNumber(table: table, at: middle * 10) {
+      high = middle
+    } else {
+      ret true
+    }
+  }
+  ret false
+}
+
+func graphemeClass(code: view Int) ret GraphemeClass {
+  if code < 128 {
+    if code is 13 {
+      ret GraphemeClass.carriageReturn
+    }
+    if code is 10 {
+      ret GraphemeClass.lineFeed
+    }
+    if code < 32 or code is 127 {
+      ret GraphemeClass.control
+    }
+    ret GraphemeClass.other
+  }
+  if code < 160 or code is 173 {
+    ret GraphemeClass.control
+  }
+  if code is 0x200D {
+    ret GraphemeClass.joiner
+  }
+  if code is 0x200B or (code >= 0x200E and code <= 0x200F) or (code >= 0x2028 and code <= 0x202E) or (code >= 0x2060 and code <= 0x206F) or code is 0xFEFF {
+    ret GraphemeClass.control
+  }
+  if code >= 0x1F1E6 and code <= 0x1F1FF {
+    ret GraphemeClass.region
+  }
+  if code >= 0xAC00 and code <= 0xD7A3 {
+    if (code - 0xAC00) % 28 is 0 {
+      ret GraphemeClass.hangulLv
+    }
+    ret GraphemeClass.hangulLvt
+  }
+  if (code >= 0x1100 and code <= 0x115F) or (code >= 0xA960 and code <= 0xA97C) {
+    ret GraphemeClass.hangulL
+  }
+  if (code >= 0x1160 and code <= 0x11A7) or (code >= 0xD7B0 and code <= 0xD7C6) {
+    ret GraphemeClass.hangulV
+  }
+  if (code >= 0x11A8 and code <= 0x11FF) or (code >= 0xD7CB and code <= 0xD7FB) {
+    ret GraphemeClass.hangulT
+  }
+  if inRanges(table: joiningRanges, code: code) {
+    ret GraphemeClass.joining
+  }
+  if inRanges(table: pictureRanges, code: code) {
+    ret GraphemeClass.picture
+  }
+  if inRanges(table: prependRanges, code: code) {
+    ret GraphemeClass.prepend
+  }
+  ret GraphemeClass.other
+}
+
+# Where the character at `at` (a boundary) ends: the next boundary, the text's end at most
+func nextGrapheme(text: view String, at: view Int) ret Int {
+  let length: Int = text.length()
+  if at >= length {
+    ret length
+  }
+  let first: CodePoint = codePointAt(text: text, at: at)
+  var previous: GraphemeClass = graphemeClass(code: first.code)
+  var end: Int = at + first.length
+  # a picture, and what joins to it, so far; then a joiner right after that
+  var picture: Bool = previous is GraphemeClass.picture
+  var pictureJoiner: Bool = false
+  var regions: Int = 0
+  if previous is GraphemeClass.region {
+    regions = 1
+  }
+  loop end < length {
+    let point: CodePoint = codePointAt(text: text, at: end)
+    let next: GraphemeClass = graphemeClass(code: point.code)
+    if breaksBetween(
+      previous: previous
+      next: next
+      pictureJoiner: pictureJoiner
+      regions: regions
+    ) {
+      ret end
+    }
+    pictureJoiner = picture and next is GraphemeClass.joiner
+    if next is not GraphemeClass.joining {
+      picture = next is GraphemeClass.picture
+    }
+    if next is GraphemeClass.region {
+      regions = regions + 1
+    } else {
+      regions = 0
+    }
+    previous = next
+    end = end + point.length
+  }
+  ret length
+}
+
+func breaksBetween(
+  previous: view GraphemeClass
+  next: view GraphemeClass
+  pictureJoiner: view Bool
+  regions: view Int
+) ret Bool {
+  if previous is GraphemeClass.carriageReturn and next is GraphemeClass.lineFeed {
+    ret false
+  }
+  if previous is GraphemeClass.carriageReturn or previous is GraphemeClass.lineFeed or previous is GraphemeClass.control {
+    ret true
+  }
+  if next is GraphemeClass.carriageReturn or next is GraphemeClass.lineFeed or next is GraphemeClass.control {
+    ret true
+  }
+  if next is GraphemeClass.joining or next is GraphemeClass.joiner or previous is GraphemeClass.prepend {
+    ret false
+  }
+  if previous is GraphemeClass.hangulL {
+    if next is GraphemeClass.hangulL or next is GraphemeClass.hangulV or next is GraphemeClass.hangulLv or next is GraphemeClass.hangulLvt {
+      ret false
+    }
+  }
+  if previous is GraphemeClass.hangulLv or previous is GraphemeClass.hangulV {
+    if next is GraphemeClass.hangulV or next is GraphemeClass.hangulT {
+      ret false
+    }
+  }
+  if (previous is GraphemeClass.hangulLvt or previous is GraphemeClass.hangulT) and next is GraphemeClass.hangulT {
+    ret false
+  }
+  if next is GraphemeClass.picture and pictureJoiner {
+    ret false
+  }
+  if next is GraphemeClass.region and previous is GraphemeClass.region {
+    ret regions % 2 is 0
+  }
+  ret true
+}
+
+# The boundary before `at`, 0 at least
+func previousGrapheme(text: view String, at: view Int) ret Int {
+  let end: Int = graphemeBoundary(text: text, at: at)
+  if end < at {
+    ret end
+  }
+  if at <= 0 {
+    ret 0
+  }
+  ret graphemeBoundary(text: text, at: at - 1)
+}
+
+# `at`, or the boundary before it where it is inside a character
+func graphemeBoundary(text: view String, at: view Int) ret Int {
+  if at <= 0 {
+    ret 0
+  }
+  if at >= text.length() {
+    ret text.length()
+  }
+  # from an ASCII letter or sign before it, which always starts a character, or the text's start
+  var start: Int = at
+  loop start > 0 and not startsForSure(text: text, at: start) {
+    start = start - 1
+  }
+  loop true {
+    let end: Int = nextGrapheme(text: text, at: start)
+    if end > at {
+      ret start
+    }
+    start = end
+  }
+  ret start
+}
+
+# An ASCII character (no control) after another, or after the text's start
+func startsForSure(text: view String, at: view Int) ret Bool {
+  if at is 0 {
+    ret true
+  }
+  let byte: Int = text.byteAt(index: at)
+  let before: Int = text.byteAt(index: at - 1)
+  ret byte >= 32 and byte < 127 and before >= 32 and before < 127
+}

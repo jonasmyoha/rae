@@ -394,7 +394,7 @@ None of these is about files; each is its own module with its own cases.
 | **pointer buttons, double click** | built (docs/ui-scene-format.md section 46) | press, release and click count per button through `UiInput` and captures; Control+click and a long press as the second button |
 | **menus** | built: `ui/MenuSystem` (section 47) | `menuSystem` with items as data, keys, one submenu level, kept in the window |
 | **dividers, scrollbars** | none | `Divider` and `ScrollBar` components with a system each |
-| **text editing** | `TextField`'s caret is at its end; copy takes it all | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
+| **text editing** | built (docs/ui-scene-format.md section 11) | a caret moved by keys and a press, a selection, word and line keys. A rename selects the name without its extension, so it cannot do without |
 | **drags** | per widget | one `UiDrag` resource: payload kind, values, a label to draw, what accepts it, copy or move; a drop is an event. OS drops (`SDL_EVENT_DROP_*`) arrive as the same event |
 | **images** | a registered image is never released | release behind in-flight frames; decode off the main thread; a budget. `lib/Gpu2dCanvas/Canvas.rae` has 999 lines, so it is split first |
 | **sorting** | insertion sort, numbers only | §3 |

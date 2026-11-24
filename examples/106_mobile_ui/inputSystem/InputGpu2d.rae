@@ -52,7 +52,6 @@ type InputSystem {
   # last poll and the number of Backspace presses. Consumed by the text
   # field system; empty/0 on frames with no typing.
   typedText: String
-  backspaces: Int
   # `RAE_UI_TYPE` scripted keyboard (#976): the text still to be "typed"
   # (pasted as one frame's typedText once the screen sequence is done).
   scriptedType: String
@@ -79,7 +78,6 @@ func createInputSystem() ret InputSystem {
     scriptedFrame: 0
     scriptedEvery: 20
     typedText: ""
-    backspaces: 0
     scriptedType: getEnv(name: "RAE_UI_TYPE")
     scriptedDrag: ScriptedDrag {
       dy: dragDy
@@ -235,10 +233,6 @@ func updateInputSystem(
   }
   sendScriptedTap(input: input)
   input.typedText = uiTextInput()
-  input.backspaces = 0
-  if Sdl3.isKeyPressed(key: keyBackspace) {
-    input.backspaces = 1
-  }
   # Scripted keyboard: paste `RAE_UI_TYPE` on the frame after the last
   # scripted tap has fired, so a headless run can drive a text field.
   if input.scriptedType.length() > 0 and input.scriptedScreens.length is 0 {

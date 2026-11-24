@@ -17,9 +17,18 @@
 #   event loop's wait.
 # - `keyboardHeight` is the on-screen keyboard's height in points (0 when none
 #   is shown, always 0 on a desktop), so a layout can keep a field above it.
-# - Cmd+V (Ctrl+V) pastes the clipboard's text at the caret (the end of the
-#   field) with its line breaks dropped, as every field is one line; Cmd+C
-#   copies and Cmd+X cuts the field's whole text. The clipboard is the
+# - The focused field has a caret and a selection (text/TextEdit, kept in
+#   TextFieldSystem.edit): the caret starts at the text's end and moves by
+#   Left, Right, Home and End, by words with Alt or Ctrl, to the ends with
+#   Command, and by a press or a drag (ui/TextFieldPointerSystem). Shift with
+#   each selects, Cmd+A selects all. Typing, paste, Backspace and Delete act
+#   on the selection; with Alt or Ctrl the deleting keys take a word, with
+#   Command the line to that end. Cmd+Z undoes, Shift+Cmd+Z or Ctrl+Y redoes,
+#   until the focus moves. setTextFieldSelection sets it from code.
+# - While a menu is open (ui/MenuSystem) the keys are the menu's.
+# - Cmd+V (Ctrl+V) pastes the clipboard's text at the caret
+#   with its line breaks dropped, as every field is one line; Cmd+C
+#   copies and Cmd+X cuts the selection, or with none the field's whole text. The clipboard is the
 #   system's (Gpu2dTextInput.clipboardText), or a scripted one a test fills
 #   with setTextFieldClipboard: the scripted step "put this on the clipboard,
 #   then paste" is that plus a frame with `paste`.
@@ -30,6 +39,7 @@
 import Gpu2dTextInput
 import Sdl3
 open Keys
+open text/TextEdit
 open ui/Ecs
 open ui/Components
 open ui/BindingComponents
@@ -54,15 +64,63 @@ type TextInputFrame {
   paste: Bool = false
   copy: Bool = false
   cut: Bool = false
+  # A move of the caret, and whether it selects (Shift)
+  move: TextMove = TextMove.none
+  extend: Bool = false
+  selectAll: Bool = false
+  # Forward deletes, and what they and the backspaces take: a character, a word, all to that end
+  deletes: Int = 0
+  deleteWord: Bool = false
+  deleteLine: Bool = false
+  undo: Bool = false
+  redo: Bool = false
+}
+
+# The caret's move by the arrow, Home and End keys (held ones repeat)
+func readTextMove(word: view Bool, line: view Bool) ret TextMove {
+  if Sdl3.isKeyTyped(key: keyHome) {
+    ret TextMove.start
+  }
+  if Sdl3.isKeyTyped(key: keyEnd) {
+    ret TextMove.end
+  }
+  if Sdl3.isKeyTyped(key: keyLeft) {
+    if line {
+      ret TextMove.start
+    }
+    if word {
+      ret TextMove.wordLeft
+    }
+    ret TextMove.left
+  }
+  if Sdl3.isKeyTyped(key: keyRight) {
+    if line {
+      ret TextMove.end
+    }
+    if word {
+      ret TextMove.wordRight
+    }
+    ret TextMove.right
+  }
+  ret TextMove.none
 }
 
 # This frame's typing from the window (Gpu2dTextInput and the SDL keys);
 # `tapped` is the app's own pointer state
 func readTextInputFrame(tapped: view Bool) ret TextInputFrame {
   var backspaces: Int = 0
-  if Sdl3.isKeyPressed(key: keyBackspace) {
+  if Sdl3.isKeyTyped(key: keyBackspace) {
     backspaces = 1
   }
+  var deletes: Int = 0
+  if Sdl3.isKeyTyped(key: keyDelete) {
+    deletes = 1
+  }
+  let line: Bool = Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui)
+  let word: Bool = Sdl3.isKeyDown(key: keyLAlt) or Sdl3.isKeyDown(key: keyRAlt) or Sdl3.isKeyDown(
+    key: keyLCtrl
+  ) or Sdl3.isKeyDown(key: keyRCtrl)
+  let shift: Bool = Sdl3.isKeyDown(key: keyLShift) or Sdl3.isKeyDown(key: keyRShift)
   # the command key: Command on the Mac, Ctrl elsewhere (either works)
   let command: Bool = Sdl3.isKeyDown(key: keyLGui) or Sdl3.isKeyDown(key: keyRGui) or Sdl3.isKeyDown(
     key: keyLCtrl
@@ -77,6 +135,14 @@ func readTextInputFrame(tapped: view Bool) ret TextInputFrame {
     paste: (command and Sdl3.isKeyPressed(key: keyV)) or menuChoice is 1
     copy: (command and Sdl3.isKeyPressed(key: keyC)) or menuChoice is 2
     cut: (command and Sdl3.isKeyPressed(key: keyX)) or menuChoice is 3
+    move: readTextMove(word: word, line: line)
+    extend: shift
+    selectAll: command and Sdl3.isKeyPressed(key: keyA)
+    deletes: deletes
+    deleteWord: word
+    deleteLine: line
+    undo: command and not shift and Sdl3.isKeyTyped(key: keyZ)
+    redo: command and ((shift and Sdl3.isKeyTyped(key: keyZ)) or Sdl3.isKeyTyped(key: keyY))
   }
 }
 
@@ -107,19 +173,6 @@ func putOnTextFieldClipboard(textFieldSystem: mod TextFieldSystem, text: view St
 # `text` on one line: every line break (CR, LF) dropped
 func withoutLineBreaks(text: view String) ret String {
   ret text.replace(old: "\r", new: "").replace(old: "\n", new: "")
-}
-
-# Drop the last character (a whole UTF-8 sequence) of `text`
-func withoutLastCharacter(text: view String) ret String {
-  var cut: Int = text.length() - 1
-  # continuation bytes are 10xxxxxx (128..191)
-  loop cut > 0 and text.byteAt(index: cut) >= 128 and text.byteAt(index: cut) < 192 {
-    cut = cut - 1
-  }
-  if cut <= 0 {
-    ret ""
-  }
-  ret text.sub(start: 0, len: cut)
 }
 
 # The field that has focus, or noEntity()
@@ -153,6 +206,168 @@ func focusTextField(world: mod UiWorld, entityId: view EntityId) ret Bool {
   ret changed
 }
 
+# The focused field's edit made current: a new one, with the caret at the text's end, when the focus
+# is on another field than before or the field's text was set by something else
+func syncTextFieldEdit(
+  world: view UiWorld
+  textFieldSystem: mod TextFieldSystem
+  fieldEntityId: view EntityId
+) {
+  let field: view TextField = componentView(this: world.textFields, entityId: fieldEntityId)
+  if fieldEntityId is textFieldSystem.editEntityId and field.text is textFieldSystem.edit.text {
+    ret
+  }
+  textFieldSystem.edit = createTextEdit(text: field.text)
+  textFieldSystem.editEntityId = fieldEntityId
+  textFieldSystem.scroll = 0.0
+}
+
+# Focus `entityId`'s field with its text from `start` to `end` selected (byte offsets, moved to
+# whole
+# characters), the caret at `end`: a rename selects a name without its extension so. False when it
+# is no text field.
+func setTextFieldSelection(
+  world: mod UiWorld
+  textFieldSystem: mod TextFieldSystem
+  entityId: view EntityId
+  start: view Int
+  end: view Int
+) ret Bool {
+  if componentHas(this: world.textFields, entityId: entityId) is false {
+    ret false
+  }
+  let moved: Bool = focusTextField(world: world, entityId: entityId)
+  syncTextFieldEdit(world: world, textFieldSystem: textFieldSystem, fieldEntityId: entityId)
+  selectText(edit: textFieldSystem.edit, start: start, end: end)
+  ret true
+}
+
+# The selection of the focused field as byte offsets, its start and end the same when nothing is
+# selected; none when no field has focus
+func textFieldSelection(
+  world: view UiWorld
+  textFieldSystem: view TextFieldSystem
+) ret opt TextSpan {
+  let focused: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: focused) {
+    ret none
+  }
+  if focused is not textFieldSystem.editEntityId {
+    let end: Int = componentView(this: world.textFields, entityId: focused).text.length()
+    ret TextSpan { start: end, end: end }
+  }
+  ret TextSpan {
+    start: selectionStart(edit: textFieldSystem.edit)
+    end: selectionEnd(edit: textFieldSystem.edit)
+  }
+}
+
+# What a deleting key takes: one character, or with a modifier a word or all to that end
+func deletingMove(input: view TextInputFrame, forward: view Bool) ret TextMove {
+  if forward {
+    if input.deleteLine {
+      ret TextMove.end
+    }
+    if input.deleteWord {
+      ret TextMove.wordRight
+    }
+    ret TextMove.right
+  }
+  if input.deleteLine {
+    ret TextMove.start
+  }
+  if input.deleteWord {
+    ret TextMove.wordLeft
+  }
+  ret TextMove.left
+}
+
+# This frame's keys and clipboard on the focused field; true when its text, caret or selection
+# changed
+func editTextField(
+  world: mod UiWorld
+  textFieldSystem: mod TextFieldSystem
+  fieldEntityId: view EntityId
+  input: view TextInputFrame
+  now: view Float64
+) ret Bool {
+  syncTextFieldEdit(world: world, textFieldSystem: textFieldSystem, fieldEntityId: fieldEntityId)
+  let caret: Int = textFieldSystem.edit.caret
+  let anchor: Int = textFieldSystem.edit.anchor
+  var changed: Bool = false
+  if input.undo {
+    changed = undoEdit(edit: textFieldSystem.edit) or changed
+  }
+  if input.redo {
+    changed = redoEdit(edit: textFieldSystem.edit) or changed
+  }
+  if input.selectAll {
+    selectText(edit: textFieldSystem.edit, start: 0, end: textFieldSystem.edit.text.length())
+  }
+  moveCaret(edit: textFieldSystem.edit, move: input.move, extend: input.extend)
+  loop var i: Int = 0, i < input.backspaces, ++i {
+    changed = deleteBy(
+      edit: textFieldSystem.edit
+      move: deletingMove(input: input, forward: false)
+      now: now
+    ) or changed
+  }
+  loop var i: Int = 0, i < input.deletes, ++i {
+    changed = deleteBy(
+      edit: textFieldSystem.edit
+      move: deletingMove(input: input, forward: true)
+      now: now
+    ) or changed
+  }
+  if input.typed.length() > 0 {
+    changed = replaceSelection(
+      edit: textFieldSystem.edit
+      text: input.typed
+      kind: TextEditKind.typed
+      now: now
+    ) or changed
+  }
+  if input.copy or input.cut {
+    # the selection, or with none the whole text
+    var taken: String = selectedText(edit: textFieldSystem.edit)
+    if taken.length() is 0 {
+      taken = "{textFieldSystem.edit.text}"
+      if input.cut {
+        selectText(edit: textFieldSystem.edit, start: 0, end: taken.length())
+      }
+    }
+    if taken.length() > 0 {
+      putOnTextFieldClipboard(textFieldSystem: textFieldSystem, text: taken)
+    }
+    if input.cut {
+      changed = replaceSelection(
+        edit: textFieldSystem.edit
+        text: ""
+        kind: TextEditKind.other
+        now: now
+      ) or changed
+    }
+  }
+  if input.paste {
+    let pasted: String = withoutLineBreaks(
+      text: textFieldClipboard(textFieldSystem: textFieldSystem)
+    )
+    if pasted.length() > 0 {
+      changed = replaceSelection(
+        edit: textFieldSystem.edit
+        text: pasted
+        kind: TextEditKind.other
+        now: now
+      ) or changed
+    }
+  }
+  if changed {
+    let text: String = "{textFieldSystem.edit.text}"
+    componentMod(this: world.textFields, entityId: fieldEntityId).text = text
+  }
+  ret changed or textFieldSystem.edit.caret is not caret or textFieldSystem.edit.anchor is not anchor
+}
+
 # Focus from this frame's taps, then typing into the focused field; Return
 # sends its action into `actions`. Then OS text input follows the focus, the
 # Text children show the fields and the caret's blink phase is updated. True
@@ -168,48 +383,38 @@ func textFieldSystem(
   # the focus: a tap on a field takes it there, a tap elsewhere drops it
   var tappedField: EntityId = noEntity()
   var tappedSomething: Bool = input.tapped
+  var tappedOnGone: Bool = false
   loop var i: Int = 0, i < eventCount(this: actions), ++i {
     let action: UiAction = eventAt(this: actions, i: i)
     if isNone(this: action.entityId) is false {
       tappedSomething = true
-      if componentHas(this: world.textFields, entityId: action.entityId) {
+      if isAlive(world: world, entityId: action.entityId) is false {
+        # a row of a menu that closed by it
+        tappedOnGone = true
+      } else if componentHas(this: world.textFields, entityId: action.entityId) {
         tappedField = action.entityId
       }
     }
   }
-  if tappedSomething and tappedField is not focusedTextFieldEntityId(world: world) {
+  # a press that moves a field's caret (TextFieldPointerSystem) gave it the focus already, and may
+  # end outside it; a menu's presses are the menu's
+  let keepsFocus: Bool = isNone(this: textFieldSystem.press.fieldEntityId) is false or tappedOnGone or world.menu.open
+  if tappedSomething and keepsFocus is false and tappedField is not focusedTextFieldEntityId(
+    world: world
+  ) {
     changed = focusTextField(world: world, entityId: tappedField) or changed
   }
   # the typing
   let focused: EntityId = focusedTextFieldEntityId(world: world)
-  if isNone(this: focused) is false {
+  if isNone(this: focused) is false and world.menu.open is false {
+    changed = editTextField(
+      world: world
+      textFieldSystem: textFieldSystem
+      fieldEntityId: focused
+      input: input
+      now: now
+    ) or changed
     let field: mod TextField = componentMod(this: world.textFields, entityId: focused)
-    loop var i: Int = 0, i < input.backspaces and field.text.length() > 0, ++i {
-      field.text = withoutLastCharacter(text: field.text)
-      changed = true
-    }
-    if input.typed.length() > 0 {
-      field.text = "{field.text}{input.typed}"
-      changed = true
-    }
-    if input.copy or input.cut {
-      if field.text.length() > 0 {
-        putOnTextFieldClipboard(textFieldSystem: textFieldSystem, text: field.text)
-      }
-      if input.cut and field.text.length() > 0 {
-        field.text = ""
-        changed = true
-      }
-    }
-    if input.paste {
-      let pasted: String = withoutLineBreaks(
-        text: textFieldClipboard(textFieldSystem: textFieldSystem)
-      )
-      if pasted.length() > 0 {
-        field.text = "{field.text}{pasted}"
-        changed = true
-      }
-    }
     if input.enter {
       if field.actionId.length() > 0 {
         eventSend(
@@ -220,6 +425,10 @@ func textFieldSystem(
       field.focused = false
       changed = true
     }
+  }
+  if isNone(this: focused) {
+    # an edit ends with its focus
+    textFieldSystem.editEntityId = noEntity()
   }
   let stillFocused: Bool = isNone(this: focusedTextFieldEntityId(world: world)) is false
   if stillFocused is not textFieldSystem.textInputOn {
@@ -308,7 +517,10 @@ func updateCaretBlink(
   now: view Float64
 ) ret Bool {
   var visible: Bool = false
-  if isNone(this: textFieldSystem.caretLineEntityId) is false {
+  # no caret while something is selected
+  if isNone(this: textFieldSystem.caretLineEntityId) is false and not (textFieldSystem.editEntityId is focusedTextFieldEntityId(
+    world: world
+  ) and hasSelection(edit: textFieldSystem.edit)) {
     let phase: Int = ((now - textFieldSystem.caretEpoch) / caretBlinkSeconds) as Int
     visible = phase % 2 is 0
   }

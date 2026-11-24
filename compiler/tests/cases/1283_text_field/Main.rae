@@ -117,7 +117,7 @@ func frame(
 # against the line's left edge, in ems
 func paintCaret(
   world: view UiWorld
-  uiSystems: view UiSystems
+  uiSystems: mod UiSystems
   res: view Gpu2dUi
   label: view String
 ) {
@@ -129,12 +129,12 @@ func paintCaret(
     scale: { x: 1.0, y: 1.0 }
   }
   let cr: ComputedRect = { position: { x: 100.0, y: 20.0 }, size: { x: 300.0, y: 40.0 } }
+  componentSet(this: uiSystems.transform2d.worldTransforms, entityId: line, data: wt)
+  componentSet(this: uiSystems.layout.computedRects, entityId: line, data: cr)
   paintCaretG(
     world: world
     uiSystems: uiSystems
     entityId: line
-    wt: wt
-    cr: cr
     chain255: 255
     res: res
     canvas: canvas

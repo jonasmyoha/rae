@@ -8,6 +8,7 @@
 # world and hands to the pipeline and to every function that reads a derived
 # table — `mod` for the owner writing, `view` for a reader. It grows in the
 # second half of the split (Transform2dSystem, AnimationSystem, ButtonSystem).
+open text/TextEdit
 open ui/Components
 open ui/BindingComponents
 open ui/InputComponents
@@ -54,6 +55,31 @@ type TextFieldSystem {
   pressY: Float = 0.0
   pressMenuShown: Bool = false
   menuShows: Int = 0
+  # The edit of the focused field (text/TextEdit): its caret, selection and undo; made anew when
+  # the focus moves or something else sets the field's text
+  edit: TextEdit = {}
+  editEntityId: EntityId = noEntity()
+  # How far the focused field's text is scrolled to the left, to show the caret
+  scroll: Float = 0.0
+  # A press on a field that moves its caret (ui/TextFieldPointerSystem)
+  press: TextFieldPress = {}
+}
+
+# A press on a text field, from the frame it begins to the frame it ends
+type TextFieldPress {
+  fieldEntityId: EntityId = noEntity()
+  # it is a finger's: the caret goes there when it is lifted, where a mouse's goes at once
+  touch: Bool = false
+  x: Float = 0.0
+  y: Float = 0.0
+  moved: Bool = false
+  # it was let go this frame
+  ended: Bool = false
+  # how many clicks it is: 2 selects by words, 3 all of it
+  clicks: Int = 1
+  # what a drag selects from: the caret's place, or the word pressed
+  start: Int = 0
+  end: Int = 0
 }
 
 # safeAreaSystem's output: the resolved insets per SafeArea node.

@@ -1,0 +1,386 @@
+# RenderTextField — the focused TextField's line (ui/textFieldSystem): its selection behind the
+# text,
+# the text, scrolled and clipped where it is wider than its place, and the caret, a thin bar in the
+# text's color, while the system's blink phase shows it. The caret is never a character in the
+# text, so a field's measured size does not change as it blinks.
+import Gpu2d
+import SdfText
+open text/Graphemes
+open text/TextEdit
+open ui/Ecs
+open ui/Components
+open ui/BindingComponents
+open ui/LayoutSystem
+open ui/TextStyle
+open ui/Theme
+open ui/UiSystems
+open ui/Transform
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Transform
+open Gpu2dCanvas
+
+# Where a field's text is, in the canvas's units
+type TextFieldLine {
+  # Its size, and where it starts and how wide it is
+  size: Float = 0.0
+  x: Float = 0.0
+  width: Float = 0.0
+  # How far it is moved from where its alignment puts it
+  shift: Float = 0.0
+  # Its place: what is outside left..right is not drawn
+  left: Float = 0.0
+  right: Float = 0.0
+  top: Float = 0.0
+  height: Float = 0.0
+  caretWidth: Float = 1.0
+  # It is wider than its place: drawn clipped, scrolled to the caret
+  scrolls: Bool = false
+}
+
+# The line of the field `fieldEntityId`, whose Text child is `lineEntityId`; none while it has no
+# place yet
+func textFieldLine(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fieldEntityId: view EntityId
+  lineEntityId: view EntityId
+  res: view Gpu2dUi
+) ret opt TextFieldLine {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: lineEntityId) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: lineEntityId
+  ) is false or componentHas(this: world.texts, entityId: lineEntityId) is false {
+    ret none
+  }
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: lineEntityId
+  )
+  let cr: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: lineEntityId
+  )
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  let field: view TextField = componentView(this: world.textFields, entityId: fieldEntityId)
+  let styleId: String = "{field.textStyleId}"
+  var line: TextFieldLine = {}
+  line.size = resolveTextSize(theme: res.theme, styleId: styleId)
+  if componentHas(this: world.styleOverrides, entityId: lineEntityId) {
+    let style: view StyleOverride = componentView(
+      this: world.styleOverrides
+      entityId: lineEntityId
+    )
+    line.size = styleOverrideSize(base: line.size, so: style)
+  }
+  line.size = line.size * wt.scale.x
+  let bounds: SdfTextBounds = SdfText.sdfMeasureTextBounds(
+    font: res.textFont
+    text: field.text
+    sizePx: line.size
+  )
+  line.width = bounds.advance
+  line.caretWidth = line.size * 0.08
+  if line.caretWidth < 1.0 {
+    line.caretWidth = 1.0
+  }
+  # its place: its own box, or the field's inside its padding when the box is as wide as the text
+  line.left = rect.x
+  line.right = rect.x + rect.w
+  if entitySize(world: world, entityId: lineEntityId).w.mode is SizeMode.hug {
+    line.right = textFieldRight(
+      world: world
+      uiSystems: uiSystems
+      fieldEntityId: fieldEntityId
+      fallback: line.right
+    )
+    let fieldLeft: Float = textFieldLeft(
+      world: world
+      uiSystems: uiSystems
+      fieldEntityId: fieldEntityId
+      fallback: line.left
+    )
+    if fieldLeft > line.left {
+      line.left = fieldLeft
+    }
+  }
+  # where the alignment starts it (as paintTextG does)
+  var centered: Bool = resolveTextIsCentered(theme: res.theme, styleId: styleId)
+  var atEnd: Bool = resolveTextIsRightAligned(theme: res.theme, styleId: styleId)
+  if componentHas(this: world.aligns, entityId: lineEntityId) {
+    let align: view Align = componentView(this: world.aligns, entityId: lineEntityId)
+    if align.hasX and align.x is AlignKind.center {
+      centered = true
+    }
+    if align.hasX and align.x is AlignKind.end {
+      atEnd = true
+    }
+  }
+  var natural: Float = rect.x
+  if centered {
+    natural = rect.x + rect.w / 2.0 - (bounds.left + bounds.right) / 2.0
+  }
+  if atEnd {
+    natural = rect.x + rect.w - bounds.right
+  }
+  line.x = natural
+  line.scrolls = line.width + line.caretWidth > line.right - line.left
+  if line.scrolls {
+    line.x = line.left - uiSystems.textField.scroll
+  }
+  line.shift = line.x - natural
+  # the caret's height, centered in the box, or from its top when that is shorter than a line
+  line.height = line.size * 1.15
+  line.top = rect.y + (rect.h - line.height) / 2.0
+  if rect.h < line.height {
+    line.top = rect.y
+  }
+  ret line
+}
+
+# The left end of the field's box inside its padding
+func textFieldLeft(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fieldEntityId: view EntityId
+  fallback: view Float
+) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: fieldEntityId) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: fieldEntityId
+  ) is false {
+    ret fallback
+  }
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: fieldEntityId
+  )
+  let cr: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: fieldEntityId
+  )
+  let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: fieldEntityId)
+  ret worldRectOf(wt: wt, cr: cr).x + padding.l * wt.scale.x
+}
+
+# The right end of the field's box inside its padding
+func textFieldRight(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  fieldEntityId: view EntityId
+  fallback: view Float
+) ret Float {
+  if componentHas(this: uiSystems.transform2d.worldTransforms, entityId: fieldEntityId) is false or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: fieldEntityId
+  ) is false {
+    ret fallback
+  }
+  let wt: view WorldTransform2D = componentView(
+    this: uiSystems.transform2d.worldTransforms
+    entityId: fieldEntityId
+  )
+  let cr: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: fieldEntityId
+  )
+  let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: fieldEntityId)
+  let rect: WorldRect = worldRectOf(wt: wt, cr: cr)
+  ret rect.x + rect.w - padding.r * wt.scale.x
+}
+
+# Where the byte offset `at` of the field's text is
+func textFieldOffsetX(
+  line: view TextFieldLine
+  res: view Gpu2dUi
+  text: view String
+  at: view Int
+) ret Float {
+  if at <= 0 {
+    ret line.x
+  }
+  ret line.x + SdfText.sdfMeasureText(
+    font: res.textFont
+    text: text.sub(start: 0, len: at)
+    sizePx: line.size
+  )
+}
+
+# The boundary of the field's text nearest to `x`
+func textFieldOffsetAt(
+  line: view TextFieldLine
+  res: view Gpu2dUi
+  text: view String
+  x: view Float
+) ret Int {
+  var at: Int = 0
+  var left: Float = line.x
+  loop at < text.length() {
+    let next: Int = nextGrapheme(text: text, at: at)
+    let width: Float = SdfText.sdfMeasureText(
+      font: res.textFont
+      text: text.sub(start: at, len: next - at)
+      sizePx: line.size
+    )
+    if x < left + width / 2.0 {
+      ret at
+    }
+    left = left + width
+    at = next
+  }
+  ret at
+}
+
+# Paint the focused field's line; `entityId` is uiSystems.textField.caretLineEntityId
+func paintTextFieldLine(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  wt: view WorldTransform2D
+  cr: view ComputedRect
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  let text: view Text = componentView(this: world.texts, entityId: entityId)
+  let fieldEntityId: EntityId = uiSystems.textField.editEntityId
+  var line: TextFieldLine = {}
+  var placed: Bool = false
+  if componentHas(this: world.textFields, entityId: fieldEntityId) {
+    if let found: TextFieldLine = textFieldLine(
+      world: world
+      uiSystems: uiSystems
+      fieldEntityId: fieldEntityId
+      lineEntityId: entityId
+      res: res
+    ) {
+      line = found
+      placed = true
+    }
+  }
+  if placed and line.scrolls {
+    # a little above and below, for the letters that reach over their line
+    Gpu2d.pushClipRect(
+      canvas: canvas
+      x: line.left
+      y: line.top - line.height
+      w: line.right - line.left
+      h: line.height * 3.0
+    )
+  }
+  if placed and hasSelection(edit: uiSystems.textField.edit) {
+    paintTextSelection(
+      world: world
+      uiSystems: uiSystems
+      line: line
+      chain255: chain255
+      res: res
+      canvas: canvas
+    )
+  }
+  var moved: WorldTransform2D = wt
+  moved.position.x = wt.position.x + line.shift
+  paintTextG(
+    world: world
+    entityId: entityId
+    wt: moved
+    cr: cr
+    chain255: chain255
+    res: res
+    canvas: canvas
+    content: text.text
+  )
+  paintCaretG(
+    world: world
+    uiSystems: uiSystems
+    entityId: entityId
+    chain255: chain255
+    res: res
+    canvas: canvas
+  )
+  if placed and line.scrolls {
+    Gpu2d.popClipRect(canvas: canvas)
+  }
+}
+
+# Paint the caret when `entityId` is the focused field's line and the caret
+# shows in this blink phase
+func paintCaretG(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  let fieldEntityId: EntityId = uiSystems.textField.editEntityId
+  if uiSystems.textField.caretVisible is false or entityId is not uiSystems.textField.caretLineEntityId or componentHas(
+    this: world.textFields
+    entityId: fieldEntityId
+  ) is false {
+    ret
+  }
+  if let line: TextFieldLine = textFieldLine(
+    world: world
+    uiSystems: uiSystems
+    fieldEntityId: fieldEntityId
+    lineEntityId: entityId
+    res: res
+  ) {
+    let text: view Text = componentView(this: world.texts, entityId: entityId)
+    let color: RgbaColor = resolveTextColor(
+      theme: res.theme
+      styleId: text.styleId
+      active: world.theme.active
+    )
+    Gpu2d.drawRoundedRect(
+      canvas: canvas
+      x: textFieldOffsetX(
+        line: line
+        res: res
+        text: uiSystems.textField.edit.text
+        at: uiSystems.textField.edit.caret
+      )
+      y: line.top
+      w: line.caretWidth
+      h: line.height
+      radius: line.caretWidth / 2.0
+      color: g2dColor(color: g2dChain(color: color, chain255: chain255))
+    )
+  }
+}
+
+# The selection, a band in the theme's accent, see-through so that the text reads over it
+func paintTextSelection(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  line: view TextFieldLine
+  chain255: view Int
+  res: view Gpu2dUi
+  canvas: mod Gpu2dCanvas
+) {
+  let edit: view TextEdit = uiSystems.textField.edit
+  let from: Float = textFieldOffsetX(
+    line: line
+    res: res
+    text: edit.text
+    at: selectionStart(edit: edit)
+  )
+  let to: Float = textFieldOffsetX(
+    line: line
+    res: res
+    text: edit.text
+    at: selectionEnd(edit: edit)
+  )
+  var color: RgbaColor = uiThemeColor(theme: world.theme, name: "accent")
+  color.a = color.a * 100 / 255
+  Gpu2d.drawRoundedRect(
+    canvas: canvas
+    x: from
+    y: line.top
+    w: to - from
+    h: line.height
+    radius: 2.0
+    color: g2dColor(color: g2dChain(color: color, chain255: chain255))
+  )
+}

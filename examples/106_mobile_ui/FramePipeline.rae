@@ -10,6 +10,7 @@ open ui/LogOverlay
 open ui/DebugOverlay
 open ui/Transform
 open ui/RenderSystem
+open ui/TextFieldPointerSystem
 open ui/visualBoundsSystem/VisualBoundsSystem
 open ui/ListViewSystem
 open ui/ButtonSystem
@@ -239,6 +240,8 @@ func runFrameLayoutTransform(
     visualBoundsSystem(world: world, uiSystems: uiSystems, res: gpuUi)
     systemDone(schedule: schedule, index: uiSystemVisualBounds)
   }
+  # a focused text wider than its field, scrolled to its caret
+  textFieldScrollSystem(world: world, uiSystems: uiSystems, res: gpuUi)
 }
 
 type FrameRenderResult {

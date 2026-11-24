@@ -259,6 +259,7 @@ static int64_t g_sdl_last_present_ms = 0;
 static rae_Bool g_sdl_presented_any = 0;       /* has any frame reached the screen? */
 static unsigned char g_sdl_pressed[SDL_SCANCODE_COUNT]; /* went-down-this-frame edges */
 static unsigned char g_sdl_keydown[SDL_SCANCODE_COUNT]; /* held state, from key down/up events */
+static unsigned char g_sdl_repeated[SDL_SCANCODE_COUNT]; /* the OS repeated it this frame (held) */
 static unsigned char g_sdl_mouse[8];                    /* held state, by SDL button index (1=L,2=M,3=R) */
 static unsigned char g_sdl_mouse_pressed[8];            /* went-down-this-frame edges */
 static unsigned char g_sdl_mouse_released[8];           /* went-up-this-frame edges */
@@ -325,6 +326,7 @@ void rae_ext_Sdl3_setTargetFPS(int64_t fps) {
  *    OUTSIDE the window still delivers its button-up (the stuck-drag bug). */
 rae_Bool rae_ext_Sdl3_shouldClose(void) {
     memset(g_sdl_pressed, 0, sizeof(g_sdl_pressed));
+    memset(g_sdl_repeated, 0, sizeof(g_sdl_repeated));
     SDL_Event ev;
     rae_Bool quit = false;
     while (SDL_PollEvent(&ev)) {
@@ -335,6 +337,7 @@ rae_Bool rae_ext_Sdl3_shouldClose(void) {
                 if (ev.key.scancode < SDL_SCANCODE_COUNT) {
                     g_sdl_keydown[ev.key.scancode] = 1;
                     if (!ev.key.repeat) g_sdl_pressed[ev.key.scancode] = 1;  /* edge */
+                    else g_sdl_repeated[ev.key.scancode] = 1;
                 }
                 break;
             case SDL_EVENT_KEY_UP:
@@ -414,6 +417,10 @@ rae_Bool rae_ext_Sdl3_isKeyDown(int64_t key) {
 rae_Bool rae_ext_Sdl3_isKeyPressed(int64_t key) {
     if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
     return g_sdl_pressed[key] != 0;
+}
+rae_Bool rae_ext_Sdl3_isKeyRepeated(int64_t key) {
+    if (key <= 0 || key >= SDL_SCANCODE_COUNT) return false;
+    return g_sdl_repeated[key] != 0;
 }
 
 /* ---- Native file-open dialog (SDL3) --------------------------------------

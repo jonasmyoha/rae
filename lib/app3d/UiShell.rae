@@ -33,6 +33,7 @@ open ui/Components
 open ui/Registry
 open ui/InputSystem
 open ui/MenuSystem
+open ui/TextFieldPointerSystem
 open ui/LayoutSystem
 open ui/RenderSystem
 open ui/AnimationSystem
@@ -565,6 +566,7 @@ func runUiSystems(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dU
   menuPlaceSystem(world: world, uiSystems: uiSystems)
   animationRun(world: world, uiSystems: uiSystems)
   transformSystem(world: world, uiSystems: uiSystems)
+  textFieldScrollSystem(world: world, uiSystems: uiSystems, res: res)
   visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
 }
 
@@ -636,6 +638,7 @@ func runScheduledUiSystems(
     visualBoundsSystem(world: world, uiSystems: uiSystems, res: res)
     systemDone(schedule: schedule, index: uiSystemVisualBounds)
   }
+  textFieldScrollSystem(world: world, uiSystems: uiSystems, res: res)
 }
 
 # Re-fit the world to the window after a resize. Returns whether anything

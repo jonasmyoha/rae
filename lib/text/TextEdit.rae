@@ -1,0 +1,316 @@
+# TextEdit — editing one line of text: a caret, a selection, undo. Functions over a value, with no
+# keyboard, window or font (ui/textFieldSystem feeds it).
+#
+# The caret and the anchor are byte offsets at whole characters (text/Graphemes). What is between
+# them is selected; typing, pasting and deleting act on it when there is one.
+open text/Graphemes
+open text/NameOrder
+
+enum TextMove {
+  none
+  left
+  right
+  wordLeft
+  wordRight
+  start
+  end
+}
+
+# What the last edit was: one more of a kind, at once after the one before, is undone with it
+enum TextEditKind { none, typed, deleted, other }
+
+# The text and its caret before an edit
+type TextEditState {
+  text: String
+  caret: Int
+  anchor: Int
+}
+
+type TextEdit {
+  text: String = ""
+  caret: Int = 0
+  # The selection's other end (the caret's own place when nothing is selected)
+  anchor: Int = 0
+  undo: List(TextEditState) = {}
+  redo: List(TextEditState) = {}
+  kind: TextEditKind = TextEditKind.none
+  editSeconds: Float64 = 0.0
+}
+
+# From a pause this long typing is a new edit to undo
+const textEditPauseSeconds: Float64 = 1.0
+
+const textEditUndoLimit: Int = 100
+
+# `text` with its caret at its end
+func createTextEdit(text: view String) ret TextEdit {
+  ret TextEdit { text: "{text}", caret: text.length(), anchor: text.length() }
+}
+
+func selectionStart(edit: view TextEdit) ret Int {
+  if edit.anchor < edit.caret {
+    ret edit.anchor
+  }
+  ret edit.caret
+}
+
+func selectionEnd(edit: view TextEdit) ret Int {
+  if edit.anchor > edit.caret {
+    ret edit.anchor
+  }
+  ret edit.caret
+}
+
+func hasSelection(edit: view TextEdit) ret Bool {
+  ret edit.anchor is not edit.caret
+}
+
+# The selected text
+func selectedText(edit: view TextEdit) ret String {
+  let start: Int = selectionStart(edit: edit)
+  ret edit.text.sub(start: start, len: selectionEnd(edit: edit) - start)
+}
+
+# Select from `start` to `end` with the caret there (byte offsets, moved to whole characters inside
+# the text)
+func selectText(edit: mod TextEdit, start: view Int, end: view Int) {
+  edit.anchor = graphemeBoundary(text: edit.text, at: start)
+  edit.caret = graphemeBoundary(text: edit.text, at: end)
+  edit.kind = TextEditKind.none
+}
+
+# The caret at `at`, or with `extend` the selection's caret end there
+func placeCaret(edit: mod TextEdit, at: view Int, extend: view Bool) {
+  edit.caret = graphemeBoundary(text: edit.text, at: at)
+  if extend is false {
+    edit.anchor = edit.caret
+  }
+  edit.kind = TextEditKind.none
+}
+
+# A part of a word: a letter or a digit of any language, an underscore. Signs and spaces are not.
+func isWordCode(code: view Int) ret Bool {
+  if code < 128 {
+    ret (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122) or code is 95
+  }
+  # Latin-1 signs, general punctuation, arrows to dingbats, CJK punctuation, fullwidth signs
+  if code < 192 {
+    ret code is 170 or code is 181 or code is 186
+  }
+  if code is 215 or code is 247 or (code >= 0x2000 and code <= 0x206F) or (code >= 0x2190 and code <= 0x2BFF) {
+    ret false
+  }
+  ret not ((code >= 0x3000 and code <= 0x303F) or (code >= 0xFF01 and code <= 0xFF0F))
+}
+
+# Is the character at `at` part of a word?
+func isWordAt(text: view String, at: view Int) ret Bool {
+  if at < 0 or at >= text.length() {
+    ret false
+  }
+  ret isWordCode(code: codePointAt(text: text, at: at).code)
+}
+
+# The end of the next word from `at`
+func wordRight(text: view String, at: view Int) ret Int {
+  var end: Int = at
+  loop end < text.length() and not isWordAt(text: text, at: end) {
+    end = nextGrapheme(text: text, at: end)
+  }
+  loop end < text.length() and isWordAt(text: text, at: end) {
+    end = nextGrapheme(text: text, at: end)
+  }
+  ret end
+}
+
+# The start of the word before `at`
+func wordLeft(text: view String, at: view Int) ret Int {
+  var start: Int = at
+  loop start > 0 and not isWordAt(text: text, at: previousGrapheme(text: text, at: start)) {
+    start = previousGrapheme(text: text, at: start)
+  }
+  loop start > 0 and isWordAt(text: text, at: previousGrapheme(text: text, at: start)) {
+    start = previousGrapheme(text: text, at: start)
+  }
+  ret start
+}
+
+# A part of a text, as byte offsets
+type TextSpan {
+  start: Int
+  end: Int
+}
+
+# The word at `at`, or the signs or the spaces there: the characters of one kind around it
+func wordAround(text: view String, at: view Int) ret TextSpan {
+  if text.length() is 0 {
+    ret TextSpan { start: 0, end: 0 }
+  }
+  var inside: Int = graphemeBoundary(text: text, at: at)
+  if inside >= text.length() {
+    inside = previousGrapheme(text: text, at: inside)
+  }
+  let word: Bool = isWordAt(text: text, at: inside)
+  let space: Bool = text.byteAt(index: inside) is 32
+  var start: Int = inside
+  var end: Int = nextGrapheme(text: text, at: inside)
+  loop start > 0 {
+    let before: Int = previousGrapheme(text: text, at: start)
+    if isWordAt(text: text, at: before) is not word or (text.byteAt(index: before) is 32) is not space {
+      break
+    }
+    start = before
+  }
+  loop end < text.length() and isWordAt(text: text, at: end) is word and (text.byteAt(index: end) is 32) is space {
+    end = nextGrapheme(text: text, at: end)
+  }
+  ret TextSpan { start: start, end: end }
+}
+
+# Where a move from the caret goes
+func moveTarget(edit: view TextEdit, move: view TextMove) ret Int {
+  if move is TextMove.left {
+    ret previousGrapheme(text: edit.text, at: edit.caret)
+  }
+  if move is TextMove.right {
+    ret nextGrapheme(text: edit.text, at: edit.caret)
+  }
+  if move is TextMove.wordLeft {
+    ret wordLeft(text: edit.text, at: edit.caret)
+  }
+  if move is TextMove.wordRight {
+    ret wordRight(text: edit.text, at: edit.caret)
+  }
+  if move is TextMove.start {
+    ret 0
+  }
+  if move is TextMove.end {
+    ret edit.text.length()
+  }
+  ret edit.caret
+}
+
+# Move the caret, or with `extend` (Shift) the selection's caret end. Left and Right on a selection
+# go to its end on that side.
+func moveCaret(edit: mod TextEdit, move: view TextMove, extend: view Bool) {
+  if move is TextMove.none {
+    ret
+  }
+  var target: Int = moveTarget(edit: edit, move: move)
+  if extend is false and hasSelection(edit: edit) {
+    if move is TextMove.left {
+      target = selectionStart(edit: edit)
+    } else if move is TextMove.right {
+      target = selectionEnd(edit: edit)
+    }
+  }
+  placeCaret(edit: edit, at: target, extend: extend)
+}
+
+# Remember the text before an edit of `kind`, unless the edit goes on from the one before
+func rememberEdit(edit: mod TextEdit, kind: view TextEditKind, now: view Float64) {
+  let goesOn: Bool = kind is not TextEditKind.other and kind is edit.kind and now - edit.editSeconds < textEditPauseSeconds
+  if goesOn is false {
+    let state: TextEditState = { text: "{edit.text}", caret: edit.caret, anchor: edit.anchor }
+    edit.undo.add(value: own state)
+    if edit.undo.length > textEditUndoLimit {
+      edit.undo.removeAt(index: 0)
+    }
+  }
+  edit.redo.clear()
+  edit.kind = kind
+  edit.editSeconds = now
+}
+
+# `text` in place of the selection, or at the caret; nothing when there is nothing to change
+func replaceSelection(
+  edit: mod TextEdit
+  text: view String
+  kind: view TextEditKind
+  now: view Float64
+) ret Bool {
+  if text.length() is 0 and hasSelection(edit: edit) is false {
+    ret false
+  }
+  rememberEdit(edit: edit, kind: kind, now: now)
+  let start: Int = selectionStart(edit: edit)
+  let end: Int = selectionEnd(edit: edit)
+  let before: String = edit.text.sub(start: 0, len: start)
+  let after: String = edit.text.sub(start: end, len: edit.text.length() - end)
+  edit.text = "{before}{text}{after}"
+  edit.caret = start + text.length()
+  # a mark typed after a letter is part of it: the caret stays at a whole character
+  let boundary: Int = graphemeBoundary(text: edit.text, at: edit.caret)
+  if boundary < edit.caret {
+    edit.caret = nextGrapheme(text: edit.text, at: boundary)
+  }
+  edit.anchor = edit.caret
+  ret true
+}
+
+# Take away the selection, or what is between the caret and where `move` would take it
+func deleteBy(edit: mod TextEdit, move: view TextMove, now: view Float64) ret Bool {
+  if hasSelection(edit: edit) {
+    ret replaceSelection(
+      edit: edit
+      text: ""
+      kind: TextEditKind.other
+      now: now
+    )
+  }
+  let target: Int = moveTarget(edit: edit, move: move)
+  if target is edit.caret {
+    ret false
+  }
+  # the caret before it is what undo brings back
+  rememberEdit(edit: edit, kind: TextEditKind.deleted, now: now)
+  var start: Int = target
+  var end: Int = edit.caret
+  if target > edit.caret {
+    start = edit.caret
+    end = target
+  }
+  let before: String = edit.text.sub(start: 0, len: start)
+  let after: String = edit.text.sub(start: end, len: edit.text.length() - end)
+  edit.text = "{before}{after}"
+  # the parts around it may join into one character: the caret goes before it
+  edit.caret = graphemeBoundary(text: edit.text, at: start)
+  edit.anchor = edit.caret
+  ret true
+}
+
+# Back to the text before the last edit; false when there is none
+func undoEdit(edit: mod TextEdit) ret Bool {
+  if edit.undo.length is 0 {
+    ret false
+  }
+  let current: TextEditState = { text: "{edit.text}", caret: edit.caret, anchor: edit.anchor }
+  let last: Int = edit.undo.length - 1
+  if let state: TextEditState = edit.undo.copyAt(index: last) {
+    showEditState(edit: edit, state: state)
+  }
+  edit.undo.removeAt(index: last)
+  edit.redo.add(value: own current)
+  ret true
+}
+
+func redoEdit(edit: mod TextEdit) ret Bool {
+  if edit.redo.length is 0 {
+    ret false
+  }
+  let current: TextEditState = { text: "{edit.text}", caret: edit.caret, anchor: edit.anchor }
+  let last: Int = edit.redo.length - 1
+  if let state: TextEditState = edit.redo.copyAt(index: last) {
+    showEditState(edit: edit, state: state)
+  }
+  edit.redo.removeAt(index: last)
+  edit.undo.add(value: own current)
+  ret true
+}
+
+func showEditState(edit: mod TextEdit, state: view TextEditState) {
+  edit.text = "{state.text}"
+  edit.caret = state.caret
+  edit.anchor = state.anchor
+  edit.kind = TextEditKind.none
+}

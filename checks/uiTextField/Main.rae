@@ -1,0 +1,112 @@
+# A focused text field, painted (ui/RenderSystem RenderTextField): a name wider than its field,
+# scrolled to its caret end, with a part of it selected. RAE_TEXT_FIELD_CHECK=caret shows the caret
+# in it instead.
+#
+#   RAE_HEADLESS_FRAMES=10 RAE_GPU2D_SCREENSHOT=/tmp/field.bmp \
+#     compiler/bin/rae run checks/uiTextField/Main.rae
+#
+# The rules are checked exactly in compiler/tests/cases/1582_text_field_selection. Exit 0 when it
+# drew.
+import Gpu2d
+import Sys
+import ui/Scene
+open app3d/UiShell
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/Event
+open ecs/Schedule
+open Gpu2dCanvas
+open ui/BindingComponents
+open ui/Ecs
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/UiSystems
+open ui/textFieldSystem/TextFieldSystem
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI text field check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  let scene: Scene = loadSceneFile(path: "checks/uiTextField/page.raescene")
+  if scene.ok is false {
+    log("UI TEXT FIELD FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  setTextFieldClipboard(textFieldSystem: uiSystems.textField, text: "")
+  var field: EntityId = noEntity()
+  if let raw: Int = world.nodeIds.get(k: "Field") {
+    field = id(v: raw)
+  }
+  componentMod(this: world.textFields, entityId: field).text = "A holiday photo with a much longer name.png"
+  var start: Int = 28
+  if Sys.getEnv(name: "RAE_TEXT_FIELD_CHECK") is "caret" {
+    start = 39
+  }
+  let set: Bool = setTextFieldSelection(
+    world: world
+    textFieldSystem: uiSystems.textField
+    entityId: field
+    start: start
+    end: 39
+  )
+  var schedule: Schedule = createUiPipeline(world: world)
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 600 {
+    let changed: Bool = textFieldSystem(
+      world: world
+      textFieldSystem: uiSystems.textField
+      actions: world.uiActions
+      input: TextInputFrame { typed: "", backspaces: 0, enter: false, tapped: false }
+      now: 0.0
+    )
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.03
+      g: 0.05
+      b: 0.08
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  let scroll: Float = uiSystems.textField.scroll
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if scroll <= 0.0 {
+    log("UI TEXT FIELD FAILED: the text is not scrolled to its caret")
+    ret 1
+  }
+  log("UI TEXT FIELD OK")
+  ret 0
+}
