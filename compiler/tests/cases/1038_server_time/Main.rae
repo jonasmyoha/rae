@@ -1,7 +1,8 @@
 # Server time (docs/server-benchmarks-design.md §9 G4) and lib/Time's dates in
 # Rae (docs/runtime-c-audit.md row 6): one calendar routine for the HTTP Date
 # header and formatTimestamp / formatDate, a nanosecond deadline wait and a
-# fixed-rate ticker.
+# fixed-rate ticker. Nothing here has an upper bound in time: how late a wait
+# ends is checks/serverTime.
 import Time
 
 func main() {
@@ -25,42 +26,44 @@ func main() {
   let next: Bool = Time.updateHttpDate(cache: cache, epochSeconds: 784111778)
   log("cache: first {first}, same second {same}, next second {next}: {cache.text}")
 
-  # Deadlines. Two things are checked:
-  # - a wait is never early: waitUntil re-reads the clock and returns only
-  #   once the deadline has passed, so this holds on any machine;
-  # - the MEDIAN of 15 waits of 33 ms is under 1 ms late. That separates
-  #   waitUntil from a plain sleep by a wide margin even under load
-  #   (measured 2026-10-14, 40 waits each, idle / 12 busy processes:
-  #   waitUntil 0.05 / 0.15 ms at the median, the earlier 7/8-step version
-  #   4.4 / 1.5 ms, a plain 33 ms sleep 5-8 ms).
-  # It used to check the BEST of 15 within 0.5 ms. That failed under the
-  # suite's load, and proved little: a plain sleep also landed within
-  # 0.5 ms now and then (3 of 100 idle, 8 of 100 loaded). What the median
-  # check cannot prove is a bound on a single wait: one wait can always be
-  # delayed by the scheduler, so no case here asserts a maximum.
-  var lateness: List(Int) = {}
+  # Deadlines: a wait is never early. waitUntil re-reads the clock and returns
+  # only once the deadline has passed, so this holds on any machine. How late
+  # it is depends on the machine, and is measured by checks/serverTime.
   var early: Bool = false
   loop var i: Int = 0, i < 15, ++i {
     let deadline: Int = nowNs() + 33000000
     Time.waitUntil(deadlineNs: deadline)
-    let late: Int = nowNs() - deadline
-    if late < 0 {
+    if nowNs() < deadline {
       early = true
     }
-    lateness.add(value: late)
   }
-  lateness.sort()
   log("deadline never early: {early is false}")
-  log(
-    "median of 15 waits under 1 ms late: {lateness.copyAtFallback(index: 7, fallback: 0) < 1000000}"
-  )
 
-  # A 30 Hz tick: 30 ticks take a second, not a second plus 30 delays
-  var ticker: Ticker = Time.createTicker(hertz: 30)
+  # A 30 Hz tick: none comes before it is due, and 30 of them last at least 30
+  # periods (from before the ticker was made; a slow machine makes it longer)
   let start: Int = nowNs()
+  var ticker: Ticker = Time.createTicker(hertz: 30)
+  let firstNs: Int = ticker.nextNs
+  var tickEarly: Bool = false
   loop var i: Int = 0, i < 30, ++i {
+    let due: Int = ticker.nextNs
     Time.tickerWait(ticker: ticker)
+    if nowNs() < due {
+      tickEarly = true
+    }
   }
-  let elapsedMs: Int = (nowNs() - start) / 1000000
-  log("30 ticks at 30 Hz took about a second: {elapsedMs >= 990 and elapsedMs < 1150}")
+  log("tick never early: {tickEarly is false}")
+  log("30 ticks last at least 30 periods: {nowNs() - start >= 30 * ticker.periodNs}")
+  # They do not drift: the next one is due a whole number of periods after the
+  # first, as many as were waited for or missed, however late each wait ended
+  log("no drift: {ticker.nextNs is firstNs + (30 + ticker.missed) * ticker.periodNs}")
+  # A frame that overran by three periods counts what it missed and keeps the
+  # same grid; the next tick is in the future, so it does not race to catch up
+  let missedBefore: Int = ticker.missed
+  Time.waitUntil(deadlineNs: ticker.nextNs + 3 * ticker.periodNs)
+  let late: Int = nowNs()
+  Time.tickerWait(ticker: ticker)
+  log("missed ticks counted: {ticker.missed - missedBefore >= 3}")
+  log("next tick still to come: {ticker.nextNs > late}")
+  log("no drift after it: {ticker.nextNs is firstNs + (31 + ticker.missed) * ticker.periodNs}")
 }

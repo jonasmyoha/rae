@@ -1,0 +1,36 @@
+# How late lib/Time's waits end (docs/server-benchmarks-design.md section 9 G4).
+# It needs a machine that is not busy, so it is a check that runs alone; what
+# holds on any machine (a wait is never early, ticks do not drift) is the unit
+# case 1038_server_time.
+#
+# - The MEDIAN of 15 waits of 33 ms is under 1 ms late. That separates waitUntil
+#   from a plain sleep by a wide margin (measured 2026-10-14, 40 waits each,
+#   idle / 12 busy processes: waitUntil 0.05 / 0.15 ms at the median, the
+#   earlier 7/8-step version 4.4 / 1.5 ms, a plain 33 ms sleep 5-8 ms). The best
+#   of 15 proved little: a plain sleep also landed within 0.5 ms now and then.
+#   A single wait has no bound: the scheduler can always delay one.
+# - 30 ticks at 30 Hz take a second, not a second plus 30 delays.
+import Time
+
+func main() ret Int {
+  var lateness: List(Int) = {}
+  loop var i: Int = 0, i < 15, ++i {
+    let deadline: Int = nowNs() + 33000000
+    Time.waitUntil(deadlineNs: deadline)
+    lateness.add(value: nowNs() - deadline)
+  }
+  lateness.sort()
+  let median: Int = lateness.copyAtFallback(index: 7, fallback: 0)
+  log("median of 15 waits: {median / 1000} us late (at most 1000)")
+  let start: Int = nowNs()
+  var ticker: Ticker = Time.createTicker(hertz: 30)
+  loop var i: Int = 0, i < 30, ++i {
+    Time.tickerWait(ticker: ticker)
+  }
+  let elapsedMs: Int = (nowNs() - start) / 1000000
+  log("30 ticks at 30 Hz: {elapsedMs} ms (at most 1150), {ticker.missed} missed")
+  if median >= 1000000 or elapsedMs >= 1150 {
+    ret 1
+  }
+  ret 0
+}
