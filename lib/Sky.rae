@@ -30,6 +30,7 @@ import Math
 import Vec3
 open SkyHosek
 open CloudTier
+open CloudBakeRules
 open LightUnits
 open Scene3d
 
@@ -148,6 +149,9 @@ type Sky {
   cloudTier: CloudTier = CloudTier.layer
   # the volumetric tier's march steps (48 at High, 64 at Ultra)
   cloudSteps: Int = 48
+  # the volumetric clouds baked into a map of the sky (lib/CloudBake; the
+  # renderer sets it from setCloudBake for each frame)
+  cloudBake: CloudBakeOptions = CloudBakeOptions {}
   # the clouds' shadows on the ground (lib/CloudShadow; off: the sun dimmed
   # evenly by the cover)
   cloudShadows: Bool = true

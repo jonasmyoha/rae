@@ -45,10 +45,25 @@ func createFullscreenPipeline(
   shader: view Shader
   format: copy Int32
 ) ret RenderPipelineId {
-  if let pipeline: RenderPipelineId = createRenderPipeline(
+  ret createFullscreenPipelineFrom(
     resources: resources
     shader: shader
     vertexEntry: "vs"
+    format: format
+  )
+}
+
+# createFullscreenPipeline with the vertex entry's name
+func createFullscreenPipelineFrom(
+  resources: mod GpuResources
+  shader: view Shader
+  vertexEntry: view String
+  format: copy Int32
+) ret RenderPipelineId {
+  if let pipeline: RenderPipelineId = createRenderPipeline(
+    resources: resources
+    shader: shader
+    vertexEntry: vertexEntry
     fragmentEntry: "fs"
     spec: fullscreenPipelineSpec(format: format)
   ) {
@@ -149,6 +164,30 @@ func runFullscreenInBatchTimed(
   timestampWrites: copy Ptr
 ) unsafe {
   unsafe {
+    runFullscreenInBatchInstance(
+      encoder: encoder
+      resources: resources
+      pipeline: pipeline
+      bind: bind
+      target: target
+      timestampWrites: timestampWrites
+      instance: 0
+    )
+  }
+}
+
+# runFullscreenInBatchTimed with the instance the shader sees (its
+# instance_index): which tile of a larger target this pass draws
+func runFullscreenInBatchInstance(
+  encoder: copy Ptr
+  resources: view GpuResources
+  pipeline: view RenderPipelineId
+  bind: view BindGroupId
+  target: copy Ptr
+  timestampWrites: copy Ptr
+  instance: view Int
+) unsafe {
+  unsafe {
     if target is webgpuNull() or encoder is webgpuNull() {
       ret
     }
@@ -178,7 +217,7 @@ func runFullscreenInBatchTimed(
       vertexCount: 3
       instanceCount: 1
       firstVertex: 0
-      firstInstance: 0
+      firstInstance: instance
     )
     wgpuRenderPassEncoderEnd(renderPassEncoder: pass)
     wgpuRenderPassEncoderRelease(renderPassEncoder: pass)

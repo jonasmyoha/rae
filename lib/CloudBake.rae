@@ -1,0 +1,354 @@
+# CloudBake — the volumetric clouds (lib/CloudTier volumetric) baked into a map
+# of the sky instead of marched every frame (docs/cloud-rendering-research.md
+# §8.6): the lighting pass reads the map, a couple of texture reads a pixel of
+# sky, and a bake costs a little for a few seconds, now and then.
+#
+# The map is the sky above the horizon as a square, octahedral (sky_hosek.wgsl
+# cloudMapUv), in two halves side by side: the one shown and the one baked
+# next. lib/CloudBakeRules says when a bake begins, which tiles a frame bakes
+# and how the new half fades in. A bake takes the light uniform of the frame it
+# begins in, copied into its own, and the field map (cloud_field.wgsl) drawn
+# from that, so its tiles fit together whatever moves meanwhile. Each tile is
+# marched into a small texture (lib/cloud_bake.wgsl) and copied into the map: a
+# tiled GPU neither loads nor stores the whole map.
+#
+# Between two bakes the lighting pass slides the map over the clouds' plane by
+# the wind and the eye's way (deferred_light.wgsl cloudBakedAt), so the clouds
+# drift on. The forward pass keeps the layer, as with the marched clouds.
+import Time
+open Scene3d
+open Sky
+open Vec3
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuRender
+open gpu/GpuTextures
+open gpu/GpuIds
+open gpu/GpuArgs
+open webgpu/Webgpu
+open webgpu/Context
+open webgpu/WebgpuEnums
+open webgpu/WebgpuTypes
+open GbufferFullscreen
+open CloudSlab
+open CloudTier
+open CloudTiming
+open CloudBakeRules
+
+# The bake's march steps: more than a frame's, its rays meet the edges of the
+# clouds once and no history smooths them
+const cloudBakeSteps: Int = 64
+
+type CloudBake {
+  state: CloudBakeState = CloudBakeState {}
+  work: CloudBakeWork = CloudBakeWork {}
+  # this frame draws the baked clouds
+  on: Bool = false
+  map: TextureId = noTextureId()
+  mapView: TextureViewId = noTextureViewId()
+  tile: TextureId = noTextureId()
+  tileView: TextureViewId = noTextureViewId()
+  # the light uniform of the frame the bake began in, and the bake's own
+  light: BufferId = noBufferId()
+  uniform: BufferId = noBufferId()
+  pipeline: RenderPipelineId = noRenderPipelineId()
+  bind: BindGroupId = noBindGroupId()
+  fieldBind: BindGroupId = noBindGroupId()
+  # the field map and profile the bind reads, and the side the map is made for
+  boundField: TextureViewId = noTextureViewId()
+  side: Int = 0
+}
+
+# What the frame's clouds are baked from
+func cloudBakeFromNow(sky: view Sky, light: view Light3d, camera: view Camera3d) ret CloudBakeFrom {
+  ret CloudBakeFrom {
+    eye: camera.position
+    sun: light.sunDir
+    light: (light.sunColor.x + light.sunColor.y + light.sunColor.z) / 3.0
+    cover: sky.cloudCover
+    darkness: sky.cloudDarkness
+    cloudType: sky.cloudType
+    scale: sky.cloudScale
+    height: sky.cloudHeight
+    drift: sky.cloudDrift
+    skyKind: kindCode(sky: sky)
+  }
+}
+
+# Before the frame's light uniform is written: this frame's part of the bake,
+# and what the lighting shows of the map
+func cloudBakeFrame(
+  bake: mod CloudBake
+  sky: view Sky
+  light: view Light3d
+  camera: view Camera3d
+) ret CloudBakeShown {
+  let on: Bool = sky.cloudBake.on and cloudTierRank(tier: sky.cloudTier) >= 3 and sky.cloudCover > 0.001
+  if not on {
+    if bake.on {
+      bake.state = CloudBakeState {}
+    }
+    bake.on = false
+    ret CloudBakeShown {}
+  }
+  bake.on = true
+  let seconds: Float64 = (nowNs() as Float64) / 1000000000.0
+  bake.work = cloudBakeStep(
+    state: bake.state
+    now: cloudBakeFromNow(sky: sky, light: light, camera: camera)
+    options: sky.cloudBake
+    seconds: seconds
+  )
+  ret cloudBakeShown(state: bake.state, seconds: seconds)
+}
+
+# After it was written: a bake that begins keeps it as its own
+func cloudBakeKeepLight(
+  bake: mod CloudBake
+  resources: mod GpuResources
+  writer: mod ArgWriter
+  bytes: view Int
+) {
+  if not bake.on or not bake.work.begins {
+    ret
+  }
+  if not isValidBuffer(resources: resources, id: bake.light) {
+    if let made: BufferId = createBuffer(
+      resources: resources
+      size: bytes
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      bake.light = made
+    }
+  }
+  let uploaded: Bool = uploadArgs(
+    writer: writer
+    resources: resources
+    buffer: bake.light
+    offset: 0
+  )
+}
+
+# The map, the tile, the uniform and the pipeline, made once and again for
+# another side; false while they cannot be made
+func ensureCloudBake(
+  bake: mod CloudBake
+  slab: mod CloudSlab
+  resources: mod GpuResources
+) ret Bool {
+  let side: Int = bake.state.side
+  if side is not bake.side or not isValidTextureView(resources: resources, id: bake.mapView) {
+    let attach: UInt64 = WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+    cloudSlabTexture(
+      resources: resources
+      width: side * 2
+      height: side
+      format: WGPUTextureFormat_RGBA16Float
+      usage: WGPUTextureUsage_TextureBinding + WGPUTextureUsage_CopyDst
+      texture: bake.map
+      textureView: bake.mapView
+    )
+    if not isValidTextureView(resources: resources, id: bake.tileView) {
+      cloudSlabTexture(
+        resources: resources
+        width: cloudBakeTile
+        height: cloudBakeTile
+        format: WGPUTextureFormat_RGBA16Float
+        usage: attach
+        texture: bake.tile
+        textureView: bake.tileView
+      )
+    }
+    bake.side = side
+    slab.generation = slab.generation + 1
+  }
+  if not isValidBuffer(resources: resources, id: bake.uniform) {
+    if let made: BufferId = createBuffer(
+      resources: resources
+      size: cloudSlabUniformBytes
+      usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+    ) {
+      bake.uniform = made
+    }
+  }
+  if not isValidRenderPipeline(resources: resources, id: bake.pipeline) {
+    let bakeShader: Shader = shader(files: [
+      "lib/sky_hosek.wgsl"
+      "lib/deferred_uniforms.wgsl"
+      "lib/cloud_slab_common.wgsl"
+      "lib/cloud_volume.wgsl"
+      "lib/cloud_bake.wgsl"
+    ])
+    bake.pipeline = createFullscreenPipelineFrom(
+      resources: resources
+      shader: bakeShader
+      vertexEntry: "vsTile"
+      format: WGPUTextureFormat_RGBA16Float
+    )
+  }
+  if not (bake.boundField is slab.fieldView) {
+    retireCloudBakeBinds(bake: bake, resources: resources)
+    bake.boundField = slab.fieldView
+  }
+  if not isValidBuffer(resources: resources, id: bake.light) {
+    ret false
+  }
+  if not bindGroupIsUsable(resources: resources, id: bake.fieldBind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 1)
+    entries.add(value: bufferRef(id: bake.light))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: slab.fieldPipeline
+      entries: entries
+    ) {
+      bake.fieldBind = bind
+    }
+  }
+  if not bindGroupIsUsable(resources: resources, id: bake.bind) {
+    var entries: List(ResourceRef) = List.create(ResourceRef, cap: 4)
+    entries.add(value: bufferRef(id: bake.light))
+    entries.add(value: bufferRef(id: bake.uniform))
+    entries.add(value: textureViewRef(id: slab.fieldView))
+    entries.add(value: textureViewRef(id: slab.profileView))
+    if let bind: BindGroupId = createRenderBindGroup(
+      resources: resources
+      pipeline: bake.pipeline
+      entries: entries
+    ) {
+      bake.bind = bind
+    }
+  }
+  ret bindGroupIsUsable(resources: resources, id: bake.bind) and bindGroupIsUsable(
+    resources: resources
+    id: bake.fieldBind
+  )
+}
+
+func retireCloudBakeBinds(bake: mod CloudBake, resources: mod GpuResources) {
+  let bindRetired: Bool = retireBindGroup(resources: resources, id: bake.bind)
+  let fieldRetired: Bool = retireBindGroup(resources: resources, id: bake.fieldBind)
+  bake.bind = noBindGroupId()
+  bake.fieldBind = noBindGroupId()
+}
+
+# Record this frame's tiles into `encoder`
+func drawCloudBake(
+  bake: mod CloudBake
+  slab: mod CloudSlab
+  resources: mod GpuResources
+  encoder: copy Ptr
+  cloudTiming: mod CloudTiming
+) {
+  if not bake.on {
+    ret
+  }
+  let ready: Bool = ensureCloudBake(bake: bake, slab: slab, resources: resources)
+  # nothing can be baked yet: the bake begins again
+  if not ready {
+    bake.state = CloudBakeState {}
+    ret
+  }
+  if bake.work.tiles is 0 {
+    ret
+  }
+  let row: Int = bake.side / cloudBakeTile
+  if bake.work.begins {
+    var writer: ArgWriter = createArgs(uniform: true)
+    loop var column: Int = 0, column < 4, ++column {
+      pushVec4F(
+        writer: writer
+        x: 0.0
+        y: 0.0
+        z: 0.0
+        w: 0.0
+      )
+    }
+    pushVec4F(
+      writer: writer
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      w: cloudBakeSteps.toFloat()
+    )
+    pushVec4F(
+      writer: writer
+      x: cloudBakeTile.toFloat()
+      y: bake.side.toFloat()
+      z: row.toFloat()
+      w: 0.0
+    )
+    let uploaded: Bool = uploadArgs(
+      writer: writer
+      resources: resources
+      buffer: bake.uniform
+      offset: 0
+    )
+  }
+  unsafe {
+    if bake.work.begins {
+      runFullscreenInBatch(
+        encoder: encoder
+        resources: resources
+        pipeline: slab.fieldPipeline
+        bind: bake.fieldBind
+        target: textureViewHandle(resources: resources, id: slab.fieldView)
+      )
+    }
+    let from: Ptr = textureHandle(resources: resources, id: bake.tile)
+    let into: Ptr = textureHandle(resources: resources, id: bake.map)
+    if from is webgpuNull() or into is webgpuNull() {
+      ret
+    }
+    loop var i: Int = 0, i < bake.work.tiles, ++i {
+      let index: Int = bake.work.firstTile + i
+      var writes: Ptr = webgpuNull()
+      if i is 0 {
+        writes = cloudTimingPass(cloudTiming: cloudTiming, name: "cloud bake")
+      }
+      runFullscreenInBatchInstance(
+        encoder: encoder
+        resources: resources
+        pipeline: bake.pipeline
+        bind: bake.bind
+        target: textureViewHandle(resources: resources, id: bake.tileView)
+        timestampWrites: writes
+        instance: index
+      )
+      let origin: WGPUOrigin3D = {
+        x: (index % row) * cloudBakeTile + bake.work.target * bake.side
+        y: (index / row) * cloudBakeTile
+        z: 0
+      }
+      let source: WGPUTexelCopyTextureInfo = { texture: from, aspect: WGPUTextureAspect_All }
+      let destination: WGPUTexelCopyTextureInfo = {
+        texture: into
+        origin: origin
+        aspect: WGPUTextureAspect_All
+      }
+      let extent: WGPUExtent3D = {
+        width: cloudBakeTile
+        height: cloudBakeTile
+        depthOrArrayLayers: 1
+      }
+      wgpuCommandEncoderCopyTextureToTexture(
+        commandEncoder: encoder
+        source: source
+        destination: destination
+        copySize: extent
+      )
+    }
+  }
+}
+
+# The bake's GPU objects (renderer shutdown)
+func retireCloudBake(bake: mod CloudBake, resources: mod GpuResources) {
+  retireCloudBakeBinds(bake: bake, resources: resources)
+  let pipelineRetired: Bool = retireRenderPipeline(resources: resources, id: bake.pipeline)
+  let mapViewRetired: Bool = retireTextureView(resources: resources, id: bake.mapView)
+  let tileViewRetired: Bool = retireTextureView(resources: resources, id: bake.tileView)
+  let mapRetired: Bool = retireTexture(resources: resources, id: bake.map)
+  let tileRetired: Bool = retireTexture(resources: resources, id: bake.tile)
+  let lightRetired: Bool = retireBuffer(resources: resources, id: bake.light)
+  let uniformRetired: Bool = retireBuffer(resources: resources, id: bake.uniform)
+  bake = CloudBake {}
+}

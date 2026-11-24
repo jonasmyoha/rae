@@ -15,7 +15,8 @@
 // The clouds' shadow map (lib/CloudShadow; cloudSunLight in deferred_shade.wgsl)
 @group(0) @binding(10) var cloudShadowTex: texture_2d<f32>;
 // The slab tier's half-resolution clouds (lib/CloudSlab): premultiplied light
-// and how much of the sky they hide, upsampled over the sky
+// and how much of the sky they hide, upsampled over the sky; with the baked
+// clouds (lib/CloudBake) the map of the sky, its two halves side by side
 @group(0) @binding(11) var cloudSlabTex: texture_2d<f32>;
 fn cloudSlabAt(uv: vec2<f32>) -> vec4<f32> {
   let size = vec2<f32>(textureDimensions(cloudSlabTex, 0));
@@ -27,6 +28,40 @@ fn cloudSlabAt(uv: vec2<f32>) -> vec4<f32> {
   let c = textureLoad(cloudSlabTex, cell + vec2<i32>(0, 1), 0);
   let d = textureLoad(cloudSlabTex, cell + vec2<i32>(1, 1), 0);
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+// The baked clouds (lib/CloudBake; the map's two halves side by side in
+// cloudSlabTex) along `dir`: each half is looked up at the point of the clouds'
+// plane the ray meets, carried back by the wind to where it was as the half
+// was baked, as seen from the eye it was baked from. So the clouds drift, and
+// stand still as the eye moves, between two bakes.
+fn cloudMapHalf(uv: vec2<f32>, part: i32) -> vec4<f32> {
+  let side = textureDimensions(cloudSlabTex, 0).y;
+  let at = uv * f32(side) - 0.5;
+  let cell = clamp(vec2<i32>(floor(at)), vec2<i32>(0), vec2<i32>(i32(side) - 2));
+  let f = clamp(at - vec2<f32>(cell), vec2<f32>(0.0), vec2<f32>(1.0));
+  let corner = cell + vec2<i32>(part * i32(side), 0);
+  let a = textureLoad(cloudSlabTex, corner, 0);
+  let b = textureLoad(cloudSlabTex, corner + vec2<i32>(1, 0), 0);
+  let c = textureLoad(cloudSlabTex, corner + vec2<i32>(0, 1), 0);
+  let d = textureLoad(cloudSlabTex, corner + vec2<i32>(1, 1), 0);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+fn cloudBakedHalf(dir: vec3<f32>, part: i32) -> vec4<f32> {
+  let eyeThen = L.cloudBake[part];
+  let base = max(L.cloudBake[2][part], 100.0);
+  let drift = (L.clouds.z - eyeThen.w) * 1600.0 * max(L.cloudShape.w, 0.1);
+  let plane = L.camPos.xyz + dir * max((base - L.camPos.z) / dir.z, 0.0);
+  let was = vec3<f32>(plane.xy + vec2<f32>(drift, drift * 0.35), max(base, plane.z)) - eyeThen.xyz;
+  if (was.z <= 0.0) { return vec4<f32>(0.0); }
+  return cloudMapHalf(cloudMapUv(normalize(was)), part);
+}
+fn cloudBakedAt(dir: vec3<f32>) -> vec4<f32> {
+  if (dir.z <= 0.005 || L.cloudBake[2].z <= 0.0) { return vec4<f32>(0.0); }
+  let second = L.cloudOptions.w;
+  var c = vec4<f32>(0.0);
+  if (second < 0.999) { c = c + cloudBakedHalf(dir, 0) * (1.0 - second); }
+  if (second > 0.001) { c = c + cloudBakedHalf(dir, 1) * second; }
+  return vec4<f32>(c.rgb * L.camPos.w, c.w) * L.cloudBake[2].z;
 }
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
@@ -48,7 +83,12 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     skySlabActive = L.clouds.w > 1.5 && L.clouds.x > 0.001;
     var skyLit = skyColor(dirF);
     if (skySlabActive) {
-      let slab = cloudSlabAt(uvF);
+      var slab = vec4<f32>(0.0);
+      if (L.cloudOptions.z > 0.5) {
+        slab = cloudBakedAt(dirF);
+      } else {
+        slab = cloudSlabAt(uvF);
+      }
       skyLit = skyLit * (1.0 - slab.w) + slab.rgb;
     }
     return vec4<f32>(skyLit, 1.0);

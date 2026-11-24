@@ -43,8 +43,13 @@ struct LightU {
   clouds: vec4<f32>,
   cloudShape: vec4<f32>,
   // cloudOptions (lib/SkyClouds): x the clouds' shadows on the ground (1 on),
-  // y their shapes' size apart from the clouds' (1 as the clouds)
+  // y their shapes' size apart from the clouds' (1 as the clouds), z the baked
+  // clouds drawn (lib/CloudBake; 1 on), w the second half of the map's share
   cloudOptions: vec4<f32>,
+  // The baked clouds: per half of the map the eye it was baked from and how far
+  // the clouds had drifted; then the two halves' base heights, how much they
+  // show (0 .. 1)
+  cloudBake: array<vec4<f32>, 3>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,

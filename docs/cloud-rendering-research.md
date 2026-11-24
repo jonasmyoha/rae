@@ -738,7 +738,7 @@ one before it.
      resolution controller should not shrink the whole frame because the
      clouds alone are slow.
 
-**Overrides for testing:** `RAE_CLOUD_TIER=off|layer|slab|volumetric`
+**Overrides for testing:** `RAE_CLOUD_TIER=off|layer|slab|volumetric|baked`
 forces a tier and turns the fallback off. The choice and its reason are
 logged at start-up, so a screenshot run states which tier it shows.
 
@@ -760,6 +760,36 @@ stays deterministic from its seed (docs/seasons-and-weather-design.md §5).
 The cloud **map** (the 2D field of where clouds are) is not part of
 `Weather`. It is drawn on the GPU from the field's numbers and the seed,
 as Nubis and RDR2 build theirs every frame.
+
+### 8.6 The volumetric clouds baked into a map of the sky (2026-11-24)
+
+`lib/CloudBake` (rules in `lib/CloudBakeRules`, case 1584; `setCloudBake`,
+`CloudOptions.baked` and `bakedOnAuto`, the panel's Baked button,
+`RAE_CLOUD_TIER=baked`) marches the same volume
+(`lib/cloud_volume.wgsl`) into a map and shows that:
+
+- The map is the sky above the horizon as an octahedral square, 1024 texels
+  a side, with more texels low in the sky; two halves side by side (16 MB).
+  Its light is stored before the camera's exposure.
+- A bake is 256 tiles of 64 x 64 texels, one a frame, each texel 4 rays of
+  64 steps: about 4 s at 60 fps, never a frame that pays for it all. The
+  first one is baked 32 tiles a frame. It takes the light uniform of the
+  frame it begins in, so its tiles fit together.
+- The lighting pass reads the map itself: no trace, resolve or history
+  passes. Between bakes it slides the map over the clouds' plane by the wind
+  and the eye's way, so the clouds drift on and stay put as the eye moves.
+- It is baked again every 60 s (`bakeSeconds`) and sooner when the sun turned
+  0.5 degrees, its light or the weather changed, or the slide is over 400 m. The new
+  half fades in over 4 s. With a fast clock it bakes all the time.
+- The forward pass keeps the layer, and the cirrus and the horizon's band
+  are drawn each frame, as with the marched clouds.
+
+Measured on a Mac (2560 x 1600, High, shared with other work, medians of
+three runs each, wall-clock GPU time): the clouds' passes 4.4 ms volumetric,
+0.42 ms baked, 0.43 ms the layer (what is left is the shadow map, which all
+draw); the lighting pass 0.82, 0.12 and 0.11 ms; the frame 14.5, 11.9 and
+13.1 ms. Not measured on a phone yet. A film of a sky baked again all the
+time differed by at most 0.17 % from one frame to the next.
 
 ---
 

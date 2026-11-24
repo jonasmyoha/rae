@@ -9,6 +9,7 @@
 import Sys
 import Device
 open CloudTier
+open CloudBakeRules
 open RendererDeferred
 open CloudTiming
 open app3d/SettingsDialog
@@ -71,8 +72,25 @@ func settingsQualityCloudSteps(quality: view SettingsQuality) ret Int {
   ret 48
 }
 
-# The walkers' clouds at the start: the game's ceiling `settings`, this
-# device, the quality setting, or RAE_CLOUD_TIER (logged once)
+# How often the map is baked again (RAE_CLOUD_BAKE_SECONDS overrides, for looking)
+func walkerCloudBakeSeconds(options: view CloudOptions) ret Float {
+  let forced: Float = Sys.getEnv(name: "RAE_CLOUD_BAKE_SECONDS").toFloat()
+  if forced > 0.0 {
+    ret forced
+  }
+  ret options.bakeSeconds
+}
+
+# The baked map's side (texels): 1024 looks as the marched clouds do at 1536 and
+# 2560 x 1600 (RAE_CLOUD_BAKE_SIDE overrides)
+func walkerCloudBakeSide() ret Int {
+  let forced: Int = Sys.getEnv(name: "RAE_CLOUD_BAKE_SIDE").toInt()
+  if forced > 0 {
+    ret forced
+  }
+  ret 1024
+}
+
 # The walkers' clouds at the start: the game's ceiling `settings`, this
 # device, the quality setting and the panel's choice `options` (an exact
 # tier, or Auto; logged once)
@@ -149,6 +167,14 @@ func walkerCloudsFrame(
   )
   setCloudTier(renderer: renderer, tier: clouds.control.tier)
   setCloudSteps(renderer: renderer, steps: options.steps)
+  setCloudBake(
+    renderer: renderer
+    options: CloudBakeOptions {
+      on: cloudOptionsBaked(options: options)
+      seconds: walkerCloudBakeSeconds(options: options)
+      side: walkerCloudBakeSide()
+    }
+  )
   setCloudShadows(renderer: renderer, on: options.shadows)
   let status: String = walkerCloudStatus(clouds: clouds, options: options)
   if not (status is clouds.status) {
@@ -174,7 +200,11 @@ func walkerCloudStatus(clouds: view WalkerClouds, options: view CloudOptions) re
     let tenths: Int = (clouds.lastMicroseconds + 50) / 100
     cost = ", {tenths / 10}.{tenths % 10} ms"
   }
-  ret "Drawing {walkerCloudTierLabel(tier: clouds.control.tier)}{how}{cost}"
+  var baked: String = ""
+  if clouds.control.tier is CloudTier.volumetric and cloudOptionsBaked(options: options) {
+    baked = ", baked"
+  }
+  ret "Drawing {walkerCloudTierLabel(tier: clouds.control.tier)}{baked}{how}{cost}"
 }
 
 # A tier as the panel's buttons name it

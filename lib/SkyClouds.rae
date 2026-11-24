@@ -5,6 +5,7 @@
 # the app sets from lib/Weather.
 open Sky
 open CloudTier
+open CloudBakeRules
 open gpu/GpuArgs
 
 type SkyClouds {
@@ -25,6 +26,8 @@ type SkyClouds {
   shadows: Bool = true
   # the shadows' shapes' size apart from the clouds' (1: as the clouds)
   shadowScale: Float = 1.0
+  # the baked clouds as this frame shows them (lib/CloudBake)
+  bake: CloudBakeShown = CloudBakeShown {}
 }
 
 # The clouds `sky` asks for
@@ -43,10 +46,10 @@ func skyCloudsOf(sky: view Sky) ret SkyClouds {
   }
 }
 
-# Write `clouds` as the uniform's three vec4s (the third: cloudOptions, x
-# the shadows on, y their scale): clouds (cover, darkness, drift,
-# tier)
-# and cloudShape (kind, cirrus, height, scale)
+# Write `clouds` as the uniform's six vec4s: clouds (cover, darkness, drift,
+# tier), cloudShape (kind, cirrus, height, scale), cloudOptions (x the shadows
+# on, y their scale, z the baked clouds drawn, w the second half's share) and
+# cloudBake (the halves' eyes and drifts; their heights, how much they show)
 func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
   pushVec4F(
     writer: writer
@@ -66,11 +69,36 @@ func pushSkyClouds(writer: mod ArgWriter, clouds: view SkyClouds) {
   if clouds.shadows {
     shadowsOn = 1.0
   }
+  var baked: Float = 0.0
+  if clouds.bake.on {
+    baked = 1.0
+  }
   pushVec4F(
     writer: writer
     x: shadowsOn
     y: clouds.shadowScale
-    z: 0.0
+    z: baked
+    w: clouds.bake.second
+  )
+  pushVec4F(
+    writer: writer
+    x: clouds.bake.from0.eye.x
+    y: clouds.bake.from0.eye.y
+    z: clouds.bake.from0.eye.z
+    w: clouds.bake.from0.drift
+  )
+  pushVec4F(
+    writer: writer
+    x: clouds.bake.from1.eye.x
+    y: clouds.bake.from1.eye.y
+    z: clouds.bake.from1.eye.z
+    w: clouds.bake.from1.drift
+  )
+  pushVec4F(
+    writer: writer
+    x: clouds.bake.from0.height
+    y: clouds.bake.from1.height
+    z: clouds.bake.opacity
     w: 0.0
   )
 }

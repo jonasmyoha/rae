@@ -1,0 +1,293 @@
+# CloudBakeRules — when the baked clouds (lib/CloudBake) are baked again, and
+# how much of each of their two maps a frame shows. Pure: no GPU, no clock of
+# its own, tested by case 1584.
+#
+# The volumetric clouds are baked into a map of the sky (two halves: the one
+# shown and the one baked next), a few small tiles a frame, so no frame pays
+# for a whole bake. A finished map is faded in over the one before. It is
+# baked again after `seconds`, and sooner when what it was baked from no
+# longer holds: the sun moved, the weather changed, or the wind and the eye
+# moved so far that sliding the map over the clouds' plane shows.
+import Math
+open Vec3
+
+# What an app asks for: the volumetric clouds from the baked map, how often it
+# is baked again (seconds), and one half's side (texels; a multiple of
+# cloudBakeTile)
+type CloudBakeOptions {
+  on: Bool = false
+  seconds: Float = 60.0
+  side: Int = 1024
+}
+
+# A tile's side (texels), how many tiles a frame bakes, and how many while no
+# map is ready yet (the start)
+const cloudBakeTile: Int = 64
+
+const cloudBakeTilesAFrame: Int = 1
+
+const cloudBakeTilesAtStart: Int = 32
+
+# How long a new map takes to fade in over the one before (seconds), and the
+# first one from a sky without clouds
+const cloudBakeFadeSeconds: Float = 4.0
+
+const cloudBakeFirstFadeSeconds: Float = 0.5
+
+# How far the map may slide over the clouds' plane (m: the eye's way and the
+# wind's together), the sun turn (the cosine of 0.5 degrees) and the cover,
+# the kind, the darkness or the size change (their own units) before it is
+# baked again early
+const cloudBakeSlideMeters: Float = 400.0
+
+const cloudBakeSunCosine: Float = 0.999962
+
+const cloudBakeWeatherChange: Float = 0.02
+
+# What a map is baked from
+type CloudBakeFrom {
+  eye: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  sun: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  # the key light's strength (the mean of its color, not exposed)
+  light: Float = 0.0
+  cover: Float = 0.0
+  darkness: Float = 0.0
+  cloudType: Float = 0.0
+  scale: Float = 1.0
+  height: Float = 1200.0
+  drift: Float = 0.0
+  skyKind: Float = 0.0
+}
+
+# The bake's state: the two halves and what each was baked from, the half
+# shown, the one faded away under it, and the bake that runs
+type CloudBakeState {
+  from0: CloudBakeFrom = CloudBakeFrom {}
+  from1: CloudBakeFrom = CloudBakeFrom {}
+  # the half shown (0 or 1; -1: none ready yet), since when (seconds), and
+  # when its bake began
+  front: Int = -1
+  frontAt: Float64 = 0.0
+  bakedAt: Float64 = 0.0
+  # the other half still fades away under the front one
+  hasOld: Bool = false
+  # the half being baked (-1: none), its next tile, and when it began
+  target: Int = -1
+  tile: Int = 0
+  targetAt: Float64 = 0.0
+  # the side the halves are made for
+  side: Int = 0
+}
+
+# A frame's work: a bake begins (its light is the frame's, frozen), and the
+# tiles to bake
+type CloudBakeWork {
+  begins: Bool = false
+  target: Int = 0
+  firstTile: Int = 0
+  tiles: Int = 0
+}
+
+# The side asked for, as the bake can do it: a multiple of the tile, 256 to 2048
+func cloudBakeSide(side: view Int) ret Int {
+  let held: Int = Math.clamp(val: side, low: 256, high: 2048)
+  ret held / cloudBakeTile * cloudBakeTile
+}
+
+func cloudBakeTileCount(side: view Int) ret Int {
+  ret (side / cloudBakeTile) * (side / cloudBakeTile)
+}
+
+# How far a point of the clouds' plane moved from `from` to `now` as the wind
+# carries it (m, as lib/sky_hosek.wgsl skyCloudPoint), x and y
+func cloudBakeWindX(from: view CloudBakeFrom, now: view CloudBakeFrom) ret Float {
+  ret (now.drift - from.drift) * 1600.0 * Math.max(a: from.scale, b: 0.1)
+}
+
+func cloudBakeWindY(from: view CloudBakeFrom, now: view CloudBakeFrom) ret Float {
+  ret cloudBakeWindX(from: from, now: now) * 0.35
+}
+
+# How far the map baked from `from` slides over the clouds' plane to show `now` (m)
+func cloudBakeSlide(from: view CloudBakeFrom, now: view CloudBakeFrom) ret Float {
+  let x: Float = now.eye.x - from.eye.x + cloudBakeWindX(from: from, now: now)
+  let y: Float = now.eye.y - from.eye.y + cloudBakeWindY(from: from, now: now)
+  let z: Float = now.eye.z - from.eye.z
+  ret Math.sqrt(x: x * x + y * y + z * z)
+}
+
+func cloudBakeDiffers(first: view Float, second: view Float, by: view Float) ret Bool {
+  ret Math.abs(value: first - second) > by
+}
+
+# Does a map baked from `from`, `age` seconds ago, no longer show `now`?
+func cloudBakeStale(
+  from: view CloudBakeFrom
+  now: view CloudBakeFrom
+  age: view Float
+  seconds: view Float
+) ret Bool {
+  if age >= seconds {
+    ret true
+  }
+  if Vec3.vdot(a: from.sun, b: now.sun) < cloudBakeSunCosine {
+    ret true
+  }
+  if cloudBakeDiffers(
+    first: from.light
+    second: now.light
+    by: 0.05 * Math.max(a: from.light, b: now.light)
+  ) {
+    ret true
+  }
+  if from.skyKind is not now.skyKind or cloudBakeDiffers(
+    first: from.height
+    second: now.height
+    by: 30.0
+  ) {
+    ret true
+  }
+  let by: Float = cloudBakeWeatherChange
+  if cloudBakeDiffers(first: from.cover, second: now.cover, by: by) or cloudBakeDiffers(
+    first: from.darkness
+    second: now.darkness
+    by: by
+  ) or cloudBakeDiffers(first: from.cloudType, second: now.cloudType, by: by) or cloudBakeDiffers(
+    first: from.scale
+    second: now.scale
+    by: by
+  ) {
+    ret true
+  }
+  ret cloudBakeSlide(from: from, now: now) > cloudBakeSlideMeters
+}
+
+# How much the front half shows over the old one (0 .. 1), a smooth step
+func cloudBakeFade(state: view CloudBakeState, seconds: view Float64) ret Float {
+  if state.front < 0 {
+    ret 0.0
+  }
+  var length: Float = cloudBakeFadeSeconds
+  if not state.hasOld {
+    length = cloudBakeFirstFadeSeconds
+  }
+  let t: Float = Math.clamp(val: (seconds - state.frontAt) as Float / length, low: 0.0, high: 1.0)
+  ret t * t * (3.0 - 2.0 * t)
+}
+
+# Half 1's share of the two halves (0 .. 1)
+func cloudBakeSecondShare(state: view CloudBakeState, seconds: view Float64) ret Float {
+  if state.front < 0 {
+    ret 0.0
+  }
+  var share: Float = 1.0
+  if state.hasOld {
+    share = cloudBakeFade(state: state, seconds: seconds)
+  }
+  if state.front is 1 {
+    ret share
+  }
+  ret 1.0 - share
+}
+
+# How much of the baked clouds shows at all: the first map fades in
+func cloudBakeOpacity(state: view CloudBakeState, seconds: view Float64) ret Float {
+  if state.front < 0 {
+    ret 0.0
+  }
+  if state.hasOld {
+    ret 1.0
+  }
+  ret cloudBakeFade(state: state, seconds: seconds)
+}
+
+# One frame at `seconds` (any running clock): begins a bake when the map is
+# stale, gives this frame's tiles, and shows the new map when its last tile is
+# done. The caller bakes the work it returns in the same frame.
+func cloudBakeStep(
+  state: mod CloudBakeState
+  now: view CloudBakeFrom
+  options: view CloudBakeOptions
+  seconds: view Float64
+) ret CloudBakeWork {
+  var work: CloudBakeWork = {}
+  let side: Int = cloudBakeSide(side: options.side)
+  if state.side is not side {
+    state = CloudBakeState { side: side }
+  }
+  # the old map is gone once the new one is whole
+  if state.hasOld and cloudBakeFade(state: state, seconds: seconds) >= 1.0 {
+    state.hasOld = false
+    state.frontAt = seconds - 10.0
+  }
+  if state.target < 0 and not state.hasOld {
+    var begin: Bool = state.front < 0
+    if not begin {
+      var from: CloudBakeFrom = state.from0
+      if state.front is 1 {
+        from = state.from1
+      }
+      begin = cloudBakeStale(
+        from: from
+        now: now
+        age: (seconds - state.bakedAt) as Float
+        seconds: options.seconds
+      )
+    }
+    if begin {
+      state.target = 0
+      if state.front is 0 {
+        state.target = 1
+      }
+      state.tile = 0
+      state.targetAt = seconds
+      work.begins = true
+      if state.target is 0 {
+        state.from0 = now
+      } else {
+        state.from1 = now
+      }
+    }
+  }
+  if state.target < 0 {
+    ret work
+  }
+  var count: Int = cloudBakeTilesAFrame
+  if state.front < 0 {
+    count = cloudBakeTilesAtStart
+  }
+  let all: Int = cloudBakeTileCount(side: side)
+  work.target = state.target
+  work.firstTile = state.tile
+  work.tiles = Math.min(a: count, b: all - state.tile)
+  state.tile = state.tile + work.tiles
+  if state.tile >= all {
+    state.hasOld = state.front >= 0
+    state.front = state.target
+    state.frontAt = seconds
+    state.bakedAt = state.targetAt
+    state.target = -1
+  }
+  ret work
+}
+
+# The baked clouds as a frame shows them: the light uniform's part
+# (lib/SkyClouds)
+type CloudBakeShown {
+  on: Bool = false
+  opacity: Float = 0.0
+  # half 1's share of the two
+  second: Float = 0.0
+  from0: CloudBakeFrom = CloudBakeFrom {}
+  from1: CloudBakeFrom = CloudBakeFrom {}
+}
+
+func cloudBakeShown(state: view CloudBakeState, seconds: view Float64) ret CloudBakeShown {
+  ret CloudBakeShown {
+    on: true
+    opacity: cloudBakeOpacity(state: state, seconds: seconds)
+    second: cloudBakeSecondShare(state: state, seconds: seconds)
+    from0: state.from0
+    from1: state.from1
+  }
+}

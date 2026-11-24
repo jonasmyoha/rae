@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.50, 2026-11-24: baked clouds
+
+- The volumetric clouds can be baked into a map of the sky, baked again once a minute and shown for
+  the price of the 2D layer: `lib/CloudBake`, `setCloudBake`, `CloudOptions.baked`, `bakedOnAuto` and
+  `bakeSeconds`, the panel's Baked button, `RAE_CLOUD_TIER=baked` (docs/cloud-rendering-research.md
+  section 8.6). Cases 1584 and 1335.
+- `uploadSceneLight` takes the baked clouds as the frame shows them (`CloudBakeShown {}`: none).
+
 ## 0.4.49, 2026-11-24: key focus and list selection
 
 - `TakesKeys` and `ui/KeyFocusSystem`: which node has the keys; a text field and a menu have them

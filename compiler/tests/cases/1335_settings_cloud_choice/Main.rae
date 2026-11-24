@@ -46,6 +46,38 @@ func main() {
   )
   log("an unknown renderer keeps it: {cloudOptionsName(options: settings.clouds)}")
 
+  # the baked volumetric clouds are a choice of their own, saved too; a tier by hand is not baked,
+  # and Auto is baked when the app says so
+  var baked: SettingsState = freshSettings()
+  let bakedPicked: Bool = settingsWeatherHandleAction(
+    settingsState: baked
+    actionId: "settings.clouds.renderer.baked"
+  )
+  var bakedBack: SettingsState = freshSettings()
+  var bakedEditor: Bool = false
+  let bakedHad: Bool = restoreSettingsState(
+    raw: serializeSettingsState(settingsState: baked, editor: false)
+    settingsState: bakedBack
+    editor: bakedEditor
+  )
+  log(
+    "baked: {cloudOptionsName(options: bakedBack.clouds)}, tier {bakedBack.clouds.tier}, drawn baked {cloudOptionsBaked(
+      options: bakedBack.clouds
+    )}"
+  )
+  let byHand: Bool = settingsWeatherHandleAction(
+    settingsState: baked
+    actionId: "settings.clouds.renderer.volumetric"
+  )
+  log("volumetric by hand: drawn baked {cloudOptionsBaked(options: baked.clouds)}")
+  let autoPicked: Bool = settingsWeatherHandleAction(
+    settingsState: baked
+    actionId: "settings.clouds.renderer.auto"
+  )
+  log("auto: drawn baked {cloudOptionsBaked(options: baked.clouds)}")
+  baked.clouds.bakedOnAuto = true
+  log("auto, the app's choice: drawn baked {cloudOptionsBaked(options: baked.clouds)}")
+
   # saved and restored
   let line: String = serializeSettingsState(settingsState: settings, editor: false)
   var restored: SettingsState = freshSettings()

@@ -1,0 +1,135 @@
+# The baked clouds' rules (lib/CloudBakeRules): the first map is baked in a few
+# frames and fades in; it is kept until its time, or the sun, the weather, the
+# wind or the eye moved too far; the next one is baked a tile a frame while the
+# old one shows, then faded in over it, and only then another one may begin.
+open CloudBakeRules
+open Vec3
+
+func main() {
+  let options: CloudBakeOptions = { on: true, seconds: 60.0, side: 256 }
+  var now: CloudBakeFrom = { cover: 0.5, light: 100.0 }
+  var state: CloudBakeState = {}
+  var work: CloudBakeWork = cloudBakeStep(
+    state: state
+    now: now
+    options: options
+    seconds: 1.0
+  )
+  log(
+    "start: begins {work.begins}, tiles {work.tiles} of {cloudBakeTileCount(side: 256)}, front {state.front}"
+  )
+  log(
+    "opacity at once {cloudBakeOpacity(state: state, seconds: 1.0)}, later {cloudBakeOpacity(
+      state: state
+      seconds: 2.0
+    )}"
+  )
+  work = cloudBakeStep(
+    state: state
+    now: now
+    options: options
+    seconds: 30.0
+  )
+  log("at 30 s: tiles {work.tiles}")
+  # what makes it stale
+  let base: CloudBakeFrom = now
+  log("age: {cloudBakeStale(
+    from: base
+    now: base
+    age: 59.0
+    seconds: 60.0
+  )} {cloudBakeStale(
+    from: base
+    now: base
+    age: 60.0
+    seconds: 60.0
+  )}")
+  var other: CloudBakeFrom = base
+  other.sun = Vec3.vnorm(a: Vec3.create(x: 0.02, y: 0.0, z: -1.0))
+  log("the sun turned 1.1 degrees: {cloudBakeStale(
+    from: base
+    now: other
+    age: 1.0
+    seconds: 60.0
+  )}")
+  other.sun = Vec3.vnorm(a: Vec3.create(x: 0.004, y: 0.0, z: -1.0))
+  log("the sun turned 0.2 degrees: {cloudBakeStale(
+    from: base
+    now: other
+    age: 1.0
+    seconds: 60.0
+  )}")
+  other = base
+  other.cover = 0.6
+  log("more cover: {cloudBakeStale(
+    from: base
+    now: other
+    age: 1.0
+    seconds: 60.0
+  )}")
+  other = base
+  other.eye = Vec3.create(x: 300.0, y: 0.0, z: 0.0)
+  log("the eye 300 m away: {cloudBakeStale(
+    from: base
+    now: other
+    age: 1.0
+    seconds: 60.0
+  )}")
+  other.drift = 0.2
+  log("and the wind 320 m: {cloudBakeStale(
+    from: base
+    now: other
+    age: 1.0
+    seconds: 60.0
+  )}")
+  # the next bake: a tile a frame, the front map shown meanwhile
+  var frames: Int = 0
+  var seconds: Float64 = 61.0
+  loop state.front is 0 and frames < 100 {
+    work = cloudBakeStep(
+      state: state
+      now: now
+      options: options
+      seconds: seconds
+    )
+    if frames is 0 {
+      log(
+        "at 61 s: begins {work.begins}, target {work.target}, tiles {work.tiles}, shown half 1: {cloudBakeSecondShare(
+          state: state
+          seconds: seconds
+        )}"
+      )
+    }
+    frames = frames + 1
+    seconds = seconds + 0.02
+  }
+  log("baked after {frames} frames, front {state.front}, old fades {state.hasOld}")
+  log(
+    "half 1 shown: halfway {cloudBakeSecondShare(state: state, seconds: state.frontAt + 2.0)}, whole {cloudBakeSecondShare(
+      state: state
+      seconds: state.frontAt + 4.0
+    )}"
+  )
+  # the weather changes as it fades: the fade first
+  now.cover = 0.9
+  work = cloudBakeStep(
+    state: state
+    now: now
+    options: options
+    seconds: state.frontAt + 1.0
+  )
+  log("the cover changed as it fades: begins {work.begins}")
+  work = cloudBakeStep(
+    state: state
+    now: now
+    options: options
+    seconds: state.frontAt + 4.5
+  )
+  log(
+    "faded: begins {work.begins}, target {work.target}, opacity {cloudBakeOpacity(
+      state: state
+      seconds: seconds + 5.0
+    )}"
+  )
+  log("sides: {cloudBakeSide(side: 1000)} {cloudBakeSide(side: 10)} {cloudBakeSide(side: 9999)}")
+}

@@ -52,6 +52,7 @@ open RendererDeferredGraph
 open RendererDeferredShadow
 open Sky
 open CloudTier
+open CloudBakeRules
 open Shadow3d
 open ShadowMaps
 open ShadowMapsRecords
@@ -127,6 +128,8 @@ type DeferredRenderer {
   cloudTier: CloudTier = CloudTier.layer
   # the volumetric tier's march steps (setCloudSteps)
   cloudSteps: Int = 48
+  # the volumetric clouds baked (setCloudBake)
+  cloudBake: CloudBakeOptions = CloudBakeOptions {}
   # the clouds' shadows on the ground (setCloudShadows)
   cloudShadows: Bool = true
   # the size of the clouds' shadows' shapes (setCloudShadowScale)
@@ -618,6 +621,7 @@ func renderDeferredPassWith(
     }
     sky.cloudTier = renderer.cloudTier
     sky.cloudSteps = renderer.cloudSteps
+    sky.cloudBake = renderer.cloudBake
     sky.cloudShadows = renderer.cloudShadows
     sky.cloudShadowScale = renderer.cloudShadowScale
     lightingPassSky(
@@ -866,6 +870,12 @@ func setCloudTier(renderer: mod DeferredRenderer, tier: view CloudTier) {
 # The volumetric tier's march steps: more is smoother and dearer
 func setCloudSteps(renderer: mod DeferredRenderer, steps: view Int) {
   renderer.cloudSteps = steps
+}
+
+# The volumetric clouds from a baked map of the sky, baked again now and then
+# (lib/CloudBake), or marched each frame
+func setCloudBake(renderer: mod DeferredRenderer, options: view CloudBakeOptions) {
+  renderer.cloudBake = options
 }
 
 # The clouds' shadows on the ground on or off (off: the sun dimmed evenly)

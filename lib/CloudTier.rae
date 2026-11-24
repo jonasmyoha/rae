@@ -309,14 +309,34 @@ type CloudOptions {
   tier: CloudTier = CloudTier.layer
   steps: Int = 48
   shadows: Bool = true
+  # the volumetric tier from a baked map of the sky (lib/CloudBake), picked by
+  # hand with it ("baked"); and what Auto's volumetric tier is, the app's choice
+  baked: Bool = false
+  bakedOnAuto: Bool = false
+  # how often the map is baked again (seconds)
+  bakeSeconds: Float = 60.0
 }
 
-# The choice a name spells: "auto" or a tier's name ("off", "layer",
-# "slab", "volumetric"); none for another word
+# Is the volumetric tier these options draw baked?
+func cloudOptionsBaked(options: view CloudOptions) ret Bool {
+  if options.auto {
+    ret options.bakedOnAuto
+  }
+  ret options.baked
+}
+
+# The choice a name spells: "auto", a tier's name ("off", "layer", "slab",
+# "volumetric") or "baked", the volumetric tier baked; none for another word
 func cloudOptionsNamed(name: view String, options: view CloudOptions) ret opt CloudOptions {
   var chosen: CloudOptions = options
   if name is "auto" {
     chosen.auto = true
+    ret chosen
+  }
+  chosen.baked = name is "baked"
+  if chosen.baked {
+    chosen.auto = false
+    chosen.tier = CloudTier.volumetric
     ret chosen
   }
   if let tier: CloudTier = cloudTierNamed(name: name) {
@@ -331,6 +351,9 @@ func cloudOptionsNamed(name: view String, options: view CloudOptions) ret opt Cl
 func cloudOptionsName(options: view CloudOptions) ret String {
   if options.auto {
     ret "auto"
+  }
+  if options.baked and options.tier is CloudTier.volumetric {
+    ret "baked"
   }
   ret "{options.tier}"
 }

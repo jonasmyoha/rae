@@ -291,6 +291,23 @@ fn cloudShadowOrigin() -> vec2<f32> {
   let texel = span / cloudShadowTexels;
   return floor(cloudShadowPlane(L.camPos.xyz) / texel) * texel - vec2<f32>(0.5 * span);
 }
+// The baked clouds' map of the sky (lib/CloudBake): the sky above the horizon as
+// a square, octahedral, its middle overhead and its edge the horizon, with more
+// of it low in the sky, where the clouds are seen small
+const cloudMapLow: f32 = 0.65;
+fn cloudMapUv(dir: vec3<f32>) -> vec2<f32> {
+  let flat = abs(dir.x) + abs(dir.y);
+  let high = pow(clamp(dir.z / max(flat + dir.z, 1e-6), 0.0, 1.0), cloudMapLow);
+  let p = dir.xy / max(flat, 1e-6) * (1.0 - high);
+  return vec2<f32>(p.x + p.y, p.x - p.y) * 0.5 + 0.5;
+}
+fn cloudMapDir(uv: vec2<f32>) -> vec3<f32> {
+  let e = uv * 2.0 - 1.0;
+  let p = vec2<f32>(e.x + e.y, e.x - e.y) * 0.5;
+  let r = min(abs(p.x) + abs(p.y), 1.0);
+  let high = pow(1.0 - r, 1.0 / cloudMapLow);
+  return normalize(vec3<f32>(p / max(r, 1e-6) * (1.0 - high), high));
+}
 // The slab tier draws the overhead clouds itself (lib/CloudSlab): a pass that
 // composites it sets this, and the layer then draws only its cirrus and its
 // horizon band. Every other pass leaves it false and draws the whole layer.

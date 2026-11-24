@@ -24,6 +24,8 @@ open webgpu/Webgpu
 open webgpu/Context
 open GbufferFullscreen
 open CloudSlab
+open CloudBake
+open CloudBakeRules
 open CloudTiming
 open Math3d
 
@@ -43,6 +45,8 @@ type CloudShadowMap {
   startView: TextureViewId = noTextureViewId()
   # the slab tier's clouds (lib/CloudSlab)
   slab: CloudSlab = CloudSlab {}
+  # the volumetric clouds' baked map (lib/CloudBake)
+  bake: CloudBake = CloudBake {}
   # the cloud passes' own GPU time, and the submissions still running
   timing: CloudTiming = createCloudTiming()
   inFlight: List(SubmissionId) = List.create(SubmissionId, cap: 4)
@@ -193,7 +197,17 @@ func drawFrameClouds(
         lightUniform: lightUniform
         encoder: encoder
       )
-      if slabReady and slabTier {
+      if map.bake.on and not slabReady {
+        map.bake.state = CloudBakeState {}
+      } else if map.bake.on {
+        drawCloudBake(
+          bake: map.bake
+          slab: map.slab
+          resources: resources
+          encoder: encoder
+          cloudTiming: map.timing
+        )
+      } else if slabReady and slabTier {
         drawCloudSlab(
           slab: map.slab
           resources: resources
@@ -235,6 +249,7 @@ func drawFrameClouds(
 
 # The map's GPU objects (renderer shutdown)
 func retireCloudShadow(map: mod CloudShadowMap, resources: mod GpuResources) {
+  retireCloudBake(bake: map.bake, resources: resources)
   retireCloudSlab(slab: map.slab, resources: resources)
   releaseCloudTiming(cloudTiming: map.timing, resources: resources)
   let bindRetired: Bool = retireBindGroup(resources: resources, id: map.bind)

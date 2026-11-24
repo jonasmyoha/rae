@@ -19,6 +19,8 @@ open Sky
 open SkyClouds
 open CloudShadow
 open CloudSlab
+open CloudBake
+open CloudBakeRules
 open CloudTier
 open LightUnits
 open webgpu/Webgpu
@@ -76,6 +78,7 @@ type LightPassCache {
   bindGroup: BindGroupId
   bindGen: Int
   shadowGen: Int  # the ShadowCache targets generation the bind samples
+  baked: Bool = false  # the bind samples the baked clouds' map (lib/CloudBake)
   slabGen: Int = -1  # the slab tier's textures the bind samples (lib/CloudSlab)
 }
 
@@ -388,6 +391,8 @@ func uploadSceneLight(
   camera: view Camera3d
   light: view Light3d
   sky: view Sky
+  # the baked clouds as the frame shows them (lib/CloudBake)
+  bake: view CloudBakeShown
 ) ret Bool {
   let up: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: 1.0)
   let down: Vec3 = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
@@ -433,6 +438,7 @@ func uploadSceneLight(
     z: pale.z * targets.mistTint.z
   )
   targets.clouds = skyCloudsOf(sky: sky)
+  targets.clouds.bake = bake
   setHosekChannel(targets: targets, c: sky.hosek.r, base: 0)
   setHosekChannel(targets: targets, c: sky.hosek.g, base: 12)
   setHosekChannel(targets: targets, c: sky.hosek.b, base: 24)
@@ -486,6 +492,16 @@ func lightingPassSky(
   if not postPassReady(targets: targets, resources: resources, gbuffer: gbuffer) {
     ret
   }
+  ensureShadowDefaults(shadow: shadow, resources: resources)
+  if not shadowTargetsReady(shadow: shadow, resources: resources) {
+    ret
+  }
+  let bakeShown: CloudBakeShown = cloudBakeFrame(
+    bake: targets.cloudShadow.bake
+    sky: sky
+    light: light
+    camera: camera
+  )
   let uploaded: Bool = uploadSceneLight(
     targets: targets
     resources: resources
@@ -493,10 +509,15 @@ func lightingPassSky(
     camera: camera
     light: light
     sky: sky
+    bake: bakeShown
   )
-  ensureShadowDefaults(shadow: shadow, resources: resources)
-  if not shadowTargetsReady(shadow: shadow, resources: resources) {
-    ret
+  if uploaded {
+    cloudBakeKeepLight(
+      bake: targets.cloudShadow.bake
+      resources: resources
+      writer: targets.args
+      bytes: lightUniformFloats * 4
+    )
   }
   # the clouds' shadow map and the slab tier's clouds, from the uniform just
   # uploaded, before the lighting that reads them (lib/CloudShadow)
@@ -516,7 +537,12 @@ func lightingPassSky(
   }
   let gen: Int = targets.gen
   let slabGen: Int = targets.cloudShadow.slab.generation
-  if not (gen is cache.bindGen) or not (shadow.gen is cache.shadowGen) or not (slabGen is cache.slabGen) {
+  let baked: Bool = targets.cloudShadow.bake.on and isValidTextureView(
+    resources: resources
+    id: targets.cloudShadow.bake.mapView
+  )
+  if not (gen is cache.bindGen) or not (shadow.gen is cache.shadowGen) or not (slabGen is cache.slabGen) or baked is not cache.baked {
+    cache.baked = baked
     cache.bindGen = gen
     cache.shadowGen = shadow.gen
     cache.slabGen = slabGen
@@ -536,7 +562,11 @@ func lightingPassSky(
     entries.add(value: samplerRef(id: shadow.sampler))
     entries.add(value: textureViewRef(id: targets.aoDepthView))
     entries.add(value: textureViewRef(id: targets.cloudShadow.textureView))
-    entries.add(value: textureViewRef(id: targets.cloudShadow.slab.resolvedView))
+    if baked {
+      entries.add(value: textureViewRef(id: targets.cloudShadow.bake.mapView))
+    } else {
+      entries.add(value: textureViewRef(id: targets.cloudShadow.slab.resolvedView))
+    }
     if let bind: BindGroupId = createRenderBindGroup(
       resources: resources
       pipeline: targets.lightPipeline
