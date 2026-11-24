@@ -1,0 +1,410 @@
+# A parameter of a generic function that is an optional of its type parameter: `opt view T`, `opt
+# mod T`,
+# `opt own T`, `opt copy T`, a `List(opt T)` and a generic struct of `opt T`, for every kind of T,
+# with an
+# optional, a plain value, a field, a call's result, a list row and `none`. T is the payload. A
+# value
+# that is in no place (a call's result, a literal) is given to a plain `opt view` too. Nothing
+# leaks.
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Box(T: type) {
+  inside: opt T
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!" }
+}
+
+func pairOf(value: copy Int) ret Pair(Int) {
+  ret Pair(Int) { first: value }
+}
+
+func three() ret UInt8 {
+  ret 3
+}
+
+func four() ret UInt8 {
+  ret 4
+}
+
+func look(T: type, value: opt view T) ret String {
+  if let there: view T = value {
+    ret "{there}"
+  }
+  ret "none"
+}
+
+func passOn(T: type, value: opt view T) ret String {
+  ret look(value: value)
+}
+
+func replace(T: type, value: opt mod T, other: own T) ret Bool {
+  if let there: mod T = value {
+    there = own other
+    ret true
+  }
+  ret false
+}
+
+func orElse(T: type, value: opt own T, other: own T) ret opt T {
+  if let there: view T = value {
+    ret value
+  }
+  ret other
+}
+
+func copied(T: type, value: opt copy T) ret opt T {
+  if let there: view T = value {
+    ret value
+  }
+  ret none
+}
+
+func count(T: type, list: view List(opt T)) ret Int {
+  var count: Int = 0
+  loop let row: opt view T in list {
+    if let there: view T = row {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func firstOf(T: type, list: view List(opt T)) ret opt view T {
+  ret list.viewAt(index: 0)
+}
+
+func put(T: type, this: mod List(opt T), value: own T) {
+  this.add(value: own value)
+  this.add(value: none)
+}
+
+func inside(T: type, box: view Pair(opt T)) ret String {
+  ret look(value: box.first)
+}
+
+func both(
+  A: type
+  B: type
+  first: opt view A
+  second: opt view B
+) ret String {
+  ret "{first} {second}"
+}
+
+func intRound() {
+  var held: opt Int = 3
+  var empty: opt Int = none
+  let plain: Int = 3
+  let box: Box(Int) = { inside: 3 }
+  let rows: List(Int) = { 3 }
+  log("Int {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: 3)}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log("  {replace(value: held, other: 4)} {replace(value: empty, other: 4)} {held} {empty}")
+  let copy1: opt Int = copied(value: held)
+  let copy2: opt Int = copied(value: empty)
+  let kept: opt Int = orElse(value: own held, other: 3)
+  let other: opt Int = orElse(value: own empty, other: 3)
+  let given: opt Int = orElse(value: 4, other: 3)
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Int) = { none, 4 }
+  list.put(value: 3)
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Int) = { first: 3 }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func uint8Round() {
+  var held: opt UInt8 = three()
+  var empty: opt UInt8 = none
+  let plain: UInt8 = three()
+  let box: Box(UInt8) = { inside: three() }
+  let rows: List(UInt8) = { three() }
+  log("UInt8 {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: three())}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: four())} {replace(value: empty, other: four())} {held} {empty}"
+  )
+  let copy1: opt UInt8 = copied(value: held)
+  let copy2: opt UInt8 = copied(value: empty)
+  let kept: opt UInt8 = orElse(value: own held, other: three())
+  let other: opt UInt8 = orElse(value: own empty, other: three())
+  let given: opt UInt8 = orElse(value: four(), other: three())
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt UInt8) = { none, four() }
+  list.put(value: three())
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt UInt8) = { first: three() }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func floatRound() {
+  var held: opt Float = 1.5
+  var empty: opt Float = none
+  let plain: Float = 1.5
+  let box: Box(Float) = { inside: 1.5 }
+  let rows: List(Float) = { 1.5 }
+  log("Float {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: 1.5)}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log("  {replace(value: held, other: 2.5)} {replace(value: empty, other: 2.5)} {held} {empty}")
+  let copy1: opt Float = copied(value: held)
+  let copy2: opt Float = copied(value: empty)
+  let kept: opt Float = orElse(value: own held, other: 1.5)
+  let other: opt Float = orElse(value: own empty, other: 1.5)
+  let given: opt Float = orElse(value: 2.5, other: 1.5)
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Float) = { none, 2.5 }
+  list.put(value: 1.5)
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Float) = { first: 1.5 }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func boolRound() {
+  var held: opt Bool = true
+  var empty: opt Bool = none
+  let plain: Bool = true
+  let box: Box(Bool) = { inside: true }
+  let rows: List(Bool) = { true }
+  log("Bool {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: true)}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log("  {replace(value: held, other: false)} {replace(value: empty, other: false)} {held} {empty}")
+  let copy1: opt Bool = copied(value: held)
+  let copy2: opt Bool = copied(value: empty)
+  let kept: opt Bool = orElse(value: own held, other: true)
+  let other: opt Bool = orElse(value: own empty, other: true)
+  let given: opt Bool = orElse(value: false, other: true)
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Bool) = { none, false }
+  list.put(value: true)
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Bool) = { first: true }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func charRound() {
+  var held: opt Char = 'x'
+  var empty: opt Char = none
+  let plain: Char = 'x'
+  let box: Box(Char) = { inside: 'x' }
+  let rows: List(Char) = { 'x' }
+  log("Char {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: 'x')}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log("  {replace(value: held, other: 'y')} {replace(value: empty, other: 'y')} {held} {empty}")
+  let copy1: opt Char = copied(value: held)
+  let copy2: opt Char = copied(value: empty)
+  let kept: opt Char = orElse(value: own held, other: 'x')
+  let other: opt Char = orElse(value: own empty, other: 'x')
+  let given: opt Char = orElse(value: 'y', other: 'x')
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Char) = { none, 'y' }
+  list.put(value: 'x')
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Char) = { first: 'x' }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func stringRound() {
+  var held: opt String = "a {1}"
+  var empty: opt String = none
+  let plain: String = "a {1}"
+  let box: Box(String) = { inside: "a {1}" }
+  let rows: List(String) = { "a {1}" }
+  log(
+    "String {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}"
+  )
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: "a {1}")}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: "b {2}")} {replace(value: empty, other: "b {2}")} {held} {empty}"
+  )
+  let copy1: opt String = copied(value: held)
+  let copy2: opt String = copied(value: empty)
+  let kept: opt String = orElse(value: own held, other: "a {1}")
+  let other: opt String = orElse(value: own empty, other: "a {1}")
+  let given: opt String = orElse(value: "b {2}", other: "a {1}")
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt String) = { none, "b {2}" }
+  list.put(value: "a {1}")
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt String) = { first: "a {1}" }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func kindRound() {
+  var held: opt Kind = Kind.large
+  var empty: opt Kind = none
+  let plain: Kind = Kind.large
+  let box: Box(Kind) = { inside: Kind.large }
+  let rows: List(Kind) = { Kind.large }
+  log("Kind {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: Kind.large)}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: Kind.small)} {replace(value: empty, other: Kind.small)} {held} {empty}"
+  )
+  let copy1: opt Kind = copied(value: held)
+  let copy2: opt Kind = copied(value: empty)
+  let kept: opt Kind = orElse(value: own held, other: Kind.large)
+  let other: opt Kind = orElse(value: own empty, other: Kind.large)
+  let given: opt Kind = orElse(value: Kind.small, other: Kind.large)
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Kind) = { none, Kind.small }
+  list.put(value: Kind.large)
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Kind) = { first: Kind.large }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func noteRound() {
+  var held: opt Note = noteOf(text: "a")
+  var empty: opt Note = none
+  let plain: Note = noteOf(text: "a")
+  let box: Box(Note) = { inside: noteOf(text: "a") }
+  let rows: List(Note) = { noteOf(text: "a") }
+  log("Note {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}")
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: noteOf(text: "a"))}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: noteOf(text: "b"))} {replace(
+      value: empty
+      other: noteOf(text: "b")
+    )} {held} {empty}"
+  )
+  let copy1: opt Note = copied(value: held)
+  let copy2: opt Note = copied(value: empty)
+  let kept: opt Note = orElse(value: own held, other: noteOf(text: "a"))
+  let other: opt Note = orElse(value: own empty, other: noteOf(text: "a"))
+  let given: opt Note = orElse(value: noteOf(text: "b"), other: noteOf(text: "a"))
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Note) = { none, noteOf(text: "b") }
+  list.put(value: noteOf(text: "a"))
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Note) = { first: noteOf(text: "a") }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func listRound() {
+  var held: opt List(Int) = List(Int) { 1 }
+  var empty: opt List(Int) = none
+  let plain: List(Int) = List(Int) { 1 }
+  let box: Box(List(Int)) = { inside: List(Int) { 1 } }
+  let rows: List(List(Int)) = { List(Int) { 1 } }
+  log(
+    "List(Int) {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}"
+  )
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: List(Int) { 1 })}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: List(Int) { 1, 2 })} {replace(
+      value: empty
+      other: List(Int) { 1, 2 }
+    )} {held} {empty}"
+  )
+  let copy1: opt List(Int) = copied(value: held)
+  let copy2: opt List(Int) = copied(value: empty)
+  let kept: opt List(Int) = orElse(value: own held, other: List(Int) { 1 })
+  let other: opt List(Int) = orElse(value: own empty, other: List(Int) { 1 })
+  let given: opt List(Int) = orElse(value: List(Int) { 1, 2 }, other: List(Int) { 1 })
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt List(Int)) = { none, List(Int) { 1, 2 } }
+  list.put(value: List(Int) { 1 })
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt List(Int)) = { first: List(Int) { 1 } }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func pairRound() {
+  var held: opt Pair(Int) = pairOf(value: 1)
+  var empty: opt Pair(Int) = none
+  let plain: Pair(Int) = pairOf(value: 1)
+  let box: Box(Pair(Int)) = { inside: pairOf(value: 1) }
+  let rows: List(Pair(Int)) = { pairOf(value: 1) }
+  log(
+    "Pair(Int) {look(value: held)} {look(value: empty)} {passOn(value: held)} {passOn(value: empty)}"
+  )
+  log("  {look(value: plain)} {look(value: box.inside)} {look(value: pairOf(value: 1))}")
+  log("  {look(value: rows.viewAt(index: 0))} {look(value: rows.viewAt(index: 5))}")
+  log(
+    "  {replace(value: held, other: pairOf(value: 2))} {replace(
+      value: empty
+      other: pairOf(value: 2)
+    )} {held} {empty}"
+  )
+  let copy1: opt Pair(Int) = copied(value: held)
+  let copy2: opt Pair(Int) = copied(value: empty)
+  let kept: opt Pair(Int) = orElse(value: own held, other: pairOf(value: 1))
+  let other: opt Pair(Int) = orElse(value: own empty, other: pairOf(value: 1))
+  let given: opt Pair(Int) = orElse(value: pairOf(value: 2), other: pairOf(value: 1))
+  log("  {copy1} {copy2} {kept} {other} {given}")
+  var list: List(opt Pair(Int)) = { none, pairOf(value: 2) }
+  list.put(value: pairOf(value: 1))
+  log("  {list.length} {count(list: list)} {look(value: firstOf(list: list))}")
+  let pair: Pair(opt Pair(Int)) = { first: pairOf(value: 1) }
+  log("  {inside(box: pair)} {both(first: plain, second: pair.first)}")
+}
+
+func noteText(note: opt view Note) ret String {
+  if let there: view Note = note {
+    ret "{there.text}"
+  }
+  ret "none"
+}
+
+func small(value: opt view UInt8) ret Bool {
+  if let there: view UInt8 = value {
+    ret true
+  }
+  ret false
+}
+
+func viewed(note: view Note) ret String {
+  ret noteText(note: note)
+}
+
+func take(value: opt own String, other: own String) ret String {
+  if let there: view String = value {
+    ret "{there} {other}"
+  }
+  ret other
+}
+
+func plainFunctions() {
+  let note: Note = { text: "held {1}" }
+  let number: UInt8 = 3
+  log("{noteText(note: noteOf(text: "call"))} {noteText(note: Note { text: "typed {1}" })}")
+  log("{noteText(note: { text: "bare {1}" })} {noteText(note: note)} {viewed(note: note)}")
+  log("{small(value: number)} {small(value: 4)} {small(value: none)}")
+  var text: opt String = "text {1}"
+  var empty: opt String = none
+  log("{take(value: own text, other: "b {2}")} {take(value: own empty, other: "c {2}")}")
+  log("named: {look(Int, value: none)}")
+}
+
+func main() {
+  intRound()
+  uint8Round()
+  floatRound()
+  boolRound()
+  charRound()
+  stringRound()
+  kindRound()
+  noteRound()
+  listRound()
+  pairRound()
+  plainFunctions()
+}

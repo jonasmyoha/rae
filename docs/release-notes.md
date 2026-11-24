@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.77, 2026-11-25: generic parameters of an optional type
+
+- `opt view T`, `opt mod T`, `opt own T` and `opt copy T` of a generic function, and a `List(opt T)` or another generic
+  struct of `opt T`, work for every T; T is the payload. Most were errors of the C compiler.
+- A call's result or a literal can be given to an `opt view` parameter of a struct or a fixed-width integer, and an
+  `opt String` moved into an `opt own String`; those were errors of the C compiler.
+- Breaking: a Task given to a generic `copy T` (or `copy List(T)`) is an error; it was joined and freed twice. A call
+  that does not say what T is (`look(value: none)`) is an error that says how to name it.
+- Cases 1642, 1643 and 1644, and 1634 (under ThreadSanitizer too).
+
 ## 0.4.76, 2026-11-25: the text of an optional reference
 
 - `"{kind}"` and `log(kind)` of an `opt view Kind` that `if let` narrowed is the enum's name; it was its number. Of a

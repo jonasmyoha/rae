@@ -131,10 +131,13 @@ static const AstExpr* c_mod_arg_place(CFuncContext* ctx, const AstExpr* value, b
  *     directly, anything else through a statement temporary).
  * Returns false for a plain struct value, whose existing path already passes
  * its address. */
-static bool c_is_place(const AstExpr* value) {
+static bool c_is_place(CFuncContext* ctx, const AstExpr* value) {
     const AstExpr* root = value;
     while (root && root->kind == AST_EXPR_MEMBER) root = root->as.member.object;
-    return root && root->kind == AST_EXPR_IDENT;
+    if (!root || root->kind != AST_EXPR_IDENT) return false;
+    /* `Kind.large` names a value, not a place */
+    return value->kind != AST_EXPR_MEMBER || value->as.member.object != root
+        || local_index_by_name(ctx, root->as.ident) >= 0 || !find_enum_decl(ctx, ctx->module, root->as.ident);
 }
 
 static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
@@ -148,9 +151,13 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     const AstTypeRef* arg_type = infer_expr_type_ref(ctx, inner);
     bool arg_is_ref = arg_type && (arg_type->is_view || arg_type->is_mod);
     bool arg_is_opt = arg_type && arg_type->is_opt;
-    /* a Task nobody holds is joined at the statement's end, as a temporary */
+    /* A plain struct in a place is passed by its address by the existing path;
+     * what is in none (a call's result, a literal) is a temporary here, dropped
+     * at the statement's end (a Task nobody holds is joined there) */
     bool task = str_eq_cstr(base, "Task");
-    if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped && !task) return false;
+    bool scalar = is_primitive_type(base) || find_enum_decl(ctx, ctx->module, base);
+    if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped && !task && !scalar
+        && (arg_is_ref || param_type->is_mod || c_is_place(ctx, inner))) return false;
 
     /* The parameter resolves as REF(OPT(T)): the optional and its payload
      * are the types under the reference */
@@ -181,7 +188,7 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     } else if (arg_is_opt) {
         const char* opt_c = rae_opt_type_name(ctx, &opt_type);
         fprintf(out, "rae_opt_payload_ptr(");
-        if (c_is_place(inner)) {
+        if (c_is_place(ctx, inner)) {
             fprintf(out, "&(");
             emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
             fprintf(out, ")");
@@ -198,13 +205,19 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
             }
         }
         fprintf(out, ", offsetof(%s, value))", opt_c);
-    } else if (c_is_place(inner) || param_type->is_mod) {
+    } else if (c_is_place(ctx, inner) || param_type->is_mod) {
         fprintf(out, "&(");
         emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
         fprintf(out, ")");
     } else {
         bool fresh_string = str_eq_cstr(base, "String");
-        int tmp_id = register_stmt_temp(ctx, &value_type, fresh_string);
+        /* an untyped literal (`{ text: "a" }`) is one of the payload's type */
+        if ((inner->kind == AST_EXPR_OBJECT && !inner->as.object_literal.type)
+            || (inner->kind == AST_EXPR_COLLECTION_LITERAL && !inner->as.collection.type)) {
+            ctx->has_expected_type = true;
+            ctx->expected_type = value_type;
+        }
+        int tmp_id = register_stmt_temp(ctx, &value_type, fresh_string || c_stmt_temp_value_owns(ctx, inner));
         if (tmp_id >= 0) {
             fprintf(out, "((__rae_stmt_tmp%d = %s(", tmp_id, fresh_string ? "rae_string_pool_take" : "");
             emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
@@ -1245,7 +1258,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 const AstParam* p = tmpl->params;
                 const AstCallArg* a = expr->as.call.args;
                 while (p && a && np < 32) {
-                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                    const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
                     if (arg_tr && ctx->generic_params && ctx->generic_args)
                         arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                     patterns[np] = p->type; concretes[np] = arg_tr; np++;
@@ -1275,7 +1288,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             const AstParam* p = fd->params;
             const AstCallArg* a = expr->as.call.args;
             while (p && a && np < 32) {
-                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
                 if (arg_tr && ctx->generic_params && ctx->generic_args)
                     arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                 patterns[np] = p->type; concretes[np] = arg_tr; np++;
@@ -1330,6 +1343,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         } else if (fd->specialization_args) {
             call_name = rae_mangle_specialized_function(ctx->compiler_ctx, fd, fd->specialization_args);
         } else {
+            /* Nothing at the call says what T is (`present(value: none)`) */
+            if (fd->generic_params && !fd->is_extern && expr->as.call.args) {
+                char message[320];
+                snprintf(message, sizeof message,
+                         "cannot tell what '%.*s' of '%.*s' is: no argument has its type; name it, as in `%.*s(Int, ...)`",
+                         (int)fd->generic_params->text.len, fd->generic_params->text.data,
+                         (int)fd->name.len, fd->name.data, (int)fd->name.len, fd->name.data);
+                diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
+            }
             call_name = rae_mangle_function(ctx->compiler_ctx, fd);
         }
 
@@ -2189,11 +2211,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // into the callee and null the source in one
                 // statement-expression.
                 int mv_id = ctx->temp_counter++;
-                fprintf(out, "(__extension__ ({ rae_String __rae_mv%d = ", mv_id);
+                const AstTypeRef* moved_type = infer_expr_type_ref(ctx, move_src);
+                /* an `opt String` is emptied to `none` */
+                const char* moved_c = moved_type && moved_type->is_opt && rae_opt_is_struct_rep(ctx, moved_type)
+                    ? rae_opt_type_name(ctx, moved_type) : "rae_String";
+                fprintf(out, "(__extension__ ({ %s __rae_mv%d = ", moved_c, mv_id);
                 emit_expr(ctx, (AstExpr*)move_src, out, PREC_LOWEST, false, false);
                 fprintf(out, "; ");
                 emit_expr(ctx, (AstExpr*)move_src, out, PREC_LOWEST, true, false);
-                fprintf(out, " = (rae_String){NULL, 0, 0, 0}; __rae_mv%d; }))", mv_id);
+                fprintf(out, " = (%s){0}; __rae_mv%d; }))", moved_c, mv_id);
                 // We bypassed emit_expr on the AST_EXPR_OWN node, so
                 // apply its move-mark here for the scope-exit
                 // implicit-drop suppression. A local moved on some paths

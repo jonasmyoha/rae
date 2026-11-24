@@ -1067,6 +1067,16 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
 // emit_parallel_loop, which re-declares a captured parameter under its own
 // type inside the outlined parallelLoop body.
 void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern) {
+        /* `opt view T` (`opt mod T`, `opt own T`) in a specialization is that of
+         * the concrete type: as `T` it was a pointer to the optional's box */
+        if (p->type->is_opt && !is_extern && ctx->generic_params && ctx->generic_args) {
+            AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, p->type);
+            if (concrete && !concrete->is_opt) concrete->is_opt = true;
+            if (concrete) {
+                emit_type_ref_as_c_type(ctx, concrete, out, false);
+                return;
+            }
+        }
         bool is_mod = p->type->is_mod, is_val = p->type->is_val, is_view = p->type->is_view;
         Str base = get_base_type_name(p->type);
         // Stage 6: `view`/`copy`/`own` on a numeric primitive lowers

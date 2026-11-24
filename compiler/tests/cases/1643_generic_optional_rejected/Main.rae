@@ -1,0 +1,29 @@
+# What a generic function refuses at its call: a copy of a Task, in whatever `copy T` or `copy
+# List(T)`
+# it would be, and a T that no argument says
+func work(number: copy Int) ret Int {
+  ret number
+}
+
+func copied(T: type, value: opt copy T) ret Bool {
+  ret true
+}
+
+func plain(T: type, value: copy T) ret Bool {
+  ret true
+}
+
+func listed(T: type, value: copy List(T)) ret Bool {
+  ret true
+}
+
+func main() {
+  let task: Task(Int) = spawn work(number: 1)
+  let maybe: opt Task(Int) = spawn work(number: 2)
+  let list: List(Task(Int)) = { spawn work(number: 3) }
+  log("{copied(value: task)}")  # ERROR
+  log("{copied(value: maybe)}")  # ERROR
+  log("{plain(value: task)}")  # ERROR
+  log("{plain(value: spawn work(number: 4))}")  # ERROR
+  log("{listed(value: list)}")  # ERROR
+}

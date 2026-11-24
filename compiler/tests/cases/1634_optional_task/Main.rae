@@ -119,11 +119,41 @@ func lists(finished: view Atomic(Int)) {
   log("cleared: finished {finished.load()} of 25")
 }
 
+func lookAny(T: type, value: opt view T) ret Bool {
+  if let there: view T = value {
+    ret true
+  }
+  ret false
+}
+
+func replaceAny(T: type, value: opt mod T, other: own T) {
+  if let there: mod T = value {
+    there = own other
+  }
+}
+
+func takeAny(T: type, value: opt own T) ret Bool {
+  if let there: view T = value {
+    ret true
+  }
+  ret false
+}
+
+func generics(finished: view Atomic(Int)) {
+  var held: opt Task(Int) = started(finished: finished, number: 1)
+  log("generic: {lookAny(value: held)} {lookAny(value: started(finished: finished, number: 2))}")
+  replaceAny(value: held, other: started(finished: finished, number: 3))
+  log("replaced: {look(task: held)}, finished {finished.load()} of 28")
+  log("taken: {takeAny(value: own held)} {takeAny(value: started(finished: finished, number: 4))}")
+  log("finished {finished.load()} of 29")
+}
+
 func main() {
   let finished: Atomic(Int) = createAtomic(Int, value: 0)
   bindings(finished: finished)
   fields(finished: finished)
   calls(finished: finished)
   lists(finished: finished)
+  generics(finished: finished)
   finished.freeAtomic()
 }
