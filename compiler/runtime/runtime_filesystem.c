@@ -407,6 +407,35 @@ rae_Bool rae_ext_rae_sys_unlock_file(rae_String path) {
 #endif
 }
 
+/* The memory the OS counts against the app, in KB: what iOS ends an app for.
+ * Unlike the resident size it holds the GPU's memory and not the pages shared
+ * with other apps. -1 where there is no such count. Platform reason: a
+ * per-OS struct. */
+int64_t rae_ext_rae_sys_footprint_kb(void) {
+#ifdef __APPLE__
+    task_vm_info_data_t info;
+    mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+    if (task_info(mach_task_self(), TASK_VM_INFO, (task_info_t)&info, &count) == KERN_SUCCESS) {
+        return (int64_t)(info.phys_footprint / 1024);
+    }
+#endif
+    return -1;
+}
+
+/* How much more the app may take before iOS ends it, in KB; -1 elsewhere.
+ * Platform reason: a system call of iOS alone. */
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE && !TARGET_OS_SIMULATOR
+extern size_t os_proc_available_memory(void);
+int64_t rae_ext_rae_sys_memory_left_kb(void) {
+    return (int64_t)(os_proc_available_memory() / 1024);
+}
+#else
+int64_t rae_ext_rae_sys_memory_left_kb(void) { return -1; }
+#endif
+
 int64_t rae_ext_rae_sys_rss_kb(void) {
 #ifdef __APPLE__
     struct mach_task_basic_info info;

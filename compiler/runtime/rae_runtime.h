@@ -984,6 +984,8 @@ int64_t rae_ext_NetSys_sendTo(int64_t fd, uint8_t* buffer, int64_t offset, int64
 int64_t rae_ext_NetSys_receiveFrom(int64_t fd, uint8_t* buffer, int64_t offset, int64_t maxBytes, int64_t* words);
 rae_String rae_ext_NetSys_bytesToText(uint8_t* buffer, int64_t offset, int64_t count);
 int64_t rae_ext_rae_sys_rss_kb(void);
+int64_t rae_ext_rae_sys_footprint_kb(void);
+int64_t rae_ext_rae_sys_memory_left_kb(void);
 
 /* Audio — SFX + looping ambient over the SDL3 backend (runtime_audio_sdl3.c, #46). */
 void    rae_ext_audio_init(void);

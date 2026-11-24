@@ -1,0 +1,163 @@
+# app3d/Heartbeat — a line in the app's log about every 5 s, saying in what state it runs, so the
+# log of an app that froze or was ended says where and when: the frame, the frames a second and
+# the longest of them, the memory, the OS thermal state, the place of the camera and what the app
+# adds. An app owns a Heartbeat and calls heartbeatUpdate once a frame; on a phone (where nobody
+# sees the app's output but its log is kept) it logs, on a desktop only with RAE_HEARTBEAT set.
+# The frames are counted against the real clock, not the simulated time.
+import Math
+import Sys
+import Target
+import Vec3
+open app3d/FrameLog
+open app3d/RenderScale
+
+const heartbeatPeriodSeconds: Float = 5.0
+
+# What is known at a beat
+type HeartbeatState {
+  # Frames since the start, and since the last beat in `seconds` of the real clock
+  frame: Int
+  frames: Int
+  seconds: Float
+  longestSeconds: Float
+  memoryKb: Int
+  # -1: not known
+  memoryLeftKb: Int
+  thermal: Int
+  eye: Vec3
+  target: Vec3
+}
+
+type Heartbeat {
+  on: Bool
+  frame: Int
+  frames: Int
+  # The real clock at the last beat and the last frame (ns); 0: no frame yet
+  beatNs: Int
+  frameNs: Int
+  longestSeconds: Float
+}
+
+func createHeartbeat() ret Heartbeat {
+  ret Heartbeat {
+    on: heartbeatOn(mobile: Target.isMobileOs, setting: Sys.getEnv(name: "RAE_HEARTBEAT"))
+    frame: 0
+    frames: 0
+    beatNs: 0
+    frameNs: 0
+    longestSeconds: 0.0
+  }
+}
+
+# On a phone, and where RAE_HEARTBEAT asks for it; RAE_HEARTBEAT=0 is off everywhere.
+func heartbeatOn(mobile: view Bool, setting: view String) ret Bool {
+  if setting.length() > 0 {
+    ret setting is not "0"
+  }
+  ret mobile
+}
+
+# Frames a second, to a tenth
+func heartbeatFps(frames: view Int, seconds: view Float) ret Float {
+  if seconds <= 0.0 {
+    ret 0.0
+  }
+  ret Math.round(x: frames.toFloat() / seconds * 10.0) / 10.0
+}
+
+# A value that may be below zero, to a hundredth ("-0.05"; what rounds to none is "0.00")
+func signedText(value: view Float) ret String {
+  if value <= -0.005 {
+    ret "-{hundredthsText(value: 0.0 - value)}"
+  }
+  ret hundredthsText(value: Math.max(a: 0.0, b: value))
+}
+
+func placeText(place: view Vec3) ret String {
+  ret "({signedText(value: place.x)}, {signedText(value: place.y)}, {signedText(value: place.z)})"
+}
+
+# Where a camera at `eye` looks, of length 1 (0 when the two are one place)
+func heartbeatDirection(eye: view Vec3, target: view Vec3) ret Vec3 {
+  let x: Float = target.x - eye.x
+  let y: Float = target.y - eye.y
+  let z: Float = target.z - eye.z
+  let length: Float = Math.sqrt(x: x * x + y * y + z * z)
+  if length < 0.0001 {
+    ret Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  }
+  ret Vec3.create(x: x / length, y: y / length, z: z / length)
+}
+
+# The beat's line; `note` is the app's own words, at its end.
+func heartbeatLine(state: view HeartbeatState, note: view String) ret String {
+  var memory: String = "memory {state.memoryKb / 1024} MB"
+  if state.memoryLeftKb >= 0 {
+    memory = "{memory} ({state.memoryLeftKb / 1024} MB left)"
+  }
+  let fps: Float = heartbeatFps(frames: state.frames, seconds: state.seconds)
+  let longest: String = millisecondsText(seconds: state.longestSeconds)
+  let place: String = placeText(place: state.eye)
+  let direction: Vec3 = heartbeatDirection(eye: state.eye, target: state.target)
+  let looking: String = placeText(place: direction)
+  let camera: String = "camera {place} looking {looking}"
+  var line: String = "[beat] frame {state.frame}, {fps} fps, longest {longest} ms, {memory}, thermal {state.thermal}, {camera}"
+  if note.length() > 0 {
+    line = "{line}, {note}"
+  }
+  ret line
+}
+
+# A frame at the real clock's `now` (ns) is counted; true when a beat is due.
+func heartbeatCount(heartbeat: mod Heartbeat, now: view Int) ret Bool {
+  heartbeat.frame = heartbeat.frame + 1
+  if heartbeat.beatNs is 0 {
+    heartbeat.beatNs = now
+    heartbeat.frameNs = now
+    ret false
+  }
+  heartbeat.frames = heartbeat.frames + 1
+  let frameSeconds: Float = ((now - heartbeat.frameNs) as Float) / 1000000000.0
+  heartbeat.frameNs = now
+  if frameSeconds > heartbeat.longestSeconds {
+    heartbeat.longestSeconds = frameSeconds
+  }
+  ret heartbeatSeconds(heartbeat: heartbeat, now: now) >= heartbeatPeriodSeconds
+}
+
+# Since the last beat
+func heartbeatSeconds(heartbeat: view Heartbeat, now: view Int) ret Float {
+  ret ((now - heartbeat.beatNs) as Float) / 1000000000.0
+}
+
+# Once a frame, with the camera's eye and what it looks at. True when it logged.
+func heartbeatUpdate(
+  heartbeat: mod Heartbeat
+  eye: view Vec3
+  target: view Vec3
+  note: view String
+) ret Bool {
+  if not heartbeat.on {
+    ret false
+  }
+  let now: Int = nowNs()
+  if not heartbeatCount(heartbeat: heartbeat, now: now) {
+    ret false
+  }
+  let state: HeartbeatState = {
+    frame: heartbeat.frame
+    frames: heartbeat.frames
+    seconds: heartbeatSeconds(heartbeat: heartbeat, now: now)
+    longestSeconds: heartbeat.longestSeconds
+    memoryKb: Sys.processFootprintKb()
+    memoryLeftKb: Sys.processMemoryLeftKb()
+    thermal: thermalState()
+    eye: eye
+    target: target
+  }
+  log(heartbeatLine(state: state, note: note))
+  heartbeat.frames = 0
+  heartbeat.longestSeconds = 0.0
+  heartbeat.beatNs = now
+  ret true
+}

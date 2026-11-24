@@ -58,6 +58,10 @@ func rae_sys_file_mtime(path: String) unsafe extern ret Float64
 
 func rae_sys_rss_kb() unsafe extern ret Int
 
+func rae_sys_footprint_kb() unsafe extern ret Int
+
+func rae_sys_memory_left_kb() unsafe extern ret Int
+
 func rae_ext_rae_mem_alloc_total() unsafe extern ret Int
 
 func exit(code: view Int) {
@@ -553,6 +557,27 @@ func fileModTime(path: view String) ret Float64 {
 func processRssKb() ret Int {
   unsafe {
     ret rae_sys_rss_kb()
+  }
+}
+
+# The memory the OS counts against this process, in KB: what iOS ends an app for, the GPU's
+# memory among it. The resident size where the platform has no such count.
+func processFootprintKb() ret Int {
+  var footprint: Int = -1
+  unsafe {
+    footprint = rae_sys_footprint_kb()
+  }
+  if footprint < 0 {
+    ret processRssKb()
+  }
+  ret footprint
+}
+
+# How much more memory iOS lets this process take before it ends it, in KB; -1 on the other
+# platforms.
+func processMemoryLeftKb() ret Int {
+  unsafe {
+    ret rae_sys_memory_left_kb()
   }
 }
 

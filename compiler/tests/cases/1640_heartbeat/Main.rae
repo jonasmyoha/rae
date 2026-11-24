@@ -1,0 +1,52 @@
+# app3d/Heartbeat: when it is on, when a beat is due, what its line says.
+import Vec3
+open app3d/Heartbeat
+
+func main() {
+  log(
+    "on a phone {heartbeatOn(mobile: true, setting: "")}, desktop {heartbeatOn(
+      mobile: false
+      setting: ""
+    )}"
+  )
+  log(
+    "asked {heartbeatOn(mobile: false, setting: "1")}, refused {heartbeatOn(
+      mobile: true
+      setting: "0"
+    )}"
+  )
+
+  # 60 frames a second from the clock's 1 s on: the first beat with the frame that ends 5 s
+  var heartbeat: Heartbeat = createHeartbeat()
+  var now: Int = 1000000000
+  var beats: Int = 0
+  loop beats is 0 and heartbeat.frame < 1000 {
+    if heartbeatCount(heartbeat: heartbeat, now: now) {
+      beats = beats + 1
+    } else {
+      now = now + 16666667
+      # One frame of 0.1 s
+      if heartbeat.frame is 100 {
+        now = now + 83333333
+      }
+    }
+  }
+  log("a beat at frame {heartbeat.frame}, {heartbeat.frames} since the first")
+  log("the longest {heartbeat.longestSeconds} s")
+
+  let state: HeartbeatState = {
+    frame: 18000
+    frames: 290
+    seconds: 5.0
+    longestSeconds: 0.1
+    memoryKb: 1258291
+    memoryLeftKb: 2202009
+    thermal: 2
+    eye: Vec3.create(x: 12.345, y: -0.05, z: 101.0)
+    target: Vec3.create(x: 12.344, y: -3.05, z: 97.0)
+  }
+  log(heartbeatLine(state: state, note: "volumetric clouds"))
+  var desktop: HeartbeatState = state
+  desktop.memoryLeftKb = -1
+  log(heartbeatLine(state: desktop, note: ""))
+}
