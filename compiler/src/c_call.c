@@ -1505,7 +1505,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
                     int li = local_index_by_name(ctx, a->value->as.ident);
-                    if (li >= 0 && ctx->local_drop_flag[li]) {
+                    if (c_local_is_slot_alias(ctx, li)) {
+                        // A binding of a raw slot read does not own what it
+                        // holds: the parameter gets a copy (own_takes_copy).
+                    } else if (li >= 0 && ctx->local_drop_flag[li]) {
                         // Moved on this path only: clear the live flag as the
                         // argument is evaluated, so the scope-exit drop runs on
                         // the paths that did not move it (#55453128).
@@ -1756,7 +1759,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_BINARY)) {
                 const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
                 if (arg_tr2 && !(arg_tr2->is_view || arg_tr2->is_mod)
-                    && str_eq_cstr(get_base_type_name(arg_tr2), "String")) {
+                    && str_eq_cstr(get_base_type_name(arg_tr2), "String")
+                    && !(expr_is_alias_call(ctx, a->value) && !fd->is_extern)) {
                     wrap_pool_take_arg = true;
                 }
             }
@@ -1879,8 +1883,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 } else if (a->value->kind == AST_EXPR_IDENT) {
                     const AstTypeRef* itr = infer_expr_type_ref(ctx, a->value);
                     bool is_alias = itr && (itr->is_view || itr->is_mod);
-                    bool is_local = local_index_by_name(ctx, a->value->as.ident) >= 0;
-                    own_takes_copy = is_alias || !is_local;
+                    int local = local_index_by_name(ctx, a->value->as.ident);
+                    own_takes_copy = is_alias || local < 0 || c_local_is_slot_alias(ctx, local);
                 }
             }
             if (!wrap_pool_take_arg && !wrap_deep_copy_arg && !use_hoisted_temp
@@ -2001,6 +2005,11 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                  * String or number place) or a twin's frame slot. Skip
                  * the rvalue-temp / addr / deref / box / emit_expr
                  * branches below. */
+            } else if (p && p->type && !fd->is_extern && !needs_box && !needs_addr
+                       && (p->type->is_own || p->type->is_copy)
+                       && emit_alias_call_copy(ctx, a->value, wrap_pt, out)) {
+                // A slot's value handed to a parameter that keeps it
+                // (`list.add(value: eventAt(...))`): copied.
             } else if (needs_rvalue_temp) {
                 // Materialize the rvalue into a one-element array compound
                 // literal and let it decay to the callee's `T*` param.

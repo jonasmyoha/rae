@@ -85,6 +85,9 @@ typedef struct {
   // becomes unnecessary and Layer 5 can fire on all owning struct
   // lets unconditionally.
   bool local_struct_owns_heap[256];
+  // The local bound by a raw slot read (c_local_is_slot_alias): its name in
+  // the source, so that a reused index is not taken for it.
+  const char* local_slot_alias[256];
   // #885: a local with a destructor that the body drops explicitly somewhere
   // gets a runtime flag `int __rae_live_<name>`: 1 while it owns a value, 0
   // after `<name>.drop()`, 1 again after reassignment. Scope exit and
@@ -208,6 +211,9 @@ void emit_stmt_temp_drops_keep(CFuncContext* ctx, FILE* out);
 // (alias drop: destructors and containers still run, String fields skipped).
 int register_stmt_temp(CFuncContext* ctx, const AstTypeRef* type, bool owns_heap);
 bool c_stmt_temp_value_owns(CFuncContext* ctx, const AstExpr* value);
+bool c_local_is_slot_alias(CFuncContext* ctx, int local);
+bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e);
+bool emit_alias_call_copy(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* type, FILE* out);
 bool c_primitive_ref_has_wrapper(Str base);
 bool c_expr_is_pointer_list_ident(CFuncContext* ctx, const AstExpr* expr);
 void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out);

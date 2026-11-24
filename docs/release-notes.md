@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.59, 2026-11-24: what is taken from a slot is a copy
+
+- A call that answers a slot someone else owns (`eventAt`, `queueAt`, a function over the raw slot read)
+  gives a copy to whatever keeps its value: a binding, an `own` parameter, a field, a list element. Before,
+  they shared the slot's heap, and a program that kept it, or changed a `var` of it, freed it twice and
+  aborted. Reading a field of the call copies nothing.
+- In unsafe code a binding of the raw slot read (`rae_ext_rae_buf_get`) handed to an `own` parameter is
+  copied too; `own value` moves it out.
+- `List.pop` says `ret own`: it moves its element out, so what is popped is not copied.
+- Case 1602, stress 15.
+
 ## 0.4.58, 2026-11-24: drags, and files dropped from the OS
 
 - `ui/DragSystem`: `DragSource` and `DropTarget` on any nodes, one drag in a world (`world.drag`), its events

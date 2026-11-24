@@ -85,6 +85,7 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
       return;
     }
   }
+  if (!elem_is_any && emit_alias_call_copy(ctx, value, elem_type, out)) return;
   if (elem_is_any) fprintf(out, "rae_any((");
   if (elem_is_string) fprintf(out, "rae_string_pool_take(");
   emit_expr(ctx, value, out, PREC_LOWEST, false, false);
@@ -655,6 +656,7 @@ static bool visit_push(AliasVisit* v, const AstFuncDecl* fd) {
   v->fns[v->n++] = fd; return true;
 }
 static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVisit* v);
+static bool expr_is_raw_slot_read(const AstExpr* e);
 static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* first, AliasVisit* v);
 static bool func_returns_alias_v(CompilerContext* cctx, const AstFuncDecl* fd, AliasVisit* v);
 static const AstStmt* find_let_for_ident(const AstStmt* scope_start, Str name) {
@@ -667,17 +669,17 @@ static bool let_init_is_aliasing(CompilerContext* cctx, const AstStmt* let_s, Al
   if (!let_s) return false;
   const AstExpr* val = let_s->as.let_stmt.value;
   if (!val) return false;
-  if (val->kind == AST_EXPR_IDENT) {
-    // `let s: String = ident` deep-copies (rae_string_copy, see the let
-    // emitter's deep_copy_string_ident): the local owns its heap, so
-    // returning it is an owned value. Calling it an alias made the caller
-    // clear is_owned and leak the copy (Filesystem.trimTrailingSeparators).
+  // `let x: T = ident` deep-copies (the let emitter's deep_copy_ident), as a
+  // field or an element does: the local owns its heap, and returning it
+  // returns an owned value. Calling it an alias made the caller leak it.
+  if (val->kind == AST_EXPR_IDENT) return false;
+  // A binding of a call's alias holds a copy (emit_alias_call_copy); only
+  // the raw slot read binds the slot itself.
+  if (val->kind == AST_EXPR_CALL) {
     const AstTypeRef* lt = let_s->as.let_stmt.type;
-    if (lt && !lt->is_view && !lt->is_mod && !lt->is_opt
-        && str_eq_cstr(get_base_type_name(lt), "String")) return false;
-    return true; // bare-ident copy → alias
+    return (lt && (lt->is_view || lt->is_mod || lt->is_opt)) ? call_is_aliasing(cctx, val, v)
+                                                            : expr_is_raw_slot_read(val);
   }
-  if (val->kind == AST_EXPR_CALL) return call_is_aliasing(cctx, val, v);
   return false;
 }
 static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVisit* v) {
@@ -802,7 +804,7 @@ bool rae_func_returns_alias(CompilerContext* cctx, const AstFuncDecl* fd) {
 // local reassigned from jsonValueAt freed the document's strings). The
 // callee is the call's resolved declaration, else the first function of that
 // name (the rule the `let` path uses).
-static bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e) {
+bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e) {
   if (!e || (e->kind != AST_EXPR_CALL && e->kind != AST_EXPR_METHOD_CALL)) return false;
   Str name = {0};
   if (e->kind == AST_EXPR_CALL) {
@@ -825,6 +827,54 @@ static bool expr_is_alias_call(CFuncContext* ctx, const AstExpr* e) {
     return d->as.func_decl.body && rae_func_returns_alias(ctx->compiler_ctx, &d->as.func_decl);
   }
   return false;
+}
+
+static void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source,
+                                 int id, FILE* out);
+
+// Is `e` the raw slot read itself (`rae_ext_rae_buf_get`, unsafe code)?
+static bool expr_is_raw_slot_read(const AstExpr* e) {
+  if (!e || e->kind != AST_EXPR_CALL || !e->as.call.callee || e->as.call.callee->kind != AST_EXPR_IDENT) return false;
+  Str name = e->as.call.callee->as.ident;
+  return str_eq_cstr(name, "rae_ext_rae_buf_get") || str_eq_cstr(name, "__buf_get")
+      || str_eq_cstr(name, "rae_ext___buf_get");
+}
+
+// Does the local hold the bits of a slot someone else owns (bound by a raw
+// slot read, and not assigned since)?
+bool c_local_is_slot_alias(CFuncContext* ctx, int local) {
+  return local >= 0 && !ctx->local_struct_owns_heap[local] && ctx->local_slot_alias[local]
+      && ctx->local_slot_alias[local] == ctx->locals[local].data;
+}
+
+// The value `value`, taken for keeps by a place of `type` (a binding, an
+// `own` argument, a field, a list element): when it is a call that returns a
+// slot someone else owns (expr_is_alias_call, as `eventAt`), what is taken
+// is a copy, as `=` promises (docs/binding-modes-design.md). Bit for bit the
+// slot's owner and the place would free the same heap. Emits the copy and
+// answers true, else emits nothing.
+bool emit_alias_call_copy(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* type, FILE* out) {
+  if (!value || !type || type->is_view || type->is_mod || type->is_opt) return false;
+  if (!expr_is_alias_call(ctx, value)) return false;
+  const AstTypeRef* concrete = type;
+  if (ctx->generic_params && ctx->generic_args)
+    concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+  if (concrete->is_opt || !type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)concrete, 0)) return false;
+  Str base = get_base_type_name(concrete);
+  if (str_eq_cstr(base, "String")) {
+    fprintf(out, "rae_string_copy(");
+    emit_expr(ctx, value, out, PREC_LOWEST, false, false);
+    fprintf(out, ")");
+    return true;
+  }
+  bool is_container = str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap") || str_eq_cstr(base, "IntMap");
+  const AstDecl* decl = is_container ? NULL : find_type_decl(ctx, ctx->module, base);
+  bool is_user_struct = decl && decl->kind == AST_DECL_TYPE
+                        && !has_property(decl->as.type_decl.properties, "c_struct");
+  if (!is_container && !is_user_struct) return false;
+  const char* type_name = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)concrete);
+  emit_deep_copy_value(ctx, type_name, value, ctx->temp_counter++, out);
+  return true;
 }
 
 // A deep copy of `source` as an expression of C type `type_name`: a place
@@ -3248,6 +3298,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (needs_box) {
                     emit_optional_boxed_expr(ctx, stmt->as.let_stmt.type,
                                              stmt->as.let_stmt.value, out);
+                } else if (!expr_is_raw_slot_read(stmt->as.let_stmt.value)
+                           && emit_alias_call_copy(ctx, stmt->as.let_stmt.value,
+                                                   stmt->as.let_stmt.type, out)) {
+                    // `let event: T = eventAt(...)`: the slot is the queue's,
+                    // the binding has a copy of its own. The raw slot read
+                    // (unsafe) binds the slot's bits, as a container's code
+                    // moves its elements.
+                    let_did_deep_copy = true;
                 } else if (deep_copy_string_ident) {
                     // `let b: String = a` — deep copy via rae_string_copy.
                     // Replaces the pool_take wrapper which would only
@@ -3363,47 +3421,11 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // auto-drop the let-local at each iteration end — the
                 // local aliased the List slot, so freeing it freed the
                 // slot's data and the next iter read garbage.
-                Str cn = {0};
-                bool init_is_call = false;
-                if (init && init->kind == AST_EXPR_CALL && init->as.call.callee
-                    && init->as.call.callee->kind == AST_EXPR_IDENT) {
-                    cn = init->as.call.callee->as.ident;
-                    init_is_call = true;
-                } else if (init && init->kind == AST_EXPR_METHOD_CALL) {
-                    cn = init->as.method_call.method_name;
-                    init_is_call = true;
-                }
-                if (!owns && init_is_call) {
-                    bool is_buf_get =
-                        str_eq_cstr(cn, "rae_ext_rae_buf_get") ||
-                        str_eq_cstr(cn, "__buf_get") ||
-                        str_eq_cstr(cn, "rae_ext___buf_get");
-                    if (is_buf_get) {
-                      owns = false;
-                    } else {
-                      // Inspect the callee's body to see whether it
-                      // returns an alias (a local initialized from
-                      // buf_get / list.get / similar) or an owned
-                      // value (struct literal / new call / pool_take).
-                      // Default to owning — only flip to alias when
-                      // we find a clear `ret <local>` whose local was
-                      // initialized from a known aliasing source.
-                      // For method calls, we look up by method name —
-                      // List.get / StringMap.get / IntMap.get all share
-                      // the name "get" but all return alias (buf_get
-                      // wrapper), so first-match is safe in practice.
-                      owns = true;
-                      for (size_t k = 0; k < ctx->compiler_ctx->all_decl_count; k++) {
-                        const AstDecl* d = ctx->compiler_ctx->all_decls[k];
-                        if (d->kind != AST_DECL_FUNC) continue;
-                        if (!str_eq(d->as.func_decl.name, cn)) continue;
-                        if (!d->as.func_decl.body) break;
-                        owns = !rae_func_returns_alias(ctx->compiler_ctx, &d->as.func_decl);
-                        break;
-                      }
-                    }
-                }
+                if (!owns && init && (init->kind == AST_EXPR_CALL || init->kind == AST_EXPR_METHOD_CALL))
+                  owns = !expr_is_alias_call(ctx, init);
                 ctx->local_struct_owns_heap[ctx->local_count] = owns;
+                ctx->local_slot_alias[ctx->local_count] =
+                    (!owns && expr_is_raw_slot_read(init)) ? stmt->as.let_stmt.name.data : NULL;
                 // Alias-clearing for String locals from aliasing inits:
                 // a buf_get-flavored RHS hands back a String value
                 // whose is_owned bit was inherited from the container
@@ -4274,6 +4296,13 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     Str rbase = get_base_type_name(ret_type);
                     if (str_eq_cstr(rbase, "String")) {
                         fprintf(out, "    __ret_val = rae_string_pool_take(__ret_val);\n");
+                        // A slot's String (`let value: T = <raw slot read>`,
+                        // `ret value`, with T String): the container owns it.
+                        // `ret own value` moves it out.
+                        bool slot_alias = expr_is_raw_slot_read(ret_val)
+                            || (ret_val && ret_val->kind == AST_EXPR_IDENT
+                                && c_local_is_slot_alias(ctx, local_index_by_name(ctx, ret_val->as.ident)));
+                        if (slot_alias) fprintf(out, "    __ret_val.is_owned = 0;\n");
                     }
                 }
             }

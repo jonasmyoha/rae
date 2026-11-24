@@ -22,7 +22,10 @@ what it does, is answered here: by the mode written on the binding's line.
 binding's mode, written on the same line, decides what the name denotes:
 
 - no mode (`let x: T = v`): the name holds a **fresh deep copy** of the
-  right-hand side;
+  right-hand side, also when that is a call that answers a slot someone else
+  owns (`eventAt`); the one exception is the raw slot read in unsafe code
+  (`rae_ext_rae_buf_get`), whose binding is the slot's bits, for a container
+  that moves its elements (`own value` moves them out, anything else copies);
 - `view T` / `mod T` (`let x: view T = place`): the name is an **alias** of
   the place on the right;
 - `own x` on the right (`let x: T = own y`): a **move**, `y` ends.

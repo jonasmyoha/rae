@@ -2199,7 +2199,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 }
             }
 
-            if (field_needs_deep_copy_nonstring) {
+            if (!field_is_view_string && emit_alias_call_copy(ctx, f->value, eff_field_tr, out)) {
+                // a slot's value (`{ note: eventAt(...) }`): copied
+            } else if (field_needs_deep_copy_nonstring) {
                 // Emit a GCC statement-expression: declare a temp of
                 // the field's mangled C type, call rae_deep_copy_<T>,
                 // evaluate to the temp. Mirrors the pattern Stage 1

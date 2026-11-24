@@ -1,0 +1,25 @@
+# The foot gun: a queue lends out an event, and a list keeps it.
+#
+# `eventAt` reads the queue's own slot. If the list took the slot's bytes, the queue and the list
+# would
+# both own the name and both free it. Rae hands the list a copy.
+open ecs/Event
+
+type Note {
+  name: String
+}
+
+func main() {
+  var queue: EventQueue(Note) = createEventQueue(Note)
+  eventSend(this: queue, value: Note { name: "note {1 + 1}" })
+  var kept: List(Note) = {}
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  kept.add(value: note)
+  kept.add(value: eventAt(Note, this: queue, i: 0))
+  eventClear(this: queue)
+  var names: List(String) = {}
+  loop let each: view Note in kept {
+    names.add(value: "{each.name}")
+  }
+  log("kept {names.join(sep: ", ")}")
+}

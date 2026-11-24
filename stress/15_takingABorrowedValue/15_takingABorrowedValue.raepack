@@ -1,0 +1,37 @@
+pack TakingABorrowedValue {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "Taking a borrowed value"
+  description: "A value read from a queue's slot is kept in a list: two owners of one heap value. Rae copies it."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "run"
+      exitCode: 0
+      stdout: "kept note 2, note 2"
+    }
+    elsewhere: {
+      python: "fine: both hold a reference, the collector frees it once"
+      java: "fine, but the list and the queue share one object, and a change through one shows in the other"
+      go: "fine, but shared as in Java"
+      rust: "compile error: cannot move out of a shared reference; .clone() makes it what Rae does"
+      cpp: "a struct with an owning raw pointer and no copy constructor: freed twice"
+      c: "the struct's bytes are copied, the pointer in it shared: freed twice, or used after free"
+    }
+    fixedBy: "0.4.59"
+  }
+}

@@ -157,10 +157,9 @@ func childAt(doc: view JsonDoc, idx: view Int) ret Int {
   }
 }
 
-func fieldAt(doc: view JsonDoc, idx: view Int) ret JsonField {
+func fieldAt(doc: view JsonDoc, idx: view Int) ret view JsonField {
   unsafe {
-    let v: JsonField = rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
-    ret v
+    ret view rae_ext_rae_buf_get(buf: doc.fields.data, index: idx)
   }
 }
 
@@ -307,7 +306,7 @@ func objectKeyAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret Str
   if idx < 0 or idx >= this.rangeLen {
     ret ""
   }
-  let f: JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + idx)
+  let f: view JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + idx)
   ret f.key
 }
 
@@ -318,7 +317,7 @@ func objectValueAt(doc: view JsonDoc, this: view JsonValue, idx: view Int) ret J
   if idx < 0 or idx >= this.rangeLen {
     ret Json.jsonNull()
   }
-  let f: JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + idx)
+  let f: view JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + idx)
   ret Json.valueAt(doc: doc, idx: f.valueIdx)
 }
 
@@ -332,7 +331,7 @@ func field(doc: view JsonDoc, this: view JsonValue, key: view String) ret Int {
   }
   var i: Int = 0
   loop i < this.rangeLen {
-    let f: JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + i)
+    let f: view JsonField = Json.fieldAt(doc: doc, idx: this.rangeStart + i)
     if f.key is key {
       ret f.valueIdx
     }
@@ -652,7 +651,7 @@ func parseValue(
               var i: Int = 0
               loop i < count {
                 let f2: JsonField = rae_ext_rae_buf_get(buf: localFields.data, index: i)
-                fields.add(value: f2)
+                fields.add(value: own f2)
                 i = i + 1
               }
               # Bulk-transfer hand-off: the byte-copies above made

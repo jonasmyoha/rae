@@ -253,7 +253,8 @@ func pop(T: type, this: mod List(T)) ret T {
     }
     let val: T = rae_ext_rae_buf_get(buf: this.data, index: this.length - 1)
     this.length = this.length - 1
-    ret val
+    # the slot is the list's no more: its value is moved out
+    ret own val
   }
 }
 

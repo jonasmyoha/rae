@@ -1,0 +1,378 @@
+# A call that answers a slot someone else owns (eventAt, queueAt, a function of the program's own
+# over
+# the raw slot read) taken for keeps: bound, handed to an `own` parameter (plain, `own`, on one
+# path only,
+# the call itself), put in a field, a struct literal, a list literal or an optional, returned. What
+# is
+# taken is a copy, so the queue still has its event and each String is freed once (the runner
+# checks the
+# leaks). List.pop moves its element out.
+open ecs/Event
+open ecs/Queue
+
+type Inner {
+  tag: String
+}
+
+type Note {
+  name: String
+  parts: List(String)
+  inner: Inner
+}
+
+type Holder {
+  note: Note
+  title: String = ""
+}
+
+func make(n: view Int) ret Note {
+  ret Note {
+    name: "a name that is long enough {n}"
+    parts: List(String) { "first part of {n}", "second part of {n}" }
+    inner: Inner { tag: "the tag of {n}" }
+  }
+}
+
+func keep(list: mod List(Note), note: own Note) {
+  list.add(value: own note)
+}
+
+func queueOf() ret EventQueue(Note) {
+  var queue: EventQueue(Note) = createEventQueue(Note)
+  eventSend(this: queue, value: make(n: 1))
+  eventSend(this: queue, value: make(n: 2))
+  ret queue
+}
+
+func show(label: view String, note: view Note) {
+  log("{label}: {note.name} / {note.parts.join(sep: "+")} / {note.inner.tag}")
+}
+
+func first(queue: view EventQueue(Note)) ret Note {
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  ret note
+}
+
+func firstOwn(queue: view EventQueue(Note)) ret Note {
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  ret own note
+}
+
+func firstHeld(queue: view EventQueue(Note)) ret Holder {
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  ret Holder { note: note }
+}
+
+func addLast() {
+  log("--- addLast")
+  let queue: EventQueue(Note) = queueOf()
+  var list: List(Note) = {}
+  loop var i: Int = 0, i < eventCount(this: queue), ++i {
+    let note: Note = eventAt(Note, this: queue, i: i)
+    list.add(value: note)
+  }
+  loop let note: view Note in list {
+    show(label: "list", note: note)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 1))
+}
+
+func addOwn() {
+  log("--- addOwn")
+  let queue: EventQueue(Note) = queueOf()
+  var list: List(Note) = {}
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  list.add(value: own note)
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func addCond() {
+  log("--- addCond")
+  let queue: EventQueue(Note) = queueOf()
+  var list: List(Note) = {}
+  loop var i: Int = 0, i < eventCount(this: queue), ++i {
+    let note: Note = eventAt(Note, this: queue, i: i)
+    if note.name.endsWith(suffix: "2") {
+      list.add(value: note)
+    }
+  }
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 1))
+}
+
+func direct() {
+  log("--- direct")
+  let queue: EventQueue(Note) = queueOf()
+  var list: List(Note) = {}
+  list.add(value: eventAt(Note, this: queue, i: 0))
+  keep(list: list, note: eventAt(Note, this: queue, i: 1))
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+  show(label: "queue", note: eventAt(Note, this: queue, i: 1))
+}
+
+func ownParam() {
+  log("--- ownParam")
+  let queue: EventQueue(Note) = queueOf()
+  var list: List(Note) = {}
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  keep(list: list, note: note)
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func field() {
+  log("--- field")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  var holder: Holder = { note: make(n: 9) }
+  holder.note = note
+  show(label: "held", note: holder.note)
+  holder.note = eventAt(Note, this: queue, i: 1)
+  show(label: "held", note: holder.note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func fieldOwn() {
+  log("--- fieldOwn")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  var holder: Holder = { note: make(n: 9) }
+  holder.note = own note
+  show(label: "held", note: holder.note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func literal() {
+  log("--- literal")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  let holder: Holder = { note: note }
+  let second: Holder = { note: eventAt(Note, this: queue, i: 1) }
+  show(label: "held", note: holder.note)
+  show(label: "held", note: second.note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func literalOwn() {
+  log("--- literalOwn")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  let holder: Holder = { note: own note }
+  show(label: "held", note: holder.note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func letOwn() {
+  log("--- letOwn")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  var mine: Note = own note
+  mine.name = "changed to something long"
+  show(label: "mine", note: mine)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func letCopy() {
+  log("--- letCopy")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  var mine: Note = note
+  mine.name = "changed to something long"
+  mine.parts.add(value: "third")
+  show(label: "mine", note: mine)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func varMut() {
+  log("--- varMut")
+  let queue: EventQueue(Note) = queueOf()
+  var note: Note = eventAt(Note, this: queue, i: 0)
+  note.name = "changed to something long"
+  note.parts.add(value: "third")
+  show(label: "mine", note: note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func retCase() {
+  log("--- ret")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = first(queue: queue)
+  var list: List(Note) = {}
+  list.add(value: note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+  let wrapped: Holder = firstHeld(queue: queue)
+  show(label: "held", note: wrapped.note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func retOwn() {
+  log("--- retOwn")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = firstOwn(queue: queue)
+  show(label: "mine", note: note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func listLit() {
+  log("--- listLit")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  let list: List(Note) = { note }
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func listLitDirect() {
+  log("--- listLitDirect")
+  let queue: EventQueue(Note) = queueOf()
+  let list: List(Note) = { eventAt(Note, this: queue, i: 0) }
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func optional() {
+  log("--- optional")
+  let queue: EventQueue(Note) = queueOf()
+  let note: Note = eventAt(Note, this: queue, i: 0)
+  let maybe: opt Note = note
+  if let held: view Note = maybe {
+    show(label: "opt", note: held)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func assignVar() {
+  log("--- assignVar")
+  let queue: EventQueue(Note) = queueOf()
+  var note: Note = make(n: 7)
+  note = eventAt(Note, this: queue, i: 0)
+  show(label: "mine", note: note)
+  var list: List(Note) = {}
+  list.add(value: own note)
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func reassignAlias() {
+  log("--- reassignAlias")
+  let queue: EventQueue(Note) = queueOf()
+  var note: Note = eventAt(Note, this: queue, i: 0)
+  note = make(n: 7)
+  show(label: "mine", note: note)
+  var list: List(Note) = {}
+  list.add(value: own note)
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: eventAt(Note, this: queue, i: 0))
+}
+
+func stringsCase() {
+  log("--- strings")
+  var queue: EventQueue(String) = createEventQueue(String)
+  eventSend(this: queue, value: "a string that is long {1 + 1}")
+  var list: List(String) = {}
+  let text: String = eventAt(String, this: queue, i: 0)
+  list.add(value: text)
+  let other: String = eventAt(String, this: queue, i: 0)
+  list.add(value: own other)
+  list.add(value: eventAt(String, this: queue, i: 0))
+  log(list.join(sep: "|"))
+  log(eventAt(String, this: queue, i: 0))
+}
+
+func queueAt() {
+  log("--- queueAt")
+  var queue: Queue(Note) = createQueue(Note)
+  enqueue(this: queue, value: make(n: 1))
+  var list: List(Note) = {}
+  let note: Note = queueAt(this: queue, i: 0)
+  list.add(value: note)
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+  show(label: "queue", note: queueAt(this: queue, i: 0))
+}
+
+func bufGet() {
+  log("--- bufGet")
+  var list: List(Note) = { make(n: 1) }
+  var out: List(Note) = {}
+  unsafe {
+    let note: Note = rae_ext_rae_buf_get(buf: list.data, index: 0)
+    out.add(value: note)
+  }
+  loop let kept: view Note in out {
+    show(label: "out", note: kept)
+  }
+  loop let kept: view Note in list {
+    show(label: "list", note: kept)
+  }
+}
+
+func popCase() {
+  log("--- pop")
+  var list: List(Note) = { make(n: 1), make(n: 2), make(n: 3), make(n: 4) }
+  let last: Note = list.pop()
+  show(label: "mine", note: last)
+  var other: List(Note) = {}
+  other.add(value: list.pop())
+  let third: Note = list.pop()
+  other.add(value: third)
+  show(label: "list", note: list.pop())
+  var strings: List(String) = {
+    "one string of some length {1}"
+    "two {2}"
+    "three of them {3}"
+    "four {4}"
+  }
+  let text: String = strings.pop()
+  log(text)
+  log(strings.pop())
+  other.clear()
+  var kept: List(String) = {}
+  kept.add(value: strings.pop())
+  let sure: String = strings.pop()
+  kept.add(value: sure)
+  log("{kept.length} {strings.length}")
+  list.pop()
+}
+
+func main() {
+  addLast()
+  addOwn()
+  addCond()
+  direct()
+  ownParam()
+  field()
+  fieldOwn()
+  literal()
+  literalOwn()
+  letOwn()
+  letCopy()
+  varMut()
+  retCase()
+  retOwn()
+  listLit()
+  listLitDirect()
+  optional()
+  assignVar()
+  reassignAlias()
+  stringsCase()
+  queueAt()
+  bufGet()
+  popCase()
+}
