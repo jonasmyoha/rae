@@ -770,7 +770,8 @@ as Nubis and RDR2 build theirs every frame.
 
 - The map is the sky above the horizon as an octahedral square, 1024 texels
   a side, with more texels low in the sky; two halves side by side (16 MB).
-  Its light is stored before the camera's exposure.
+  Its light is stored with the exposure it was baked with and scaled by the change since
+  (before the exposure, the clouds by the sun are past a half float's 65504).
 - A bake is 256 tiles of 64 x 64 texels, one a frame, each texel 4 rays of
   64 steps: about 4 s at 60 fps, never a frame that pays for it all. The
   first one is baked 32 tiles a frame. It takes the light uniform of the

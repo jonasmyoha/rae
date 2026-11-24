@@ -4,8 +4,10 @@
 // tiles of many frames fit together). The instance is the tile. A texel takes
 // four rays, each with its own place in the texel and in the first step: they
 // average out the march's grain, which no history does here. The light is
-// stored before the camera's exposure (camPos.w), so the map holds while the
-// exposure moves. SlabU: pattern.w the steps; sizes.x the tile's side, sizes.y
+// stored with the exposure (camPos.w) it began with, and the lighting pass
+// scales it by the exposure's change since (cloudBake[3]): before the exposure
+// the clouds by the sun are past what a half float holds. Held finite
+// (hdrFinite): a bad texel would stay a whole bake long. SlabU: pattern.w the steps; sizes.x the tile's side, sizes.y
 // the map's, sizes.z its tiles in a row.
 const PI = 3.14159265;  // sky_hosek.wgsl reads it
 @group(0) @binding(0) var<uniform> L: LightU;
@@ -39,5 +41,5 @@ fn fs(in: BakeOut) -> @location(0) vec4<f32> {
     sum = sum + volumeMarch(dir, fract(grain + f32(i) * 0.25), clamp(i32(S.pattern.w), 16, 128));
   }
   sum = sum * 0.25;
-  return vec4<f32>(sum.rgb / max(L.camPos.w, 1e-9), sum.w);
+  return vec4<f32>(hdrFinite(sum.rgb), hdrFinite(vec3<f32>(sum.w)).x);
 }

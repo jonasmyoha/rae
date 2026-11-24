@@ -139,9 +139,15 @@ func ensureBloomObjects(
     ret
   }
   cache.objectsMade = true
-  let prefilterShader: Shader = shader(files: ["lib/bloom_common.wgsl", "lib/bloom_prefilter.wgsl"])
-  let downShader: Shader = shader(files: ["lib/bloom_common.wgsl", "lib/bloom_down.wgsl"])
-  let upShader: Shader = shader(files: ["lib/bloom_common.wgsl", "lib/bloom_up.wgsl"])
+  let prefilterShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_prefilter.wgsl"]
+  )
+  let downShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_down.wgsl"]
+  )
+  let upShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_up.wgsl"]
+  )
   cache.prefilterPipeline = createFullscreenPipeline(
     resources: resources
     shader: prefilterShader

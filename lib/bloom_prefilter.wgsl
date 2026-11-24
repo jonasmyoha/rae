@@ -23,5 +23,5 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
   var soft = clamp(brightness - U.p0.x + knee, 0.0, 2.0 * knee);
   soft = soft * soft / (4.0 * knee);
   let weight = max(soft, brightness - U.p0.x) / max(brightness, 1e-4);
-  return vec4<f32>(color * weight, 1.0);
+  return vec4<f32>(hdrFinite(color * weight), 1.0);
 }

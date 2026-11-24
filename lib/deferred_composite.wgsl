@@ -46,7 +46,7 @@ fn vibrance(c: vec3<f32>, amount: f32) -> vec3<f32> {
 // The lit target has one mip, so the explicit level 0 samples exactly what
 // textureSample would, without derivatives.
 fn shade(uv: vec2<f32>) -> vec3<f32> {
-  var hdr = textureSampleLevel(litTex, litSamp, uv, 0.0).rgb;
+  var hdr = hdrFinite(textureSampleLevel(litTex, litSamp, uv, 0.0).rgb);
   if (P.p2.w > 0.0) {
     hdr = hdr + textureSampleLevel(bloomTex, litSamp, uv, 0.0).rgb * P.p2.w;
   }

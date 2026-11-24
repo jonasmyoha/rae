@@ -22,6 +22,7 @@ a unit test case (the unit suite does not need a GPU device or a browser).
 | `gpuManagerTiming` | `gpu/GpuTiming`, the one GPU timing module: per-pass timestamps read back without blocking, named passes, and the last sample published as profiler counters (gpu.<pass>, gpu.total) |
 | `gpuReadback` | `gpu/GpuReadback`: concurrent manager-owned readbacks, reuse, cancellation, shutdown |
 | `gpuRender` | `gpu/GpuRender`: a manager render pipeline draws into a texture that is read back and compared |
+| `hdrFinite` | an infinite, a not-a-number and a huge pixel in the lit image stay one pixel: the bloom's and the TAA's textures are judged by their bits, in both lit formats |
 | `gpuTextureRegion` | `gpu/GpuRenderTransfer` writeTextureRegion: four 32x32 regions of a 64x64 texture written and read back; out-of-bounds, short and non-CopyDst regions refused |
 | `gpuResources` | `gpu/GpuResources`: two managers, known buffer contents, stale ids, exhaustion, cleanup |
 | `impostorBake` | `ImpostorBake` and `CanopyBake`: every tree species baked into an octahedral impostor atlas on the GPU, then a far canopy of four 40 m cells baked from those impostors; each covers part of its layer and every mip keeps level 0's coverage within 3%; writes the atlas as PNGs to `RAE_IMPOSTOR_PNG_DIR` (default `/tmp/rae-impostor-atlas`; `RAE_IMPOSTOR_PHONE=1` bakes the phone's 4 x 4) |

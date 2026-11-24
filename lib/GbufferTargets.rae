@@ -37,7 +37,7 @@ open CloudShadow
 
 const pyramidMaxMips: Int = 16
 
-const lightUniformFloats: Int = 176  # 704 bytes: LightU in the lighting WGSL
+const lightUniformFloats: Int = 180  # 720 bytes: LightU in the lighting WGSL
 
 const taaUniformBytes: Int = 16
 
@@ -422,7 +422,7 @@ func ensureDeferredPipelines(targets: mod DeferredTargets, resources: mod GpuRes
       "lib/deferred_light.wgsl"
     ])
   }
-  let taaShader: Shader = shader(files: ["lib/deferred_taa.wgsl"])
+  let taaShader: Shader = shader(files: ["lib/hdr_finite.wgsl", "lib/deferred_taa.wgsl"])
   let pyramidFromDepthShader: Shader = shader(files: ["lib/deferred_pyramid_from_depth.wgsl"])
   let pyramidReduceShader: Shader = shader(files: ["lib/deferred_pyramid_reduce.wgsl"])
   targets.lightPipeline = createFullscreenPipeline(

@@ -10,6 +10,8 @@
 //   motion where a nearest fetch jittered and a bilinear one blurred;
 // - this frame weighs 0.05 when still, rising to 0.2 with the motion
 //   length (8 pixels or more);
+// - this frame's light and the history are held finite (hdrFinite): an
+//   infinite or not-a-number pixel would stay in the history;
 // - a REACTIVE pixel weighs 0.6: geometry whose motion vectors miss part
 //   of its movement (wind-blown grass, the deforming metaballs) marks
 //   itself in the G-buffer (gba.z = 1), and a pixel a transparent surface
@@ -47,7 +49,7 @@ fn fromYCoCg(c: vec3<f32>) -> vec3<f32> {
   return vec3<f32>(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z);
 }
 fn litAt(px: vec2<i32>, dim: vec2<i32>) -> vec3<f32> {
-  return textureLoad(litTex, clamp(px, vec2<i32>(0), dim - vec2<i32>(1)), 0).rgb;
+  return hdrFinite(textureLoad(litTex, clamp(px, vec2<i32>(0), dim - vec2<i32>(1)), 0).rgb);
 }
 // The history at uv, 5-tap Catmull-Rom (the bilinear taps cover the 4x4
 // footprint's corners' small weights by leaving them out)
@@ -70,7 +72,7 @@ fn historyAt(uv: vec2<f32>, size: vec2<f32>) -> vec3<f32> {
   sum = sum + textureSampleLevel(histTex, histSamp, vec2<f32>(p3.x, p12.y), 0.0).rgb * (w3.x * w12.y);
   sum = sum + textureSampleLevel(histTex, histSamp, vec2<f32>(p12.x, p3.y), 0.0).rgb * (w12.x * w3.y);
   let total = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
-  return max(sum / total, vec3<f32>(0.0));
+  return hdrFinite(sum / total);
 }
 // Move `history` toward `center` until it is inside the box center +- extent
 fn clipToBox(history: vec3<f32>, center: vec3<f32>, extent: vec3<f32>) -> vec3<f32> {
@@ -84,7 +86,7 @@ fn clipToBox(history: vec3<f32>, center: vec3<f32>, extent: vec3<f32>) -> vec3<f
 fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
   let dim = vec2<i32>(textureDimensions(litTex));
   let px = vec2<i32>(fc.xy);
-  let cur = textureLoad(litTex, px, 0).rgb;
+  let cur = hdrFinite(textureLoad(litTex, px, 0).rgb);
   if (P.x < 0.5) { return vec4<f32>(cur, 1.0); }
   let motion = textureLoad(gbcTex, px, 0).xy * 2.0 - vec2<f32>(256.0 / 255.0);
   let size = vec2<f32>(dim);

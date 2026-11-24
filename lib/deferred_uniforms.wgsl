@@ -48,8 +48,8 @@ struct LightU {
   cloudOptions: vec4<f32>,
   // The baked clouds: per half of the map the eye it was baked from and how far
   // the clouds had drifted; then the two halves' base heights, how much they
-  // show (0 .. 1)
-  cloudBake: array<vec4<f32>, 3>,
+  // show (0 .. 1); then per half how much the exposure changed since
+  cloudBake: array<vec4<f32>, 4>,
 };
 struct ShadowU {
   lightViewProj: array<mat4x4<f32>, 4>,

@@ -166,7 +166,9 @@ func ensureCompositeObjects(cache: mod CompositePassCache, resources: mod GpuRes
     ret
   }
   cache.pipeMade = true
-  let compositeShader: Shader = shader(files: ["lib/deferred_composite.wgsl"])
+  let compositeShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/deferred_composite.wgsl"]
+  )
   unsafe {
     cache.pipeline = createFullscreenPipeline(
       resources: resources

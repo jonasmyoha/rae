@@ -57,6 +57,8 @@ type CloudBakeFrom {
   height: Float = 1200.0
   drift: Float = 0.0
   skyKind: Float = 0.0
+  # the camera's exposure, which the map's light is stored with
+  exposure: Float = 1.0
 }
 
 # The bake's state: the two halves and what each was baked from, the half
@@ -280,6 +282,17 @@ type CloudBakeShown {
   second: Float = 0.0
   from0: CloudBakeFrom = CloudBakeFrom {}
   from1: CloudBakeFrom = CloudBakeFrom {}
+  # what each half's light is scaled by: the exposure's change since
+  gain0: Float = 1.0
+  gain1: Float = 1.0
+}
+
+# The exposure now over the one a half was baked with
+func cloudBakeGain(from: view CloudBakeFrom, now: view CloudBakeFrom) ret Float {
+  if from.exposure <= 0.0 {
+    ret 1.0
+  }
+  ret now.exposure / from.exposure
 }
 
 # A map this far off (m) is of other clouds (the date jumped): it stands still
@@ -307,5 +320,7 @@ func cloudBakeShown(
     second: cloudBakeSecondShare(state: state, seconds: seconds)
     from0: cloudBakeSlidFrom(from: state.from0, now: now)
     from1: cloudBakeSlidFrom(from: state.from1, now: now)
+    gain0: cloudBakeGain(from: state.from0, now: now)
+    gain1: cloudBakeGain(from: state.from1, now: now)
   }
 }

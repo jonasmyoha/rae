@@ -18,5 +18,6 @@ fn fs(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
     }
   }
   let level = textureLoad(levelTex, vec2<i32>(pos.xy), 0).rgb;
-  return vec4<f32>(level + sum / 16.0, 1.0);
+  // Two levels may add up to more than the format holds
+  return vec4<f32>(min(level + sum / 16.0, vec3<f32>(HDR_TOP)), 1.0);
 }

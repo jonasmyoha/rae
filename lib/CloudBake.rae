@@ -34,6 +34,7 @@ open CloudSlab
 open CloudTier
 open CloudTiming
 open CloudBakeRules
+open LightUnits
 
 # The bake's march steps: more than a frame's, its rays meet the edges of the
 # clouds once and no history smooths them
@@ -72,6 +73,7 @@ func cloudBakeFromNow(sky: view Sky, light: view Light3d, camera: view Camera3d)
     height: sky.cloudHeight
     drift: sky.cloudDrift
     skyKind: kindCode(sky: sky)
+    exposure: exposureScale(ev100: light.ev100)
   }
 }
 
@@ -174,6 +176,7 @@ func ensureCloudBake(
   }
   if not isValidRenderPipeline(resources: resources, id: bake.pipeline) {
     let bakeShader: Shader = shader(files: [
+      "lib/hdr_finite.wgsl"
       "lib/sky_hosek.wgsl"
       "lib/deferred_uniforms.wgsl"
       "lib/cloud_slab_common.wgsl"

@@ -178,7 +178,8 @@ fn gSmith(NoV: half, NoL: half, rough: half) -> half {
   return gv * gl;
 }
 fn fresnel(VoH: half, f0: half3) -> half3 {
-  return f0 + (half3(1.0) - f0) * pow(1.0 - VoH, 5.0);
+  // (a rounded dot may be a hair over 1, and pow of less than 0 is no number)
+  return f0 + (half3(1.0) - f0) * pow(max(1.0 - VoH, 0.0), 5.0);
 }
 fn envBrdf(f0: half3, rough: half, NoV: half) -> half3 {
   let c0 = half4(-1.0, -0.0275, -0.572, 0.022);

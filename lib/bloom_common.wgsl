@@ -9,24 +9,31 @@ fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
     vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
   return vec4<f32>(points[vi], 0.0, 1.0);
 }
+fn bloomTap(tex: texture_2d<f32>, samp: sampler, at: vec2<f32>, hold: bool) -> vec3<f32> {
+  let c = textureSampleLevel(tex, samp, at, 0.0).rgb;
+  if (hold) { return hdrFinite(c); }
+  return c;
+}
 fn bloomLuma(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722)); }
 // The five boxes of the 13 taps; `karis` weights each box by 1/(1 + luma)
 // (the first downsample only), so one very bright pixel cannot flash a
 // whole block on and off from frame to frame (fireflies).
+// The first downsample also holds each tap (hdrFinite): what the lit image
+// may have, the levels never have.
 fn downsample13(tex: texture_2d<f32>, samp: sampler, uv: vec2<f32>, texel: vec2<f32>, karis: bool) -> vec3<f32> {
-  let a = textureSampleLevel(tex, samp, uv + texel * vec2<f32>(-2.0, -2.0), 0.0).rgb;
-  let b = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 0.0, -2.0), 0.0).rgb;
-  let c = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 2.0, -2.0), 0.0).rgb;
-  let d = textureSampleLevel(tex, samp, uv + texel * vec2<f32>(-1.0, -1.0), 0.0).rgb;
-  let e = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 1.0, -1.0), 0.0).rgb;
-  let f = textureSampleLevel(tex, samp, uv + texel * vec2<f32>(-2.0,  0.0), 0.0).rgb;
-  let g = textureSampleLevel(tex, samp, uv, 0.0).rgb;
-  let h = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 2.0,  0.0), 0.0).rgb;
-  let i = textureSampleLevel(tex, samp, uv + texel * vec2<f32>(-1.0,  1.0), 0.0).rgb;
-  let j = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 1.0,  1.0), 0.0).rgb;
-  let k = textureSampleLevel(tex, samp, uv + texel * vec2<f32>(-2.0,  2.0), 0.0).rgb;
-  let l = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 0.0,  2.0), 0.0).rgb;
-  let m = textureSampleLevel(tex, samp, uv + texel * vec2<f32>( 2.0,  2.0), 0.0).rgb;
+  let a = bloomTap(tex, samp, uv + texel * vec2<f32>(-2.0, -2.0), karis);
+  let b = bloomTap(tex, samp, uv + texel * vec2<f32>( 0.0, -2.0), karis);
+  let c = bloomTap(tex, samp, uv + texel * vec2<f32>( 2.0, -2.0), karis);
+  let d = bloomTap(tex, samp, uv + texel * vec2<f32>(-1.0, -1.0), karis);
+  let e = bloomTap(tex, samp, uv + texel * vec2<f32>( 1.0, -1.0), karis);
+  let f = bloomTap(tex, samp, uv + texel * vec2<f32>(-2.0,  0.0), karis);
+  let g = bloomTap(tex, samp, uv, karis);
+  let h = bloomTap(tex, samp, uv + texel * vec2<f32>( 2.0,  0.0), karis);
+  let i = bloomTap(tex, samp, uv + texel * vec2<f32>(-1.0,  1.0), karis);
+  let j = bloomTap(tex, samp, uv + texel * vec2<f32>( 1.0,  1.0), karis);
+  let k = bloomTap(tex, samp, uv + texel * vec2<f32>(-2.0,  2.0), karis);
+  let l = bloomTap(tex, samp, uv + texel * vec2<f32>( 0.0,  2.0), karis);
+  let m = bloomTap(tex, samp, uv + texel * vec2<f32>( 2.0,  2.0), karis);
   var boxes = array<vec3<f32>, 5>(
     (d + e + i + j) * 0.25,
     (a + b + f + g) * 0.25,

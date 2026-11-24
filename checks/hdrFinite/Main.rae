@@ -1,0 +1,513 @@
+# Hardware check: an infinite, a not-a-number and a huge pixel in the lit image stay one pixel. The
+# real bloom (bloom_prefilter, bloom_down, bloom_up) and TAA (deferred_taa) shaders run over such a
+# picture, in the lit format and in half floats, and every texture they make is read back and judged
+# by its bits. Before, the bloom's taps spread one such pixel into a block that is black on the
+# screen, and the TAA kept it. Also said: what the GPU stores of it in each format, and that the
+# bad pixel leaves a mark no larger than its bright one would. Exit code 0 = every check passed.
+open webgpu/Context
+open webgpu/Webgpu
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuArgs
+open gpu/GpuRender
+open gpu/GpuRenderTransfer
+open GbufferFullscreen
+open GbufferResources
+open GbufferTargets
+open gpu/GpuIds
+open gpu/DeviceFeatures
+open gpu/GpuTextures
+
+const side: Int = 256
+
+const levels: Int = 5
+
+const waitTries: Int = 1000
+
+type Counts {
+  bad: Int = 0
+  below: Int = 0
+  over: Int = 0
+}
+
+type Lab {
+  resources: GpuResources
+  sourceUniform: BufferId
+  prefilterUniform: BufferId
+  taaUniform: BufferId
+  sampler: SamplerId
+  judgeTarget: TextureId
+  judgeView: TextureViewId
+  pixels: BufferId
+  judge: RenderPipelineId
+}
+
+func gpuWait() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
+func target(resources: mod GpuResources, size: view Int, format: copy Int32) ret TextureViewId {
+  var texture: TextureId = noTextureId()
+  var textureView: TextureViewId = noTextureViewId()
+  let made: Bool = makeTarget(
+    resources: resources
+    width: size
+    height: size
+    format: format
+    usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_TextureBinding
+    texture: texture
+    textureView: textureView
+  )
+  ret textureView
+}
+
+func uniform(resources: mod GpuResources) ret BufferId {
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: 16
+    usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
+  ) {
+    ret buffer
+  }
+  ret noBufferId()
+}
+
+# One fullscreen pass into `into`
+func pass(
+  lab: mod Lab
+  pipeline: view RenderPipelineId
+  entries: view List(ResourceRef)
+  into: view TextureViewId
+) {
+  if let bind: BindGroupId = createRenderBindGroup(
+    resources: lab.resources
+    pipeline: pipeline
+    entries: entries
+  ) {
+    unsafe {
+      runFullscreen(
+        resources: lab.resources
+        pipeline: pipeline
+        bind: bind
+        target: textureViewHandle(resources: lab.resources, id: into)
+      )
+    }
+  } else {
+    log("FAIL: a bind group was not made")
+  }
+}
+
+func source(
+  lab: mod Lab
+  pipeline: view RenderPipelineId
+  bits: view Int
+  into: view TextureViewId
+) {
+  var args: ArgWriter = createArgs(uniform: true)
+  pushU32(writer: args, value: 101)
+  pushU32(writer: args, value: 77)
+  pushU32(writer: args, value: bits)
+  pushU32(writer: args, value: 0)
+  let unusedUpload: Bool = uploadArgs(
+    writer: args
+    resources: lab.resources
+    buffer: lab.sourceUniform
+    offset: 0
+  )
+  var entries: List(ResourceRef) = { bufferRef(id: lab.sourceUniform) }
+  pass(
+    lab: lab
+    pipeline: pipeline
+    entries: entries
+    into: into
+  )
+}
+
+# How many of the judge's pixels are bad, below zero and over 30000
+func judged(lab: mod Lab, textureView: view TextureViewId) ret Counts {
+  var counts: Counts = {}
+  var entries: List(ResourceRef) = { textureViewRef(id: textureView) }
+  let judge: RenderPipelineId = lab.judge
+  let into: TextureViewId = lab.judgeView
+  pass(
+    lab: lab
+    pipeline: judge
+    entries: entries
+    into: into
+  )
+  if var recording: Recording = beginRecording(resources: lab.resources) {
+    let copied: Bool = recordCopyTextureToBuffer(
+      recording: recording
+      resources: lab.resources
+      texture: lab.judgeTarget
+      buffer: lab.pixels
+      bytesPerRow: side * 4
+    )
+    if let submission: SubmissionId = submit(resources: lab.resources, recording: recording) {
+      var tries: Int = 0
+      loop pollSubmission(resources: lab.resources, id: submission) is 0 and tries < waitTries {
+        gpuWait()
+        tries = tries + 1
+      }
+      let retired: Bool = retireSubmission(resources: lab.resources, id: submission)
+    }
+  }
+  if let read: ReadbackId = startReadback(
+    resources: lab.resources
+    buffer: lab.pixels
+    offset: 0
+    size: side * side * 4
+  ) {
+    var tries: Int = 0
+    loop pollReadback(resources: lab.resources, id: read) is 0 and tries < waitTries {
+      gpuWait()
+      tries = tries + 1
+    }
+    var bytes: List(UInt8) = List.create(UInt8, cap: side * side * 4)
+    loop var i: Int = 0, i < side * side * 4, ++i {
+      bytes.add(value: 0 as UInt8)
+    }
+    let got: Bool = copyReadback(resources: lab.resources, id: read, destination: bytes)
+    if not got {
+      log("FAIL: the judge was not read back")
+      counts.bad = -1
+    }
+    loop var i: Int = 0, i < side * side, ++i {
+      if (bytes.copyAtFallback(index: i * 4, fallback: 0 as UInt8) as Int) > 128 {
+        counts.bad = counts.bad + 1
+      }
+      if (bytes.copyAtFallback(index: i * 4 + 1, fallback: 0 as UInt8) as Int) > 128 {
+        counts.below = counts.below + 1
+      }
+      if (bytes.copyAtFallback(index: i * 4 + 2, fallback: 0 as UInt8) as Int) > 128 {
+        counts.over = counts.over + 1
+      }
+    }
+    let retired: Bool = retireReadback(resources: lab.resources, id: read)
+  }
+  ret counts
+}
+
+# The bloom over `lit`, and the TAA over it, every texture judged; how many are wrong
+func trial(
+  lab: mod Lab
+  format: copy Int32
+  formatName: view String
+  bits: view Int
+  name: view String
+) ret Int {
+  var wrong: Int = 0
+  let sourceShader: Shader = shader(files: ["source.wgsl"])
+  let sourcePipeline: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: sourceShader
+    format: format
+  )
+  let prefilterShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_prefilter.wgsl"]
+  )
+  let downShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_down.wgsl"]
+  )
+  let upShader: Shader = shader(
+    files: ["lib/hdr_finite.wgsl", "lib/bloom_common.wgsl", "lib/bloom_up.wgsl"]
+  )
+  let taaShader: Shader = shader(files: ["lib/hdr_finite.wgsl", "lib/deferred_taa.wgsl"])
+  let prefilter: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: prefilterShader
+    format: format
+  )
+  let down: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: downShader
+    format: format
+  )
+  let up: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: upShader
+    format: format
+  )
+  let taa: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: taaShader
+    format: format
+  )
+  let lit: TextureViewId = target(resources: lab.resources, size: side, format: format)
+  let clean: TextureViewId = target(resources: lab.resources, size: side, format: format)
+  source(
+    lab: lab
+    pipeline: sourcePipeline
+    bits: bits
+    into: lit
+  )
+  source(
+    lab: lab
+    pipeline: sourcePipeline
+    bits: 1056964608
+    into: clean
+  )
+  let stored: Counts = judged(lab: lab, textureView: lit)
+  log(
+    "{name} in {formatName}: stored as infinity or no number in {stored.bad} pixels, over 30000 in {stored.over}"
+  )
+
+  # The bloom
+  var downs: List(TextureViewId) = {}
+  var size: Int = side / 2
+  loop var level: Int = 0, level < levels, ++level {
+    let into: TextureViewId = target(resources: lab.resources, size: size, format: format)
+    downs.add(value: into)
+    if level is 0 {
+      var args: ArgWriter = createArgs(uniform: true)
+      pushVec4F(
+        writer: args
+        x: 0.9
+        y: 0.2
+        z: 1.0
+        w: 0.0
+      )
+      let unusedUpload: Bool = uploadArgs(
+        writer: args
+        resources: lab.resources
+        buffer: lab.prefilterUniform
+        offset: 0
+      )
+      var entries: List(ResourceRef) = {
+        bufferRef(id: lab.prefilterUniform)
+        textureViewRef(id: lit)
+        samplerRef(id: lab.sampler)
+      }
+      pass(
+        lab: lab
+        pipeline: prefilter
+        entries: entries
+        into: into
+      )
+    } else {
+      var entries: List(ResourceRef) = {
+        textureViewRef(id: downs.copyAtFallback(index: level - 1, fallback: noTextureViewId()))
+        samplerRef(id: lab.sampler)
+      }
+      pass(
+        lab: lab
+        pipeline: down
+        entries: entries
+        into: into
+      )
+    }
+    size = size / 2
+  }
+  var below: TextureViewId = downs.copyAtFallback(index: levels - 1, fallback: noTextureViewId())
+  loop var level: Int = levels - 2, level >= 0, --level {
+    size = side / 2
+    loop var step: Int = 0, step < level, ++step {
+      size = size / 2
+    }
+    let into: TextureViewId = target(resources: lab.resources, size: size, format: format)
+    var entries: List(ResourceRef) = {
+      textureViewRef(id: downs.copyAtFallback(index: level, fallback: noTextureViewId()))
+      textureViewRef(id: below)
+      samplerRef(id: lab.sampler)
+    }
+    pass(
+      lab: lab
+      pipeline: up
+      entries: entries
+      into: into
+    )
+    below = into
+  }
+  loop var level: Int = 0, level < levels, ++level {
+    let counts: Counts = judged(
+      lab: lab
+      textureView: downs.copyAtFallback(index: level, fallback: noTextureViewId())
+    )
+    if counts.bad is not 0 {
+      wrong = wrong + 1
+      log(
+        "FAIL: {name} in {formatName}: bloom level {level} has {counts.bad * 100 / (side * side)} % of it bad"
+      )
+    }
+  }
+  let glow: Counts = judged(lab: lab, textureView: below)
+  if glow.bad is not 0 or glow.below is not 0 {
+    wrong = wrong + 1
+    log(
+      "FAIL: {name} in {formatName}: the bloom's result has {glow.bad * 100 / (side * side)} % bad and {glow.below} below zero"
+    )
+  }
+
+  # The TAA: the bad pixel in this frame's light, then in the history, each with a clean other; no
+  # motion (gbc 0.5 and a bit), nothing reactive, no opaque copy
+  let motion: TextureViewId = target(
+    resources: lab.resources
+    size: side
+    format: WGPUTextureFormat_RGBA8Unorm
+  )
+  var args: ArgWriter = createArgs(uniform: true)
+  pushVec4F(
+    writer: args
+    x: 1.0
+    y: 0.0
+    z: 0.0
+    w: 0.0
+  )
+  let unusedUpload: Bool = uploadArgs(
+    writer: args
+    resources: lab.resources
+    buffer: lab.taaUniform
+    offset: 0
+  )
+  let stillShader: Shader = shader(files: ["still.wgsl"])
+  let still: RenderPipelineId = createFullscreenPipeline(
+    resources: lab.resources
+    shader: stillShader
+    format: WGPUTextureFormat_RGBA8Unorm
+  )
+  let nothing: List(ResourceRef) = { bufferRef(id: lab.sourceUniform) }
+  pass(
+    lab: lab
+    pipeline: still
+    entries: nothing
+    into: motion
+  )
+  loop var turn: Int = 0, turn < 2, ++turn {
+    var now: TextureViewId = lit
+    var history: TextureViewId = clean
+    var where: String = "this frame's light"
+    if turn is 1 {
+      now = clean
+      history = lit
+      where = "the history"
+    }
+    let into: TextureViewId = target(resources: lab.resources, size: side, format: format)
+    var entries: List(ResourceRef) = {
+      textureViewRef(id: now)
+      textureViewRef(id: history)
+      textureViewRef(id: motion)
+      bufferRef(id: lab.taaUniform)
+      textureViewRef(id: motion)
+      textureViewRef(id: now)
+      samplerRef(id: lab.sampler)
+    }
+    pass(
+      lab: lab
+      pipeline: taa
+      entries: entries
+      into: into
+    )
+    let counts: Counts = judged(lab: lab, textureView: into)
+    if counts.bad is not 0 or counts.below is not 0 {
+      wrong = wrong + 1
+      log(
+        "FAIL: {name} in {formatName}, in {where}: the TAA has {counts.bad} bad pixels, {counts.below} below zero"
+      )
+    }
+  }
+  ret wrong
+}
+
+func main() ret Int {
+  var booted: Int = 0
+  var smallLit: Bool = false
+  chooseDeviceFeatures()
+  unsafe {
+    booted = webgpuBootstrap()
+    smallLit = webgpuHaveRg11b10() is 1
+  }
+  if booted is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var issuer: IdIssuer = IdIssuer.create()
+  if var resources: GpuResources = GpuResources.create(issuer: issuer, capacity: 512) {
+    let sourceUniform: BufferId = uniform(resources: resources)
+    let prefilterUniform: BufferId = uniform(resources: resources)
+    let taaUniform: BufferId = uniform(resources: resources)
+    var sampler: SamplerId = noSamplerId()
+    if let made: SamplerId = createSampler(resources: resources) {
+      sampler = made
+    }
+    var judgeTarget: TextureId = noTextureId()
+    var judgeView: TextureViewId = noTextureViewId()
+    let made: Bool = makeTarget(
+      resources: resources
+      width: side
+      height: side
+      format: WGPUTextureFormat_RGBA8Unorm
+      usage: WGPUTextureUsage_RenderAttachment + WGPUTextureUsage_CopySrc
+      texture: judgeTarget
+      textureView: judgeView
+    )
+    var pixels: BufferId = noBufferId()
+    if let buffer: BufferId = createBuffer(
+      resources: resources
+      size: side * side * 4
+      usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+    ) {
+      pixels = buffer
+    }
+    let judgeShader: Shader = shader(files: ["judge.wgsl"])
+    let judge: RenderPipelineId = createFullscreenPipeline(
+      resources: resources
+      shader: judgeShader
+      format: WGPUTextureFormat_RGBA8Unorm
+    )
+    var lab: Lab = {
+      resources: own resources
+      sourceUniform: sourceUniform
+      prefilterUniform: prefilterUniform
+      taaUniform: taaUniform
+      sampler: sampler
+      judgeTarget: judgeTarget
+      judgeView: judgeView
+      pixels: pixels
+      judge: judge
+    }
+    var wrong: Int = 0
+    loop var which: Int = 0, which < 2, ++which {
+      var format: Int32 = WGPUTextureFormat_RG11B10Ufloat
+      var formatName: String = "rg11b10ufloat"
+      if which is 1 {
+        format = WGPUTextureFormat_RGBA16Float
+        formatName = "rgba16float"
+      } else if not smallLit {
+        log("rg11b10ufloat: this device does not render to it")
+        continue
+      }
+      wrong = wrong + trial(
+        lab: lab
+        format: format
+        formatName: formatName
+        bits: 2139095040
+        name: "infinity"
+      )
+      wrong = wrong + trial(
+        lab: lab
+        format: format
+        formatName: formatName
+        bits: 2143289344
+        name: "not a number"
+      )
+      wrong = wrong + trial(
+        lab: lab
+        format: format
+        formatName: formatName
+        bits: 1315859240
+        name: "a thousand million"
+      )
+    }
+    if wrong is not 0 {
+      log("{wrong} wrong")
+      ret 1
+    }
+    log("an infinite, a not-a-number and a huge pixel stay one pixel: bloom and TAA finite")
+    ret 0
+  }
+  ret 1
+}

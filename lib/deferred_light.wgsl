@@ -53,7 +53,9 @@ fn cloudBakedHalf(dir: vec3<f32>, part: i32) -> vec4<f32> {
   let plane = L.camPos.xyz + dir * max((base - L.camPos.z) / dir.z, 0.0);
   let was = vec3<f32>(plane.xy + vec2<f32>(drift, drift * 0.35), max(base, plane.z)) - eyeThen.xyz;
   if (was.z <= 0.0) { return vec4<f32>(0.0); }
-  return cloudMapHalf(cloudMapUv(normalize(was)), part);
+  // its light as exposed now (it was exposed as the bake began)
+  let baked = cloudMapHalf(cloudMapUv(normalize(was)), part);
+  return vec4<f32>(baked.rgb * L.cloudBake[3][part], baked.w);
 }
 fn cloudBakedAt(dir: vec3<f32>) -> vec4<f32> {
   if (dir.z <= 0.005 || L.cloudBake[2].z <= 0.0) { return vec4<f32>(0.0); }
@@ -61,7 +63,7 @@ fn cloudBakedAt(dir: vec3<f32>) -> vec4<f32> {
   var c = vec4<f32>(0.0);
   if (second < 0.999) { c = c + cloudBakedHalf(dir, 0) * (1.0 - second); }
   if (second > 0.001) { c = c + cloudBakedHalf(dir, 1) * second; }
-  return vec4<f32>(c.rgb * L.camPos.w, c.w) * L.cloudBake[2].z;
+  return c * L.cloudBake[2].z;
 }
 @vertex
 fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {

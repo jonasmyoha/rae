@@ -148,4 +148,15 @@ func main() {
       now: jumped
     )} m"
   )
+  # the map's light is scaled by the exposure's change since its bake
+  var exposed: CloudBakeFrom = base
+  exposed.exposure = 0.25
+  var brighter: CloudBakeFrom = base
+  brighter.exposure = 0.5
+  log(
+    "exposed twice as much since: {cloudBakeGain(from: exposed, now: brighter)}, no exposure known: {cloudBakeGain(
+      from: CloudBakeFrom { exposure: 0.0 }
+      now: brighter
+    )}"
+  )
 }
