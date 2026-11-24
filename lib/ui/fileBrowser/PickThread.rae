@@ -1,0 +1,26 @@
+# The thread that looks whether a name is taken before a save (docs/file-browser-design.md
+# section 8): a disk may take its time. It knows no UI.
+import Files
+import ui/EventLoop
+open Channel
+
+type NameTaken {
+  number: Int = 0
+  found: Bool = false
+  folder: Bool = false
+}
+
+func nameTakenThread(answers: own Channel(NameTaken), number: copy Int, path: own String) ret Int {
+  let status: PathStatus = Files.pathStatus(path: path, follow: true)
+  # (a symlink that leads nowhere has the name too)
+  let itself: PathStatus = Files.pathStatus(path: path, follow: false)
+  answers.channelSend(
+    value: NameTaken {
+      number: number
+      found: status.found or itself.found
+      folder: status.found and status.kind is EntryKind.folder
+    }
+  )
+  EventLoop.wake()
+  ret 0
+}

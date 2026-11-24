@@ -12,6 +12,7 @@ open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PickSystem
 
 # Opened this often a file has the stronger tint
 const oftenOpened: Int = 10
@@ -79,7 +80,8 @@ func fillColumnRows(
   ) {
     ret false
   }
-  let tinted: Bool = browserOptions(systems: systems, browser: browser).openCountTint
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let tinted: Bool = options.openCountTint
   let folder: String = folderOfColumn(systems: systems, column: column)
   var rows: List(ListViewRow) = {}
   loop var i: Int = wanted.first, i < wanted.first + wanted.count, ++i {
@@ -91,6 +93,7 @@ func fillColumnRows(
         folder: folder
         entry: entry
         tinted: tinted
+        fits: entryFits(kinds: systems.kinds, options: options, entry: entry)
       ))
     }
   }
@@ -112,13 +115,20 @@ func flag(on: view Bool) ret String {
   ret "false"
 }
 
-# The cells of a row: name, icon, path (of a picture), size, changed, folder, tint, tintStrong
+# The cells of a row: name, icon, path (of a picture), size, changed, folder, tint, tintStrong,
+# strength
 func rowOfEntry(
   systems: view FileBrowserSystems
   folder: view String
   entry: view FileEntry
   tinted: view Bool
+  fits: view Bool
 ) ret ListViewRow {
+  # what may not be picked is muted
+  var strength: String = "1"
+  if fits is false {
+    strength = "0.4"
+  }
   let kind: FileKind = kindOfEntry(kinds: systems.kinds, entry: entry)
   let path: String = pathIn(folder: folder, name: entry.name)
   var opened: Int = 0
@@ -150,6 +160,7 @@ func rowOfEntry(
       "folder"
       "tint"
       "tintStrong"
+      "strength"
     }
     values: List(String) {
       "{entry.name}"
@@ -161,6 +172,7 @@ func rowOfEntry(
       flag(on: opensAsFolder(kinds: systems.kinds, entry: entry))
       flag(on: opened >= someOpened and opened < oftenOpened)
       flag(on: opened >= oftenOpened)
+      own strength
     }
   }
 }

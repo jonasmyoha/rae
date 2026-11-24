@@ -14,6 +14,7 @@ open ui/fileBrowser/BrowserMemory
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PickSystem
 open ui/fileBrowser/RenameSystem
 
 func fileSelectionSystem(
@@ -90,6 +91,18 @@ func takeListEvent(
       scenes: scenes
       column: column
     )
+  } else if event.byKey and picking(
+    systems: systems
+    browser: componentView(this: systems.columns, entityId: column).browser
+  ) {
+    pickActivated(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      byReturn: true
+    )
   } else if event.byKey and returnOpens(systems: systems, column: column) is false {
     renameSelected(
       systems: systems
@@ -127,6 +140,20 @@ func activateSelection(
     list: listOfColumn(systems: systems, column: column)
   )
   if names.length is 0 {
+    ret
+  }
+  if picking(
+    systems: systems
+    browser: componentView(this: systems.columns, entityId: column).browser
+  ) {
+    pickActivated(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      byReturn: false
+    )
     ret
   }
   let first: String = names.copyAtFallback(index: 0, fallback: "")

@@ -11,6 +11,9 @@
 # With RAE_FILE_SEARCH=1 the browser above left is one of files on the disk (a small tree it makes),
 # with a search in it.
 #
+# With RAE_FILE_PICK=1 the wide ones pick: above a name to save under, below a file; only pictures
+# fit.
+#
 # The behavior is checked in compiler/tests/cases/1592_file_browser. Exit 0 when it drew.
 import Gpu2d
 import Sys
@@ -41,6 +44,7 @@ open ui/fileBrowser/BrowserPlaces
 open ui/fileBrowser/FileBrowser
 open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/PickSystem
 open ui/fileBrowser/PlacesThread
 open ui/textFieldSystem/TextFieldSystem
 
@@ -127,6 +131,7 @@ func openAt(
   node: view String
   folder: view String
   names: own List(String)
+  mode: copy BrowserMode
 ) ret EntityId {
   let browser: EntityId = openFileBrowser(
     systems: files
@@ -137,6 +142,9 @@ func openAt(
     root: "/Projects"
     options: BrowserOptions {
       source: BrowserSource.app
+      mode: mode
+      pickName: "cover 2.png"
+      pickExtensions: List(String) { "png", "jpg" }
       openCountTint: true
       showSidebar: node is "Wide"
       allowAboveRoot: true
@@ -285,6 +293,16 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     )
     ret half
   }
+  var mode: BrowserMode = BrowserMode.browse
+  if Sys.getEnv(name: "RAE_FILE_PICK") is "1" {
+    mode = BrowserMode.save
+    folder = "/Projects"
+    names = List(String) {}
+    if large {
+      mode = BrowserMode.pickFile
+      names = List(String) { "cover.png" }
+    }
+  }
   half.wide = openAt(
     files: half.files
     world: half.world
@@ -293,6 +311,7 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     node: "Wide"
     folder: folder
     names: own names
+    mode: mode
   )
   noteRecent(systems: half.files, browser: half.wide, folder: "/Projects/Photos")
   noteRecent(systems: half.files, browser: half.wide, folder: folder)
@@ -304,6 +323,7 @@ func makeHalf(scenes: view SceneRegistry, theme: view String, large: copy Bool) 
     node: "Narrow"
     folder: "/Projects/Film/Photos"
     names: List(String) {}
+    mode: BrowserMode.browse
   )
   ret half
 }
@@ -332,7 +352,7 @@ func stepHalf(half: mod Half, scenes: view SceneRegistry, frames: view Int) {
     uiSystems: half.uiSystems
     scenes: scenes
   )
-  if frames is 2 and half.large {
+  if frames is 2 and half.large and picking(systems: half.files, browser: half.wide) is false {
     let column: EntityId = columnAt(systems: half.files, browser: half.wide, place: 1)
     setScrollPosition(
       world: half.world
@@ -420,6 +440,10 @@ func main() ret Int {
     frames = frames + 1
   }
   let columns: Int = browserColumns(systems: dark.files, browser: dark.wide).length
+  var wanted: Int = 2
+  if picking(systems: dark.files, browser: dark.wide) {
+    wanted = 1
+  }
   var ended: Bool = closeFileBrowsers(
     systems: dark.files
     world: dark.world
@@ -429,7 +453,7 @@ func main() ret Int {
   canvasShutdown(canvas: canvas)
   Gpu2d.closeWindow()
   let searched: Bool = Sys.getEnv(name: "RAE_FILE_SEARCH") is "1"
-  if (columns is not 2 and searched is false) or ended is false {
+  if (columns is not wanted and searched is false) or ended is false {
     log("UI FILE BROWSER FAILED: {columns} columns")
     ret 1
   }

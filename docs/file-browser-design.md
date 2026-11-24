@@ -4,8 +4,8 @@ Status: design, 2026-11-23. Built so far: step 2 (§3: lib/Files, text/NameOrder
 collections/MergeSort), step 3 (§11: lib/Files' operations, without UI), and of §10 the buttons,
 menus, text editing, key focus, list selection, the row window, the
 scrolling, dividers, scrollbars and thumbnails (steps 4 to 6), step 7, the column browser, 7b, its
-operations, 7c, drags, and of 7d the sidebar and the search: `lib/ui/fileBrowser` (its use is in `FileBrowser.rae`; what differs from the text below
-is in §18). The steps are the `[file browser ...]` tasks in
+operations, 7c, drags, 7d, the sidebar, 7e, the search, and 7f, pick and save: `lib/ui/fileBrowser`
+(its use is in `FileBrowser.rae`; what differs from the text below is in §18). The steps are the `[file browser ...]` tasks in
 QUEUE.md; §16 maps this document to them.
 
 A file browser in Rae UI that any app can use: the media editor needs one for its projects, and so
@@ -265,7 +265,8 @@ component changes (case 1596). An app that reports unknown components before its
 `order` (in a scene `orderBy`, `descending`, `foldersFirst`), `showHidden`, `extensions`, `selection`
 (`none`, `single`, `multiple`), `returnKey`, `allowAboveRoot`, `showBar`, `showPreview`,
 `openCountTint`, `columnWidth`, `previewWidth`, `rowHeight`, `source` (§9), `allowOperations` (false: look
-and pick only), `showSidebar`, `sidebarWidth`, `pinned`, `showSearch` (§18). To come: `mode` (§8).
+and pick only), `showSidebar`, `sidebarWidth`, `pinned`, `showSearch` (§18); and to pick (§8) `mode` (`browse`,
+`pickFile`, `pickFiles`, `pickFolder`, `save`), `pickExtensions`, `pickName`, `pickText`.
 
 ### 4.2 Events
 
@@ -276,7 +277,7 @@ One `EventQueue` per type, on `FileBrowserEvents`; each names its browser's enti
 | `FolderOpened` | a column opened (its folder; the deepest one is the browser's folder) |
 | `FileActivated` | open, double click, or Return with `returnKey: open`; several at once |
 | `SelectionChanged` | the paths selected now |
-| `PickAnswered` | a pick or save ended (§8): paths, or canceled |
+| `PickAnswered` | a pick or save ended (§8): paths, or canceled; `replace` for a save onto a file |
 | `OperationAsked` | an operation needs an answer: a conflict, a delete with no trash |
 | `OperationDone` | per operation: what happened to each item, and the undo record |
 | `BrowserMenuChosen` | an item the app added to the context menu |
@@ -299,6 +300,7 @@ browsers are the same code with two rows in a table.
 | 4 | `ListingSystem` | `FileColumn` (a folder not listed, or stale), the channel | `ListingJobs`, `ColumnEntries`, the column's state |
 | 5 | `WatchSystem` | `FolderWatches`, live `FileColumn`s | watches, "stale" on columns |
 | 6 | `SearchSystem` | `BrowserSearch`, the channel | the results' column |
+| | `PickSystem` (after it) | `BrowserPick`, the selection, the footer's actions, the channel | the footer, the question, `PickAnswered` |
 | 7 | `RenameSystem` | `RenameEdit`, its `TextField` | an operation request, `RenameEdit` removed |
 | 8 | `OperationsSystem` | requests, `OperationAsked`'s answers, the channel | `FileOperations`, `FileClipboard`, `OperationDone`, "stale" |
 | 9 | `DragSystem` | the drag payload (§10), captures | a drop's operation request, the row shown as target |
@@ -603,3 +605,26 @@ Step 7e, the search:
   is not watched.
 - `BrowserMemory` is what was the end of `NavigationSystem`. Case 1628; the picture is `checks/uiFileBrowser`
   with `RAE_FILE_SEARCH=1`.
+
+Step 7f, pick and save:
+
+- A browser whose `mode` is not `browse` has a footer: New Folder (save and pickFolder, where operations are
+  allowed), the name of a save, Cancel, and Open, Choose or Save (`pickText` for another word), which is off while
+  nothing can be picked. It is a browser like any other, with the sidebar, the search, the menus and renames.
+- The program puts it in a dialog page with `"closeOnAction": false` (a click on a row is an action) and a
+  `maxWidth`, and closes the page when it reads `PickAnswered`. The browser does nothing by itself: a save writes
+  no file, and a browser that stays can answer again.
+- `pickExtensions` says what fits; other files are muted, and in pickFolder every file is. A muted row can be
+  selected and looked at, but not picked. Folders are walked into in every mode. (`extensions` hides files, as ever.)
+- One file, one folder or a name: one row is selected at a time. In pickFolder the one selected folder is answered,
+  or the folder the browser is at.
+- Return in the rows picks (no rename; the menu has it), in pickFolder a selected folder too; a double click or
+  Cmd+O opens a folder and picks a file. Escape cancels, after what it ends first (a question, a search, an edited
+  name or path, the large preview). `FileActivated` is not sent.
+- A save begins with `pickName`, typed on with its stem selected; a click on a file that fits gives its name. A name
+  with none of the `pickExtensions` gets the first. A bad name, or a folder's, is refused beside the field. Whether
+  the name is taken is looked up on a thread (`PickThread`); a file's asks Cancel or Replace, and Return never
+  replaces. A file picked out of a search is saved in its own folder.
+- An answer makes its folder recent (step 7d); the folder the browser was at is in `fileBrowserState`.
+- Cases 1629 (the thread, under ThreadSanitizer) and 1630; the picture is `checks/uiFileBrowser` with
+  `RAE_FILE_PICK=1`.

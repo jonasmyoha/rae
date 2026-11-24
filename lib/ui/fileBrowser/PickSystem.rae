@@ -1,0 +1,831 @@
+# Picking files or a folder, and choosing where to save (docs/file-browser-design.md §8): a browser
+# whose `mode` is not `browse` has a footer with Cancel and Open, and answers by PickAnswered.
+import Files
+open Channel
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ecs/hierarchySystem/HierarchySystem
+open ui/BindingComponents
+open ui/Components
+open ui/Ecs
+open ui/EscapeHold
+open ui/KeyFocusSystem
+open ui/ListSelectionSystem
+open ui/SceneInstance
+open ui/SelectionComponents
+open ui/UiSystems
+open ui/fileBrowser/BrowserPlaces
+open ui/fileBrowser/ChromeSystem
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/FileBrowserNodes
+open ui/fileBrowser/FileBrowserPaths
+open ui/fileBrowser/FileKinds
+open ui/fileBrowser/KeysSystem
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/PickThread
+open ui/fileBrowser/RenameSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func picking(systems: view FileBrowserSystems, browser: view EntityId) ret Bool {
+  ret componentHas(this: systems.picks, entityId: browser)
+}
+
+# May an entry be chosen in this mode? (A folder is walked into in any.) What may not is muted.
+func entryFits(
+  kinds: view List(FileKind)
+  options: view BrowserOptions
+  entry: view FileEntry
+) ret Bool {
+  if options.mode is BrowserMode.browse or opensAsFolder(kinds: kinds, entry: entry) {
+    ret true
+  }
+  if options.mode is BrowserMode.pickFolder {
+    ret false
+  }
+  ret options.pickExtensions.length is 0 or options.pickExtensions.contains(
+    value: Files.extensionOf(name: Files.nameOf(path: entry.name))
+  )
+}
+
+# ----- opening and closing --------------------------------------------------------------------
+func doneText(options: view BrowserOptions) ret String {
+  if options.pickText.length() > 0 {
+    ret "{options.pickText}"
+  }
+  if options.mode is BrowserMode.save {
+    ret "Save"
+  }
+  if options.mode is BrowserMode.pickFolder {
+    ret "Choose"
+  }
+  ret "Open"
+}
+
+# The footer of a new browser, when it picks
+func openPick(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let scene: EntityId = componentView(this: systems.browsers, entityId: browser).scene
+  let footer: EntityId = nodeIn(world: world, root: scene, nodeId: "FileBrowserPick")
+  let on: Bool = options.mode is not BrowserMode.browse
+  showNode(world: world, entityId: footer, shown: on)
+  if on is false or isNone(this: footer) {
+    ret
+  }
+  let save: Bool = options.mode is BrowserMode.save
+  var pick: BrowserPick = { footer: footer }
+  pick.newFolder = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickNewFolder")
+  pick.nameBox = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickNameBox")
+  pick.nameField = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickName")
+  pick.note = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickNote")
+  pick.cancel = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickCancel")
+  pick.done = nodeIn(world: world, root: footer, nodeId: "FileBrowserPickDone")
+  pick.action = "{componentView(this: systems.browsers, entityId: browser).pathAction}.name"
+  showNode(
+    world: world
+    entityId: pick.newFolder
+    shown: options.allowOperations and (save or options.mode is BrowserMode.pickFolder)
+  )
+  showNode(world: world, entityId: pick.nameBox, shown: save)
+  setNodeText(
+    world: world
+    entityId: nodeIn(world: world, root: footer, nodeId: "FileBrowserPickDoneText")
+    text: doneText(options: options)
+  )
+  let field: EntityId = pick.nameField
+  if save and componentHas(this: world.textFields, entityId: field) {
+    let text: mod TextField = componentMod(this: world.textFields, entityId: field)
+    text.actionId = "{pick.action}"
+    text.text = "{options.pickName}"
+    pick.nameSeen = "{options.pickName}"
+  }
+  componentSet(this: systems.picks, entityId: browser, data: own pick)
+  if save {
+    focusName(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+  }
+  # Escape cancels it, and does not quit the program
+  holdEscape(world: world)
+}
+
+func closePickQuestion(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  let pick: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+  let node: EntityId = pick.question
+  pick.question = noEntity()
+  pick.asked = ""
+  if isNone(this: node) is false and isAlive(world: world, entityId: node) {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: node)
+  }
+}
+
+func closePick(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  if picking(systems: systems, browser: browser) is false {
+    ret
+  }
+  closePickQuestion(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+  componentRemove(this: systems.picks, entityId: browser)
+  releaseEscape(world: world)
+}
+
+# ----- what is picked -------------------------------------------------------------------------
+
+# The folder the browser is at, or the one folder selected
+func pickedFolder(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret String {
+  let paths: List(String) = selectedPaths(systems: systems, world: world, browser: browser)
+  let column: EntityId = selectedColumn(systems: systems, world: world, browser: browser)
+  let name: String = firstSelectedName(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  if paths.length is 1 and entryOpensAsFolder(systems: systems, column: column, name: name) {
+    ret paths.copyAtFallback(index: 0, fallback: "")
+  }
+  ret browserFolder(systems: systems, browser: browser)
+}
+
+# The files that would be picked: those selected, when each may be (else none)
+func pickedFiles(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret List(String) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let column: EntityId = selectedColumn(systems: systems, world: world, browser: browser)
+  let names: List(String) = listSelectedKeys(
+    world: world
+    list: listOfColumn(systems: systems, column: column)
+  )
+  if names.length > 1 and options.mode is not BrowserMode.pickFiles {
+    ret List(String) {}
+  }
+  loop let name: view String in names {
+    if let entry: FileEntry = entryOfColumn(systems: systems, column: column, name: name) {
+      let folder: Bool = opensAsFolder(kinds: systems.kinds, entry: entry)
+      if folder or entryFits(kinds: systems.kinds, options: options, entry: entry) is false {
+        ret List(String) {}
+      }
+    } else {
+      ret List(String) {}
+    }
+  }
+  ret selectedPaths(systems: systems, world: world, browser: browser)
+}
+
+# The name of a save: what was typed, with the first of the extensions when it has none of them
+func pickedName(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret String {
+  let field: EntityId = componentView(this: systems.picks, entityId: browser).nameField
+  if componentHas(this: world.textFields, entityId: field) is false {
+    ret ""
+  }
+  let name: String = componentView(this: world.textFields, entityId: field).text.trim()
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let first: String = options.pickExtensions.copyAtFallback(index: 0, fallback: "")
+  if name.length() is 0 or first.length() is 0 or options.pickExtensions.contains(
+    value: Files.extensionOf(name: name)
+  ) {
+    ret name
+  }
+  ret "{name}.{first}"
+}
+
+# May Open, Choose or Save be pressed?
+func canPick(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  browser: view EntityId
+) ret Bool {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  if options.mode is BrowserMode.pickFile or options.mode is BrowserMode.pickFiles {
+    ret pickedFiles(systems: systems, world: world, browser: browser).length > 0
+  }
+  let deepest: EntityId = deepestColumn(systems: systems, browser: browser)
+  if componentHas(this: systems.columns, entityId: deepest) is false or componentView(
+    this: systems.columns
+    entityId: deepest
+  ).state is not ColumnState.ready {
+    ret false
+  }
+  ret options.mode is BrowserMode.pickFolder or pickedName(
+    systems: systems
+    world: world
+    browser: browser
+  ).length() > 0
+}
+
+func sendPick(
+  systems: mod FileBrowserSystems
+  browser: view EntityId
+  paths: own List(String)
+  canceled: view Bool
+  replace: view Bool
+) {
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  let first: String = paths.copyAtFallback(index: 0, fallback: "")
+  if canceled is false {
+    var folder: String = parentPath(path: first)
+    if options.mode is BrowserMode.pickFolder {
+      folder = "{first}"
+    }
+    noteRecent(systems: systems, browser: browser, folder: folder)
+  }
+  eventSend(
+    this: systems.pickAnswered
+    value: PickAnswered { browser: browser, paths: own paths, canceled: canceled, replace: replace }
+  )
+}
+
+# Open, Choose or Save: what is picked is answered, or a save first looks whether the name is taken
+func pickNow(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  if canPick(systems: systems, world: world, browser: browser) is false or isNone(
+    this: componentView(this: systems.picks, entityId: browser).question
+  ) is false {
+    ret
+  }
+  let options: BrowserOptions = browserOptions(systems: systems, browser: browser)
+  if options.mode is BrowserMode.save {
+    beginSave(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+    ret
+  }
+  var paths: List(String) = {}
+  if options.mode is BrowserMode.pickFolder {
+    paths.add(value: pickedFolder(systems: systems, world: world, browser: browser))
+  } else {
+    paths = pickedFiles(systems: systems, world: world, browser: browser)
+  }
+  sendPick(
+    systems: systems
+    browser: browser
+    paths: own paths
+    canceled: false
+    replace: false
+  )
+}
+
+func cancelPick(systems: mod FileBrowserSystems, browser: view EntityId) {
+  # (and a save that was being looked at)
+  componentMod(this: systems.picks, entityId: browser).looking = 0
+  sendPick(
+    systems: systems
+    browser: browser
+    paths: {}
+    canceled: true
+    replace: false
+  )
+}
+
+# A row was activated: a folder opens (Return chooses it in pickFolder), a file is picked
+func pickActivated(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  column: view EntityId
+  byReturn: view Bool
+) {
+  let browser: EntityId = componentView(this: systems.columns, entityId: column).browser
+  let list: EntityId = listOfColumn(systems: systems, column: column)
+  let name: String = firstSelectedName(world: world, list: list)
+  let one: Bool = selectedCount(world: world, list: list) is 1
+  let folder: Bool = one and entryOpensAsFolder(systems: systems, column: column, name: name)
+  let chooses: Bool = byReturn and browserOptions(systems: systems, browser: browser).mode is BrowserMode.pickFolder
+  if folder and chooses is false {
+    openChildFolder(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      scenes: scenes
+      column: column
+      name: name
+    )
+    ret
+  }
+  if byReturn is false {
+    if pickedFiles(systems: systems, world: world, browser: browser).length is 0 {
+      ret
+    }
+    # the name of a save is this file's, also when another was typed since
+    componentMod(this: systems.picks, entityId: browser).fileSeen = ""
+  }
+  let named: Bool = takeNameOfFile(systems: systems, world: world, browser: browser)
+  pickNow(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+}
+
+# ----- saving ---------------------------------------------------------------------------------
+func noteText(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+  text: view String
+) {
+  let note: EntityId = componentView(this: systems.picks, entityId: browser).note
+  setNodeText(world: world, entityId: note, text: text)
+  showNode(world: world, entityId: note, shown: text.length() > 0)
+}
+
+# What is wrong with the name is said, and the name is typed on
+func refuseName(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+  text: view String
+) {
+  noteText(
+    systems: systems
+    world: world
+    browser: browser
+    text: text
+  )
+  focusName(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+}
+
+# The name is typed, its stem selected
+func focusName(
+  systems: view FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  let field: EntityId = componentView(this: systems.picks, entityId: browser).nameField
+  if componentHas(this: world.textFields, entityId: field) is false {
+    ret
+  }
+  let name: String = "{componentView(this: world.textFields, entityId: field).text}"
+  let focused: Bool = setTextFieldSelection(
+    world: world
+    textFieldSystem: uiSystems.textField
+    entityId: field
+    start: 0
+    end: Files.stemLength(name: name, isFolder: false)
+  )
+}
+
+# The name of a file that is selected is the name of a save
+func takeNameOfFile(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  browser: view EntityId
+) ret Bool {
+  if browserOptions(systems: systems, browser: browser).mode is not BrowserMode.save {
+    ret false
+  }
+  let paths: List(String) = pickedFiles(systems: systems, world: world, browser: browser)
+  let path: String = paths.copyAtFallback(index: 0, fallback: "")
+  let pick: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+  if pick.fileSeen is path {
+    ret false
+  }
+  pick.fileSeen = "{path}"
+  let field: EntityId = pick.nameField
+  if path.length() is 0 or componentHas(this: world.textFields, entityId: field) is false {
+    ret false
+  }
+  componentMod(this: world.textFields, entityId: field).text = lastPart(path: path)
+  ret true
+}
+
+# Where a save goes: the folder the browser is at; of a file that was found, the file's own
+func saveFolder(systems: view FileBrowserSystems, browser: view EntityId) ret String {
+  let column: EntityId = deepestColumn(systems: systems, browser: browser)
+  let file: String = componentView(this: systems.picks, entityId: browser).fileSeen
+  if isResults(systems: systems, column: column) and file.length() > 0 {
+    ret parentPath(path: file)
+  }
+  ret browserFolder(systems: systems, browser: browser)
+}
+
+func beginSave(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+) {
+  let name: String = pickedName(systems: systems, world: world, browser: browser)
+  let problem: NameError = Files.checkName(name: name)
+  if problem is not NameError.none {
+    refuseName(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+      text: nameErrorText(error: problem)
+    )
+    ret
+  }
+  let path: String = pathIn(folder: saveFolder(systems: systems, browser: browser), name: name)
+  let number: Int = systems.picking.nextNumber
+  systems.picking.nextNumber = number + 1
+  let pick: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+  pick.path = "{path}"
+  pick.looking = number
+  if browserOptions(systems: systems, browser: browser).source is BrowserSource.app {
+    # a program's own entries are known
+    let column: EntityId = deepestColumn(systems: systems, browser: browser)
+    systems.picking.answers.channelSend(
+      value: NameTaken {
+        number: number
+        found: entryIndex(systems: systems, column: column, name: name) >= 0
+        folder: entryOpensAsFolder(systems: systems, column: column, name: name)
+      }
+    )
+    ret
+  }
+  when Target.isNative {
+    let task: Task(Int) = spawn thread nameTakenThread(
+      answers: systems.picking.answers
+      number: number
+      path: path
+    )
+    systems.picking.jobs.add(value: FolderJob { generation: number, task: own task })
+  } else {
+    let looked: Int = nameTakenThread(answers: systems.picking.answers, number: number, path: path)
+  }
+}
+
+func finishLook(systems: mod FileBrowserSystems, number: view Int) {
+  loop var i: Int = systems.picking.jobs.length - 1, i >= 0, --i {
+    var mine: Bool = false
+    if let job: view FolderJob = systems.picking.jobs.viewAt(index: i) {
+      mine = job.generation is number
+    }
+    if mine {
+      systems.picking.jobs.removeAt(index: i)
+    }
+  }
+}
+
+# What the threads found: the name is free and the save is answered, or it is asked, or it is a
+# folder's
+func takeLooks(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+) ret Bool {
+  var changed: Bool = false
+  loop systems.picking.answers.pending() > 0 {
+    let answer: NameTaken = systems.picking.answers.receive()
+    finishLook(systems: systems, number: answer.number)
+    loop var i: Int = 0, i < componentCount(this: systems.picks), ++i {
+      let browser: EntityId = componentEntityAt(this: systems.picks, i: i)
+      let pick: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+      if pick.looking is not answer.number {
+        continue
+      }
+      changed = true
+      pick.looking = 0
+      let path: String = "{pick.path}"
+      if answer.folder {
+        refuseName(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          browser: browser
+          text: "There is a folder of that name"
+        )
+      } else if answer.found {
+        askReplace(
+          systems: systems
+          world: world
+          uiSystems: uiSystems
+          scenes: scenes
+          browser: browser
+          path: path
+        )
+      } else {
+        sendPick(
+          systems: systems
+          browser: browser
+          paths: List(String) { own path }
+          canceled: false
+          replace: false
+        )
+      }
+    }
+  }
+  ret changed
+}
+
+func pickQuestionNode(
+  world: view UiWorld
+  question: view EntityId
+  name: view String
+) ret EntityId {
+  ret nodeIn(world: world, root: question, nodeId: "FileQuestion{name}")
+}
+
+# The dialog of an operation's conflict, with Cancel and Replace only
+func askReplace(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  browser: view EntityId
+  path: view String
+) {
+  var node: EntityId = noEntity()
+  if let index: Int = sceneRegistryIndex(reg: scenes, key: "fileQuestion") {
+    let overrides: List(SceneOverride) = emptyOverrides()
+    node = mountSubScene(
+      world: world
+      uiSystems: uiSystems
+      scene: sceneRegistryGet(reg: scenes, idx: index)
+      overrides: overrides
+    )
+  }
+  if isNone(this: node) {
+    ret
+  }
+  componentSet(this: world.layerTags, entityId: node, data: LayerTag { id: "dialog", z: 900 })
+  setNodeText(
+    world: world
+    entityId: pickQuestionNode(world: world, question: node, name: "Title")
+    text: "\"{lastPart(path: path)}\" is already in \"{lastPart(path: parentPath(path: path))}\""
+  )
+  setNodeText(
+    world: world
+    entityId: pickQuestionNode(world: world, question: node, name: "Detail")
+    text: "Replace it? What is in it now is lost."
+  )
+  setNodeText(
+    world: world
+    entityId: pickQuestionNode(world: world, question: node, name: "StopText")
+    text: "Cancel"
+  )
+  loop let name: view String in List(String) { "All", "Skip", "Keep" } {
+    showNode(
+      world: world
+      entityId: pickQuestionNode(world: world, question: node, name: name)
+      shown: false
+    )
+  }
+  let pick: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+  pick.question = node
+  pick.asked = "{path}"
+}
+
+# ----- the frame ------------------------------------------------------------------------------
+
+# The footers and what they ask. Escape that answered something is taken from `keys`.
+func filePickSystem(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  scenes: view SceneRegistry
+  keys: mod BrowserKeys
+) ret Bool {
+  var changed: Bool = takeLooks(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+  )
+  loop var i: Int = 0, i < componentCount(this: systems.picks), ++i {
+    let browser: EntityId = componentEntityAt(this: systems.picks, i: i)
+    if isNone(this: componentView(this: systems.picks, entityId: browser).question) is false {
+      changed = stepPickQuestion(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+        keys: keys
+      ) or changed
+    } else {
+      changed = stepFooter(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+        keys: keys
+      ) or changed
+    }
+  }
+  ret changed
+}
+
+func stepPickQuestion(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+  keys: mod BrowserKeys
+) ret Bool {
+  let question: EntityId = componentView(this: systems.picks, entityId: browser).question
+  var stop: Bool = keys.escape
+  var replace: Bool = false
+  keys.escape = false
+  # nothing that replaces has a key
+  keys.confirm = false
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if isNone(this: action.entityId) is false {
+      if action.entityId is pickQuestionNode(world: world, question: question, name: "Stop") {
+        stop = true
+      } else if action.entityId is pickQuestionNode(
+        world: world
+        question: question
+        name: "Replace"
+      ) {
+        replace = true
+      }
+    }
+  }
+  if componentHas(this: world.rects, entityId: question) {
+    let size: Vec2 = componentView(this: world.rects, entityId: question).size
+    if size.x is not world.layoutW or size.y is not world.layoutH {
+      let rect: mod Rect = componentMod(this: world.rects, entityId: question)
+      rect.size.x = world.layoutW
+      rect.size.y = world.layoutH
+    }
+  }
+  if stop is false and replace is false {
+    ret false
+  }
+  let path: String = "{componentView(this: systems.picks, entityId: browser).asked}"
+  closePickQuestion(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
+  if replace is false {
+    focusName(
+      systems: systems
+      world: world
+      uiSystems: uiSystems
+      browser: browser
+    )
+  } else {
+    sendPick(
+      systems: systems
+      browser: browser
+      paths: List(String) { own path }
+      canceled: false
+      replace: true
+    )
+  }
+  ret true
+}
+
+# Escape in the name, or when nothing has the keys (in the rows it is KeysSystem's)
+func escapeCancels(
+  systems: view FileBrowserSystems
+  world: view UiWorld
+  uiSystems: view UiSystems
+  field: view EntityId
+) ret Bool {
+  if isNone(this: systems.operations.question.node) is false {
+    ret false
+  }
+  let focused: EntityId = focusedTextFieldEntityId(world: world)
+  if isNone(this: focused) is false {
+    ret focused is field
+  }
+  ret isNone(this: columnWithKeys(systems: systems, world: world, uiSystems: uiSystems)) and keysTaken(
+    world: world
+    uiSystems: uiSystems
+  ) is false
+}
+
+func stepFooter(
+  systems: mod FileBrowserSystems
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  browser: view EntityId
+  keys: mod BrowserKeys
+) ret Bool {
+  var changed: Bool = takeNameOfFile(systems: systems, world: world, browser: browser)
+  let seen: view BrowserPick = componentView(this: systems.picks, entityId: browser)
+  let pick: BrowserPick = seen
+  let field: EntityId = pick.nameField
+  if componentHas(this: world.textFields, entityId: field) {
+    let text: String = "{componentView(this: world.textFields, entityId: field).text}"
+    if pick.nameSeen is not text {
+      # what was wrong with the name, or looked for, is so no more
+      let mine: mod BrowserPick = componentMod(this: systems.picks, entityId: browser)
+      mine.nameSeen = own text
+      mine.looking = 0
+      noteText(
+        systems: systems
+        world: world
+        browser: browser
+        text: ""
+      )
+      changed = true
+    }
+    if actionSent(world: world, actionId: pick.action) {
+      pickNow(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+      )
+      changed = true
+    }
+  }
+  if keys.escape and escapeCancels(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    field: field
+  ) {
+    keys.escape = false
+    cancelPick(systems: systems, browser: browser)
+    ret true
+  }
+  loop var i: Int = 0, i < eventCount(UiAction, this: world.uiActions), ++i {
+    let action: UiAction = eventAt(UiAction, this: world.uiActions, i: i)
+    if isNone(this: action.entityId) {
+      continue
+    }
+    if action.entityId is pick.done {
+      pickNow(
+        systems: systems
+        world: world
+        uiSystems: uiSystems
+        browser: browser
+      )
+      changed = true
+    } else if action.entityId is pick.cancel {
+      cancelPick(systems: systems, browser: browser)
+      changed = true
+    } else if action.entityId is pick.newFolder {
+      newFolderIn(systems: systems, column: deepestColumn(systems: systems, browser: browser))
+      changed = true
+    }
+  }
+  let on: Bool = canPick(systems: systems, world: world, browser: browser)
+  setNodeOpacity(world: world, entityId: pick.done, value: barOpacity(on: on))
+  ret changed
+}
+
+# Every look is over; false when a disk has not answered in `waitMs`
+func stopPicks(systems: mod FileBrowserSystems, waitMs: view Int) ret Bool {
+  loop var i: Int = 0, i < waitMs and systems.picking.jobs.length > 0, ++i {
+    loop systems.picking.answers.pending() > 0 {
+      let answer: NameTaken = systems.picking.answers.receive()
+      finishLook(systems: systems, number: answer.number)
+    }
+    if systems.picking.jobs.length > 0 {
+      sleep(ms: 1)
+    }
+  }
+  if systems.picking.jobs.length > 0 {
+    ret false
+  }
+  systems.picking.answers.freeChannel()
+  ret true
+}

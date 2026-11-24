@@ -718,6 +718,11 @@ func applyOverride(world: mod UiWorld, entityId: view EntityId, override: view S
     }
     ret
   }
+  if override.componentName is "Opacity" {
+    let opacity: Opacity = { value: override.valueString.toFloat() }
+    componentSet(this: world.opacities, entityId: entityId, data: opacity)
+    ret
+  }
   let rectKey: String = "Rect"
   if override.componentName is rectKey {
     # Upsert one field in place: create the default only when missing, then

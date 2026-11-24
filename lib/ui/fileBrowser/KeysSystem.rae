@@ -19,6 +19,7 @@ open ui/fileBrowser/FileBrowserNodes
 open ui/fileBrowser/FileBrowserPaths
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/PickSystem
 open ui/fileBrowser/PreviewSystem
 open ui/fileBrowser/SelectionSystem
 open ui/textFieldSystem/TextFieldSystem
@@ -143,6 +144,8 @@ func fileKeysSystem(
         uiSystems: uiSystems
         browser: browser
       )
+    } else if picking(systems: systems, browser: browser) {
+      cancelPick(systems: systems, browser: browser)
     } else {
       let list: EntityId = listOfColumn(systems: systems, column: column)
       if clearListSelection(world: world, uiSystems: uiSystems, list: list) {

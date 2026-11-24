@@ -1,0 +1,78 @@
+# The thread that looks whether a name is taken before a save (lib/ui/fileBrowser/PickThread): a
+# free
+# name, a file, a folder, a symlink to each and one that leads nowhere, and a folder that is not
+# there. Under ThreadSanitizer too.
+import Files
+import Sys
+open Channel
+open ui/fileBrowser/PickThread
+
+func rae_ext_Files_makeLink(target: String, path: String) unsafe extern ret Int
+
+type Look {
+  task: Task(Int)
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  let base: String = "{temporary}/rae-name-taken-{nowNs()}"
+  let made: Bool = Sys.makeDir(path: base)
+  let folder: Bool = Sys.makeDir(path: "{base}/folder")
+  let written: Bool = Sys.writeFile(path: "{base}/file", content: "text")
+  unsafe {
+    let toFile: Int = rae_ext_Files_makeLink(target: "file", path: "{base}/toFile")
+    let toFolder: Int = rae_ext_Files_makeLink(target: "folder", path: "{base}/toFolder")
+    let toNowhere: Int = rae_ext_Files_makeLink(target: "nowhere", path: "{base}/toNowhere")
+  }
+  let names: List(String) = {
+    "free"
+    "file"
+    "folder"
+    "toFile"
+    "toFolder"
+    "toNowhere"
+    "missing/free"
+  }
+  let answers: Channel(NameTaken) = createChannel(NameTaken)
+  var looks: List(Look) = {}
+  loop var i: Int = 0, i < names.length, ++i {
+    let task: Task(Int) = spawn thread nameTakenThread(
+      answers: answers
+      number: i
+      path: "{base}/{names.copyAtFallback(index: i, fallback: "")}"
+    )
+    looks.add(value: Look { task: own task })
+  }
+  var lines: List(String) = names
+  var count: Int = 0
+  loop var i: Int = 0, i < 20000 and count < names.length, ++i {
+    if answers.pending() is 0 {
+      sleep(ms: 1)
+      continue
+    }
+    let answer: NameTaken = answers.receive()
+    lines.set(
+      index: answer.number
+      value: "{names.copyAtFallback(index: answer.number, fallback: "")}: found {answer.found}, folder {answer.folder}"
+    )
+    count = count + 1
+  }
+  log("{lines.join(sep: "\n")}")
+  loop looks.length > 0 {
+    looks.removeAt(index: looks.length - 1)
+  }
+  answers.freeChannel()
+  loop let name: view String in List(String) {
+    "toFile"
+    "toFolder"
+    "toNowhere"
+    "file"
+    "folder"
+  } {
+    let gone: Bool = Sys.delete(path: "{base}/{name}")
+  }
+  log("cleaned {Sys.delete(path: base)}")
+}

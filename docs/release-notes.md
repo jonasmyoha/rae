@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.71, 2026-11-24: the file browser picks and saves
+
+- `mode` (`pickFile`, `pickFiles`, `pickFolder`, `save`) gives a file browser a footer with Cancel and Open, Choose or
+  Save; `PickAnswered` says what came of it. `pickExtensions`: what fits, others are muted. `pickName`: the name a
+  save begins with; a name that is taken asks first. In a dialog page: `"closeOnAction": false`
+  (docs/file-browser-design.md section 18).
+- A ListView row and a scene instance's override can set `Opacity`'s `value`.
+- Cases 1629 (the thread, under ThreadSanitizer) and 1630.
+
 ## 0.4.70, 2026-11-24: the file browser's search
 
 - `showSearch` gives a file browser a search field (Cmd+F): the folder it is at first, then what is below it, on a

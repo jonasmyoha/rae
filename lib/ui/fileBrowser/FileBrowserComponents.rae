@@ -14,6 +14,7 @@ open ui/SelectionComponents
 open ui/fileBrowser/FileKinds
 open ui/fileBrowser/FolderListing
 open ui/fileBrowser/OperationThread
+open ui/fileBrowser/PickThread
 open ui/fileBrowser/PlacesThread
 open ui/fileBrowser/SearchThread
 
@@ -22,7 +23,24 @@ enum BrowserSource { disk, app }
 # What Return does on a row
 enum BrowserReturnKey { rename, open }
 
+# What a browser is for: to look and work in, or to pick files or a folder, or a name to save under,
+# which it answers by PickAnswered (ui/fileBrowser/PickSystem)
+enum BrowserMode {
+  browse
+  pickFile
+  pickFiles
+  pickFolder
+  save
+}
+
 type BrowserOptions {
+  mode: BrowserMode = BrowserMode.browse
+  # What may be picked, lowercase and without dots; none for any. Others are shown muted. A name
+  # saved under without one of them gets the first.
+  pickExtensions: List(String) = {}
+  # The name a save begins with, and the text of the button ("" Open, Choose or Save)
+  pickName: String = ""
+  pickText: String = ""
   order: EntryOrder = {}
   showHidden: Bool = false
   # Lowercase, without dots; none for any. Folders always show.
@@ -60,6 +78,10 @@ type BrowserOptions {
 # fileBrowserUpdate opens it, and opens it anew when the component is changed.
 type FileBrowser {
   root: String = "~"
+  mode: BrowserMode = BrowserMode.browse
+  pickExtensions: List(String) = {}
+  pickName: String = ""
+  pickText: String = ""
   orderBy: EntryOrderBy = EntryOrderBy.name
   descending: Bool = false
   foldersFirst: Bool = true
@@ -370,6 +392,37 @@ type SearchJobs {
   nextGeneration: Int = 1
 }
 
+# ----- picking ----------------------------------------------------------------------
+
+# On a browser that picks: the nodes of its footer
+type BrowserPick {
+  footer: EntityId
+  newFolder: EntityId = noEntity()
+  nameBox: EntityId = noEntity()
+  nameField: EntityId = noEntity()
+  note: EntityId = noEntity()
+  cancel: EntityId = noEntity()
+  done: EntityId = noEntity()
+  # What the name's field sends on Return, its text as it was seen last, and the file whose name was
+  # taken
+  action: String = ""
+  nameSeen: String = ""
+  fileSeen: String = ""
+  # The path a save looks at, and the number of that look (0 none)
+  path: String = ""
+  looking: Int = 0
+  # The dialog that asks whether to replace, and the path it asks about
+  question: EntityId = noEntity()
+  asked: String = ""
+}
+
+# The looks whether a name is taken
+type PickLooks {
+  answers: Channel(NameTaken)
+  jobs: List(FolderJob) = {}
+  nextNumber: Int = 1
+}
+
 # ----- operations ------------------------------------------------------------------
 enum OperationJobState {
   waiting
@@ -535,6 +588,15 @@ type FilesDropped {
   moved: Bool = false
 }
 
+# A pick or a save ended: the paths, or none when it was canceled. `replace`: a save whose name was
+# taken, and the user said so. The browser stays until the program closes it.
+type PickAnswered {
+  browser: EntityId
+  paths: List(String) = {}
+  canceled: Bool = false
+  replace: Bool = false
+}
+
 # One of the app's own menu items was chosen
 type BrowserMenuChosen {
   browser: EntityId
@@ -554,6 +616,7 @@ type FileBrowserSystems {
   sidebars: ComponentTable(BrowserSidebar)
   placeRows: ComponentTable(PlaceRow)
   searches: ComponentTable(BrowserSearch)
+  picks: ComponentTable(BrowserPick)
   columnOfList: ComponentTable(ListOfColumn)
   buttons: ComponentTable(ButtonOfBrowser)
   renames: ComponentTable(RenameEdit)
@@ -564,6 +627,7 @@ type FileBrowserSystems {
   polling: FolderPolling
   places: FileBrowserPlaces
   search: SearchJobs
+  picking: PickLooks
   # columns came or went since the watches were set up
   watchesStale: Bool = false
   browsersMade: Int = 0
@@ -594,6 +658,7 @@ type FileBrowserSystems {
   operationRequested: EventQueue(OperationRequested)
   browserMenuChosen: EventQueue(BrowserMenuChosen)
   filesDropped: EventQueue(FilesDropped)
+  pickAnswered: EventQueue(PickAnswered)
 }
 
 func createFileBrowsers() ret FileBrowserSystems {
@@ -602,6 +667,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     polling: FolderPolling { answers: createChannel(FolderStamps) }
     places: FileBrowserPlaces { answers: createChannel(PlacesAnswer) }
     search: SearchJobs { answers: createChannel(SearchAnswer) }
+    picking: PickLooks { answers: createChannel(NameTaken) }
     browsers: ComponentTable.create(OpenBrowser)
     columns: ComponentTable.create(FileColumn)
     entries: ComponentTable.create(ColumnEntries)
@@ -611,6 +677,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     sidebars: ComponentTable.create(BrowserSidebar)
     placeRows: ComponentTable.create(PlaceRow)
     searches: ComponentTable.create(BrowserSearch)
+    picks: ComponentTable.create(BrowserPick)
     columnOfList: ComponentTable.create(ListOfColumn)
     buttons: ComponentTable.create(ButtonOfBrowser)
     renames: ComponentTable.create(RenameEdit)
@@ -631,6 +698,7 @@ func createFileBrowsers() ret FileBrowserSystems {
     operationRequested: createEventQueue(OperationRequested)
     browserMenuChosen: createEventQueue(BrowserMenuChosen)
     filesDropped: createEventQueue(FilesDropped)
+    pickAnswered: createEventQueue(PickAnswered)
   }
 }
 

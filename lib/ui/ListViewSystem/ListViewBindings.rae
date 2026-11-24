@@ -102,6 +102,12 @@ func listViewSceneBindingCurrent(
     let trueStr: String = "true"
     ret cur.value is (value is trueStr)
   }
+  if binding.componentName is "Opacity" {
+    if componentHas(this: world.opacities, entityId: entityId) is false {
+      ret false
+    }
+    ret componentView(this: world.opacities, entityId: entityId).value is value.toFloat()
+  }
   let heroName: String = "HeroWidget"
   if binding.componentName is heroName {
     if componentHas(this: world.heroWidgets, entityId: entityId) is false {

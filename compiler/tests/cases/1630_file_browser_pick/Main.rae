@@ -1,0 +1,234 @@
+# Picking with a file browser in a dialog page, by scripted input: a file, files, a folder, and a
+# name
+# to save under (free, refused, taken by a file and by a folder), by the buttons, Return, a double
+# click and Escape; what does not fit is muted; New Folder; a pick out of a search; a browser of the
+# program's own entries from a scene.
+import Files
+import Sys
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Ecs
+open ui/ListSelectionSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/Transform
+open ui/fileBrowser/FileBrowser
+open ui/fileBrowser/FileBrowserComponents
+open ui/fileBrowser/NavigationSystem
+open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/SearchSystem
+open ui/textFieldSystem/TextFieldSystem
+
+func optionsOf(mode: copy BrowserMode) ret BrowserOptions {
+  ret BrowserOptions { mode: mode, columnWidth: 150.0, showPreview: false, showSearch: true }
+}
+
+func choose(app: mod App, place: view Int, name: view String) {
+  pick(
+    app: app
+    browser: app.left
+    place: place
+    name: name
+  )
+}
+
+func pressDone(app: mod App) {
+  clickNode(app: app, entityId: footerNode(app: app, name: "Done"))
+}
+
+func pickOne(app: mod App) {
+  log("----- one file")
+  var options: BrowserOptions = optionsOf(mode: BrowserMode.pickFile)
+  options.pickExtensions = List(String) { "png" }
+  openPage(app: app, options: options)
+  show(app: app, step: "opened; {mutedText(app: app, place: 0)}")
+  pressDone(app: app)
+  show(app: app, step: "Open with nothing selected")
+  choose(app: app, place: 0, name: "a.txt")
+  pressDone(app: app)
+  doublePick(app: app, place: 0, name: "a.txt")
+  show(app: app, step: "a muted one, by the button and a double click")
+  choose(app: app, place: 0, name: "Photos")
+  pressDone(app: app)
+  show(app: app, step: "a folder")
+  choose(app: app, place: 1, name: "sea.png")
+  show(app: app, step: "one that fits")
+  pressDone(app: app)
+  show(app: app, step: "Open")
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  show(app: app, step: "Return: the same, and no rename: {componentCount(this: app.files.renames)}")
+  doublePick(app: app, place: 0, name: "cover.png")
+  show(app: app, step: "a double click")
+  log("recent: {recentText(app: app)}")
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape")
+  clickNode(app: app, entityId: footerNode(app: app, name: "Cancel"))
+  show(app: app, step: "Cancel")
+  closePage(app: app)
+}
+
+func pickMany(app: mod App) {
+  log("----- files")
+  openPage(app: app, options: optionsOf(mode: BrowserMode.pickFiles))
+  choose(app: app, place: 0, name: "a.txt")
+  listKey(app: app, keys: ListSelectionKeys { down: true, extend: true })
+  show(app: app, step: "two")
+  pressDone(app: app)
+  show(app: app, step: "Open")
+  listKey(app: app, keys: ListSelectionKeys { selectAll: true })
+  pressDone(app: app)
+  show(app: app, step: "with folders among them")
+  closePage(app: app)
+}
+
+func pickPlace(app: mod App) {
+  log("----- a folder")
+  openPage(app: app, options: optionsOf(mode: BrowserMode.pickFolder))
+  show(app: app, step: "opened; {mutedText(app: app, place: 0)}")
+  pressDone(app: app)
+  show(app: app, step: "Choose: where it is")
+  doublePick(app: app, place: 0, name: "a.txt")
+  show(app: app, step: "a double click on a file")
+  choose(app: app, place: 0, name: "Photos")
+  listKey(app: app, keys: ListSelectionKeys { choose: true })
+  show(app: app, step: "Return on a folder")
+  clickNode(app: app, entityId: footerNode(app: app, name: "NewFolder"))
+  typeText(app: app, text: "Made", erased: 20)
+  typeEnter(app: app)
+  show(app: app, step: "New Folder")
+  pressDone(app: app)
+  show(app: app, step: "Choose")
+  closePage(app: app)
+}
+
+func saving(app: mod App) {
+  log("----- a name to save under")
+  var options: BrowserOptions = optionsOf(mode: BrowserMode.save)
+  options.pickExtensions = List(String) { "png" }
+  options.pickName = "new.png"
+  openPage(app: app, options: options)
+  show(app: app, step: "opened; {mutedText(app: app, place: 0)}")
+  typeText(app: app, text: "other", erased: 0)
+  show(app: app, step: "its stem was selected")
+  typeEnter(app: app)
+  show(app: app, step: "Return: the name is free")
+  clickNode(app: app, entityId: footerNode(app: app, name: "Name"))
+  typeText(app: app, text: "", erased: 20)
+  pressDone(app: app)
+  show(app: app, step: "no name")
+  clickNode(app: app, entityId: footerNode(app: app, name: "Name"))
+  typeText(app: app, text: "a/b", erased: 0)
+  typeEnter(app: app)
+  show(app: app, step: "a bad name")
+  typeText(app: app, text: "folder", erased: 3)
+  typeEnter(app: app)
+  show(app: app, step: "a name without the extension: a folder has it with it")
+  typeText(app: app, text: "cover", erased: 6)
+  show(app: app, step: "typed on")
+  typeEnter(app: app)
+  show(app: app, step: "a file has it")
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape: only the question")
+  typeEnter(app: app)
+  press(app: app, keys: BrowserKeys { confirm: true })
+  show(app: app, step: "Return does not replace")
+  answerQuestion(app: app, name: "Stop")
+  show(app: app, step: "Cancel of the question")
+  typeEnter(app: app)
+  answerQuestion(app: app, name: "Replace")
+  show(
+    app: app
+    step: "Replace; nothing was done on the disk: {diskText(folder: "{app.base}/root")}"
+  )
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape in the name")
+  choose(app: app, place: 0, name: "a.txt")
+  show(app: app, step: "a muted file gives no name")
+  doublePick(app: app, place: 0, name: "a.txt")
+  show(app: app, step: "nor saves")
+  choose(app: app, place: 0, name: "Photos")
+  choose(app: app, place: 1, name: "sea.png")
+  show(app: app, step: "a file gives its name")
+  doublePick(app: app, place: 1, name: "sea.png")
+  show(app: app, step: "a double click on it asks")
+  closePage(app: app)
+}
+
+func savingFound(app: mod App) {
+  log("----- out of a search")
+  openPage(app: app, options: optionsOf(mode: BrowserMode.save))
+  show(app: app, step: "opened, with no name")
+  let focused: Bool = focusSearch(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+    browser: app.left
+  )
+  typeText(app: app, text: "sea", erased: 0)
+  choose(app: app, place: 0, name: "Photos/sea.png")
+  show(app: app, step: "found")
+  pressDone(app: app)
+  show(app: app, step: "Save")
+  answerQuestion(app: app, name: "Replace")
+  show(app: app, step: "Replace")
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape ends the search")
+  press(app: app, keys: BrowserKeys { escape: true })
+  show(app: app, step: "Escape cancels")
+  closePage(app: app)
+}
+
+func authored(app: mod App) {
+  log("----- from a scene, of the program's entries")
+  mountPage(app: app, scene: parseScene(source: embedText(file: "Authored.raescene")))
+  app.left = filesNode(app: app)
+  settle(app: app)
+  show(app: app, step: "opened")
+  pressDone(app: app)
+  show(app: app, step: "Export: taken")
+  answerQuestion(app: app, name: "Stop")
+  typeText(app: app, text: "take 2.mp3", erased: 4)
+  pressDone(app: app)
+  show(app: app, step: "take 2")
+  closePage(app: app)
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+}
+
+func main() {
+  var temporary: String = Sys.getEnv(name: "TMPDIR")
+  if temporary.length() is 0 {
+    temporary = "/tmp"
+  }
+  if temporary.endsWith(suffix: "/") {
+    temporary = temporary.sub(start: 0, len: temporary.length() - 1)
+  }
+  let base: String = "{temporary}/rae-file-pick-{nowNs()}"
+  makeFolder(path: base)
+  loop let folder: view String in List(String) { "trash", "root", "root/Photos", "root/folder.png" } {
+    makeFolder(path: "{base}/{folder}")
+  }
+  loop let name: view String in List(String) {
+    "root/a.txt"
+    "root/b.txt"
+    "root/cover.png"
+    "root/Photos/sea.png"
+  } {
+    writeFile(path: "{base}/{name}", text: name)
+  }
+  var app: App = makeApp(base: base)
+  app.files.operations.rules = OperationRules { trashFolder: "{base}/trash", onlyIn: "{base}" }
+  settle(app: app)
+  pickOne(app: app)
+  pickMany(app: app)
+  pickPlace(app: app)
+  saving(app: app)
+  savingFound(app: app)
+  authored(app: app)
+  let ended: Bool = closeFileBrowsers(
+    systems: app.files
+    world: app.world
+    uiSystems: app.uiSystems
+  )
+  log("ended {ended}")
+  removeTree(folder: base)
+}

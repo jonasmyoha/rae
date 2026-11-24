@@ -14,9 +14,20 @@
 # and
 # listSelectionSystem: fileBrowserUpdate; then updateScrollRoots and scrollToRowSystem;
 # fileBrowserRows; listViewSystem and the rest. The app reads the events (files.folderOpened,
-# fileActivated, selectionChanged, entriesRequested, operationDone and more) after
+# fileActivated, selectionChanged, entriesRequested, operationDone, pickAnswered and more) after
 # fileBrowserUpdate. At the end:
-# closeFileBrowsers. Escape ends an edit or a dialog of a browser without quitting the program.
+# closeFileBrowsers.
+#
+# To pick files, a folder, or a name to save under: `BrowserOptions.mode`, in a dialog page (a click
+# on a row is an action, so its DialogOptions has `closeOnAction` false):
+#
+#     "PickPage": { "PageRoot": { "presentation": "dialog" }, "DialogOptions": { "maxWidth": 760,
+#       "closeOnAction": false, "dismissActionId": "" }, ... "Children": ["Files"] }
+#     "Files": { "FileBrowser": { "root": "~", "mode": "pickFile", "pickExtensions": ["png"] }, ...
+#     }
+#
+# and pickAnswered says what came of it. Escape ends an edit or a dialog of a browser without
+# quitting the program.
 open collections/StringMap
 open ecs/ComponentTable
 open ecs/Entity
@@ -46,6 +57,7 @@ open ui/fileBrowser/ListingSystem
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationRowsSystem
 open ui/fileBrowser/OperationsSystem
+open ui/fileBrowser/PickSystem
 open ui/fileBrowser/PreviewSystem
 open ui/fileBrowser/RenameSystem
 open ui/fileBrowser/RowsSystem
@@ -137,6 +149,12 @@ func openFileBrowser(
   componentSet(this: systems.previews, entityId: host, data: BrowserPreview {})
   openSidebar(systems: systems, world: world, browser: host)
   openSearchField(systems: systems, world: world, browser: host)
+  openPick(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: host
+  )
   let first: EntityId = openColumn(
     systems: systems
     world: world
@@ -183,6 +201,7 @@ func fileBrowserUpdate(
   frameAdvance(this: systems.operationRequested)
   frameAdvance(this: systems.browserMenuChosen)
   frameAdvance(this: systems.filesDropped)
+  frameAdvance(this: systems.pickAnswered)
   systems.now = input.nowSeconds
   closeDeadBrowsers(systems: systems, world: world, uiSystems: uiSystems)
   applyFileBrowserComponents(systems: systems, world: world)
@@ -201,6 +220,13 @@ func fileBrowserUpdate(
   # (an Escape that ends a search does nothing else)
   var left: BrowserKeys = keys
   changed = fileSearchSystem(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    scenes: scenes
+    keys: left
+  ) or changed
+  changed = filePickSystem(
     systems: systems
     world: world
     uiSystems: uiSystems
@@ -366,6 +392,10 @@ func authoredOptions(authored: view FileBrowser) ret BrowserOptions {
     sidebarWidth: authored.sidebarWidth
     pinned: authored.pinned
     showSearch: authored.showSearch
+    mode: authored.mode
+    pickExtensions: authored.pickExtensions
+    pickName: authored.pickName
+    pickText: authored.pickText
     rowHeight: authored.rowHeight
     source: authored.source
   }
@@ -644,6 +674,12 @@ func closeBrowserNodes(
   if componentHas(this: systems.browsers, entityId: browser) is false {
     ret
   }
+  closePick(
+    systems: systems
+    world: world
+    uiSystems: uiSystems
+    browser: browser
+  )
   let searched: Bool = leaveSearch(
     systems: systems
     world: world
@@ -745,5 +781,6 @@ func closeFileBrowsers(
   let polled: Bool = stopPolling(systems: systems, waitMs: 1000)
   let placed: Bool = stopPlaces(systems: systems, waitMs: 1000)
   let searched: Bool = stopSearches(systems: systems, waitMs: 1000)
-  ret stopFileListings(systems: systems, waitMs: 1000) and polled and placed and searched and ended
+  let looked: Bool = stopPicks(systems: systems, waitMs: 1000)
+  ret stopFileListings(systems: systems, waitMs: 1000) and polled and placed and searched and looked and ended
 }

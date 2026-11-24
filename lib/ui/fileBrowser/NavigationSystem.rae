@@ -271,7 +271,11 @@ func openColumn(
     width: width
   )
   if componentHas(this: world.listSelections, entityId: column.list) {
-    componentMod(this: world.listSelections, entityId: column.list).mode = options.selection
+    var mode: ListSelectMode = options.selection
+    if options.mode is not BrowserMode.browse and options.mode is not BrowserMode.pickFiles {
+      mode = ListSelectMode.single
+    }
+    componentMod(this: world.listSelections, entityId: column.list).mode = mode
   }
   if componentHas(this: world.listViews, entityId: column.list) {
     componentMod(this: world.listViews, entityId: column.list).itemHeight = options.rowHeight
