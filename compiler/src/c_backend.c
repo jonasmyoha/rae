@@ -2649,6 +2649,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   }
   declare_param_live_flags(&tctx, body_to_emit, out);
   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
+  c_forget_rejected_moves(&tctx);
   sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
                                  tctx.moved_values, tctx.moved_value_count);
   free(tctx.moved_values);

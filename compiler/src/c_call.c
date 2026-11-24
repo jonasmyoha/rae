@@ -397,6 +397,31 @@ static void exclusive_access_check(CFuncContext* ctx, const AstExpr* expr, const
     }
 }
 
+/* `own x` for a parameter that does not take ownership, in a call sema did
+ * not resolve (a generic body). Reported once per place, however often the
+ * body is specialized, and not counted as a move: the error is enough. */
+static const AstExpr* s_rejected_own[64];
+static size_t s_rejected_own_count;
+static bool own_argument_rejected(const AstExpr* value) {
+  for (size_t i = 0; i < s_rejected_own_count; i++)
+    if (s_rejected_own[i] == value) return true;
+  return false;
+}
+/* (a value may be recorded before its argument is looked at: a hoisted one) */
+void c_forget_rejected_moves(CFuncContext* ctx) {
+  size_t kept = 0;
+  for (size_t i = 0; i < ctx->moved_value_count; i++)
+    if (!own_argument_rejected(ctx->moved_values[i])) ctx->moved_values[kept++] = ctx->moved_values[i];
+  ctx->moved_value_count = kept;
+}
+static void report_own_argument(CFuncContext* ctx, const AstFuncDecl* fd, const AstParam* param,
+                                const AstExpr* value) {
+  char message[400];
+  if (!sema_own_argument_error(fd, param, value, message, sizeof message) || own_argument_rejected(value)) return;
+  if (s_rejected_own_count < 64) s_rejected_own[s_rejected_own_count++] = value;
+  diag_error(c_source_file(ctx), (int)value->line, (int)value->column, message);
+}
+
 /* In a specialization: `value` (a bare local, or `own x`) moves a local that
  * owns its value. Recorded for the use-after-move check of the body, which
  * sema has not analyzed for these type arguments; the same rule as its
@@ -1528,6 +1553,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // genuinely consumes its arg must opt in with `own`.
             bool param_consumes = !(fd->is_extern) || p->type->is_own;
             if (p && p->type && p->type->is_own) c_record_moved_local(ctx, a->value);
+            else report_own_argument(ctx, fd, p, a->value);
             bool close_live_flag = false;
             if (param_consumes
                 && p && p->type && !(p->type->is_view || p->type->is_mod)

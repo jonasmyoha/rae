@@ -1118,8 +1118,8 @@ static const AstExpr* flow_destructor_target(const LifecycleFlow* flow, const As
         return target->kind == AST_EXPR_IDENT
             && (flow_is_hook_name(flow, target->as.ident) || flow_is_borrowed_name(flow, target->as.ident))
             ? target : NULL;
-    const AstExpr* place = target->kind == AST_EXPR_OWN ? target->as.unary.operand : target;
-    const TypeInfo* type = place->resolved_type;
+    if (target->kind == AST_EXPR_OWN) return NULL;   /* an error of its own: sema_own_argument_error */
+    const TypeInfo* type = target->resolved_type;
     while (type && (type->kind == TYPE_REF || type->kind == TYPE_OPT))
         type = type->kind == TYPE_REF ? type->as.ref.base : type->as.opt.base;
     if (!type || type->kind != TYPE_STRUCT || type->as.structure.generic_count > 0) return NULL;
@@ -1170,11 +1170,7 @@ static void flow_check_destructor_call(LifecycleFlow* flow, const AstExpr* e) {
     const AstExpr* target = e == flow->consuming_drop ? NULL : flow_destructor_target(flow, e);
     if (!target) return;
     char buf[420];
-    if (target->kind == AST_EXPR_OWN) {
-        snprintf(buf, sizeof buf,
-                 "a destructor takes the value as 'mod', and an explicit drop of a local consumes it; "
-                 "leave out the 'own'");
-    } else if (target->kind == AST_EXPR_IDENT) {
+    if (target->kind == AST_EXPR_IDENT) {
         Str name = target->as.ident;
         snprintf(buf, sizeof buf,
                  "cannot drop '%.*s' by hand: it does not own the value, and the owner drops it, so the "
@@ -10650,6 +10646,36 @@ static void sema_analyze_match_expr(CompilerContext* ctx, AstModule* module, Sym
     module->had_error = true;
 }
 
+/* `own x` asserts a move; a `copy` parameter takes a copy and a `view` or
+ * `mod` one borrows, so nothing moves, x stays, and the word is wrong there.
+ * The message into `out`; false when the argument is fine. The C emission
+ * asks too, for the calls of generic bodies, which sema does not resolve. */
+bool sema_own_argument_error(const AstFuncDecl* fd, const AstParam* param, const AstExpr* value, char* out, size_t size) {
+    if (!param || !param->type || !value || value->kind != AST_EXPR_OWN) return false;
+    const AstTypeRef* type = param->type;
+    const char* mode = type->is_copy ? "copy" : type->is_mod ? "mod" : type->is_view ? "view" : NULL;
+    if (!mode) return false;
+    if (type->is_mod && fd && str_eq_cstr(fd->name, "drop") && !fd->generic_params && param == fd->params) {
+        snprintf(out, size, "a destructor takes the value as 'mod', and an explicit drop of a local consumes it; "
+                            "leave out the 'own'");
+        return true;
+    }
+    const char* does = type->is_copy ? "takes a copy" : "borrows it";
+    const AstExpr* moved = value->as.unary.operand;
+    if (moved && moved->kind == AST_EXPR_IDENT)
+        snprintf(out, size,
+                 "'own %.*s' moves, but parameter '%.*s' is '%s': the callee %s and '%.*s' "
+                 "stays. Remove 'own', or declare the parameter 'own' to take it",
+                 (int)moved->as.ident.len, moved->as.ident.data, (int)param->name.len, param->name.data,
+                 mode, does, (int)moved->as.ident.len, moved->as.ident.data);
+    else
+        snprintf(out, size,
+                 "'own' moves, but parameter '%.*s' is '%s': the callee %s. Remove 'own', "
+                 "or declare the parameter 'own'",
+                 (int)param->name.len, param->name.data, mode, does);
+    return true;
+}
+
 /* Is `sym` a local that owns its value? A reference binding, a borrowed
  * parameter and a global are not: what they name is copied, not moved. */
 static bool sema_symbol_owns_value(const Symbol* sym) {
@@ -10760,25 +10786,10 @@ static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolT
          * deep COPY (docs/binding-modes-design.md §2, "alias or field" row),
          * so nothing the caller still owns is freed. */
         (void)expr_is_owning;
-        /* `own x` asserts a move; into a `copy` parameter nothing moves — the
-         * callee takes a copy and `x` stays — so the word is wrong there. */
-        if (p->type && p->type->is_copy && a->value && a->value->kind == AST_EXPR_OWN) {
-            const AstExpr* moved = a->value->as.unary.operand;
+        char own_error[400];
+        if (sema_own_argument_error(fd, named ? named : p, a->value, own_error, sizeof own_error)) {
             a->value->as.unary.moves_local = false;   /* this error is enough */
-            char buf[320];
-            if (moved && moved->kind == AST_EXPR_IDENT)
-                snprintf(buf, sizeof buf,
-                         "'own %.*s' moves, but parameter '%.*s' is 'copy': the callee takes a copy and '%.*s' "
-                         "stays. Remove 'own', or declare the parameter 'own' to take it",
-                         (int)moved->as.ident.len, moved->as.ident.data,
-                         (int)p->name.len, p->name.data,
-                         (int)moved->as.ident.len, moved->as.ident.data);
-            else
-                snprintf(buf, sizeof buf,
-                         "'own' moves, but parameter '%.*s' is 'copy': the callee takes a copy. Remove 'own', "
-                         "or declare the parameter 'own'",
-                         (int)p->name.len, p->name.data);
-            diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, buf);
+            diag_error(sema_diag_file(module), (int)a->value->line, (int)a->value->column, own_error);
             module->had_error = true;
         }
         p = p->next; a = a->next;

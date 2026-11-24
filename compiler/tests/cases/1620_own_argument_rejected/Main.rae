@@ -1,0 +1,53 @@
+# `own x` for a parameter that borrows: nothing moves, so the word is wrong
+type Note {
+  name: String
+  parts: List(String)
+}
+
+func change(names: mod List(String)) {
+  names.add("b")
+}
+
+func look(names: view List(String)) ret Int {
+  ret names.length
+}
+
+func read(text: view String) ret Int {
+  ret text.length()
+}
+
+func readMaybe(text: opt view String) ret Bool {
+  ret text is none
+}
+
+func changeNote(this: mod Note, name: view String) {
+  this.name = name
+}
+
+func changeNumber(number: mod Int) {
+  number = number + 1
+}
+
+func makeNames() ret List(String) {
+  ret List(String) { "a" }
+}
+
+func main() {
+  var names: List(String) = { "a" }
+  change(names: own names)  # ERROR: mod
+  log("{names.length}")  # names is still here: one error is enough
+  log("{look(names: own names)}")  # ERROR: view
+  log("{look(names: own makeNames())}")  # ERROR: view
+  let text: String = "text"
+  log("{read(text: own text)} {text}")  # ERROR
+  log("{readMaybe(text: own text)}")  # ERROR
+  var note: Note = { name: "note", parts: {} }
+  note.changeNote(name: own text)  # ERROR
+  changeNote(this: own note, name: "other")  # ERROR
+  change(names: own note.parts)  # ERROR: a field
+  var number: Int = 1
+  changeNumber(number: own number)  # ERROR
+  if note.parts.length > 0 {
+    change(names: own names)  # ERROR: on one path only (this one did not compile in C)
+  }
+}

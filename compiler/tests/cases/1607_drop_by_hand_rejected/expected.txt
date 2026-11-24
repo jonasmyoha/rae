@@ -31,9 +31,9 @@ tests/cases/1607_drop_by_hand_rejected/Main.rae:63:25: cannot drop this value by
 tests/cases/1607_drop_by_hand_rejected/Main.rae:69:6: use of 'handle' after 'handle.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again
     69 |   log("{handle.id}")  # ERROR: dropped
        |      ^~~~
-tests/cases/1607_drop_by_hand_rejected/Main.rae:74:7: a destructor takes the value as 'mod', and an explicit drop of a local consumes it; leave out the 'own'
+tests/cases/1607_drop_by_hand_rejected/Main.rae:74:14: a destructor takes the value as 'mod', and an explicit drop of a local consumes it; leave out the 'own'
     74 |   drop(this: own handle)  # ERROR: not `own`
-       |       ^~~~
+       |              ^~~~
 tests/cases/1607_drop_by_hand_rejected/Main.rae:81:10: unknown function 'generic': no function by that name is loaded here — did you forget to `import`/`open` its module?
     81 |   generic(Handle, value: handle)
        |          ^~~~

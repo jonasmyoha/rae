@@ -1,0 +1,27 @@
+# The same in the calls of a generic body, and of generic functions, found when they are emitted
+func look(T: type, values: view List(T)) ret Int {
+  ret values.length
+}
+
+func change(T: type, values: mod List(T), value: view T) {
+  values.add(value: value)
+}
+
+func duplicate(T: type, value: copy T) ret T {
+  ret value
+}
+
+func inner(T: type, values: own List(T), value: own T) ret Int {
+  change(T, values: own values, value: own value)  # ERROR twice
+  let twin: T = duplicate(T, value: own value)  # ERROR: copy
+  ret look(T, values: own values)  # ERROR
+}
+
+func main() {
+  var names: List(String) = { "a" }
+  log("{look(String, values: own names)}")  # ERROR
+  let others: List(String) = { "b" }
+  log("{(own others).copyAtDefault(index: 0)}")  # ERROR: the receiver
+  log("{inner(String, values: List(String) { "b" }, value: "c")}")
+  log("{inner(Int, values: List(Int) { 1 }, value: 2)}")
+}

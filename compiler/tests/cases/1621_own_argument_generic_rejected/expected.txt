@@ -1,0 +1,18 @@
+tests/cases/1621_own_argument_generic_rejected/Main.rae:15:21: 'own values' moves, but parameter 'values' is 'mod': the callee borrows it and 'values' stays. Remove 'own', or declare the parameter 'own' to take it
+    15 |   change(T, values: own values, value: own value)  # ERROR twice
+       |                     ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:15:40: 'own value' moves, but parameter 'value' is 'view': the callee borrows it and 'value' stays. Remove 'own', or declare the parameter 'own' to take it
+    15 |   change(T, values: own values, value: own value)  # ERROR twice
+       |                                        ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:16:37: 'own value' moves, but parameter 'value' is 'copy': the callee takes a copy and 'value' stays. Remove 'own', or declare the parameter 'own' to take it
+    16 |   let twin: T = duplicate(T, value: own value)  # ERROR: copy
+       |                                     ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:17:23: 'own values' moves, but parameter 'values' is 'view': the callee borrows it and 'values' stays. Remove 'own', or declare the parameter 'own' to take it
+    17 |   ret look(T, values: own values)  # ERROR
+       |                       ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:22:30: 'own names' moves, but parameter 'values' is 'view': the callee borrows it and 'names' stays. Remove 'own', or declare the parameter 'own' to take it
+    22 |   log("{look(String, values: own names)}")  # ERROR
+       |                              ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:24:10: 'own others' moves, but parameter 'this' is 'view': the callee borrows it and 'others' stays. Remove 'own', or declare the parameter 'own' to take it
+    24 |   log("{(own others).copyAtDefault(index: 0)}")  # ERROR: the receiver
+       |          ^~~~

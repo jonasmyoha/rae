@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.67, 2026-11-24: `own` for a parameter that borrows
+
+- Breaking: `own x` for a `view` or `mod` parameter is an error ("remove 'own'"), as it already was for a `copy`
+  one, also in the calls of generic functions. Nothing moves there: x was counted as moved and never freed.
+- Cases 1620 and 1621.
+
 ## 0.4.66, 2026-11-24: a match expression owns its value
 
 - `let text: String = match kind { case 1 => "one {kind}" default => other }` owns its String, and a list or a

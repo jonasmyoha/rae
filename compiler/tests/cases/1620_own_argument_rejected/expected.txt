@@ -1,0 +1,30 @@
+tests/cases/1620_own_argument_rejected/Main.rae:37:17: 'own names' moves, but parameter 'names' is 'mod': the callee borrows it and 'names' stays. Remove 'own', or declare the parameter 'own' to take it
+    37 |   change(names: own names)  # ERROR: mod
+       |                 ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:39:21: 'own names' moves, but parameter 'names' is 'view': the callee borrows it and 'names' stays. Remove 'own', or declare the parameter 'own' to take it
+    39 |   log("{look(names: own names)}")  # ERROR: view
+       |                     ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:40:21: 'own' moves, but parameter 'names' is 'view': the callee borrows it. Remove 'own', or declare the parameter 'own'
+    40 |   log("{look(names: own makeNames())}")  # ERROR: view
+       |                     ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:42:20: 'own text' moves, but parameter 'text' is 'view': the callee borrows it and 'text' stays. Remove 'own', or declare the parameter 'own' to take it
+    42 |   log("{read(text: own text)} {text}")  # ERROR
+       |                    ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:43:25: 'own text' moves, but parameter 'text' is 'view': the callee borrows it and 'text' stays. Remove 'own', or declare the parameter 'own' to take it
+    43 |   log("{readMaybe(text: own text)}")  # ERROR
+       |                         ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:45:25: 'own text' moves, but parameter 'name' is 'view': the callee borrows it and 'text' stays. Remove 'own', or declare the parameter 'own' to take it
+    45 |   note.changeNote(name: own text)  # ERROR
+       |                         ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:46:20: 'own note' moves, but parameter 'this' is 'mod': the callee borrows it and 'note' stays. Remove 'own', or declare the parameter 'own' to take it
+    46 |   changeNote(this: own note, name: "other")  # ERROR
+       |                    ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:47:17: 'own' moves, but parameter 'names' is 'mod': the callee borrows it. Remove 'own', or declare the parameter 'own'
+    47 |   change(names: own note.parts)  # ERROR: a field
+       |                 ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:49:24: 'own number' moves, but parameter 'number' is 'mod': the callee borrows it and 'number' stays. Remove 'own', or declare the parameter 'own' to take it
+    49 |   changeNumber(number: own number)  # ERROR
+       |                        ^~~~
+tests/cases/1620_own_argument_rejected/Main.rae:51:19: 'own names' moves, but parameter 'names' is 'mod': the callee borrows it and 'names' stays. Remove 'own', or declare the parameter 'own' to take it
+    51 |     change(names: own names)  # ERROR: on one path only (this one did not compile in C)
+       |                   ^~~~
