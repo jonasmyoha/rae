@@ -9,7 +9,13 @@ CC = gcc
 # symbols for profiling and debuggers; `make clean build COMPILER_OPT=-O0` gives an
 # unoptimized build for stepping through code (objects do not track the
 # flags, hence the clean).
+# On Linux without LTO: gcc links it in one job, and gcc 13 aborted there under
+# a parallel make in an emulated x86-64 (jobserver_info::return_token).
+ifeq ($(shell uname -s),Darwin)
 COMPILER_OPT ?= -O2 -flto
+else
+COMPILER_OPT ?= -O2
+endif
 COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic $(COMPILER_OPT) -g -ffp-contract=off
 COMMON_CFLAGS += -I../third_party/tinyexpr
 # The libraries of the machine the compiler is built on. Linux (glibc) hides
