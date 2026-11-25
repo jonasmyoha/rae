@@ -140,6 +140,50 @@ static bool c_is_place(CFuncContext* ctx, const AstExpr* value) {
         || local_index_by_name(ctx, root->as.ident) >= 0 || !find_enum_decl(ctx, ctx->module, root->as.ident);
 }
 
+/* Does a parameter of `fd`, called with type arguments `concrete`, take the
+ * address of an optional (c_type_parameter_is_optional)? */
+static bool c_parameter_takes_optional(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete,
+                                       const AstTypeRef* type) {
+    if (!fd->generic_params || !concrete || fd->is_extern) return false;
+    CFuncContext callee = *ctx;
+    callee.generic_params = fd->generic_params;
+    callee.generic_args = concrete;
+    return c_type_parameter_is_optional(&callee, type);
+}
+
+/* The address of an optional that a `view T` / `mod T` takes when T is the
+ * optional: a place's own, a statement temporary's for anything else */
+static void emit_optional_address(CFuncContext* ctx, const AstTypeRef* opt_type, const AstExpr* value, FILE* out) {
+    const AstExpr* source = value;
+    while (source->kind == AST_EXPR_UNBOX || source->kind == AST_EXPR_BOX
+           || (source->kind == AST_EXPR_UNARY
+               && (source->as.unary.op == AST_UNARY_VIEW || source->as.unary.op == AST_UNARY_MOD)))
+        source = source->as.unary.operand;
+    const AstTypeRef* type = infer_expr_type_ref(ctx, source);
+    bool reference = c_type_parameter_is_optional(ctx, type);
+    if (type && ctx->generic_params && ctx->generic_args)
+        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+    bool optional = type && type->is_opt && (reference || !(type->is_view || type->is_mod));
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    if (optional && c_is_place(ctx, source)) {
+        ctx->suppress_opt_unbox = true;
+        fprintf(out, "&(");
+        emit_expr(ctx, source, out, PREC_LOWEST, false, false);
+        fprintf(out, ")");
+        ctx->suppress_opt_unbox = saved_unbox;
+        return;
+    }
+    /* a boxed plain place is a copy of its own; a call's result is the temporary's */
+    bool owns = !optional || c_stmt_temp_value_owns(ctx, source);
+    int held = register_stmt_temp(ctx, opt_type, owns);
+    if (held >= 0) fprintf(out, "((__rae_stmt_tmp%d = (", held);
+    else fprintf(out, "(%s[1]){ ", rae_opt_type_name(ctx, opt_type));
+    if (source->kind == AST_EXPR_NONE) fprintf(out, "(%s){0}", rae_opt_type_name(ctx, opt_type));
+    else emit_optional_boxed_expr(ctx, opt_type, source, out);
+    if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), &__rae_stmt_tmp%d)", held, held);
+    else fprintf(out, " }");
+}
+
 static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
                              const AstExpr* value, FILE* out) {
     Str base = get_base_type_name(param_type);
@@ -1402,7 +1446,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             int ai = 0;
             while (sa && ai < RAE_MAX_PRIM_WRAP) {
                 if (sp && sp->type && (sp->type->is_view || sp->type->is_mod)
-                    && !sp->type->is_opt) {
+                    && !sp->type->is_opt && !c_parameter_takes_optional(ctx, fd, concrete, sp->type)) {
                     const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, sa->value);
                     if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                         Str pbase = get_base_type_name(sp->type);
@@ -1647,6 +1691,18 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     arg_index++;
                     continue;
                 }
+            }
+            /* `view T` / `mod T` of a generic function whose T is an optional: the
+             * address of the optional, one made for a plain value or `none` */
+            if (p && p->type && a->value && c_parameter_takes_optional(ctx, fd, concrete, p->type)) {
+                AstTypeRef opt_pt = *substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
+                opt_pt.is_view = false; opt_pt.is_mod = false; opt_pt.next = NULL;
+                emit_optional_address(ctx, &opt_pt, a->value, out);
+                if (close_live_flag) fprintf(out, ")");
+                if (a->next) fprintf(out, ", ");
+                a = a->next; p = p->next;
+                arg_index++;
+                continue;
             }
             if (p && p->type && p->type->is_opt && (p->type->is_view || p->type->is_mod) && a->value) {
                 const AstTypeRef* opt_pt = p->type;

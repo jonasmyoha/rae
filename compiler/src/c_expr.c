@@ -616,6 +616,123 @@ static void emit_string_eq_operand(CFuncContext* ctx, const AstExpr* operand, FI
     if (reference_call) fprintf(out, ").ptr)");
 }
 
+/* How an operand of `is` takes part in a comparison with an optional */
+typedef enum { IS_OPERAND_PLAIN, IS_OPERAND_OPTIONAL, IS_OPERAND_REFERENCE } IsOperandKind;
+
+static const AstExpr* is_operand_source(const AstExpr* operand) {
+    while (operand->kind == AST_EXPR_UNBOX || operand->kind == AST_EXPR_BOX) operand = operand->as.unary.operand;
+    return operand;
+}
+
+/* The kind of an operand, and in `type` what it is in this specialization. A
+ * `view T` whose T is an optional is that optional (as for its text), not a
+ * reference to a payload. */
+static IsOperandKind is_operand_kind(CFuncContext* ctx, const AstExpr* source, AstTypeRef* type, bool* known) {
+    const AstTypeRef* declared = infer_expr_type_ref(ctx, source);
+    /* a call's type as it is written (an inferred one can lack a name) */
+    if (source->kind == AST_EXPR_CALL && source->decl_link && source->decl_link->kind == AST_DECL_FUNC
+        && !source->decl_link->as.func_decl.generic_params && source->decl_link->as.func_decl.returns)
+        declared = source->decl_link->as.func_decl.returns->type;
+    if (declared && !declared->parts && declared->resolved_type)
+        declared = sema_type_ref_of(ctx->compiler_ctx, declared->resolved_type);
+    *known = declared != NULL;
+    if (!declared) return IS_OPERAND_PLAIN;
+    *type = *declared;
+    if (ctx->generic_params && ctx->generic_args) {
+        const AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                                         (AstTypeRef*)declared);
+        if (concrete) *type = *concrete;
+        if (!declared->is_opt && type->is_opt) { type->is_view = false; type->is_mod = false; }
+    }
+    type->next = NULL;
+    if (!type->is_opt) return IS_OPERAND_PLAIN;
+    if (type->is_view || type->is_mod) return IS_OPERAND_REFERENCE;
+    return rae_opt_is_struct_rep(ctx, type) ? IS_OPERAND_OPTIONAL : IS_OPERAND_PLAIN;
+}
+
+/* `a is b` where one or both are optional: both none, or both there and equal
+ * as `equals(a:, b:)` compares the payload. A plain operand is there. Each
+ * operand is evaluated once; a fresh owned one is held in a statement temporary.
+ * False when neither is an optional. */
+static bool emit_optional_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    const AstExpr* operands[2] = { is_operand_source(expr->as.binary.lhs), is_operand_source(expr->as.binary.rhs) };
+    AstTypeRef types[2] = {0};
+    IsOperandKind kinds[2];
+    bool known[2];
+    for (int side = 0; side < 2; side++) kinds[side] = is_operand_kind(ctx, operands[side], &types[side], &known[side]);
+    if (kinds[0] == IS_OPERAND_PLAIN && kinds[1] == IS_OPERAND_PLAIN) return false;
+    AstTypeRef payload = kinds[0] != IS_OPERAND_PLAIN ? types[0] : types[1];
+    payload.is_opt = false; payload.is_view = false; payload.is_mod = false;
+    payload.is_own = false; payload.is_copy = false;
+    payload.resolved_type = NULL; payload.next = NULL;
+    Str base = get_base_type_name(&payload);
+    if (base.len == 0 || str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
+    AstTypeRef optional = payload;
+    optional.is_opt = true;
+    int id = ctx->temp_counter++;
+    bool had_expected = ctx->has_expected_type;
+    AstTypeRef saved_expected = ctx->expected_type;
+    bool saved_unbox = ctx->suppress_opt_unbox;
+    fprintf(out, "((bool)(__extension__ ({ ");
+    for (int side = 0; side < 2; side++) {
+        const AstExpr* operand = operands[side];
+        ctx->has_expected_type = false;
+        if (kinds[side] == IS_OPERAND_REFERENCE) {
+            bool wrapper = operand->kind == AST_EXPR_IDENT && c_primitive_ref_has_wrapper(base);
+            fprintf(out, "const ");
+            emit_type_ref_as_c_type(ctx, &payload, out, false);
+            fprintf(out, "* __is%d_%d = (", id, side);
+            ctx->suppress_opt_unbox = true;
+            emit_expr(ctx, operand, out, PREC_LOWEST, false, true);
+            ctx->suppress_opt_unbox = saved_unbox;
+            fprintf(out, wrapper ? ").ptr; " : "); ");
+            continue;
+        }
+        bool is_optional = kinds[side] == IS_OPERAND_OPTIONAL;
+        const AstTypeRef* held_type = is_optional ? &optional : &payload;
+        bool call = operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL;
+        /* a plain String call's result is in the statement's pool already */
+        bool owns = (is_optional || !str_eq_cstr(base, "String"))
+            && (c_stmt_temp_value_owns(ctx, operand) || operand->kind == AST_EXPR_COLLECTION_LITERAL)
+            && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, held_type, 0);
+        int held = owns ? register_stmt_temp(ctx, held_type, true) : -1;
+        emit_type_ref_as_c_type(ctx, held_type, out, false);
+        fprintf(out, " __isv%d_%d = (", id, side);
+        if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+        if (is_optional && call) {
+            emit_optional_boxed_expr(ctx, &optional, operand, out);
+        } else if (is_optional) {
+            ctx->suppress_opt_unbox = true;
+            emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
+            ctx->suppress_opt_unbox = saved_unbox;
+        } else {
+            ctx->has_expected_type = true;
+            ctx->expected_type = payload;
+            /* a `view List` is emitted as the pointer it is */
+            if (operand->kind == AST_EXPR_IDENT && (types[side].is_view || types[side].is_mod)
+                && str_eq_cstr(base, "List")) {
+                fprintf(out, "*");
+                emit_expr(ctx, operand, out, PREC_UNARY, false, true);
+            } else if (str_eq_cstr(base, "String")) emit_string_eq_operand(ctx, operand, out);
+            else emit_to_string_value(ctx, operand, known[side] ? &types[side] : NULL, out);
+        }
+        if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
+        fprintf(out, "); const ");
+        emit_type_ref_as_c_type(ctx, &payload, out, false);
+        if (is_optional) fprintf(out, "* __is%d_%d = __isv%d_%d.has ? &__isv%d_%d.value : NULL; ", id, side, id, side, id, side);
+        else fprintf(out, "* __is%d_%d = &__isv%d_%d; ", id, side, id, side);
+    }
+    ctx->has_expected_type = had_expected;
+    ctx->expected_type = saved_expected;
+    char left[48], right[48];
+    snprintf(left, sizeof left, "*__is%d_0", id);
+    snprintf(right, sizeof right, "*__is%d_1", id);
+    fprintf(out, "%s(__is%d_0 && __is%d_1 ? (bool)(", expr->as.binary.op == AST_BIN_NEQ ? "!" : "", id, id);
+    rae_value_equals_expr(ctx->compiler_ctx, ctx->module, &payload, left, right, out);
+    fprintf(out, ") : (bool)(!__is%d_0 && !__is%d_1)); })))", id, id);
+    return true;
+}
+
 /* The non-generic function `fn` of the module whose import path ends in
  * `qualifier` (`Vec3` for module Vec3, `WalkerKnockdown` for
  * app3d/WalkerKnockdown), the one taking as many arguments as `args` when
@@ -789,6 +906,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_IDENT: {
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         const Str cn = ident_c_name(ctx, expr);  // #816: prefixed symbol for a module global
+        if (c_type_parameter_is_optional(ctx, tr)) {
+            fprintf(out, suppress_deref ? "%.*s" : "(*%.*s)", (int)cn.len, cn.data);
+            break;
+        }
         bool is_prim_ref = is_primitive_ref(ctx, tr);
         bool is_ptr = is_pointer_type(ctx, expr->as.ident);
         // `view T` / `mod T` for a non-primitive non-Buffer/List/Any
@@ -989,6 +1110,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           ctx->suppress_opt_unbox = saved_unbox;
           break;
       }
+      if ((expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ)
+          && emit_optional_equality(ctx, expr, out)) break;
       // Special case: string equality — use rae_ext_rae_str_eq instead of ==
       // (and its negation for `is not`).
       if (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ) {
@@ -1050,7 +1173,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               bool is_struct = dtd && dtd->kind == AST_DECL_TYPE
                   && !has_property(dtd->as.type_decl.properties, "c_struct")
                   && !dtd->as.type_decl.generic_params && !deep_tr->generic_args;
-              if (is_list || is_struct) {
+              AstTypeRef instance = *deep_tr;
+              instance.is_view = false; instance.is_mod = false; instance.next = NULL;
+              bool is_instance = !is_list && generic_struct_template(ctx->compiler_ctx, &instance) != NULL;
+              if (is_list || is_struct || is_instance) {
                   AstTypeRef plain = *deep_tr;
                   plain.is_view = false; plain.is_mod = false; plain.is_own = false; plain.is_copy = false;
                   plain.next = NULL;
@@ -1070,7 +1196,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                   for (int side = 0; side < 2; side++) {
                       fprintf(out, " %s = (", names[side]);
                       int held = -1;
-                      if (c_stmt_temp_value_owns(ctx, operands[side])
+                      if ((c_stmt_temp_value_owns(ctx, operands[side])
+                           || operands[side]->kind == AST_EXPR_COLLECTION_LITERAL)
                           && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &plain, 0))
                           held = register_stmt_temp(ctx, &plain, true);
                       if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
@@ -1152,23 +1279,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           if (!picked && rhs_ti && !rhs_ti->is_opt) {
               Str b = get_base_type_name(rhs_ti);
               if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) picked = rhs_ti;
-          }
-          // #651: value (in)equality between TWO optionals of the same scalar
-          // payload — `back.copyAt(i) is not data.copyAt(i)`. Neither side is a
-          // bare primitive, so drive both to unbox to `.value` by expecting the
-          // payload type. (A none-vs-value compare took the none_compare branch
-          // above and never reaches here.)
-          if (!picked && (expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ)) {
-              const AstTypeRef* opt_side = (lhs_ti && lhs_ti->is_opt) ? lhs_ti
-                                         : ((rhs_ti && rhs_ti->is_opt) ? rhs_ti : NULL);
-              if (opt_side && !(opt_side->is_view || opt_side->is_mod)) {
-                  AstTypeRef payload = *opt_side;
-                  payload.is_opt = false; payload.is_view = false; payload.is_mod = false; payload.next = NULL;
-                  Str b = get_base_type_name(&payload);
-                  if (is_primitive_type(b) && !str_eq_cstr(b, "Any")) {
-                      ctx->expected_type = payload; ctx->has_expected_type = true;
-                  }
-              }
           }
           // #817: an integer literal infers as plain `Int`; inside a UInt64-typed
           // context (`let y: UInt64 = 4294967295 * 4294967295`) that must not

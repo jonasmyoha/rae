@@ -1,0 +1,715 @@
+# `is` and `is not` with an optional on one side or both: equal when both are none, or both are
+# there and
+# what is there is equal as `equals(a:, b:)` says; a plain value is there. Of bindings, fields,
+# calls,
+# list rows, `opt view` parameters (which compared their addresses) and in generic functions; and
+# `contains` and `indexOf` of a list of optionals. A `view T` or `mod T` whose T is an optional is
+# passed on, copied and stored. Nothing leaks.
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Box(T: type) {
+  inside: opt T
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!" }
+}
+
+func pairOf(value: copy Int) ret Pair(Int) {
+  ret Pair(Int) { first: value }
+}
+
+func three() ret UInt8 {
+  ret 3
+}
+
+func four() ret UInt8 {
+  ret 4
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b
+}
+
+func sameOn(T: type, a: view T, b: view T) ret Bool {
+  ret same(a: a, b: b)
+}
+
+func sameReferences(T: type, a: opt view T, b: opt view T) ret Bool {
+  ret a is b
+}
+
+func held(T: type, value: view T) ret T {
+  let mine: T = value
+  ret mine
+}
+
+func put(T: type, list: mod List(T), value: view T) {
+  list.add(value: value)
+}
+
+func copyIn(T: type, place: mod T, value: view T) {
+  place = value
+}
+
+func zeroOrNone(on: view Bool) ret opt Int {
+  if on {
+    ret 0
+  }
+  ret none
+}
+
+func intMaybe(on: view Bool) ret opt Int {
+  if on {
+    ret 3
+  }
+  ret none
+}
+
+func intReferences(a: opt view Int, b: view Int) ret Bool {
+  ret a is b
+}
+
+func intRound() {
+  let first: opt Int = 3
+  let twin: opt Int = 3
+  let other: opt Int = 4
+  let empty: opt Int = none
+  let bare: opt Int = none
+  let plain: Int = 3
+  log("Int {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log("  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is 3}")
+  let box: Box(Int) = { inside: 3 }
+  let hollow: Box(Int) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {intMaybe(on: true) is intMaybe(on: true)} {intMaybe(on: true) is empty} {first is intMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Int) = { 3, 4 }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {intReferences(a: first, b: plain)} {intReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Int) = { 3, none }
+  log(
+    "  contains {list.contains(value: 3)} {list.contains(value: other)} {list.contains(value: none)}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Int = held(value: first)
+  var place: opt Int = 4
+  copyIn(place: place, value: first)
+  var more: List(opt Int) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func uint8Maybe(on: view Bool) ret opt UInt8 {
+  if on {
+    ret three()
+  }
+  ret none
+}
+
+func uint8References(a: opt view UInt8, b: view UInt8) ret Bool {
+  ret a is b
+}
+
+func uint8Round() {
+  let first: opt UInt8 = three()
+  let twin: opt UInt8 = three()
+  let other: opt UInt8 = four()
+  let empty: opt UInt8 = none
+  let bare: opt UInt8 = none
+  let plain: UInt8 = three()
+  log("UInt8 {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is three()}"
+  )
+  let box: Box(UInt8) = { inside: three() }
+  let hollow: Box(UInt8) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {uint8Maybe(on: true) is uint8Maybe(on: true)} {uint8Maybe(on: true) is empty} {first is uint8Maybe(
+      on: true
+    )}"
+  )
+  let rows: List(UInt8) = { three(), four() }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {uint8References(a: first, b: plain)} {uint8References(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt UInt8) = { three(), none }
+  log(
+    "  contains {list.contains(value: three())} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt UInt8 = held(value: first)
+  var place: opt UInt8 = four()
+  copyIn(place: place, value: first)
+  var more: List(opt UInt8) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func floatMaybe(on: view Bool) ret opt Float {
+  if on {
+    ret 1.5
+  }
+  ret none
+}
+
+func floatReferences(a: opt view Float, b: view Float) ret Bool {
+  ret a is b
+}
+
+func floatRound() {
+  let first: opt Float = 1.5
+  let twin: opt Float = 1.5
+  let other: opt Float = 2.5
+  let empty: opt Float = none
+  let bare: opt Float = none
+  let plain: Float = 1.5
+  log("Float {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log("  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is 1.5}")
+  let box: Box(Float) = { inside: 1.5 }
+  let hollow: Box(Float) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {floatMaybe(on: true) is floatMaybe(on: true)} {floatMaybe(on: true) is empty} {first is floatMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Float) = { 1.5, 2.5 }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {floatReferences(a: first, b: plain)} {floatReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Float) = { 1.5, none }
+  log(
+    "  contains {list.contains(value: 1.5)} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Float = held(value: first)
+  var place: opt Float = 2.5
+  copyIn(place: place, value: first)
+  var more: List(opt Float) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func boolMaybe(on: view Bool) ret opt Bool {
+  if on {
+    ret true
+  }
+  ret none
+}
+
+func boolReferences(a: opt view Bool, b: view Bool) ret Bool {
+  ret a is b
+}
+
+func boolRound() {
+  let first: opt Bool = true
+  let twin: opt Bool = true
+  let other: opt Bool = false
+  let empty: opt Bool = none
+  let bare: opt Bool = none
+  let plain: Bool = true
+  log("Bool {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log("  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is true}")
+  let box: Box(Bool) = { inside: true }
+  let hollow: Box(Bool) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {boolMaybe(on: true) is boolMaybe(on: true)} {boolMaybe(on: true) is empty} {first is boolMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Bool) = { true, false }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {boolReferences(a: first, b: plain)} {boolReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Bool) = { true, none }
+  log(
+    "  contains {list.contains(value: true)} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Bool = held(value: first)
+  var place: opt Bool = false
+  copyIn(place: place, value: first)
+  var more: List(opt Bool) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func charMaybe(on: view Bool) ret opt Char {
+  if on {
+    ret 'x'
+  }
+  ret none
+}
+
+func charReferences(a: opt view Char, b: view Char) ret Bool {
+  ret a is b
+}
+
+func charRound() {
+  let first: opt Char = 'x'
+  let twin: opt Char = 'x'
+  let other: opt Char = 'y'
+  let empty: opt Char = none
+  let bare: opt Char = none
+  let plain: Char = 'x'
+  log("Char {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log("  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is 'x'}")
+  let box: Box(Char) = { inside: 'x' }
+  let hollow: Box(Char) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {charMaybe(on: true) is charMaybe(on: true)} {charMaybe(on: true) is empty} {first is charMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Char) = { 'x', 'y' }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {charReferences(a: first, b: plain)} {charReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Char) = { 'x', none }
+  log(
+    "  contains {list.contains(value: 'x')} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Char = held(value: first)
+  var place: opt Char = 'y'
+  copyIn(place: place, value: first)
+  var more: List(opt Char) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func stringMaybe(on: view Bool) ret opt String {
+  if on {
+    ret "a {1}"
+  }
+  ret none
+}
+
+func stringReferences(a: opt view String, b: view String) ret Bool {
+  ret a is b
+}
+
+func stringRound() {
+  let first: opt String = "a {1}"
+  let twin: opt String = "a {1}"
+  let other: opt String = "b {2}"
+  let empty: opt String = none
+  let bare: opt String = none
+  let plain: String = "a {1}"
+  log(
+    "String {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}"
+  )
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is "a {1}"}"
+  )
+  let box: Box(String) = { inside: "a {1}" }
+  let hollow: Box(String) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {stringMaybe(on: true) is stringMaybe(on: true)} {stringMaybe(on: true) is empty} {first is stringMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(String) = { "a {1}", "b {2}" }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {stringReferences(a: first, b: plain)} {stringReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt String) = { "a {1}", none }
+  log(
+    "  contains {list.contains(value: "a {1}")} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt String = held(value: first)
+  var place: opt String = "b {2}"
+  copyIn(place: place, value: first)
+  var more: List(opt String) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func kindMaybe(on: view Bool) ret opt Kind {
+  if on {
+    ret Kind.large
+  }
+  ret none
+}
+
+func kindReferences(a: opt view Kind, b: view Kind) ret Bool {
+  ret a is b
+}
+
+func kindRound() {
+  let first: opt Kind = Kind.large
+  let twin: opt Kind = Kind.large
+  let other: opt Kind = Kind.small
+  let empty: opt Kind = none
+  let bare: opt Kind = none
+  let plain: Kind = Kind.large
+  log("Kind {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is Kind.large}"
+  )
+  let box: Box(Kind) = { inside: Kind.large }
+  let hollow: Box(Kind) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {kindMaybe(on: true) is kindMaybe(on: true)} {kindMaybe(on: true) is empty} {first is kindMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Kind) = { Kind.large, Kind.small }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {kindReferences(a: first, b: plain)} {kindReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Kind) = { Kind.large, none }
+  log(
+    "  contains {list.contains(value: Kind.large)} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Kind = held(value: first)
+  var place: opt Kind = Kind.small
+  copyIn(place: place, value: first)
+  var more: List(opt Kind) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func noteMaybe(on: view Bool) ret opt Note {
+  if on {
+    ret noteOf(text: "a")
+  }
+  ret none
+}
+
+func noteReferences(a: opt view Note, b: view Note) ret Bool {
+  ret a is b
+}
+
+func noteRound() {
+  let first: opt Note = noteOf(text: "a")
+  let twin: opt Note = noteOf(text: "a")
+  let other: opt Note = noteOf(text: "b")
+  let empty: opt Note = none
+  let bare: opt Note = none
+  let plain: Note = noteOf(text: "a")
+  log("Note {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}")
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is noteOf(
+      text: "a"
+    )}"
+  )
+  let box: Box(Note) = { inside: noteOf(text: "a") }
+  let hollow: Box(Note) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {noteMaybe(on: true) is noteMaybe(on: true)} {noteMaybe(on: true) is empty} {first is noteMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Note) = { noteOf(text: "a"), noteOf(text: "b") }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {noteReferences(a: first, b: plain)} {noteReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Note) = { noteOf(text: "a"), none }
+  log(
+    "  contains {list.contains(value: noteOf(text: "a"))} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Note = held(value: first)
+  var place: opt Note = noteOf(text: "b")
+  copyIn(place: place, value: first)
+  var more: List(opt Note) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func listMaybe(on: view Bool) ret opt List(Int) {
+  if on {
+    ret List(Int) { 1 }
+  }
+  ret none
+}
+
+func listReferences(a: opt view List(Int), b: view List(Int)) ret Bool {
+  ret a is b
+}
+
+func listRound() {
+  let first: opt List(Int) = List(Int) { 1 }
+  let twin: opt List(Int) = List(Int) { 1 }
+  let other: opt List(Int) = List(Int) { 2 }
+  let empty: opt List(Int) = none
+  let bare: opt List(Int) = none
+  let plain: List(Int) = List(Int) { 1 }
+  log(
+    "List(Int) {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}"
+  )
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is List(Int) {
+      1
+    }}"
+  )
+  let box: Box(List(Int)) = { inside: List(Int) { 1 } }
+  let hollow: Box(List(Int)) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {listMaybe(on: true) is listMaybe(on: true)} {listMaybe(on: true) is empty} {first is listMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(List(Int)) = { List(Int) { 1 }, List(Int) { 2 } }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {listReferences(a: first, b: plain)} {listReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt List(Int)) = { List(Int) { 1 }, none }
+  log(
+    "  contains {list.contains(value: List(Int) { 1 })} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt List(Int) = held(value: first)
+  var place: opt List(Int) = List(Int) { 2 }
+  copyIn(place: place, value: first)
+  var more: List(opt List(Int)) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func pairMaybe(on: view Bool) ret opt Pair(Int) {
+  if on {
+    ret pairOf(value: 1)
+  }
+  ret none
+}
+
+func pairReferences(a: opt view Pair(Int), b: view Pair(Int)) ret Bool {
+  ret a is b
+}
+
+func pairRound() {
+  let first: opt Pair(Int) = pairOf(value: 1)
+  let twin: opt Pair(Int) = pairOf(value: 1)
+  let other: opt Pair(Int) = pairOf(value: 2)
+  let empty: opt Pair(Int) = none
+  let bare: opt Pair(Int) = none
+  let plain: Pair(Int) = pairOf(value: 1)
+  log(
+    "Pair(Int) {first is twin} {first is other} {first is empty} {empty is bare} {first is not twin}"
+  )
+  log(
+    "  plain {first is plain} {other is plain} {empty is plain} {plain is first} {first is pairOf(
+      value: 1
+    )}"
+  )
+  let box: Box(Pair(Int)) = { inside: pairOf(value: 1) }
+  let hollow: Box(Pair(Int)) = { inside: none }
+  log("  fields {box.inside is first} {box.inside is hollow.inside} {box is hollow}")
+  log(
+    "  calls {pairMaybe(on: true) is pairMaybe(on: true)} {pairMaybe(on: true) is empty} {first is pairMaybe(
+      on: true
+    )}"
+  )
+  let rows: List(Pair(Int)) = { pairOf(value: 1), pairOf(value: 2) }
+  log(
+    "  rows {rows.viewAt(index: 0) is first} {rows.viewAt(index: 1) is first} {rows.viewAt(index: 9) is empty}"
+  )
+  log("  references {sameReferences(a: first, b: twin)} {sameReferences(a: first, b: empty)}")
+  log("  and plain {pairReferences(a: first, b: plain)} {pairReferences(a: empty, b: plain)}")
+  log(
+    "  generic {sameOn(a: first, b: twin)} {sameOn(a: first, b: empty)} {sameOn(a: empty, b: bare)}"
+  )
+  let list: List(opt Pair(Int)) = { pairOf(value: 1), none }
+  log(
+    "  contains {list.contains(value: pairOf(value: 1))} {list.contains(value: other)} {list.contains(
+      value: none
+    )}"
+  )
+  if let index: Int = list.indexOf(value: none) {
+    log(
+      "  none is row {index}, the first {list.indexOf(value: twin)}, another {list.indexOf(
+        value: other
+      )}"
+    )
+  }
+  let mine: opt Pair(Int) = held(value: first)
+  var place: opt Pair(Int) = pairOf(value: 2)
+  copyIn(place: place, value: first)
+  var more: List(opt Pair(Int)) = {}
+  put(list: more, value: first)
+  put(list: more, value: empty)
+  log("  passed on {mine is first} {place is first} {more is list}")
+  copyIn(place: place, value: empty)
+  log("  and none {place is empty} {first is twin}")
+}
+
+func main() {
+  intRound()
+  uint8Round()
+  floatRound()
+  boolRound()
+  charRound()
+  stringRound()
+  kindRound()
+  noteRound()
+  listRound()
+  pairRound()
+  # a `none` is not a 0
+  log("{zeroOrNone(on: true) is 0} {zeroOrNone(on: false) is 0} {0 is zeroOrNone(on: false)}")
+}

@@ -1032,6 +1032,14 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
               bool num = str_eq_cstr(cb, "Int") || str_eq_cstr(cb, "Int64") ||
                   str_eq_cstr(cb, "Float") || str_eq_cstr(cb, "Float32") || str_eq_cstr(cb, "Float64") ||
                   str_eq_cstr(cb, "Bool") || str_eq_cstr(cb, "Char") || str_eq_cstr(cb, "Char32");
+              // A T that is itself an optional is passed by its address, whatever it
+              // holds: `view T` of one is a `const rae_opt_X*`, `mod T` a `rae_opt_X*`
+              // (c_type_parameter_is_optional).
+              if (arg->is_opt && (tmp.is_view || tmp.is_mod) && rae_opt_is_struct_rep(ctx, arg)) {
+                  if (tmp.is_view && !tmp.is_mod) fprintf(out, "const ");
+                  fprintf(out, "%s%s", rae_opt_type_name(ctx, arg), skip_ptr ? "" : "*");
+                  return true;
+              }
               if (num && tmp.is_view && !tmp.is_mod) tmp.is_view = false;
               return emit_type_ref_as_c_type(ctx, &tmp, out, skip_ptr);
           }
@@ -1066,6 +1074,17 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
 // The C type a parameter is declared with (without its name). Also used by
 // emit_parallel_loop, which re-declares a captured parameter under its own
 // type inside the outlined parallelLoop body.
+/* Is `type` a `view T` / `mod T` whose type parameter is bound to an optional
+ * here (a `List(opt Int)`'s `contains(value: view T)`)? A reference to the
+ * optional, not an `opt view` of its payload. */
+bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type) {
+    if (!type || type->is_opt || !(type->is_view || type->is_mod) || !type->parts || type->generic_args) return false;
+    const AstTypeRef* arg = ctx->generic_args;
+    for (const AstIdentifierPart* param = ctx->generic_params; param && arg; param = param->next, arg = arg->next)
+        if (str_eq(param->text, type->parts->text)) return arg->is_opt && rae_opt_is_struct_rep(ctx, arg);
+    return false;
+}
+
 void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern) {
         /* `opt view T` (`opt mod T`, `opt own T`) in a specialization is that of
          * the concrete type: as `T` it was a pointer to the optional's box */

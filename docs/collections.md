@@ -67,8 +67,9 @@ loop let note: opt view Note in notes {
 ```
 
 `opt mod Note` writes into the rows that hold something, `opt Note` copies each. A row becomes `none`, or holds
-something again, by `set`. `contains`, `indexOf` and `sort` compare, and two optionals are not compared: they are
-errors on such a list. In JSON a `none` row is `null`. (Fixtures 1635, 1637, 1638, 1639.)
+something again, by `set`. `contains` and `indexOf` compare as `is` does: two optionals are equal when both are
+`none`, or both are there and equal, and a plain value is there. `sort` orders, and `none` has no order: it is an
+error on such a list. In JSON a `none` row is `null`. (Fixtures 1635, 1637, 1638, 1639, 1645.)
 
 ## Why maps are not in core
 

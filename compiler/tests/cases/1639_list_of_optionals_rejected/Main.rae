@@ -1,16 +1,14 @@
-# What a list refuses: comparing optionals, and every copy of a Task out of one
+# What a list refuses: ordering optionals, and every copy of a Task out of one; and a match on an
+# optional
 func work(number: copy Int) ret Int {
   ret number
 }
 
 func main() {
   var numbers: List(opt Int) = { 1, none }
-  log("{numbers.contains(value: 1)}")  # ERROR
-  if let index: Int = numbers.indexOf(value: 1) {
-    # ERROR
-    log("{index}")
-  }
   numbers.sort()  # ERROR
+  let number: opt Int = 1
+  let word: String = match number { case 1 => "one", default => "other" }  # ERROR
   let optionals: List(opt Task(Int)) = { spawn work(number: 1), none }
   let tasks: List(Task(Int)) = { spawn work(number: 1) }
   loop let task: opt Task(Int) in optionals {
