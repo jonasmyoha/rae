@@ -1,0 +1,415 @@
+diff --git a/compiler/src/c_backend.c b/compiler/src/c_backend.c
+index 6040794ba..fdaa1d299 100644
+--- a/compiler/src/c_backend.c
++++ b/compiler/src/c_backend.c
+@@ -1778,7 +1778,18 @@ static _Thread_local struct { const AstExpr* expr; const AstTypeRef* type; } s_i
+ static _Thread_local int s_infer_call_count = 0;
+ static _Thread_local int s_infer_depth = 0;
+ 
++#include <time.h>
++static double pnow(void) { struct timespec ts; clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts); return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6; }
++double g_infer_ms = 0; size_t g_infer_count = 0; static int g_infer_level = 0; double g_infer_spec_ms = 0; size_t g_infer_spec = 0;
++static const AstTypeRef* infer_real(CFuncContext* ctx, const AstExpr* expr);
+ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
++    if (g_infer_level) return infer_real(ctx, expr);
++    g_infer_level = 1; double t = pnow();
++    const AstTypeRef* r = infer_real(ctx, expr);
++    t = pnow() - t; g_infer_ms += t; g_infer_count++; if (ctx->generic_params) { g_infer_spec_ms += t; g_infer_spec++; }
++    g_infer_level = 0; return r;
++}
++static const AstTypeRef* infer_real(CFuncContext* ctx, const AstExpr* expr) {
+     if (!expr) return NULL;
+     if (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL) return infer_expr_type_ref_once(ctx, expr);
+     if (s_infer_depth == 0) s_infer_call_count = 0;
+@@ -2596,6 +2607,8 @@ static void report_late_specializations(CompilerContext* ctx, size_t before, con
+   }
+ }
+ 
++extern AstDecl* g_proto_last; void proto_analyze_instance(CompilerContext* ctx, const AstFuncDecl* f, const AstTypeRef* args, const char* name);
++size_t g_proto_used, g_proto_old;
+ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
+   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
+   // body and their call sites are inlined elsewhere — emitting an empty
+@@ -2610,6 +2623,16 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
+   }
+   RAE_GROW1(g_emitted_spec_funcs, g_emitted_spec_func_count, g_emitted_spec_func_cap);
+   g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
++  const AstFuncDecl* pf = NULL;
++  if (getenv("RAE_PROTO_EMIT")) {
++    proto_analyze_instance(ctx, f, args, mangled);
++    if (g_proto_last) {
++      pf = &g_proto_last->as.func_decl;
++      tctx = (CFuncContext){.compiler_ctx = ctx, .module = m, .func_decl = pf, .func_first_let_idx = (size_t)-1};
++      c_rename_hidden_names(ctx, (AstFuncDecl*)pf);
++      g_proto_used++;
++    } else g_proto_old++;
++  }
+   // A container drop whose elements are containers calls the ELEMENT
+   // container's drop per element (Layer 5 below). That drop may be emitted
+   // later or not be forward-declared yet (a `List(List(Point))` made with
+@@ -2626,12 +2649,12 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
+               rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)args));
+     }
+   }
+-  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
+-  for (const AstParam* p = f->params; p; p = p->next) {
++  fprintf(out, "RAE_UNUSED static %s %s(", rt, mangled); emit_param_list(&tctx, pf ? pf->params : f->params, out, false); fprintf(out, ")%s {\n", c_effect_attribute(f));
++  for (const AstParam* p = pf ? pf->params : f->params; p; p = p->next) {
+       if (tctx.local_count < 256) {
+           tctx.locals[tctx.local_count] = p->name;
+           tctx.local_type_refs[tctx.local_count] = p->type;
+-          tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type));
++          tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, pf ? NULL : gp_src, pf ? NULL : args, p->type));
+           // Stage C: `own T` param — callee owns; mark for end-of-scope drop.
+           // Stage 3: `copy T` param — callee owns the deep-copied
+           // value the caller paid for; same drop responsibility.
+@@ -2796,13 +2819,13 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
+   // this is inert for all non-reflection generics.
+   const AstBlock* body_to_emit = f->body;
+   {
+-      AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
++      AstBlock* instantiated = pf ? pf->body : reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
+       if (instantiated) body_to_emit = instantiated;
+   }
+   declare_param_live_flags(&tctx, body_to_emit, out);
+   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
+   c_forget_rejected_moves(&tctx);
+-  sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
++  if (!pf) sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
+                                  tctx.moved_values, tctx.moved_value_count);
+   free(tctx.moved_values);
+   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
+@@ -3083,7 +3106,14 @@ bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl) {
+   return may_wait_spawn_on_pool(compiler->wait_graph, callee_decl, false);
+ }
+ 
++extern size_t g_proto_used, g_proto_old; static double g_spec_ms = 0; double g_disc_ms = 0; void proto_analyze_instance(CompilerContext* ctx, const AstFuncDecl* f, const AstTypeRef* args, const char* name); void proto_report(CompilerContext* ctx);
++static bool emit_module_real(CompilerContext* ctx, const AstModule* module, const char* out_path);
+ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
++  double t = pnow(); bool ok = emit_module_real(ctx, module, out_path); t = pnow() - t;
++  if (getenv("RAE_PROTO_TIMES")) { fprintf(stderr, "[proto-emit] new=%zu old=%zu\n", g_proto_used, g_proto_old); fprintf(stderr, "[proto-times] discovery_ms=%.0f backend_ms=%.0f spec_bodies_ms=%.0f infer_ms=%.0f infer_calls=%zu infer_spec_ms=%.0f infer_spec_calls=%zu specialized=%zu\n", g_disc_ms, t, g_spec_ms, g_infer_ms, g_infer_count, g_infer_spec_ms, g_infer_spec, ctx->specialized_func_count); proto_report(ctx); }
++  return ok;
++}
++static bool emit_module_real(CompilerContext* ctx, const AstModule* module, const char* out_path) {
+   if (!module) return false;
+   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
+   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
+@@ -3111,7 +3141,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const
+   #define EMIT_STAGE_SPEC_BODIES_HI 0.99
+   // Discover generic specializations by walking all function bodies
+   discovery_progress_window(EMIT_STAGE_DISCOVER_LO, EMIT_STAGE_DISCOVER_HI);
+-  collect_type_refs_module(ctx);
++  { double dt = pnow(); collect_type_refs_module(ctx); g_disc_ms += pnow() - dt; }
+ 
+   FILE* out = fopen(out_path, "w");
+   if (!out) {
+@@ -4198,7 +4228,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const
+   // this re-discovery, those nested calls go out as undeclared
+   // C functions because the prototype comes later in the output.
+   discovery_progress_window(EMIT_STAGE_REDISCOVER_LO, EMIT_STAGE_REDISCOVER_HI);
+-  collect_type_refs_module(ctx);
++  { double dt = pnow(); collect_type_refs_module(ctx); g_disc_ms += pnow() - dt; }
+   /* Every specialization is known now: the may-wait graph decides which
+    * spawns run as tasks on the scheduler (c_spawn_on_pool) */
+   may_wait_free(ctx->wait_graph);
+@@ -5098,8 +5128,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const
+           char* body = NULL;
+           size_t body_len = 0;
+           FILE* body_out = open_memstream(&body, &body_len);
++          double ps = pnow();
+           emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args,
+                                     body_out ? body_out : out);
++          g_spec_ms += pnow() - ps;
++          if (getenv("RAE_PROTO")) proto_analyze_instance(ctx, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args, rae_mangle_specialized_function(ctx, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args));
+           if (body_out) {
+               fclose(body_out);
+               emit_new_specialization_prototypes(ctx, module, &prototyped_count, out);
+diff --git a/compiler/src/diag.c b/compiler/src/diag.c
+index 93ecfc4d0..0ff3a9d56 100644
+--- a/compiler/src/diag.c
++++ b/compiler/src/diag.c
+@@ -110,7 +110,10 @@ void diag_ctx_fatal(DiagState* state, const char* message) {
+ // Global state for legacy fallback
+ static DiagState g_diag_legacy = {0};
+ 
++int g_diag_proto = 0; char g_diag_proto_text[512]; int g_diag_proto_count = 0;
+ void (diag_error)(const char* file, int line, int col, const char* message) {
++  if (g_diag_proto) { if (!g_diag_proto_text[0]) snprintf(g_diag_proto_text, sizeof g_diag_proto_text, "%s:%d:%d: %s", simplify_path(file), line, col, message); g_diag_proto_count++; return; }
++
+     diag_ctx_error(&g_diag_legacy, file, line, col, message);
+ }
+ 
+diff --git a/compiler/src/main.c b/compiler/src/main.c
+index 00347f3cf..73ba5cf91 100644
+--- a/compiler/src/main.c
++++ b/compiler/src/main.c
+@@ -2928,7 +2928,10 @@ static bool build_c_backend_output(const char* entry_file,
+       return false;
+   }
+   progress_phase(PROGRESS_SEMA);
+-  if (!sema_analyze_module(&ctx, &merged)) {
++  struct timespec ps0, ps1; clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ps0);
++  bool psok = sema_analyze_module(&ctx, &merged); clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ps1);
++  if (getenv("RAE_PROTO_TIMES")) fprintf(stderr, "[proto-times] sema_ms=%.0f arena=%zu\n", (ps1.tv_sec - ps0.tv_sec) * 1e3 + (ps1.tv_nsec - ps0.tv_nsec) / 1e6, arena_used(ctx.ast_arena));
++  if (!psok) {
+       module_graph_free(&graph);
+       arena_destroy(arena);
+       progress_end(false);
+diff --git a/compiler/src/sema.c b/compiler/src/sema.c
+index 7c0d03889..2a36bd18f 100644
+--- a/compiler/src/sema.c
++++ b/compiler/src/sema.c
+@@ -1782,8 +1782,29 @@ AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p)
+     return res;
+ }
+ 
++extern int g_proto_full; static CompilerContext* g_proto_ctx; static const AstIdentifierPart* g_proto_gp; static const AstTypeRef* g_proto_args;
++AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
++static const AstTypeRef* proto_arg(Str name) {
++    const AstTypeRef* a = g_proto_args;
++    for (const AstIdentifierPart* gp = g_proto_gp; gp && a; gp = gp->next, a = a->next) if (str_eq(gp->text, name)) return a;
++    return NULL;
++}
++static AstExpr* proto_type_expr(Arena* arena, const AstTypeRef* a, const AstExpr* like) {
++    AstExpr* id = arena_alloc(arena, sizeof *id); id->kind = AST_EXPR_IDENT; id->line = like->line; id->column = like->column;
++    id->as.ident = get_base_type_name(a);
++    if (!a->generic_args) return id;
++    AstExpr* call = arena_alloc(arena, sizeof *call); call->kind = AST_EXPR_CALL; call->line = like->line; call->column = like->column;
++    call->as.call.callee = id; AstCallArg* tail = NULL;
++    for (const AstTypeRef* g = a->generic_args; g; g = g->next) { AstCallArg* ca = arena_alloc(arena, sizeof *ca); ca->value = proto_type_expr(arena, g, like); if (tail) tail->next = ca; else call->as.call.args = ca; tail = ca; }
++    return call;
++}
+ static AstTypeRef* clone_type_ref(Arena* arena, const AstTypeRef* tr) {
+     if (!tr) return NULL;
++    if (g_proto_full && g_proto_gp) {
++        AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
++        for (const AstTypeRef* c = tr; c; c = c->next) { AstTypeRef one = *c; one.next = NULL; AstTypeRef* n = substitute_type_ref(g_proto_ctx, g_proto_gp, g_proto_args, &one); AstTypeRef* k = arena_alloc(arena, sizeof *k); *k = *n; k->next = NULL; if (!head) head = k; else tail->next = k; tail = k; }
++        return head;
++    }
+     AstTypeRef* res = arena_alloc(arena, sizeof(AstTypeRef));
+     *res = *tr;
+     /* Same rule as substitute_type_ref: an Array's count lives in the
+@@ -1863,12 +1884,15 @@ AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* g
+ }
+ 
+ static AstCallArg* clone_call_args(Arena* arena, const AstCallArg* arg);
++size_t g_proto_nodes = 0; int g_proto_full = 0;
+ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
+     if (!expr) return NULL;
++    g_proto_nodes++;
+     AstExpr* res = arena_alloc(arena, sizeof(AstExpr));
+     *res = *expr;
+     res->resolved_type = NULL;
+     res->decl_link = NULL;
++    if (g_proto_full && g_proto_gp && expr->kind == AST_EXPR_IDENT && proto_arg(expr->as.ident)) return proto_type_expr(arena, proto_arg(expr->as.ident), expr);
+     switch (expr->kind) {
+         case AST_EXPR_BINARY:
+             res->as.binary.lhs = clone_expr(arena, expr->as.binary.lhs);
+@@ -1883,8 +1907,20 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
+             break;
+         case AST_EXPR_CALL:
+             res->as.call.callee = clone_expr(arena, expr->as.call.callee);
+-            res->as.call.args = clone_call_args(arena, expr->as.call.args);
+             res->as.call.generic_args = clone_type_ref(arena, expr->as.call.generic_args);
++            bool proto_type_call = expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT && expr->as.call.callee->as.ident.len && expr->as.call.callee->as.ident.data[0] >= 'A' && expr->as.call.callee->as.ident.data[0] <= 'Z';
++            if (g_proto_full && g_proto_gp && !proto_type_call) {
++                const AstCallArg* first = expr->as.call.args; AstTypeRef* tail = NULL;
++                while (first && !res->as.call.generic_args && first->name.len == 0 && first->value && first->value->kind == AST_EXPR_IDENT && proto_arg(first->value->as.ident)) {
++                    const AstTypeRef* a = proto_arg(first->value->as.ident);
++                    AstTypeRef* k = arena_alloc(arena, sizeof *k); *k = *a; k->next = NULL;
++                    AstTypeRef* list = NULL; (void)list;
++                    if (!tail) { res->as.call.generic_args = k; tail = k; first = first->next; 
++                        while (first && first->name.len == 0 && first->value && first->value->kind == AST_EXPR_IDENT && proto_arg(first->value->as.ident)) { AstTypeRef* k2 = arena_alloc(arena, sizeof *k2); *k2 = *proto_arg(first->value->as.ident); k2->next = NULL; tail->next = k2; tail = k2; first = first->next; } }
++                }
++                res->as.call.args = clone_call_args(arena, first);
++            } else
++            res->as.call.args = clone_call_args(arena, expr->as.call.args);
+             break;
+         case AST_EXPR_MEMBER:
+             res->as.member.object = clone_expr(arena, expr->as.member.object);
+@@ -1902,6 +1938,27 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
+             /* resolved per specialization: shared, `List(T) { value }` was the
+              * first one's List in every later one */
+             res->as.collection.type = clone_type_ref(arena, expr->as.collection.type);
++            if (g_proto_full) {
++                AstCollectionElement* head = NULL; AstCollectionElement* tail = NULL;
++                for (AstCollectionElement* c = expr->as.collection.elements; c; c = c->next) {
++                    AstCollectionElement* n = arena_alloc(arena, sizeof *n); *n = *c; n->value = clone_expr(arena, c->value); n->next = NULL;
++                    if (!head) head = n; else tail->next = n; tail = n;
++                }
++                res->as.collection.elements = head;
++            }
++            break;
++        case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX:
++            if (g_proto_full) res->as.unary.operand = clone_expr(arena, expr->as.unary.operand);
++            break;
++        case AST_EXPR_LIST:
++            if (g_proto_full) {
++                AstExprList* head = NULL; AstExprList* tail = NULL;
++                for (AstExprList* c = expr->as.list; c; c = c->next) {
++                    AstExprList* n = arena_alloc(arena, sizeof *n); *n = *c; n->value = clone_expr(arena, c->value); n->next = NULL;
++                    if (!head) head = n; else tail->next = n; tail = n;
++                }
++                res->as.list = head;
++            }
+             break;
+         case AST_EXPR_OBJECT:
+             res->as.object_literal.type = clone_type_ref(arena, expr->as.object_literal.type);
+@@ -1971,6 +2028,7 @@ static AstBlock* clone_block(Arena* arena, const AstBlock* block) {
+ 
+ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
+     if (!stmt) return NULL;
++    g_proto_nodes++;
+     AstStmt* res = arena_alloc(arena, sizeof(AstStmt));
+     *res = *stmt;
+     res->next = NULL;
+@@ -2022,8 +2080,30 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
+         case AST_STMT_UNSAFE:
+             res->as.unsafe_stmt.block = clone_block(arena, stmt->as.unsafe_stmt.block);
+             break;
++        case AST_STMT_MATCH:
++            if (g_proto_full) {
++                res->as.match_stmt.binding = clone_stmt(arena, stmt->as.match_stmt.binding);
++                res->as.match_stmt.subject = clone_expr(arena, stmt->as.match_stmt.subject);
++                AstMatchCase* head = NULL; AstMatchCase* tail = NULL;
++                for (AstMatchCase* c = stmt->as.match_stmt.cases; c; c = c->next) {
++                    AstMatchCase* n = arena_alloc(arena, sizeof *n); *n = *c; n->pattern = clone_expr(arena, c->pattern); n->block = clone_block(arena, c->block); n->next = NULL;
++                    AstCasePattern* ph = NULL; AstCasePattern* pt = NULL;
++                    for (AstCasePattern* op = c->or_patterns; op; op = op->next) { AstCasePattern* np = arena_alloc(arena, sizeof *np); *np = *op; np->expr = clone_expr(arena, op->expr); np->next = NULL; if (!ph) ph = np; else pt->next = np; pt = np; }
++                    n->or_patterns = ph;
++                    if (!head) head = n; else tail->next = n; tail = n;
++                }
++                res->as.match_stmt.cases = head;
++            }
++            break;
++        case AST_STMT_DESTRUCT:
++            if (g_proto_full) res->as.destruct_stmt.call = clone_expr(arena, stmt->as.destruct_stmt.call);
++            break;
+         default: break;
+     }
++    if (g_proto_full && stmt->kind == AST_STMT_LOOP) {
++        res->as.loop_stmt.step_target = clone_expr(arena, stmt->as.loop_stmt.step_target);
++        res->as.loop_stmt.query_iterable = NULL;
++    }
+     return res;
+ }
+ 
+@@ -11919,7 +11999,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+         ctx->instantiation_stack = arena_alloc(ctx->ast_arena, sizeof(InstantiationStack));
+         ctx->instantiation_stack->head = NULL;
+     }
+-    SymbolTable symbols = {0};
++    static SymbolTable symbols;
+     s_lifecycle_symbols = &symbols;
+  size_t processed_count = 0; PointerSet* processed = pointer_set_create();  /* grows: no cap (one of 8192, left from the array it replaced, made a program past 8192 declarations re-check the rest forever) */
+     AstDecl* d = module->decls;
+@@ -12034,6 +12114,109 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
+     return !module->had_error;
+ }
+ 
++#include <time.h>
++static double proto_now(void) { struct timespec ts; clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts); return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6; }
++extern int g_diag_proto; extern char g_diag_proto_text[512]; extern int g_diag_proto_count;
++static double g_proto_clone_ms, g_proto_sema_ms; static size_t g_proto_count, g_proto_total_nodes, g_proto_bytes, g_proto_bad; 
++static void cov_block(const AstBlock* b, int w);
++AstDecl* g_proto_last = NULL;
++void proto_analyze_instance(CompilerContext* ctx, const AstFuncDecl* f, const AstTypeRef* args, const char* name) {
++    g_proto_last = NULL;
++    const AstFuncDecl* tmpl = f;
++    if (f->generic_template && f->generic_template->kind == AST_DECL_FUNC) tmpl = &f->generic_template->as.func_decl;
++    if (!tmpl->generic_params || !tmpl->body || tmpl->is_extern) return;
++    AstDecl* origin = NULL;
++    for (size_t i = 0; i < ctx->all_decl_count; i++) if (ctx->all_decls[i]->kind == AST_DECL_FUNC && &ctx->all_decls[i]->as.func_decl == tmpl) { origin = (AstDecl*)ctx->all_decls[i]; break; }
++    if (!origin) return;
++    SymbolTable* symbols = s_lifecycle_symbols; AstModule* module = s_current_module;
++    double t0 = proto_now(); size_t bytes0 = arena_used(ctx->ast_arena); size_t nodes0 = g_proto_nodes;
++    AstDecl* d = arena_alloc(ctx->ast_arena, sizeof *d);
++    *d = *origin; d->next = NULL; d->resolved_type = NULL;
++    AstFuncDecl* nf = &d->as.func_decl;
++    nf->generic_params = NULL; nf->specialization_args = (AstTypeRef*)args; nf->generic_template = origin;
++    AstParam* head = NULL; AstParam* tail = NULL;
++    for (AstParam* p = tmpl->params; p; p = p->next) { AstParam* np = arena_alloc(ctx->ast_arena, sizeof *np); *np = *p; np->type = substitute_type_ref(ctx, tmpl->generic_params, args, p->type); np->next = NULL; if (!head) head = np; else tail->next = np; tail = np; }
++    nf->params = head;
++    AstReturnItem* rh = NULL; AstReturnItem* rt = NULL;
++    for (AstReturnItem* r = tmpl->returns; r; r = r->next) { AstReturnItem* nr = arena_alloc(ctx->ast_arena, sizeof *nr); *nr = *r; nr->type = substitute_type_ref(ctx, tmpl->generic_params, args, r->type); nr->next = NULL; if (!rh) rh = nr; else rt->next = nr; rt = nr; }
++    nf->returns = rh;
++    g_proto_full = 1; g_proto_ctx = ctx; g_proto_gp = tmpl->generic_params; g_proto_args = args;
++    nf->body = clone_block(ctx->ast_arena, tmpl->body);
++    g_proto_full = 0; g_proto_gp = NULL;
++    size_t nodes = g_proto_nodes - nodes0;
++    double t1 = proto_now();
++    int had = module->had_error; int errs0 = g_diag_proto_count;
++    g_diag_proto = 1; g_diag_proto_text[0] = 0;
++    const char* so = s_current_decl_origin; if (origin->origin_file) s_current_decl_origin = origin->origin_file;
++    symbol_table_push_scope(symbols);
++    const AstTypeRef* ga = args;
++    for (const AstIdentifierPart* gp = tmpl->generic_params; gp && ga; gp = gp->next, ga = ga->next) {
++        AstTypeRef one = *ga; one.next = NULL;
++        TypeInfo* ti = ga->resolved_type ? ga->resolved_type : sema_resolve_type_internal(ctx, module, symbols, &one);
++        symbol_table_define(symbols, ctx->ast_arena, gp->text, NULL, ti, false);
++    }
++    sema_analyze_decl(ctx, module, symbols, d);
++    symbol_table_pop_scope(symbols);
++    s_current_decl_origin = so;
++    g_diag_proto = 0; module->had_error = had;
++    cov_block(nf->body, 1);
++    double t2 = proto_now();
++    g_proto_clone_ms += t1 - t0; g_proto_sema_ms += t2 - t1; g_proto_count++; g_proto_total_nodes += nodes;
++    g_proto_bytes += arena_used(ctx->ast_arena) - bytes0;
++    if (g_diag_proto_count == errs0) g_proto_last = d;
++    if (g_diag_proto_count > errs0) { g_proto_bad++; if (getenv("RAE_PROTO_ERRORS")) fprintf(stderr, "[proto-error] %s: %d: %s\n", name, g_diag_proto_count - errs0, g_diag_proto_text); }
++}
++/* coverage: which expressions have a concrete type after the analysis */
++static size_t g_cov[2][64][2];  /* [0 plain, 1 instance][kind][untyped, typed] */
++static void cov_block(const AstBlock* b, int w);
++static void cov_expr(const AstExpr* e, int w) {
++    if (!e) return;
++    if (e->kind != AST_EXPR_NONE) g_cov[w][e->kind][sema_type_is_concrete(e->resolved_type, 0) ? 1 : 0]++;
++    switch (e->kind) {
++        case AST_EXPR_BINARY: cov_expr(e->as.binary.lhs, w); cov_expr(e->as.binary.rhs, w); break;
++        case AST_EXPR_UNARY: case AST_EXPR_OWN: case AST_EXPR_BOX: case AST_EXPR_UNBOX: cov_expr(e->as.unary.operand, w); break;
++        case AST_EXPR_CAST: cov_expr(e->as.cast.operand, w); break;
++        case AST_EXPR_CALL: for (const AstCallArg* a = e->as.call.args; a; a = a->next) if (a->name.len || !sema_arg_is_type_name(s_lifecycle_symbols, a->value)) cov_expr(a->value, w); break;
++        case AST_EXPR_METHOD_CALL: cov_expr(e->as.method_call.object, w); for (const AstCallArg* a = e->as.method_call.args; a; a = a->next) cov_expr(a->value, w); break;
++        case AST_EXPR_MEMBER: if (e->as.member.object->kind != AST_EXPR_IDENT || e->as.member.object->resolved_type) cov_expr(e->as.member.object, w); break;
++        case AST_EXPR_INDEX: cov_expr(e->as.index.target, w); cov_expr(e->as.index.index, w); break;
++        case AST_EXPR_OBJECT: for (const AstObjectField* f = e->as.object_literal.fields; f; f = f->next) cov_expr(f->value, w); break;
++        case AST_EXPR_INTERP: for (const AstInterpPart* p = e->as.interp.parts; p; p = p->next) cov_expr(p->value, w); break;
++        case AST_EXPR_COLLECTION_LITERAL: for (const AstCollectionElement* c = e->as.collection.elements; c; c = c->next) cov_expr(c->value, w); break;
++        case AST_EXPR_MATCH: cov_expr(e->as.match_expr.subject, w); for (const AstMatchArm* a = e->as.match_expr.arms; a; a = a->next) cov_expr(a->value, w); break;
++        default: break;
++    }
++}
++static void cov_stmt(const AstStmt* s, int w) {
++    if (!s) return;
++    switch (s->kind) {
++        case AST_STMT_LET: cov_expr(s->as.let_stmt.value, w); break;
++        case AST_STMT_EXPR:
++            if (s->as.expr_stmt && s->as.expr_stmt->kind == AST_EXPR_CALL) { for (const AstCallArg* a = s->as.expr_stmt->as.call.args; a; a = a->next) if (a->name.len || !sema_arg_is_type_name(s_lifecycle_symbols, a->value)) cov_expr(a->value, w); }
++            else if (s->as.expr_stmt && s->as.expr_stmt->kind == AST_EXPR_METHOD_CALL) { cov_expr(s->as.expr_stmt->as.method_call.object, w); for (const AstCallArg* a = s->as.expr_stmt->as.method_call.args; a; a = a->next) cov_expr(a->value, w); }
++            else cov_expr(s->as.expr_stmt, w);
++            break;
++        case AST_STMT_RET: for (const AstReturnArg* a = s->as.ret_stmt.values; a; a = a->next) cov_expr(a->value, w); break;
++        case AST_STMT_ASSIGN: cov_expr(s->as.assign_stmt.target, w); cov_expr(s->as.assign_stmt.value, w); break;
++        case AST_STMT_IF: cov_stmt(s->as.if_stmt.binding, w); cov_expr(s->as.if_stmt.condition, w); cov_block(s->as.if_stmt.then_block, w); cov_block(s->as.if_stmt.else_block, w); break;
++        case AST_STMT_LOOP: if (!s->as.loop_stmt.is_range) cov_stmt(s->as.loop_stmt.init, w); cov_expr(s->as.loop_stmt.condition, w); cov_block(s->as.loop_stmt.body, w); break;
++        case AST_STMT_MATCH: cov_expr(s->as.match_stmt.subject, w); for (const AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) cov_block(c->block, w); break;
++        case AST_STMT_DEFER: cov_block(s->as.defer_stmt.block, w); break;
++        case AST_STMT_UNSAFE: cov_block(s->as.unsafe_stmt.block, w); break;
++        default: break;
++    }
++}
++static void cov_block(const AstBlock* b, int w) { for (const AstStmt* s = b ? b->first : NULL; s; s = s->next) cov_stmt(s, w); }
++void proto_report(CompilerContext* ctx) {
++    for (size_t i = 0; i < ctx->all_decl_count; i++) { const AstDecl* d = ctx->all_decls[i]; if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args) cov_block(d->as.func_decl.body, 0); }
++    static const char* names[] = {"IDENT","INTEGER","FLOAT","STRING","CHAR","BOOL","NONE","BINARY","UNARY","CAST","CALL","MEMBER","OBJECT","MATCH","LIST","INDEX","METHOD","COLLECTION","INTERP","BOX","UNBOX","OWN"};
++    for (int w = 0; w < 2; w++) { size_t u = 0, ty = 0; for (int k = 0; k < 64; k++) { u += g_cov[w][k][0]; ty += g_cov[w][k][1]; }
++      fprintf(stderr, "[cov] %s typed=%zu untyped=%zu", w ? "instances" : "plain", ty, u);
++      for (int k = 0; k < 22; k++) if (g_cov[w][k][0]) fprintf(stderr, " kind%d:%zu/%zu", k, g_cov[w][k][0], g_cov[w][k][0] + g_cov[w][k][1]);
++      fprintf(stderr, "\n"); } (void)names;
++    fprintf(stderr, "[proto] instances=%zu nodes=%zu bytes=%zu clone_ms=%.1f sema_ms=%.1f with_errors=%zu arena=%zu\n", g_proto_count, g_proto_total_nodes, g_proto_bytes, g_proto_clone_ms, g_proto_sema_ms, g_proto_bad, arena_used(ctx->ast_arena));
++}
++
+ /* Whether a borrowed parameter of type `p` is a value at the C level (a
+  * scalar or an enum): a spawn copies those whatever their mode */
+ static bool sema_param_is_value(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstParam* p) {
