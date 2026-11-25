@@ -1925,7 +1925,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         AstTypeRef* tr = NULL;
         if (args[i] && ((args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
                          && args[i]->as.structure.generic_count > 0)
-                        || args[i]->kind == TYPE_TASK)) {
+                        || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY)) {
             // A generic instantiation argument (`decodeField` over a
             // `List(String)` field): spell the template name with its args,
             // not the mangled TypeInfo name `List_String`, so the
@@ -6307,7 +6307,12 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                          if (binding_value_type && binding_value_type->kind == TYPE_REF) {
                              binding_value_type = binding_value_type->as.ref.base;
                          }
-                         if (!type_is_same(binding_value_type, element_type)) {
+                         /* an enum's values may be read as Ints */
+                         bool int_of_enum = binding_value_type && element_type
+                             && binding_value_type->kind == TYPE_INT && element_type->kind == TYPE_INT
+                             && (binding_value_type->as.integer.enum_decl || element_type->as.integer.enum_decl)
+                             && binding_value_type->as.integer.bits == element_type->as.integer.bits;
+                         if (!int_of_enum && !type_is_same(binding_value_type, element_type)) {
                              diag_error(sema_diag_file(module), (int)binding->line,
                                         (int)binding->column,
                                         "collection loop binding type must match the collection's element type");
@@ -7108,6 +7113,20 @@ AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     if (t->kind == TYPE_TASK) {
         tr->parts->text = str_from_cstr("Task");
         if (t->as.task.base) tr->generic_args = sema_type_ref_of(ctx, t->as.task.base);
+        return tr;
+    }
+    /* `Array(T, cap: N)`: its element and its count, or the ref could not be
+     * resolved again where it is an argument of another type */
+    if (t->kind == TYPE_ARRAY && t->as.array.base) {
+        AstTypeRef* cap = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        memset(cap, 0, sizeof(*cap));
+        cap->is_value_arg = true;
+        cap->value_name = str_from_cstr("cap");
+        cap->value_folded = t->as.array.count;
+        cap->value_is_folded = true;
+        tr->parts->text = str_from_cstr("Array");
+        tr->generic_args = sema_type_ref_of(ctx, t->as.array.base);
+        tr->generic_args->next = cap;
         return tr;
     }
     if ((t->kind == TYPE_STRUCT || t->kind == TYPE_GENERIC_INST) && t->as.structure.decl) {
@@ -11248,14 +11267,14 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             }
             if (sym && sym->decl && sym->decl->kind == AST_DECL_ENUM) {
                 /* Enums are int-backed value types with no payloads. Resolve the
-                 * enum name to Int so both cast directions (`intVal as Enum` and
+                 * enum name to an Int that keeps the name (type_get_enum) so both cast directions (`intVal as Enum` and
                  * `enumVal as Int`) type-check through the numeric-cast path,
                  * enum-typed values interoperate with Int params/storage, and
                  * arithmetic on ordinals is legal. This does NOT weaken
                  * `match` exhaustiveness: that keys off the case patterns
                  * (`Enum.member`), not the subject's resolved type.
                  * (docs/match-and-sum-types.md) */
-                base = type_get_int(ctx->type_registry);
+                base = type_get_enum(ctx->type_registry, sym->decl, sym->decl->as.enum_decl.name);
             } else if (sym && sym->type) {
                 if (type_ref->generic_args && sym->decl && sym->decl->kind == AST_DECL_TYPE) {
                     /* Value generic arguments are a builtin-only capability for

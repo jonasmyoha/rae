@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.83, 2026-11-25: an enum is its own type inside another type
+
+- A `Pair(Kind)`, `IntMap(Kind)` or `StringMap(opt Kind)` (Kind an enum) can be given to a generic function, as `view`,
+  `copy` or `mod`, and comes back as what it was; `Pair(Kind)` and `Pair(Int)` can be in one program. The type checker
+  had no type for an enum, only Int.
+- A `List(Array(Int, cap: 2))`, a map or a generic struct of Arrays can be given to a generic function; it was an error
+  at line 0. `copyAt` of an `Array(Kind, cap: N)` works.
+- Functions are chosen by an enum argument: `nameOf(value: Kind)` beside `nameOf(value: Int)`.
+- Breaking: a `List(Kind)` where a `List(Int)` is wanted is an error of Rae's; it was one of the C compiler. An enum is
+  still read as an Int wherever an Int is wanted.
+- Cases 1655, 1656 and 1657.
+
 ## 0.4.82, 2026-11-25: text and `is` of a map
 
 - `log(map)`, `"{map}"` and `map.toString()` of a `StringMap(V)` or `IntMap(V)` write its pairs ordered by key,

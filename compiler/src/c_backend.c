@@ -524,13 +524,10 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
 
 /* Does `type` carry an ENUM generic argument (at any depth)?
  *
- * This is the ONE place the two manglers disagree. Sema types every enum as
- * TYPE_INT (docs/match-and-sum-types.md: enums are int-backed so both cast
- * directions and arithmetic type-check), so the TypeInfo mangler
- * (`type_mangle_name`) spells `List(Kind)` as `rae_List_int64_t` — the enum's
- * NAME is not in the TypeInfo at all — while the AstTypeRef mangler
- * (`rae_mangle_type_specialized`) reads the written name and spells it
- * `rae_List_rae_Kind`.
+ * An enum's TypeInfo is an Int that keeps the enum's name (type_get_enum), so
+ * the TypeInfo mangler and the AstTypeRef mangler both spell `List(Kind)` as
+ * `rae_List_rae_Kind`. What was written before 0.4.83, when the TypeInfo had
+ * lost the name, still asks this predicate and takes the written spelling.
  *
  * The canonical rule is that an enum KEEPS ITS NAME: `List(Kind)` is a
  * distinct C type from `List(Int)`, so its toString can name the members the
@@ -908,8 +905,9 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
        * prints the rae_View_Int64 wrapper, while callers pass and the body
        * reads an `int64_t*` for a view enum (the un-resolved path, further
        * down). Same C type from both paths. */
-      if (t->kind == TYPE_INT && ctx && ctx->module && type->parts && !type->parts->next
-          && find_enum_decl(ctx, ctx->module, type->parts->text)) {
+      if (t->kind == TYPE_INT && (t->as.integer.enum_decl
+                                  || (ctx && ctx->module && type->parts && !type->parts->next
+                                      && find_enum_decl(ctx, ctx->module, type->parts->text)))) {
           fprintf(out, "int64_t"); if (is_ptr) fprintf(out, "*");
           return true;
       }

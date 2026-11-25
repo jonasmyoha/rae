@@ -108,17 +108,34 @@ TypeInfo* type_get_int_sized(TypeRegistry* r, int bits, bool is_unsigned) {
     uint64_t h = hash_type(TYPE_INT, &key, sizeof(key));
     size_t idx = h % r->capacity;
     for (TypeInfo* curr = r->buckets[idx]; curr; curr = curr->next_interned) {
-        if (curr->kind == TYPE_INT && curr->as.integer.bits == bits && curr->as.integer.is_unsigned == is_unsigned)
+        if (curr->kind == TYPE_INT && curr->as.integer.bits == bits && curr->as.integer.is_unsigned == is_unsigned
+            && !curr->as.integer.enum_decl)
             return curr;
     }
     TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
     t->kind = TYPE_INT;
     t->as.integer.bits = bits;
     t->as.integer.is_unsigned = is_unsigned;
+    t->as.integer.enum_decl = NULL;
     /* Canonical name — "Int" for the default so diagnostics/mangled names of
      * existing code are unchanged; the C spelling otherwise. */
     if (bits == 64 && !is_unsigned) t->name = (Str){"Int", 3};
     else { const char* nm = rae_int_c_name(bits, is_unsigned); t->name = (Str){nm, strlen(nm)}; }
+    add_interned(r, h, t);
+    return t;
+}
+
+TypeInfo* type_get_enum(TypeRegistry* r, struct AstDecl* decl, Str name) {
+    uint64_t h = hash_type(TYPE_INT, &decl, sizeof(decl));
+    for (TypeInfo* curr = r->buckets[h % r->capacity]; curr; curr = curr->next_interned) {
+        if (curr->kind == TYPE_INT && curr->as.integer.enum_decl == decl) return curr;
+    }
+    TypeInfo* t = (TypeInfo*)arena_alloc(r->arena, sizeof(TypeInfo));
+    memset(t, 0, sizeof(*t));
+    t->kind = TYPE_INT;
+    t->as.integer.bits = 64;
+    t->as.integer.enum_decl = decl;
+    t->name = name;
     add_interned(r, h, t);
     return t;
 }
@@ -398,7 +415,10 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
     }
     switch (t->kind) {
         case TYPE_VOID: *pos += snprintf(buf + *pos, cap - *pos, "void"); break;
-        case TYPE_INT: *pos += snprintf(buf + *pos, cap - *pos, "%s", rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned)); break;
+        case TYPE_INT:
+            if (t->as.integer.enum_decl) *pos += snprintf(buf + *pos, cap - *pos, "rae_%.*s", (int)t->name.len, t->name.data);
+            else *pos += snprintf(buf + *pos, cap - *pos, "%s", rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned));
+            break;
         case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "float"); break;
         case TYPE_FLOAT64: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
         case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;

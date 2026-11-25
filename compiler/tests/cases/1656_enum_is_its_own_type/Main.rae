@@ -1,0 +1,90 @@
+# An enum is an Int that keeps its name: it is read as an Int wherever one is wanted, functions are
+# chosen by it, and an Array of it can be read.
+enum Kind { small, large }
+
+enum Other { one, two }
+
+type Pair(T: type) {
+  first: T
+}
+
+type Row {
+  kinds: Array(Kind, cap: 2)
+}
+
+func nameOf(value: view Kind) ret String {
+  ret "kind {value}"
+}
+
+func nameOf(value: view Int) ret String {
+  ret "int {value}"
+}
+
+func nameOf(value: view Other) ret String {
+  ret "other {value}"
+}
+
+func takesInt(value: view Int) ret Int {
+  ret value + 1
+}
+
+func takesKind(value: Kind) ret Kind {
+  ret value
+}
+
+func listSum(list: view List(Int)) ret Int {
+  ret list.length
+}
+
+func main() {
+  let kind: Kind = Kind.large
+  log(
+    "{nameOf(value: kind)} {nameOf(value: Kind.small)} {nameOf(value: 3)} {nameOf(value: Other.two)}"
+  )
+  let number: Int = kind
+  log("{number} {takesInt(value: kind)} {kind as Int} {1 as Kind}")
+  let sum: Int = kind + 1
+  log("{sum} {kind is Kind.large} {number is kind}")
+  let kinds: List(Kind) = { kind, Kind.small }
+  loop let one: Kind in kinds {
+    log(one)
+  }
+  loop let one: Int in kinds {
+    log(one)
+  }
+  if let one: Kind = kinds.copyAt(index: 0) {
+    log(one)
+  }
+  if let one: Int = kinds.copyAt(index: 0) {
+    log(one)
+  }
+  let maybe: opt Kind = Kind.large
+  if let one: view Kind = maybe {
+    match one {
+      case Kind.small {
+        log("small")
+      }
+      case Kind.large {
+        log("large")
+      }
+    }
+  }
+  var row: Row = { kinds: Array(Kind, cap: 2) }
+  row.kinds.set(index: 1, value: Kind.large)
+  if let one: Kind = row.kinds.copyAt(index: 1) {
+    log(one)
+  }
+  if let one: view Kind = row.kinds.viewAt(index: 1) {
+    log(one)
+  }
+  loop let one: Kind in row.kinds {
+    log(one)
+  }
+  let pair: Pair(Kind) = { first: Kind.large }
+  log("{pair.first} {takesKind(value: pair.first)}")
+  var counts: List(Int) = { 1, 2 }
+  counts.add(value: kind)
+  log("{counts}")
+  let word: String = match pair.first { case Kind.small => "s", case Kind.large => "l" }
+  log(word)
+}

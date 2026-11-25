@@ -1,0 +1,203 @@
+# A List, StringMap, IntMap and generic struct of an enum, an optional enum and an Array, given to
+# a `view T`, a `copy T` and a `mod T`, and back as a T; next to the same types of Int. Nothing
+# leaks.
+import collections/IntMap
+import collections/StringMap
+
+enum Kind { small, large }
+
+type Pair(T: type) {
+  first: T
+}
+
+type Box(T: type) {
+  held: T
+}
+
+type Holder {
+  pair: Pair(Kind)
+  kinds: List(Kind)
+  map: StringMap(opt Kind) = {}
+}
+
+func textOf(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func textOfCopy(T: type, value: copy T) ret String {
+  ret "{value}"
+}
+
+func back(T: type, value: copy T) ret T {
+  ret value
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b
+}
+
+func change(T: type, value: mod T, to: copy T) {
+  value = to
+}
+
+func boxed(T: type, value: copy T) ret Box(T) {
+  ret Box(T) { held: value }
+}
+
+func listOf(T: type, value: copy T) ret List(T) {
+  var list: List(T) = {}
+  list.add(value: value)
+  ret list
+}
+
+func wrapped(T: type, value: view T) ret String {
+  let list: List(T) = List(T) { value }
+  ret textOf(value: list)
+}
+
+func pairOf(T: type, value: copy T) ret Pair(T) {
+  ret Pair(T) { first: value }
+}
+
+func firstOf(T: type, this: view Pair(T)) ret T {
+  ret this.first
+}
+
+func setFirst(T: type, this: mod Pair(T), value: copy T) {
+  this.first = value
+}
+
+func firstOr(T: type, list: view List(T), fallback: copy T) ret T {
+  ret list.copyAtFallback(index: 0, fallback: fallback)
+}
+
+func both(
+  A: type
+  B: type
+  a: view A
+  b: view B
+) ret String {
+  ret "{a} {b}"
+}
+
+# every one of the functions above, for one value
+func all(T: type, value: view T) {
+  var changed: T = back(value: value)
+  change(value: changed, to: back(value: value))
+  let box: Box(T) = boxed(value: changed)
+  let list: List(T) = listOf(value: value)
+  log(
+    "{textOf(value: value)} {textOfCopy(value: value)} {same(a: changed, b: value)} {box} {textOf(
+      value: list
+    )}"
+  )
+}
+
+func rowOf(number: copy Int) ret Array(Int, cap: 2) {
+  var row: Array(Int, cap: 2) = Array(Int, cap: 2)
+  row.set(index: 0, value: number)
+  ret row
+}
+
+func kindRow() ret Array(Kind, cap: 2) {
+  var row: Array(Kind, cap: 2) = Array(Kind, cap: 2)
+  row.set(index: 1, value: Kind.large)
+  ret row
+}
+
+func enums() {
+  let list: List(Kind) = { Kind.large, Kind.small }
+  let lists: List(List(Kind)) = { list }
+  let pair: Pair(Kind) = { first: Kind.large }
+  var strings: StringMap(Kind) = {}
+  strings.set(k: "a", value: Kind.large)
+  var numbers: IntMap(Kind) = {}
+  numbers.set(k: 1, value: Kind.small)
+  all(value: Kind.large)
+  all(value: list)
+  all(value: lists)
+  all(value: pair)
+  all(value: strings)
+  all(value: numbers)
+}
+
+func optionals() {
+  let list: List(opt Kind) = { Kind.large, none }
+  let pair: Pair(opt Kind) = { first: none }
+  var strings: StringMap(opt Kind) = {}
+  strings.set(k: "a", value: Kind.large)
+  strings.set(k: "b", value: none)
+  var numbers: IntMap(opt Kind) = {}
+  numbers.set(k: 1, value: none)
+  all(value: list)
+  all(value: pair)
+  all(value: strings)
+  all(value: numbers)
+}
+
+func arrays() {
+  let list: List(Array(Int, cap: 2)) = { rowOf(number: 1), rowOf(number: 2) }
+  let pair: Pair(Array(Int, cap: 2)) = { first: rowOf(number: 3) }
+  let maybe: List(opt Array(Int, cap: 2)) = { rowOf(number: 4), none }
+  var strings: StringMap(Array(Int, cap: 2)) = {}
+  strings.set(k: "a", value: rowOf(number: 5))
+  var numbers: IntMap(Array(Kind, cap: 2)) = {}
+  numbers.set(k: 1, value: kindRow())
+  all(value: list)
+  all(value: pair)
+  all(value: maybe)
+  all(value: strings)
+  all(value: numbers)
+  let again: List(Array(Int, cap: 2)) = back(value: list)
+  if let row: view Array(Int, cap: 2) = again.viewAt(index: 1) {
+    loop let number: Int in row {
+      log(number)
+    }
+  }
+  let kinds: IntMap(Array(Kind, cap: 2)) = back(value: numbers)
+  if let row: view Array(Kind, cap: 2) = kinds.viewGet(key: 1) {
+    loop let kind: Kind in row {
+      log(kind)
+    }
+  }
+}
+
+# the same generic functions, for a type of enums and the same type of Ints
+func besideInts() {
+  let kinds: Pair(Kind) = { first: Kind.large }
+  let numbers: Pair(Int) = { first: 1 }
+  let backKinds: Pair(Kind) = back(value: kinds)
+  let backNumbers: Pair(Int) = back(value: numbers)
+  log("{textOf(value: kinds)} {textOf(value: numbers)} {backKinds} {backNumbers}")
+  log(both(a: kinds, b: numbers))
+  log(both(a: numbers, b: kinds))
+  log("{back(value: kinds)} {back(value: kinds).first} {back(value: kinds) is kinds}")
+  log("{textOf(value: back(value: kinds))} {wrapped(value: kinds)} {wrapped(value: Kind.large)}")
+}
+
+func places() {
+  var pair: Pair(Kind) = pairOf(value: Kind.large)
+  log("{pair.firstOf()} {textOf(value: pair.firstOf())}")
+  pair.setFirst(value: Kind.small)
+  var holder: Holder = { pair: pair, kinds: { Kind.large } }
+  holder.map.set(k: "x", value: Kind.large)
+  log("{textOf(value: holder.pair)} {textOf(value: holder.kinds)} {textOf(value: holder.map)}")
+  holder.pair = back(value: pairOf(value: Kind.large))
+  let pairs: List(Pair(Kind)) = { holder.pair, back(value: pair) }
+  loop let one: view Pair(Kind) in pairs {
+    log(textOf(value: one))
+  }
+  if let one: view Pair(Kind) = pairs.viewAt(index: 1) {
+    log(textOf(value: one))
+  }
+  log(textOf(value: firstOr(list: pairs, fallback: pair)))
+  log(textOf(value: firstOr(list: holder.kinds, fallback: Kind.small)))
+}
+
+func main() {
+  enums()
+  optionals()
+  arrays()
+  besideInts()
+  places()
+}

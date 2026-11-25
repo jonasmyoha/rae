@@ -107,6 +107,7 @@ struct TypeInfo {
         struct {
              int bits;         // 8, 16, 32, 64
              bool is_unsigned; // false = signed
+             struct AstDecl* enum_decl; // the enum this Int is the value of, NULL for a plain integer
         } integer;
 
         struct {
@@ -143,6 +144,9 @@ void type_registry_add_specialization(TypeRegistry* r, struct AstDecl* generic_d
 // Core Type Constructors (Interning included)
 TypeInfo* type_get_void(TypeRegistry* registry);
 TypeInfo* type_get_bool(TypeRegistry* registry);
+/* An enum is an Int (its kind is TYPE_INT, 64 bits signed) that keeps its name,
+ * so `List(Kind)` and `List(Int)` are two types */
+TypeInfo* type_get_enum(TypeRegistry* registry, struct AstDecl* decl, Str name);
 TypeInfo* type_get_int(TypeRegistry* registry);      // canonical Int (64-bit signed)
 /* Fixed-width integer (#507). bits in {8,16,32,64}. (64,false) is the canonical
  * Int and returns the same interned TypeInfo as type_get_int. */
