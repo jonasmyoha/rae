@@ -92,7 +92,10 @@ func characterSystem(
 # body is moved there. Untouched entities cost one stamp compare. A frame
 # that runs several steps writes a pose once: on its other steps a kinematic
 # body is aimed at that pose again and stopped there, instead of keeping the
-# first step's velocity and overshooting.
+# first step's velocity and overshooting. A kinematic body sent farther than the
+# world's top speed takes it in one step (a body parked far away, or brought
+# back from there) is put there at once and stopped: flown, it would cross the
+# world at that speed for many steps, pushing whatever it met.
 func physicsPushSystem(
   physics: mod Physics
   rigidBodies: mod ComponentTable(RigidBody)
@@ -116,7 +119,31 @@ func physicsPushSystem(
     let transform: view Transform3D = componentView(this: transforms, entityId: entityId)
     let pose: Transform = { position: transform.position, rotation: transform.rotation }
     unsafe {
-      if rigidBody.bodyType is BodyType.kinematicBody {
+      if rigidBody.bodyType is BodyType.kinematicBody and kinematicJump(
+        physics: physics
+        bodyId: rigidBody.bodyId
+        to: pose.position
+      ) {
+        let zero: Vec3 = { x: 0.0, y: 0.0, z: 0.0 }
+        b3Body_SetTransform(
+          bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
+          position: toB3Vector(vector: transform.position)
+          rotation: toB3Quat(quat: transform.rotation)
+        )
+        b3Body_SetLinearVelocity(
+          bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
+          linearVelocity: toB3Vector(vector: zero)
+        )
+        b3Body_SetAngularVelocity(
+          bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
+          angularVelocity: toB3Vector(vector: zero)
+        )
+        let jumped: mod RigidBody = componentMod(this: rigidBodies, entityId: entityId)
+        jumped.syncedTransformStamp = stamp
+        jumped.target = pose
+        jumped.aimed = false
+        continue
+      } else if rigidBody.bodyType is BodyType.kinematicBody {
         b3Body_SetTargetTransform(
           bodyId: toB3BodyId(bodyId: rigidBody.bodyId)
           target: toB3Transform(transform: pose)
@@ -138,6 +165,16 @@ func physicsPushSystem(
       synced.aimed = true
     }
   }
+}
+
+# Is `to` farther from the body than the world's top speed takes it in a fixed
+# step?
+func kinematicJump(physics: view Physics, bodyId: view BodyId, to: view Vec3) ret Bool {
+  var now: Vec3 = to
+  unsafe {
+    now = fromB3Transform(transform: b3Body_GetTransform(bodyId: toB3BodyId(bodyId: bodyId))).position
+  }
+  ret vlen(a: vsub(a: to, b: now)) > physics.maximumLinearSpeed * physics.fixedStep
 }
 
 # How close a kinematic body must be to its target to have arrived (m, and

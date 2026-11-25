@@ -54,6 +54,10 @@ type Physics {
   # The fixed step and its sub-steps; the accumulator holds the frame time
   # not yet stepped, capped at maxStepsPerFrame fixed steps
   fixedStep: Float
+  # The world's top speed (its WorldDef's maximumLinearSpeed): a kinematic body
+  # sent farther than this goes in a fixed step is put there, not flown
+  # (PhysicsSystems physicsPushSystem)
+  maximumLinearSpeed: Float = 400.0
   subSteps: Int
   accumulator: Float
   maxStepsPerFrame: Int
@@ -103,6 +107,7 @@ func createPhysics(def: view WorldDef, fixedStep: view Float, subSteps: view Int
       world: rae_b3CreateWorldWithTasks(def: worldDef, taskSystem: taskSystem)
       lengthUnitsPerMeter: def.lengthUnitsPerMeter
       fixedStep: fixedStep
+      maximumLinearSpeed: def.maximumLinearSpeed
       subSteps: subSteps
       accumulator: 0.0
       maxStepsPerFrame: 2
