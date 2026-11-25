@@ -1462,9 +1462,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         ctx->expected_type = saved_exp;
                         if (pp) pp = pp->next;
                     }
-                    fprintf(out, "RaeTask* __t = rae_task_new(");
-                    if (is_void) fprintf(out, "0");
-                    else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
+                    fprintf(out, "RaeTask* __t = ");
+                    c_emit_task_new(ctx, resT, callee, out);
                     // `spawn thread`: always its own OS thread (§6.6.1)
                     if (!expr->as.unary.spawn_thread && c_spawn_on_pool(ctx, callexpr->decl_link)) {
                         // A task on the scheduler's worker pool: Scheduler.rae
@@ -1476,7 +1475,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         // a readiness poller (§15): elsewhere the task stays
                         // a thread, as before
                         bool socket = may_wait_reaches_socket(ctx->compiler_ctx->wait_graph, callexpr->decl_link);
-                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; ");
+                        fprintf(out, "; __s->__task = __t; __s->__frame = NULL; ");
                         if (socket) fprintf(out, "if (RAE_SCHED_IO_SUSPENDS) { ");
                         if (resumable) fprintf(out, "rae_task_prepare_step(__t, __raestep_%s, __s); ", mangled);
                         else fprintf(out, "rae_task_prepare(__t, __raespawn_thunk_%s, __s); ", mangled);
@@ -1486,10 +1485,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     } else if (expr->as.unary.spawn_thread) {
                         // its own thread, its event-recorder lane named by the
                         // function (runtime_perf_hooks.c)
-                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start_thread(__t, __raespawn_thunk_%s, __s, \"%.*s\"); __t; })",
+                        fprintf(out, "; __s->__task = __t; __s->__frame = NULL; rae_task_start_thread(__t, __raespawn_thunk_%s, __s, \"%.*s\"); __t; })",
                                 mangled, (int)callee->name.len, callee->name.data);
                     } else {
-                        fprintf(out, "); __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
+                        fprintf(out, "; __s->__task = __t; __s->__frame = NULL; rae_task_start(__t, __raespawn_thunk_%s, __s); __t; })", mangled);
                     }
                     break;
                 }
@@ -1503,10 +1502,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 }
                 // Sequential fallback (heap/mod/view-enum args, or an
                 // unresolved callee): run synchronously into a completed task.
-                fprintf(out, "({ RaeTask* __raet = rae_task_new(");
-                if (is_void) fprintf(out, "0");
-                else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
-                fprintf(out, "); ");
+                fprintf(out, "({ RaeTask* __raet = ");
+                c_emit_task_new(ctx, resT, callee, out);
+                fprintf(out, "; ");
                 if (!is_void) { fprintf(out, "*("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, "*)__raet->result = "); }
                 /* the task keeps the result: an optional whole, a String out of
                  * the statement's pool */
@@ -1547,11 +1545,17 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                  * temporary (`log(task.get())`, boxed to Any) is freed at
                  * the statement's flush instead of leaking */
                 bool string_result = resT->kind == TYPE_STRING;
+                /* what owns memory is moved out, once */
+                bool moves = c_task_result_owns(ctx, sema_type_ref_of(ctx->compiler_ctx, resT));
                 if (string_result) fprintf(out, "rae_string_pool_register_owned(");
                 fprintf(out, "(*(");
                 emit_type_info_as_c_type(ctx, resT, out);
-                fprintf(out, "*)rae_task_await(");
+                fprintf(out, moves ? "*)rae_task_take(" : "*)rae_task_await(");
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
+                if (moves) {
+                    fprintf(out, ", ");
+                    emit_c_source_location(ctx, expr, out);
+                }
                 fprintf(out, "))");
                 if (string_result) fprintf(out, ")");
             }
@@ -1587,8 +1591,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 int id = ctx->temp_counter++;
                 fprintf(out, "(__extension__ ({ RaeTask* __tt%d = (", id);
                 emit_expr(ctx, expr->as.method_call.object, out, PREC_LOWEST, false, false);
-                fprintf(out, "); %s __tr%d = {0}; if (rae_task_claim(__tt%d)) { __tr%d.has = 1; __tr%d.value = *(",
-                        rae_opt_type_name(ctx, &opt_ref), id, id, id, id);
+                fprintf(out, "); %s __tr%d = {0}; if (rae_task_claim(__tt%d)) { ", rae_opt_type_name(ctx, &opt_ref), id, id);
+                if (resT && resT->kind == TYPE_OPT) fprintf(out, "__tr%d = *(", id);
+                else fprintf(out, "__tr%d.has = 1; __tr%d.value = *(", id, id);
                 emit_type_info_as_c_type(ctx, resT, out);
                 fprintf(out, "*)rae_task_await(__tt%d); } __tr%d; }))", id, id);
                 break;

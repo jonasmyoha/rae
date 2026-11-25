@@ -66,7 +66,9 @@ typedef struct {
   _Atomic int done; /* stored by the worker after the result (a release); read
                        by isDone/tryGet on the owner's thread (an acquire) */
   int joined;     /* pthread_join called once */
-  int taken;      /* tryGet handed the result out (owner's thread only) */
+  int taken;      /* the result was handed out (owner's thread only): by tryGet, or
+                     by get when it owns memory */
+  void (*drop_result)(void* result); /* frees a result nobody took; NULL: it owns nothing */
   /* A task on the scheduler's worker pool (lib/core/Scheduler.rae) instead
    * of a thread of its own: the thunk and its arguments, run by a worker */
   int on_pool;
@@ -85,7 +87,7 @@ typedef struct {
   int64_t io_fd;
 } RaeTask;
 
-RaeTask* rae_task_new(size_t result_size);
+RaeTask* rae_task_new(size_t result_size, void (*drop_result)(void* result));
 /* Start a spawned task's thunk on a thread, or on the caller when no thread
  * can be had (runtime_threads.c) */
 void rae_task_start(RaeTask* t, void* (*thunk)(void*), void* args);
@@ -152,6 +154,9 @@ int64_t rae_ext_Parallel_workerCount(void);
  * program. */
 void rae_parallel_check_write(const void* storage, int64_t index, int64_t iteration, const char* name);
 void* rae_task_await(RaeTask* t);   /* join once; returns the result buffer */
+/* `get` of a result that owns memory: await, and the result is the caller's. A
+ * second time there is nothing left to hand out: a runtime error. */
+void* rae_task_take(RaeTask* t, const char* file, int line);
 /* Task(T).isDone(): the worker has stored its result. Never blocks. */
 static inline int rae_task_is_done(RaeTask* t) {
   return t && atomic_load_explicit(&t->done, memory_order_acquire);
@@ -164,7 +169,7 @@ static inline int rae_task_claim(RaeTask* t) {
   t->taken = 1;
   return 1;
 }
-void rae_task_drop(RaeTask* t);     /* join (if not joined) + free; scope-exit drop */
+void rae_task_drop(RaeTask* t);     /* join (if not joined) + free, its untaken result too; scope-exit drop */
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))

@@ -1,0 +1,207 @@
+# The result of a task: `get` moves one that owns memory out, once, and `tryGet` after it is none.
+# One that nobody took is freed with its task, however the task ended up dropped: each result is
+# freed exactly once, and nothing leaks. Under ThreadSanitizer too.
+import collections/StringMap
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Handle {
+  id: Int = 0
+}
+
+type Shelf {
+  task: Task(List(String))
+}
+
+func drop(this: mod Handle) {
+  if this.id > 0 {
+    log("drop {this.id}")
+  }
+}
+
+func copy(this: view Handle) ret Handle {
+  ret Handle { id: this.id + 100 }
+}
+
+func text(number: copy Int) ret String {
+  ret "text {number}"
+}
+
+func slowText(number: copy Int) ret String {
+  sleep(ms: 2)
+  ret "slow {number}"
+}
+
+func note(number: copy Int) ret Note {
+  ret Note { text: "note {number}" }
+}
+
+func words(number: copy Int) ret List(String) {
+  ret List(String) { "word {number}" }
+}
+
+func lists(number: copy Int) ret List(List(Int)) {
+  ret List(List(Int)) { List(Int) { number } }
+}
+
+func map(number: copy Int) ret StringMap(Note) {
+  var made: StringMap(Note) = {}
+  made.set(k: "key {number}", value: Note { text: "n {number}" })
+  ret made
+}
+
+func pair(number: copy Int) ret Pair(String) {
+  ret Pair(String) { first: "pair {number}" }
+}
+
+func maybe(number: copy Int) ret opt Note {
+  if number < 0 {
+    ret none
+  }
+  ret Note { text: "maybe {number}" }
+}
+
+func row(number: copy Int) ret Array(String, cap: 2) {
+  var made: Array(String, cap: 2) = Array(String, cap: 2)
+  made.set(index: 0, value: "row {number}")
+  ret made
+}
+
+func handle(number: copy Int) ret Handle {
+  ret Handle { id: number }
+}
+
+func lent(names: view List(String), number: copy Int) ret opt String {
+  ret "lent {names.length} {number}"
+}
+
+func length(text: own String) ret Int {
+  ret text.length()
+}
+
+func wait(task: view Task(Int)) {
+  loop not task.isDone() {
+    sleep(ms: 1)
+  }
+}
+
+# nobody asks for these
+func neverTaken() {
+  let a: Task(String) = spawn text(number: 1)
+  let b: Task(String) = spawn thread slowText(number: 2)
+  let c: Task(Note) = spawn note(number: 3)
+  let d: Task(List(String)) = spawn thread words(number: 4)
+  let e: Task(List(List(Int))) = spawn lists(number: 5)
+  let f: Task(StringMap(Note)) = spawn map(number: 6)
+  let g: Task(Pair(String)) = spawn thread pair(number: 7)
+  let h: Task(opt Note) = spawn maybe(number: 8)
+  let i: Task(Array(String, cap: 2)) = spawn row(number: 9)
+  let j: Task(Handle) = spawn handle(number: 10)
+  if false {
+    let late: String = a.get()
+  }
+}
+
+func taken() {
+  let a: Task(String) = spawn thread text(number: 1)
+  let b: Task(String) = spawn slowText(number: 2)
+  let c: Task(Note) = spawn note(number: 3)
+  let d: Task(List(String)) = spawn words(number: 4)
+  let e: Task(List(List(Int))) = spawn thread lists(number: 5)
+  let f: Task(StringMap(Note)) = spawn map(number: 6)
+  let g: Task(Pair(String)) = spawn pair(number: 7)
+  let h: Task(opt Note) = spawn thread maybe(number: 8)
+  let j: Task(Handle) = spawn handle(number: 20)
+  let held: opt Note = h.get()
+  log("{a.get()} {b.get()} {c.get()} {d.get()} {e.get()} {f.get()} {g.get()} {held}")
+  let owned: Handle = j.get()
+  log("owned {owned.id}")
+  let number: Task(Int) = spawn length(text: "four")
+  log("{number.get()} {number.get()}, a number may be read again")
+}
+
+func polled() {
+  let done: Task(Int) = spawn length(text: "x")
+  let a: Task(List(String)) = spawn words(number: 1)
+  wait(task: done)
+  let first: List(String) = a.get()
+  if let second: List(String) = a.tryGet() {
+    log("twice {second}")
+  } else {
+    log("{first}, then none")
+  }
+  let b: Task(opt Note) = spawn maybe(number: 2)
+  loop not b.isDone() {
+    sleep(ms: 1)
+  }
+  if let there: Note = b.tryGet() {
+    log(there.text)
+  }
+  if let there: Note = b.tryGet() {
+    log("twice")
+  }
+  let c: Task(opt Note) = spawn maybe(number: -1)
+  loop not c.isDone() {
+    sleep(ms: 1)
+  }
+  if let there: Note = c.tryGet() {
+    log("wrong {there.text}")
+  }
+  let d: Task(String) = spawn slowText(number: 3)
+  if let early: String = d.tryGet() {
+    log(early)
+  } else {
+    log(d.get())
+  }
+}
+
+func places() {
+  var tasks: List(Task(List(String))) = {}
+  loop var i: Int = 0, i < 4, ++i {
+    tasks.add(value: spawn words(number: i))
+  }
+  if let task: view Task(List(String)) = tasks.viewAt(index: 1) {
+    let got: List(String) = task.get()
+    log("{got}")
+  }
+  tasks.swapRemove(index: 0)
+  var maybeTask: opt Task(Note) = spawn note(number: 1)
+  maybeTask = none
+  let shelf: Shelf = { task: spawn words(number: 8) }
+  let other: Shelf = { task: spawn words(number: 9) }
+  let fromField: List(String) = other.task.get()
+  log("{fromField}")
+  var task: Task(List(String)) = spawn words(number: 10)
+  task = spawn words(number: 11)
+  let eleven: List(String) = task.get()
+  task = spawn thread words(number: 12)
+  let twelve: List(String) = task.get()
+  log("{eleven} {twelve}")
+  # as a statement: taken, and not kept
+  let unkept: Task(List(String)) = spawn words(number: 13)
+  unkept.get()
+  let handleTask: Task(Handle) = spawn handle(number: 30)
+  handleTask.get()
+  log("after the statement")
+  let names: List(String) = { "a {1}" }
+  taskScope {
+    let one: Task(opt String) = spawn lent(names: names, number: 1)
+    let two: Task(opt String) = spawn lent(names: names, number: 2)
+    let got: opt String = two.get()
+    log("{got}")
+  }
+}
+
+func main() {
+  neverTaken()
+  log("never taken")
+  taken()
+  polled()
+  places()
+}

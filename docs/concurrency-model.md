@@ -151,6 +151,14 @@ failure — see *Errors*). We use `get()` rather than `join()` because it
 communicates both the wait *and* the value; `join()` traditionally implies
 wait-only.
 
+**A result that owns memory is handed out once (0.4.85).** It belongs to the
+task until `get()` moves it out, and one that nobody took is freed with the
+task. A second `get()` of the same task is an error where a path reaches it
+(`let`s, parameters, loop bindings); a task in a list or a field is not
+followed, and there the program stops with the line of the second `get()`. A
+result that owns nothing (a number, a Bool, an enum, a struct of those) may be
+read any number of times. (Fixtures 1663, 1665, stress 16.)
+
 **There is no implicit `Task(T)` → `T` coercion.** Writing `let r: Int = task`
 is rejected. Hiding a potentially long blocking wait (and potential deadlock)
 inside an ordinary assignment or function argument would defeat the whole point
@@ -176,7 +184,9 @@ if let image: Image = task.tryGet() {
 - `tryGet() ret opt T` — the result once the task has finished, `none` while
   it runs. It hands the result out **once**: the task is joined (instantly —
   it has finished) and the value is moved out exactly as `get()` would; a
-  later `tryGet()` is `none`. A heap result (a `String`, a `List`) is then
+  later `tryGet()`, or one after a `get()` that moved the result out, is
+  `none`. An optional result is its own `none`: `tryGet` of a `Task(opt T)` is
+  an `opt T`. A heap result (a `String`, a `List`) is then
   owned by the caller and dropped by it, once.
 - `tryGet()` needs a task with a result (`Task(Void)` is rejected: poll
   `isDone()`, then `get()`). A task never asked at all is still joined when
@@ -330,7 +340,10 @@ its result, then `done` with release order; `isDone()` is one acquire load
 filling the `rae_opt_<T>` struct (discovery registers `opt T`, which the
 program may never spell). `taken` is touched only on the owner's thread.
 `rae_task_await` joins once (guarded) and hands back the result buffer, which
-the `get()` site casts to `T`; `rae_task_drop` joins if needed and frees. A
+the `get()` site casts to `T`; for a `T` that owns memory the site calls
+`rae_task_take`, which also marks it taken and stops a second one.
+`rae_task_drop` joins if needed and frees, an untaken result through the
+`drop_result` the spawn gave the task (`c_task_result.c`). A
 `view`/`mod Task(T)` parameter is a `RaeTask**` (a reference like any other). There is **no** running/failed
 status and **no** failure propagation yet (§8 stays open). A `Task` inside a
 struct or a `List(Task(T))` (fixture 646) is not cascade-dropped — the owner

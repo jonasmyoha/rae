@@ -4899,6 +4899,20 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   emit_json_scan_wrappers(ctx, out);
   emit_scheduler_hooks(ctx, out);
 
+  {
+      char* drops = NULL;
+      size_t drops_len = 0;
+      size_t drops_prototyped = ctx->specialized_func_count;
+      FILE* drops_out = open_memstream(&drops, &drops_len);
+      if (drops_out) {
+          c_emit_task_drops(ctx, module, drops_out);
+          fclose(drops_out);
+          emit_new_specialization_prototypes(ctx, module, &drops_prototyped, out);
+          if (drops) fwrite(drops, 1, drops_len, out);
+          free(drops);
+      }
+  }
+
   // Path-1 spawn thunks: one per threadable function (all params passed by
   // value, so a worker thread safely owns its copies). pthread needs a
   // void*(*)(void*); the thunk unpacks the args struct, runs the function,

@@ -1303,7 +1303,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
     fprintf(out, "  %s(&%s);\n", drop_name, cname);
     return;
   }
-  if (type->generic_args) {
+  if (type->generic_args && !str_eq_cstr(tbase, "Array")) {
     // A generic struct instance (Pair(String)): released through the
     // specialized rae_drop_struct_<instance> Pass A' synthesises for every
     // registered instance. Anything else generic has no helper to call.
@@ -2966,14 +2966,19 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // case: `log("iter {i}")` where the interp result is consumed by log
             // and never bound). Bindings (let/assign/ret) detach captured
             // results via `rae_string_pool_take` so this flush doesn't free them.
+            int taken = c_task_take_temp(ctx, stmt->as.expr_stmt);
             if (ctx->stmt_may_pool) {
                 fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
+                if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
             } else {
                 // Nothing in it can register a pool temporary (expr_may_pool).
                 fprintf(out, "  ");
+                if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, ";\n");
             }
             // #881: `value.drop()` (or `drop(this: value)`) on a local whose
