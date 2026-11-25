@@ -7076,6 +7076,14 @@ static bool sema_is_pending_create(const AstExpr* e) {
 
 /* An AstTypeRef naming `t` (a struct or generic instance), generic args included. */
 AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
+    /* an optional is written as its payload's type with `opt`: it has no name,
+     * and a List(opt Int) given to a `view T` became a List of nothing */
+    if (t->kind == TYPE_OPT && t->as.opt.base) {
+        AstTypeRef* payload = sema_type_ref_of(ctx, t->as.opt.base);
+        payload->is_opt = true;
+        payload->resolved_type = t;
+        return payload;
+    }
     AstTypeRef* tr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
     memset(tr, 0, sizeof(*tr));
     tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));

@@ -423,7 +423,7 @@ func describeMembers(E: type) {
 **`equals(a: x, b: y)` → `Bool`** (2026-09-22). Deep VALUE equality for any
 type, including a generic one: primitives, `Char` and `Bool` by value, `String`
 by content, enums by ordinal, structs field by field, `List(T)` element-wise
-(length first), `opt T` by presence and then the value — all recursive, so a
+(length first), `StringMap(V)` and `IntMap(V)` by their keys and values, `opt T` by presence and then the value — all recursive, so a
 struct holding a list of structs compares all the way down. A **`Ptr` or
 `Buffer` field compares by pointer IDENTITY**, not by what it points at: the
 element count is not in the type, so there is nothing to walk. A foreign

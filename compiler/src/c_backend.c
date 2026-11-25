@@ -1585,7 +1585,7 @@ const AstTypeRef* c_call_list_string_type(CFuncContext* ctx) {
 //   primitives, String, Char, Bool -> rae_ext_rae_str(X)      (the _Generic)
 //   enum                           -> rae_enum_toString_<E>((int64_t)X)
 //   user struct                    -> rae_to_str_<T>_(&X)     (generated)
-//   List(T)                        -> rae_to_str_<List(T)>_(&X) (generated, recursive)
+//   List(T), StringMap(V), IntMap(V) -> rae_to_str_<type>_(&X) (generated, recursive)
 //   opt T (struct rep)             -> X.has ? <payload rule> : "none"
 //   c_struct / Ptr / Buffer / other -> a "<Type>" placeholder, never a C error
 // `nested` is true inside a literal (a struct field, a list element): there a
@@ -1612,7 +1612,7 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "rae_enum_toString_%.*s((int64_t)(%s))", (int)base.len, base.data, cexpr);
         return;
     }
-    if ((str_eq_cstr(base, "List") && type->generic_args) || generic_struct_template(ctx, type)) {
+    if (c_has_generic_value_helpers(ctx, type)) {
         const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
         if (mangled) { fprintf(out, "rae_to_str_%s_(&(%s))", mangled, cexpr); return; }
     }
@@ -1655,8 +1655,9 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
 //   primitives, Char, Bool, enum   -> (A) == (B)          (an enum by ordinal)
 //   String                         -> rae_ext_rae_str_eq(A, B)
 //   user struct                    -> rae_eq_<T>_(&A, &B)     (generated)
-//   List(T)                        -> rae_eq_<List(T)>_(&A, &B) (generated, recursive)
+//   List(T), StringMap(V), IntMap(V) -> rae_eq_<type>_(&A, &B) (generated, recursive)
 //   opt T (struct rep)             -> presence, then the payload rule
+//   Any                            -> rae_any_eq(A, B)
 //   Ptr / Buffer                   -> pointer IDENTITY, not the pointee
 //   c_struct / Array / other       -> memcmp of the bytes
 void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type,
@@ -1677,11 +1678,15 @@ void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "rae_ext_rae_str_eq((%s), (%s))", aexpr, bexpr);
         return;
     }
+    if (str_eq_cstr(base, "Any")) {
+        fprintf(out, "rae_any_eq((%s), (%s))", aexpr, bexpr);
+        return;
+    }
     if (base.len > 0 && find_enum_decl(&lctx, module, base)) {
         fprintf(out, "((%s) == (%s))", aexpr, bexpr);
         return;
     }
-    if ((str_eq_cstr(base, "List") && type->generic_args) || generic_struct_template(ctx, type)) {
+    if (c_has_generic_value_helpers(ctx, type)) {
         const char* mangled = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)type);
         if (mangled) { fprintf(out, "rae_eq_%s_(&(%s), &(%s))", mangled, aexpr, bexpr); return; }
     }
@@ -2761,6 +2766,7 @@ bool rae_struct_value_comparable(const AstModule* module, const AstTypeDecl* td)
 static bool rae_typeref_value_comparable(const AstModule* module, const AstTypeRef* ft) {
     if (!ft || ft->is_opt || ft->is_view || ft->is_mod) return false;
     Str base = get_base_type_name(ft);
+    if (str_eq_cstr(base, "Any")) return false;  // a struct in C: compared by rae_value_equals_expr
     if (is_primitive_type(base)) return true;
     if (str_eq_cstr(base, "String")) return true;
     if (str_eq_cstr(base, "Bool") || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) return true;
@@ -3762,6 +3768,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", mangled, mangled);
       fprintf(out, "RAE_UNUSED static rae_String rae_log_text_%s_(const %s* this);\n", mangled, mangled);
   }
+  emit_map_helper_declarations(ctx, out);
   fprintf(out, "\n");
   for (size_t si = 0; si < shape_count; si++) {
       const AstTypeDecl* td = &shapes[si].decl;
@@ -3890,6 +3897,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     }
     free(done);
   }
+  emit_map_helper_definitions(ctx, module, out);
 
   // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct
   // drop fns. For every non-generic user struct that transitively

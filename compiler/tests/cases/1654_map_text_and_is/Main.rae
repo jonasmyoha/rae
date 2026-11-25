@@ -1,0 +1,156 @@
+# The text of a StringMap(V) and an IntMap(V) (`log`, interpolation, toString): its pairs ordered by
+# key. `is` and `equals`: the same keys with equal values, whatever order they were set in. As a
+# local, a parameter, a call's result, a field, an element, an optional, and in generic functions.
+import collections/IntMap
+import collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Shelf {
+  name: String = ""
+  notes: StringMap(Note) = {}
+  sizes: IntMap(opt Float) = {}
+}
+
+func numbers() ret StringMap(Int) {
+  var map: StringMap(Int) = {}
+  map.set(k: "one", value: 1)
+  map.set(k: "two", value: 2)
+  ret map
+}
+
+func textOf(map: view StringMap(Int)) ret String {
+  ret "{map}"
+}
+
+func textOfAny(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b
+}
+
+func texts() {
+  let map: StringMap(Int) = numbers()
+  log(map)
+  logS(map)
+  log(" {map} {map.toString()} {numbers()}")
+  log(numbers())
+  log("{textOf(map: map)} {textOfAny(value: map)}")
+  let empty: IntMap(String) = {}
+  log("{empty} {empty.length}")
+  var ordered: IntMap(Kind) = {}
+  ordered.set(k: 30, value: Kind.large)
+  ordered.set(k: -5, value: Kind.small)
+  ordered.set(k: 4, value: Kind.large)
+  log(ordered)
+  var words: StringMap(String) = {}
+  words.set(k: "b", value: "bee")
+  words.set(k: "a", value: "a {1}")
+  words.set(k: "", value: "none")
+  words.set(k: "ab", value: "")
+  log(words)
+  var maybe: IntMap(opt String) = {}
+  maybe.set(k: 1, value: "there")
+  maybe.set(k: 2, value: none)
+  log("{maybe} {textOfAny(value: maybe)}")
+  var lists: StringMap(List(Int)) = {}
+  lists.set(k: "l", value: List(Int) { 1, 2 })
+  log(lists)
+  var pairs: IntMap(Pair(Char)) = {}
+  pairs.set(k: 1, value: Pair(Char) { first: 'c' })
+  log(pairs)
+  var maps: StringMap(StringMap(Int)) = {}
+  maps.set(k: "inner", value: numbers())
+  log(maps)
+  let rows: List(StringMap(Int)) = { map }
+  log("{rows}")
+  var there: opt StringMap(Int) = numbers()
+  log("{there}")
+  if let held: view StringMap(Int) = there {
+    log("{held} {held is map}")
+  }
+  there = none
+  log("{there} {there is none}")
+}
+
+func comparisons() {
+  let first: StringMap(Int) = numbers()
+  var other: StringMap(Int) = {}
+  loop var i: Int = 0, i < 40, ++i {
+    other.set(k: "more {i}", value: i)
+  }
+  other.set(k: "two", value: 2)
+  other.set(k: "one", value: 1)
+  log("more keys: {first is other} {other is not first}")
+  loop var i: Int = 0, i < 40, ++i {
+    other.remove(k: "more {i}")
+  }
+  log("the same: {first is other} {first is not other} {equals(a: first, b: other)}")
+  log("the same: {same(a: first, b: other)} {numbers() is numbers()} {numbers() is other}")
+  log("the same text: {first.toString() is other.toString()}")
+  other.set(k: "two", value: 3)
+  log("another value: {first is other} {first is not other}")
+  other.remove(k: "two")
+  other.set(k: "three", value: 2)
+  log("another key: {first is other}")
+  var maybe: IntMap(opt String) = {}
+  maybe.set(k: 1, value: none)
+  let copy: IntMap(opt String) = maybe
+  let empty: IntMap(opt String) = {}
+  log("a none value: {maybe is copy} {maybe is empty}")
+  maybe.set(k: 1, value: "x")
+  log("a value: {maybe is copy}")
+  let some: opt StringMap(Int) = numbers()
+  let nothing: opt StringMap(Int) = none
+  log("optional: {some is first} {some is nothing} {nothing is none}")
+  let rows: List(StringMap(Int)) = { numbers() }
+  let equalRows: List(StringMap(Int)) = { first }
+  log("in a list: {rows is equalRows} {rows.contains(value: first)}")
+}
+
+func structs() {
+  var shelf: Shelf = { name: "s" }
+  shelf.notes.set(k: "b", value: Note { text: "bee {1}" })
+  shelf.notes.set(k: "a", value: Note { text: "a" })
+  shelf.sizes.set(k: 2, value: 1.5)
+  shelf.sizes.set(k: 1, value: none)
+  log(shelf)
+  log("{shelf.notes}")
+  log(shelf.sizes)
+  var other: Shelf = shelf
+  log("{shelf is other} {equals(a: shelf, b: other)}")
+  if let note: mod Note = other.notes.modGet(key: "a") {
+    note.text = "changed"
+  }
+  log("{shelf is other} {shelf is not other} {shelf.sizes is other.sizes}")
+}
+
+# what a generic function is given may hold optionals
+func generics() {
+  let list: List(opt Int) = { 1, none }
+  let pair: Pair(opt Int) = { first: none }
+  log("{textOfAny(value: list)} {textOfAny(value: pair)} {same(a: list, b: list)}")
+  var boxed: List(Any) = {}
+  boxed.add(value: 1)
+  boxed.add(value: "x")
+  var otherBoxed: List(Any) = {}
+  otherBoxed.add(value: 1)
+  log("{boxed is boxed} {boxed is otherBoxed}")
+}
+
+func main() {
+  texts()
+  comparisons()
+  structs()
+  generics()
+}

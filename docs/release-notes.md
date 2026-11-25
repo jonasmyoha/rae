@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.82, 2026-11-25: text and `is` of a map
+
+- `log(map)`, `"{map}"` and `map.toString()` of a `StringMap(V)` or `IntMap(V)` write its pairs ordered by key,
+  `{ "a": 1, "b": 2 }`; they were errors of the C compiler. A struct's text shows its map fields the same way; it said
+  `<StringMap>`.
+- `a is b` of two maps: the same keys with equal values, whatever order they were set in. It was an error of the C
+  compiler.
+- `is` and `equals` of two structs that hold a map compare the maps' pairs; they compared where the maps lie in memory,
+  so a struct was never equal to its own copy.
+- A `List`, map or generic struct of optionals (`List(opt Int)`) can be given to a `view T`; it was an error about a
+  `List_void`.
+- `is` of a `List(Any)`, and a struct with an `Any` field, are no longer errors of the C compiler.
+- Case 1654.
+
 ## 0.4.81, 2026-11-25: maps of optionals
 
 - `StringMap(opt V)` and `IntMap(opt V)` work for every V, tasks too. Most did not compile. A value that is `none` reads

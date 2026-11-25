@@ -304,8 +304,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         bool plain_struct = vd && vd->kind == AST_DECL_TYPE
             && !has_property(vd->as.type_decl.properties, "c_struct")
             && !vd->as.type_decl.generic_params && !tr->generic_args;
-        bool formatted = (str_eq_cstr(base, "List") && tr->generic_args)
-            || generic_struct_template(ctx->compiler_ctx, &value_type) || plain_struct;
+        bool formatted = c_has_generic_value_helpers(ctx->compiler_ctx, &value_type) || plain_struct;
         const char* mangled = formatted
             ? rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &value_type) : NULL;
         if (mangled) {
@@ -324,8 +323,8 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     }
     // A List(T): its generated toString (elements recursively). The operand
     // is captured into a temp so the formatter can take its address.
-    // A generic struct instance (Pair(String)) the same way: its generated
-    // rae_to_str_<instance>_ (c_struct_shapes.c).
+    // A map and a generic struct instance (Pair(String)) the same way: the
+    // generated rae_to_str_<instance>_ (c_map_helpers.c, c_struct_shapes.c).
     const AstTypeRef* generic_sub = NULL;
     if (tr && !tr->is_opt && tr->generic_args && !str_eq_cstr(base, "List")) {
         generic_sub = tr;
@@ -334,7 +333,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
             if (s2) generic_sub = s2;
         }
         AstTypeRef plain = *generic_sub; plain.is_view = false; plain.is_mod = false;
-        if (!generic_struct_template(ctx->compiler_ctx, &plain)) generic_sub = NULL;
+        if (!c_has_generic_value_helpers(ctx->compiler_ctx, &plain)) generic_sub = NULL;
     }
     if (tr && !tr->is_opt && ((str_eq_cstr(base, "List") && tr->generic_args) || generic_sub)) {
         const AstTypeRef* sub = tr;
@@ -1175,7 +1174,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                   && !dtd->as.type_decl.generic_params && !deep_tr->generic_args;
               AstTypeRef instance = *deep_tr;
               instance.is_view = false; instance.is_mod = false; instance.next = NULL;
-              bool is_instance = !is_list && generic_struct_template(ctx->compiler_ctx, &instance) != NULL;
+              bool is_instance = !is_list && c_has_generic_value_helpers(ctx->compiler_ctx, &instance);
               if (is_list || is_struct || is_instance) {
                   AstTypeRef plain = *deep_tr;
                   plain.is_view = false; plain.is_mod = false; plain.is_own = false; plain.is_copy = false;

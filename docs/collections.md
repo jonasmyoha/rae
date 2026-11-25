@@ -75,6 +75,10 @@ error on such a list. In JSON a `none` row is `null`. (Fixtures 1635, 1637, 1638
 (`get`, `viewGet`, `modGet` answer `none`), and `has`, `keys` and `length` say the key is there. `values` has every
 value. `get` and `values` copy, so they are an error for a map that holds tasks. (Fixtures 1651 to 1653.)
 
+The text of a map (`log(map)`, `"{map}"`) is its pairs ordered by key, `{ "a": 1, "b": 2 }`, an empty one `{ }`.
+`keys` and `values` are in the order inside the map, which no program should rely on. `a is b` of two maps: the same
+keys with equal values, whatever order they were set in. (Fixture 1654.)
+
 ## Why maps are not in core
 
 They pass none of the "core" tests: the compiler has no built-in knowledge of

@@ -425,6 +425,11 @@ typedef struct {
 } StructShape;
 size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
 const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
+/* c_map_helpers.c */
+bool c_is_map_type(CompilerContext* ctx, const AstTypeRef* type);
+bool c_has_generic_value_helpers(CompilerContext* ctx, const AstTypeRef* type);
+void emit_map_helper_declarations(CompilerContext* ctx, FILE* out);
+void emit_map_helper_definitions(CompilerContext* ctx, const AstModule* module, FILE* out);
 bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name);
 
 bool c_reserved_name(Str name);
