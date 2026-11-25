@@ -1,0 +1,29 @@
+# `get` and `values` copy out of a map, and a Task has no copy: an error for a map whose values are
+# tasks, optional tasks, or hold one.
+open collections/IntMap
+open collections/StringMap
+
+type Job {
+  task: Task(Int)
+}
+
+func work(value: view Int) ret Int {
+  ret value
+}
+
+func main() {
+  var tasks: StringMap(Task(Int)) = {}
+  tasks.set(k: "a", value: spawn work(value: 1))
+  let one: opt Task(Int) = tasks.get(k: "a")
+  let all: List(Task(Int)) = tasks.values()
+  var maybe: IntMap(opt Task(Int)) = {}
+  maybe.set(k: 1, value: spawn work(value: 2))
+  let two: opt Task(Int) = maybe.get(k: 1)
+  let every: List(opt Task(Int)) = maybe.values()
+  var jobs: StringMap(Job) = {}
+  let job: opt Job = StringMap.get(jobs, k: "a")
+  let jobList: List(Job) = values(jobs)
+  if let task: view Task(Int) = tasks.viewGet(key: "a") {
+    log(task.get())
+  }
+}

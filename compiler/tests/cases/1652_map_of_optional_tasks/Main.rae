@@ -1,0 +1,70 @@
+# Maps of tasks: read by viewGet and modGet. A task that another value replaces, that is removed, or
+# that the map still holds when it ends is joined. Nothing copies a task. Under ThreadSanitizer too.
+open Atomic
+open collections/IntMap
+open collections/StringMap
+
+func work(finished: own Atomic(Int), number: copy Int) ret Int {
+  sleep(ms: 5)
+  let done: Int = finished.fetchAdd(amount: 1)
+  ret number
+}
+
+func started(finished: view Atomic(Int), number: copy Int) ret Task(Int) {
+  ret spawn thread work(finished: finished, number: number)
+}
+
+func resultOf(task: opt view Task(Int)) ret Int {
+  if let there: view Task(Int) = task {
+    ret there.get()
+  }
+  ret -1
+}
+
+func named(finished: view Atomic(Int)) {
+  var tasks: StringMap(opt Task(Int)) = {}
+  loop var i: Int = 0, i < 10, ++i {
+    if i % 2 is 0 {
+      tasks.set(k: "task {i}", value: started(finished: finished, number: i))
+    } else {
+      tasks.set(k: "task {i}", value: none)
+    }
+  }
+  log("{tasks.length} {tasks.has(k: "task 1")}")
+  log(
+    "{resultOf(task: tasks.viewGet(key: "task 4"))} {resultOf(task: tasks.viewGet(key: "task 5"))}"
+  )
+  if let task: mod Task(Int) = tasks.modGet(key: "task 4") {
+    task = started(finished: finished, number: 14)
+  }
+  tasks.set(k: "task 2", value: none)
+  log("replaced: {resultOf(task: tasks.viewGet(key: "task 2"))}")
+  tasks.set(k: "task 1", value: started(finished: finished, number: 11))
+  tasks.remove(k: "task 0")
+  log(
+    "{resultOf(task: tasks.viewGet(key: "task 4"))} {resultOf(task: tasks.viewGet(key: "task 1"))}"
+  )
+}
+
+func numbered(finished: view Atomic(Int)) {
+  var tasks: IntMap(opt Task(Int)) = {}
+  var plain: IntMap(Task(Int)) = {}
+  loop var i: Int = 0, i < 10, ++i {
+    tasks.set(k: i, value: started(finished: finished, number: i))
+    plain.set(k: i, value: started(finished: finished, number: i))
+  }
+  tasks.set(k: 3, value: none)
+  tasks.remove(k: 4)
+  plain.remove(k: 5)
+  log("{resultOf(task: tasks.viewGet(key: 3))} {resultOf(task: tasks.viewGet(key: 9))}")
+  log("{tasks.length} {plain.length} {resultOf(task: plain.viewGet(key: 6))}")
+}
+
+func main() {
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  named(finished: finished)
+  log("finished {finished.load()} of 7")
+  numbered(finished: finished)
+  log("finished {finished.load()} of 27")
+  finished.freeAtomic()
+}

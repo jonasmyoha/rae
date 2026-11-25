@@ -153,6 +153,19 @@ static const AstTypeRef* c_raw_slot_type(CFuncContext* ctx, const AstExpr* read)
   return buffer && str_eq_cstr(get_base_type_name(buffer), "Buffer") ? buffer->generic_args : NULL;
 }
 
+/* The type of a field of such a slot (`rae_ext_rae_buf_get(...).value` of a map's
+ * entry) */
+static const AstTypeRef* c_raw_slot_field_type(CFuncContext* ctx, const AstExpr* field) {
+  const AstTypeRef* slot = field->kind == AST_EXPR_MEMBER ? c_raw_slot_type(ctx, field->as.member.object) : NULL;
+  const AstDecl* decl = slot ? find_type_decl(ctx, ctx->module, get_base_type_name(slot)) : NULL;
+  if (!decl || decl->kind != AST_DECL_TYPE) return NULL;
+  for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
+    if (!str_eq(f->name, field->as.member.member)) continue;
+    return substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, slot->generic_args, f->type);
+  }
+  return NULL;
+}
+
 /* The type `T.default()` of a type parameter has in the current specialization */
 static const AstTypeRef* c_type_parameter_default(CFuncContext* ctx, const AstExpr* value) {
   if (!value || value->kind != AST_EXPR_METHOD_CALL || value->as.method_call.args
@@ -3398,6 +3411,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ctx->local_is_mod[local_index] = false;
                     ctx->local_drop_flag[local_index] = false;  // #902: never inherit a reused slot's stale flag
                     ctx->local_moved[local_index] = false;
+                    ctx->local_struct_owns_heap[local_index] = true;  // built here: what it comes to hold is its own
                     ctx->local_count++;
                 }
                 if (!is_ref_bind) declare_live_flag(ctx, stmt->as.let_stmt.name, stmt->next, out);
@@ -4394,6 +4408,15 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     ret_slot = ret_slot->as.unary.operand;
                 const AstTypeRef* ret_slot_type =
                     is_ref_return ? c_raw_slot_type(ctx, ret_slot) : NULL;
+                /* and a field: of a slot (a map's `entry.value`) or of any place */
+                if (is_ref_return && ret_type && ret_type->is_opt && ret_slot->kind == AST_EXPR_MEMBER) {
+                    ret_slot_type = c_raw_slot_field_type(ctx, ret_slot);
+                    if (!ret_slot_type) ret_slot_type = infer_expr_type_ref(ctx, ret_slot);
+                    if (ret_slot_type && ctx->generic_params && ctx->generic_args)
+                        ret_slot_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                                            (AstTypeRef*)ret_slot_type);
+                    if (ret_slot_type && (ret_slot_type->is_view || ret_slot_type->is_mod)) ret_slot_type = NULL;
+                }
 
                 if (ret_slot_type && ret_slot_type->is_opt && rae_opt_is_struct_rep(ctx, ret_slot_type)) {
                     /* A reference to a slot that is an optional is one to its

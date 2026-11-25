@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.81, 2026-11-25: maps of optionals
+
+- `StringMap(opt V)` and `IntMap(opt V)` work for every V, tasks too. Most did not compile. A value that is `none` reads
+  as a key that is not there (`get`, `viewGet`, `modGet`); `has` and `length` say the key is there.
+- A struct local built by `{}` frees what it is given later; it leaked it.
+- Breaking: `get` and `values` of a map that holds tasks are an error: they copied the task, and the program crashed.
+  Use `viewGet` or `modGet`.
+- A program's function without parameters (`values()`) no longer takes a method call of that name (`map.values()`).
+- Cases 1651, 1652 and 1653.
+
 ## 0.4.80, 2026-11-25: which of several functions a call means
 
 - A program's function named like one of the prelude (`add(list:, value:)`, `contains(list:, value:)`) is called when

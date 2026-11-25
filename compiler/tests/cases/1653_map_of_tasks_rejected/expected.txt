@@ -1,0 +1,18 @@
+tests/cases/1653_map_of_tasks_rejected/Main.rae:17:37: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    17 |   let one: opt Task(Int) = tasks.get(k: "a")
+       |                                     ^~~~
+tests/cases/1653_map_of_tasks_rejected/Main.rae:18:42: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    18 |   let all: List(Task(Int)) = tasks.values()
+       |                                          ^~~~
+tests/cases/1653_map_of_tasks_rejected/Main.rae:21:37: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    21 |   let two: opt Task(Int) = maybe.get(k: 1)
+       |                                     ^~~~
+tests/cases/1653_map_of_tasks_rejected/Main.rae:22:48: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    22 |   let every: List(opt Task(Int)) = maybe.values()
+       |                                                ^~~~
+tests/cases/1653_map_of_tasks_rejected/Main.rae:24:35: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    24 |   let job: opt Job = StringMap.get(jobs, k: "a")
+       |                                   ^~~~
+tests/cases/1653_map_of_tasks_rejected/Main.rae:25:34: cannot copy this value out of a map (use 'viewGet'/'modGet'): it holds a Task, which is joined and freed when it is dropped, so two copies would join and free it twice; write 'own <expr>' to move it, or bind a 'view'/'mod' reference
+    25 |   let jobList: List(Job) = values(jobs)
+       |                                  ^~~~

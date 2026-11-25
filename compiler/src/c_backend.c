@@ -4643,9 +4643,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
       // Copy value per element type.
       if (elem_is_opt) {
-        if (elem_opt_struct)
+        // (an optional that owns nothing is copied with the entries above)
+        if (elem_opt_struct && elem_needs_deep)
           fprintf(out, "      rae_deep_copy_%s(&__de->value, &__se->value);\n", elem_mangled);
-        else
+        else if (!elem_opt_struct)
           fprintf(out, "      __de->value = rae_any_copy(__se->value);\n");
       } else if (elem_is_string) {
         fprintf(out, "      __de->value = rae_string_copy(__se->value);\n");

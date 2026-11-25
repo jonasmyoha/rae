@@ -1,0 +1,184 @@
+# StringMap(opt V) and IntMap(opt V). A value that is `none` reads as a key that is not there
+# (get, viewGet, modGet); `has` and `length` say the key is there. Nothing leaks.
+open collections/IntMap
+open collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Shelf {
+  notes: StringMap(opt Note) = {}
+  texts: IntMap(opt String) = {}
+}
+
+type Plain {
+  texts: List(String) = {}
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!" }
+}
+
+func textOf(note: opt view Note) ret String {
+  if let there: view Note = note {
+    ret "{there.text}"
+  }
+  ret "none"
+}
+
+func notes() {
+  var map: StringMap(opt Note) = {}
+  map.set(k: "a", value: noteOf(text: "a"))
+  map.set(k: "b", value: none)
+  let third: opt Note = noteOf(text: "c")
+  map.set(k: "c", value: third)
+  log("{map.length}: {map.has(k: "a")} {map.has(k: "b")} {map.has(k: "c")} {map.has(k: "d")}")
+  log("view: {textOf(note: map.viewGet(key: "a"))} {textOf(note: map.viewGet(key: "b"))}")
+  log("view: {textOf(note: map.viewGet(key: "c"))} {textOf(note: map.viewGet(key: "d"))}")
+  if let note: mod Note = map.modGet(key: "a") {
+    note.text = "{note.text}+"
+  }
+  if let note: mod Note = map.modGet(key: "b") {
+    log("wrong {note.text}")
+  }
+  if let note: Note = map.get(k: "a") {
+    log("copy {note.text}")
+  }
+  let missing: opt Note = map.get(k: "b")
+  log("copy {textOf(note: missing)}")
+  let same: StringMap(opt Note) = map
+  map.set(k: "a", value: none)
+  map.set(k: "b", value: noteOf(text: "b"))
+  map.remove(k: "c")
+  let held: List(opt Note) = map.values()
+  loop let note: opt view Note in held {
+    log("value {textOf(note: note)}")
+  }
+  log("{map.length} of {same.length}, the copy's {textOf(note: same.viewGet(key: "a"))}")
+}
+
+func grown() {
+  var texts: StringMap(opt String) = {}
+  var numbers: IntMap(opt String) = {}
+  loop var i: Int = 0, i < 40, ++i {
+    if i % 2 is 0 {
+      texts.set(k: "key {i}", value: "text {i}")
+      numbers.set(k: i, value: "number {i}")
+    } else {
+      texts.set(k: "key {i}", value: none)
+      numbers.set(k: i, value: none)
+    }
+  }
+  loop var i: Int = 0, i < 20, ++i {
+    texts.remove(k: "key {i}")
+    numbers.remove(k: i)
+  }
+  var found: Int = 0
+  let heldTexts: List(opt String) = texts.values()
+  loop let text: opt view String in heldTexts {
+    if let there: view String = text {
+      found = found + there.length()
+    }
+  }
+  let heldNumbers: List(opt String) = numbers.values()
+  loop let text: opt String in heldNumbers {
+    if let there: view String = text {
+      found = found + there.length()
+    }
+  }
+  log("{texts.length} {texts.keys().length} {numbers.length} {numbers.keys().length} {found}")
+  if let text: view String = texts.viewGet(key: "key 38") {
+    log(text)
+  }
+  if let text: mod String = numbers.modGet(key: 38) {
+    text = "{text}, changed"
+  }
+  if let text: String = numbers.get(k: 38) {
+    log(text)
+  }
+}
+
+func values() {
+  var counts: StringMap(opt Int) = {}
+  counts.set(k: "zero", value: 0)
+  counts.set(k: "none", value: none)
+  if let count: mod Int = counts.modGet(key: "zero") {
+    count = count + 3
+  }
+  if let count: Int = counts.get(k: "zero") {
+    log("count {count}")
+  }
+  log("is there: {counts.get(k: "none") is not none} {counts.has(k: "none")}")
+  var bytes: IntMap(opt UInt8) = {}
+  bytes.set(k: 1, value: 200)
+  bytes.set(k: 2, value: none)
+  if let byte: UInt8 = bytes.get(k: 1) {
+    log("byte {byte}, {bytes.has(k: 2)}")
+  }
+  var letters: IntMap(opt Char) = {}
+  letters.set(k: 1, value: 'x')
+  if let letter: view Char = letters.viewGet(key: 1) {
+    log("letter {letter}")
+  }
+  var kinds: StringMap(opt Kind) = {}
+  kinds.set(k: "a", value: Kind.large)
+  kinds.set(k: "b", value: none)
+  if let kind: Kind = kinds.get(k: "a") {
+    log("kind {kind}, {kinds.get(k: "b") is none}")
+  }
+  var lists: StringMap(opt List(String)) = {}
+  lists.set(k: "a", value: List(String) { "one {1}" })
+  lists.set(k: "b", value: none)
+  if let list: mod List(String) = lists.modGet(key: "a") {
+    list.add(value: "two {2}")
+  }
+  if let list: List(String) = lists.get(k: "a") {
+    log("list of {list.length}")
+  }
+  var pairs: IntMap(opt Pair(String)) = {}
+  pairs.set(k: 1, value: Pair(String) { first: "first {1}" })
+  pairs.set(k: 2, value: none)
+  if let pair: Pair(String) = pairs.get(k: 1) {
+    log("pair {pair.first}, {pairs.viewGet(key: 2) is none}")
+  }
+}
+
+func present(V: type, map: view StringMap(V)) ret Int {
+  var count: Int = 0
+  let keys: List(String) = map.keys()
+  loop let key: view String in keys {
+    if let value: view V = map.viewGet(key: key) {
+      count = count + 1
+    }
+  }
+  ret count
+}
+
+func fields() {
+  var shelf: Shelf = {}
+  shelf.notes.set(k: "a", value: noteOf(text: "a"))
+  shelf.notes.set(k: "b", value: none)
+  shelf.texts.set(k: 1, value: "text {1}")
+  shelf.texts.set(k: 2, value: none)
+  let other: Shelf = shelf
+  shelf.notes.set(k: "a", value: none)
+  log("{present(map: shelf.notes)} {present(map: other.notes)} {other.texts.length}")
+  # a struct built by `{}` frees what it holds later
+  var plain: Plain = {}
+  plain.texts.add(value: "kept {shelf.notes.length}")
+  log(plain.texts.length)
+}
+
+func main() {
+  notes()
+  grown()
+  values()
+  fields()
+}

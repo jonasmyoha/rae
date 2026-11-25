@@ -8102,8 +8102,8 @@ static void sema_check_void_value(AstModule* module, const AstExpr* expr) {
     module->had_error = true;
 }
 
-/* What a List's elements cannot do: a Task has no copy, and optionals have no
- * order. */
+/* What the elements of a List and the values of a map cannot do: a Task has no
+ * copy, and optionals have no order. */
 static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const AstExpr* expr) {
     Str name = {0};
     const AstExpr* receiver = NULL;
@@ -8118,9 +8118,28 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
     if (!receiver) return;
     bool copies = str_eq_cstr(name, "copyAtDefault") || str_eq_cstr(name, "copyAtFallback");
     bool orders = str_eq_cstr(name, "sort") || str_eq_cstr(name, "sortDesc");
-    if (!copies && !orders) return;
+    bool copies_value = str_eq_cstr(name, "get") || str_eq_cstr(name, "values");
+    if (!copies && !orders && !copies_value) return;
     TypeInfo* list = receiver->resolved_type;
     while (list && list->kind == TYPE_REF) list = list->as.ref.base;
+    if (copies_value && expr->kind == AST_EXPR_METHOD_CALL && expr->as.method_call.args
+        && receiver->kind == AST_EXPR_IDENT && expr->as.method_call.args->value) {
+        /* `StringMap.get(map, k: key)`: the map is the first argument (the
+         * receiver is the module, or the type of the same name) */
+        TypeInfo* first = expr->as.method_call.args->value->resolved_type;
+        while (first && first->kind == TYPE_REF) first = first->as.ref.base;
+        if (sema_struct_template_is(first, "StringMap") || sema_struct_template_is(first, "IntMap")) list = first;
+    }
+    if (copies_value) {
+        if ((sema_struct_template_is(list, "StringMap") || sema_struct_template_is(list, "IntMap"))
+            && list->as.structure.generic_count == 1
+            && sema_typeinfo_holds_task(symbols, list->as.structure.generic_args[0], 0)) {
+            sema_report_task_copy(module, s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module),
+                                  expr->line, expr->column, NULL,
+                                  "out of a map (use 'viewGet'/'modGet')");
+        }
+        return;
+    }
     if (!sema_struct_template_is(list, "List") || list->as.structure.generic_count != 1) return;
     const TypeInfo* element = list->as.structure.generic_args[0];
     const char* file = s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module);
@@ -8316,7 +8335,7 @@ static bool sema_fold_binary_schema(CompilerContext* ctx, AstModule* module, Sym
  * argument names. */
 static bool sema_yields_to_method(SymbolTable* symbols, const AstDecl* decl, const AstExpr* call) {
     const AstParam* first = decl->as.func_decl.params;
-    if (!first || str_eq_cstr(first->name, "this")) return false;
+    if (first && str_eq_cstr(first->name, "this")) return false;
     const TypeInfo* receiver = call->as.method_call.object->resolved_type;
     while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
     if (!receiver) return false;

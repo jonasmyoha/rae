@@ -2080,7 +2080,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && !(p->type->is_view || p->type->is_mod)
                 && a->value && a->value->kind == AST_EXPR_MEMBER) {
                 const AstTypeRef* arg_tr3 = infer_expr_type_ref(ctx, a->value);
-                if (arg_tr3 && !(arg_tr3->is_view || arg_tr3->is_mod)
+                // An `opt String` place is copied whole below (copy_arg_kind 4).
+                if (arg_tr3 && !(arg_tr3->is_view || arg_tr3->is_mod || arg_tr3->is_opt)
                     && str_eq_cstr(get_base_type_name(arg_tr3), "String")) {
                     wrap_deep_copy_arg = true;
                 }

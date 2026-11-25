@@ -71,6 +71,10 @@ something again, by `set`. `contains` and `indexOf` compare as `is` does: two op
 `none`, or both are there and equal, and a plain value is there. `sort` orders, and `none` has no order: it is an
 error on such a list. In JSON a `none` row is `null`. (Fixtures 1635, 1637, 1638, 1639, 1645.)
 
+`StringMap(opt V)` and `IntMap(opt V)` follow the same rule: a value that is `none` reads as a key that is not there
+(`get`, `viewGet`, `modGet` answer `none`), and `has`, `keys` and `length` say the key is there. `values` has every
+value. `get` and `values` copy, so they are an error for a map that holds tasks. (Fixtures 1651 to 1653.)
+
 ## Why maps are not in core
 
 They pass none of the "core" tests: the compiler has no built-in knowledge of

@@ -175,11 +175,33 @@ func get(V: type, this: view StringMap(V), k: view String) ret opt V {
   }
 }
 
-# Through viewGet, not get: get returns an owned COPY of the value, and a
-# temporary optional that is only compared to none is never released — one
-# leaked copy of a heap value per call.
+# Looks for the key, not for a value: the value of a StringMap(opt V) may be
+# `none`, and its key is there all the same.
 func has(V: type, this: view StringMap(V), k: view String) ret Bool {
-  ret viewGet(this, key: k) is not none
+  unsafe {
+    if this.cap is 0 {
+      ret false
+    }
+    let h: Int = k.hash()
+    var idx: Int = h % this.cap
+    if idx < 0 {
+      idx = -idx
+    }
+    let startIdx: Int = idx
+    loop true {
+      let entry: StringMapEntry(V) = rae_ext_rae_buf_get(buf: this.data, index: idx)
+      if not entry.occupied {
+        ret false
+      }
+      if rae_str_eq(a: entry.k, b: k) {
+        ret true
+      }
+      idx = (idx + 1) % this.cap
+      if idx is startIdx {
+        ret false
+      }
+    }
+  }
 }
 
 func remove(V: type, this: mod StringMap(V), k: view String) {
