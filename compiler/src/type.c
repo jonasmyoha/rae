@@ -104,7 +104,9 @@ const char* rae_int_c_name(int bits, bool is_unsigned) {
  * distinct type identity, mangling and layout (#507). The canonical Int is
  * (64, signed); everything below routes through here so there is one interner. */
 TypeInfo* type_get_int_sized(TypeRegistry* r, int bits, bool is_unsigned) {
-    struct { int bits; bool u; } key = { bits, is_unsigned };
+    /* No padding in a key that is hashed by its bytes: padding is whatever the
+     * stack held, so one type could hash two ways and be interned twice */
+    int64_t key = (int64_t)bits * 2 + (is_unsigned ? 1 : 0);
     uint64_t h = hash_type(TYPE_INT, &key, sizeof(key));
     size_t idx = h % r->capacity;
     for (TypeInfo* curr = r->buckets[idx]; curr; curr = curr->next_interned) {
@@ -214,7 +216,7 @@ TypeInfo* type_get_any(TypeRegistry* r) {
 
 TypeInfo* type_get_ref(TypeRegistry* r, TypeInfo* base, bool is_mod) {
     // Key: [is_mod (1 byte), base_ptr (8 bytes)]
-    struct { bool m; TypeInfo* b; } key = { is_mod, base };
+    struct { int64_t m; TypeInfo* b; } key = { is_mod ? 1 : 0, base };
     uint64_t h = hash_type(TYPE_REF, &key, sizeof(key));
     
     // We need a custom find because the generic one above was illustrative.
