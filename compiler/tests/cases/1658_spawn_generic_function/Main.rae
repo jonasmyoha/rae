@@ -1,0 +1,244 @@
+# Spawning a generic function, as a task and on a thread of its own: every kind of result, for a T
+# that is an Int, a String, a struct, a List, an enum, an optional; written types, two types, own,
+# view and copy, methods, a module's function, a lent view. Under ThreadSanitizer too.
+open Atomic
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+func toInt(T: type, value: copy T) ret Int {
+  ret 7
+}
+
+func toFloat(T: type, value: copy T) ret Float {
+  ret 2.5
+}
+
+func toText(T: type, value: copy T) ret String {
+  ret "text {value}"
+}
+
+func toLiteral(T: type, value: own T) ret String {
+  ret "literal"
+}
+
+func toNote(T: type, value: copy T) ret Note {
+  ret Note { text: "note {value}" }
+}
+
+func toWords(T: type, value: copy T) ret List(String) {
+  ret List(String) { "word {value}" }
+}
+
+func toOptional(T: type, value: copy T) ret opt String {
+  ret "maybe {value}"
+}
+
+func toNone(T: type, value: copy T) ret opt Int {
+  ret none
+}
+
+func toKind(T: type, value: copy T) ret Kind {
+  ret Kind.large
+}
+
+func back(T: type, value: copy T) ret T {
+  ret value
+}
+
+func backOptional(T: type, value: copy T) ret opt T {
+  ret value
+}
+
+func listOf(T: type, value: copy T) ret List(T) {
+  ret List(T) { value }
+}
+
+func pairOf(T: type, value: own T) ret Pair(T) {
+  ret Pair(T) { first: own value }
+}
+
+func slow(T: type, value: copy T) ret T {
+  sleep(ms: 2)
+  ret value
+}
+
+func two(
+  A: type
+  B: type
+  a: copy A
+  b: own B
+) ret String {
+  ret "{a} {b}"
+}
+
+func emptyOf(T: type, count: copy Int) ret List(T) {
+  let list: List(T) = List.create(T, cap: count)
+  ret list
+}
+
+func viewText(T: type, value: view T) ret String {
+  ret "view {value}"
+}
+
+func firstOf(T: type, this: copy Pair(T)) ret T {
+  ret this.first
+}
+
+func shown(this: copy Note, size: copy Int) ret String {
+  ret "{this.text} {size}"
+}
+
+func count(T: type, finished: own Atomic(Int), value: copy T) {
+  sleep(ms: 1)
+  let done: Int = finished.fetchAdd(amount: 1)
+}
+
+func maybeText(value: opt view String) ret String {
+  if let there: view String = value {
+    ret "{there}"
+  }
+  ret "none"
+}
+
+func ints() {
+  let int: Task(Int) = spawn toInt(value: 3)
+  let float: Task(Float) = spawn thread toFloat(value: 3)
+  let text: Task(String) = spawn toText(value: 3)
+  let literal: Task(String) = spawn thread toLiteral(value: 3)
+  let note: Task(Note) = spawn toNote(value: 3)
+  let words: Task(List(String)) = spawn thread toWords(value: 3)
+  let kind: Task(Kind) = spawn toKind(value: 3)
+  let same: Task(Int) = spawn thread back(value: 3)
+  let list: Task(List(Int)) = spawn listOf(value: 3)
+  let pair: Task(Pair(Int)) = spawn thread pairOf(value: 3)
+  log("{int.get()} {float.get()} {text.get()} {literal.get()} {note.get()} {words.get()}")
+  log("{kind.get()} {same.get()} {list.get()} {pair.get()}")
+  let maybe: Task(opt String) = spawn toOptional(value: 3)
+  let got: opt String = maybe.get()
+  let nothing: Task(opt Int) = spawn thread toNone(value: 3)
+  let none3: opt Int = nothing.get()
+  let backTask: Task(opt Int) = spawn backOptional(value: 3)
+  let three: opt Int = backTask.get()
+  log("{maybeText(value: got)} {none3} {three}")
+}
+
+func texts() {
+  let word: String = "w {1}"
+  let int: Task(Int) = spawn thread toInt(value: word)
+  let text: Task(String) = spawn toText(value: word)
+  let note: Task(Note) = spawn thread toNote(value: word)
+  let words: Task(List(String)) = spawn toWords(value: word)
+  let same: Task(String) = spawn back(value: word)
+  let list: Task(List(String)) = spawn thread listOf(value: word)
+  let pair: Task(Pair(String)) = spawn pairOf(value: word)
+  let fresh: Task(Pair(String)) = spawn thread pairOf(value: "fresh {2}")
+  log("{int.get()} {text.get()} {note.get()} {words.get()} {same.get()}")
+  log("{list.get()} {pair.get()} {fresh.get()}, still {word}")
+  let backTask: Task(opt String) = spawn thread backOptional(value: word)
+  let got: opt String = backTask.get()
+  log(maybeText(value: got))
+}
+
+func structs() {
+  let note: Note = { text: "n {1}" }
+  let text: Task(String) = spawn toText(value: note)
+  let same: Task(Note) = spawn thread back(value: note)
+  let list: Task(List(Note)) = spawn listOf(value: note)
+  let pair: Task(Pair(Note)) = spawn pairOf(value: note)
+  log("{text.get()} {same.get()} {list.get()} {pair.get()}, still {note}")
+  let numbers: List(Int) = { 1, 2 }
+  let listText: Task(String) = spawn thread toText(value: numbers)
+  let sameList: Task(List(Int)) = spawn back(value: numbers)
+  let lists: Task(List(List(Int))) = spawn listOf(value: numbers)
+  let held: Task(Pair(List(Int))) = spawn thread pairOf(value: numbers)
+  log("{listText.get()} {sameList.get()} {lists.get()} {held.get()}, still {numbers}")
+  let notes: List(Note) = { note }
+  let noteList: Task(List(Note)) = spawn back(value: notes)
+  log(noteList.get())
+  let box: Pair(Int) = { first: 4 }
+  let boxText: Task(String) = spawn thread toText(value: box)
+  let sameBox: Task(Pair(Int)) = spawn back(value: box)
+  log("{boxText.get()} {sameBox.get()}")
+}
+
+func enums() {
+  let kind: Kind = Kind.large
+  let text: Task(String) = spawn toText(value: kind)
+  let literal: Task(String) = spawn thread toText(value: Kind.small)
+  let same: Task(Kind) = spawn back(value: kind)
+  let list: Task(List(Kind)) = spawn thread listOf(value: kind)
+  let other: Task(Kind) = spawn toKind(value: kind)
+  log("{text.get()} {literal.get()} {same.get()} {list.get()} {other.get()}")
+  let maybe: opt Int = 5
+  let optional: Task(String) = spawn toText(value: maybe)
+  let optionals: Task(List(opt Int)) = spawn thread listOf(value: maybe)
+  log("{optional.get()} {optionals.get()}")
+  let letter: Task(String) = spawn toText(value: 'x')
+  let flag: Task(String) = spawn thread toText(value: true)
+  let half: Task(Float) = spawn back(value: 0.5)
+  let byte: UInt8 = 200
+  let bytes: Task(List(UInt8)) = spawn thread listOf(value: byte)
+  log("{letter.get()} {flag.get()} {half.get()} {bytes.get()}")
+}
+
+func forms() {
+  let written: Task(String) = spawn toText(Int, value: 3)
+  let both: Task(String) = spawn thread two(a: 1, b: "x {2}")
+  let empty: Task(List(String)) = spawn emptyOf(String, count: 4)
+  let none0: List(String) = empty.get()
+  log("{written.get()} {both.get()} {none0.length}")
+  let number: Task(String) = spawn viewText(value: 3)
+  let kind: Task(String) = spawn viewText(value: Kind.small)
+  log("{number.get()} {kind.get()}")
+  let notes: List(Note) = { Note { text: "n {1}" } }
+  taskScope {
+    let lent: Task(String) = spawn viewText(value: notes)
+    log(lent.get())
+  }
+  let pair: Pair(Int) = { first: 4 }
+  let first: Task(Int) = spawn pair.firstOf()
+  let note: Note = { text: "n {1}" }
+  let method: Task(String) = spawn thread note.shown(size: 3)
+  log("{first.get()} {method.get()} {note.text}")
+  let tool: Task(String) = spawn toolText(value: 5)
+  let qualified: Task(String) = spawn Tools.toolText(value: notes)
+  log("{tool.get()} {qualified.get()}")
+}
+
+func many() {
+  var tasks: List(Task(String)) = {}
+  loop var i: Int = 0, i < 20, ++i {
+    tasks.add(value: spawn slow(value: "s {i}"))
+  }
+  var length: Int = 0
+  loop let task: view Task(String) in tasks {
+    let text: String = task.get()
+    length = length + text.length()
+  }
+  let finished: Atomic(Int) = createAtomic(Int, value: 0)
+  var counts: List(Task(Void)) = {}
+  loop var i: Int = 0, i < 10, ++i {
+    counts.add(value: spawn count(finished: finished, value: i))
+    counts.add(value: spawn thread count(finished: finished, value: "t {i}"))
+  }
+  counts.clear()
+  log("{length} {finished.load()}")
+  finished.freeAtomic()
+}
+
+func main() {
+  ints()
+  texts()
+  structs()
+  enums()
+  forms()
+  many()
+}

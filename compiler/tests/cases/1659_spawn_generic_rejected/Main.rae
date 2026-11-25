@@ -1,0 +1,23 @@
+# What cannot be spawned: a generic function whose type nothing says, one that would share a List
+# with this thread, and a method of the language itself.
+func make(T: type, count: copy Int) ret List(T) {
+  let list: List(T) = List.create(T, cap: count)
+  ret list
+}
+
+func textOf(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func change(T: type, value: mod List(T)) {
+  value.clear()
+}
+
+func main() {
+  let number: Int = 3
+  var numbers: List(Int) = { 1 }
+  let list: Task(List(Int)) = spawn make(count: 3)  # ERROR
+  let text: Task(String) = spawn textOf(value: numbers)  # ERROR
+  let changed: Task(Void) = spawn change(value: numbers)  # ERROR
+  let method: Task(String) = spawn number.toString()  # ERROR
+}
