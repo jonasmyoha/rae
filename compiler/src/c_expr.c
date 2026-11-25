@@ -1152,6 +1152,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           break;
       }
       if ((expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ)
+          && c_emit_any_equality(ctx, expr, out)) break;
+      if ((expr->as.binary.op == AST_BIN_IS || expr->as.binary.op == AST_BIN_NEQ)
           && emit_optional_equality(ctx, expr, out)) break;
       // Special case: string equality — use rae_ext_rae_str_eq instead of ==
       // (and its negation for `is not`).
@@ -1187,7 +1189,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           // A `view`/`mod` struct operand is a pointer here; emit_expr
           // dereferences it to the value, which rae_eq_<T> takes by value.
           // `opt` is excluded (its emptiness is the none path above).
-          if (ltr && !ltr->is_opt
+          // A side that a call made and that owns memory is held below, and freed.
+          AstTypeRef compared = ltr ? *ltr : (AstTypeRef){0};
+          compared.is_view = false; compared.is_mod = false; compared.next = NULL;
+          bool made = (c_stmt_temp_value_owns(ctx, expr->as.binary.lhs) || c_stmt_temp_value_owns(ctx, expr->as.binary.rhs))
+              && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &compared, 0);
+          if (ltr && !ltr->is_opt && !made
               && ctx->module && rae_named_type_value_comparable(ctx->module, lbase)) {
               const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
                   &(AstTypeRef){.parts = &(AstIdentifierPart){.text = lbase}});
@@ -1242,7 +1249,13 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                           && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &plain, 0))
                           held = register_stmt_temp(ctx, &plain, true);
                       if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
-                      emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                      /* a `view List` is emitted as the pointer it is */
+                      const AstTypeRef* operand_tr = is_list && operands[side]->kind == AST_EXPR_IDENT
+                          ? infer_expr_type_ref(ctx, operands[side]) : NULL;
+                      bool list_reference = operand_tr && (operand_tr->is_view || operand_tr->is_mod);
+                      if (list_reference) fprintf(out, "*");
+                      emit_expr(ctx, operands[side], out, list_reference ? PREC_UNARY : PREC_LOWEST, false,
+                                list_reference);
                       if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
                       fprintf(out, "); ");
                       if (side == 0) emit_type_ref_as_c_type(ctx, &plain, out, false);
@@ -1481,7 +1494,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                         AstTypeRef saved_exp = ctx->expected_type;
                         if (pp && pp->type) { ctx->expected_type = *pp->type; ctx->has_expected_type = true; }
                         fprintf(out, "__s->f%d = ", k);
-                        if (str_param) {
+                        /* (`own text` is the worker's: as a copy, what was moved
+                         * in had no owner left and leaked) */
+                        if (str_param && a->value->kind != AST_EXPR_OWN) {
                             fprintf(out, "rae_string_copy((");
                             emit_expr(ctx, a->value, out, PREC_LOWEST, false, false);
                             fprintf(out, "))");

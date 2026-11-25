@@ -17,11 +17,15 @@ bool c_is_any(const AstTypeRef* type) {
   return str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny");
 }
 
-static const AstTypeRef* concrete_type(CFuncContext* ctx, const AstExpr* value) {
-  const AstTypeRef* type = infer_expr_type_ref(ctx, value);
+/* `type` as it is in this specialization */
+const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type) {
   if (type && ctx->generic_params && ctx->generic_args)
     type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   return type;
+}
+
+static const AstTypeRef* concrete_type(CFuncContext* ctx, const AstExpr* value) {
+  return c_concrete_type_ref(ctx, infer_expr_type_ref(ctx, value));
 }
 
 /* `value` as an Any: one of its own (ANY_OWNED: a place is copied), one that
@@ -136,4 +140,23 @@ void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out) {
   fprintf(out, "(RaeAny[1]){ ");
   c_emit_any(ctx, value, ANY_BORROWED, out);
   fprintf(out, " }");
+}
+
+/* `a is b` where one side is an Any: both as an Any, the same kind with the same
+ * value. False when neither side is one. */
+bool c_emit_any_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+  const AstExpr* sides[2] = { expr->as.binary.lhs, expr->as.binary.rhs };
+  bool any = false;
+  for (int side = 0; side < 2; side++) {
+    while (sides[side]->kind == AST_EXPR_BOX || sides[side]->kind == AST_EXPR_UNBOX)
+      sides[side] = sides[side]->as.unary.operand;
+    if (c_is_any(concrete_type(ctx, sides[side]))) any = true;
+  }
+  if (!any) return false;
+  fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? "((bool)(!rae_any_eq(" : "((bool)(rae_any_eq(");
+  c_emit_any(ctx, sides[0], ANY_BORROWED, out);
+  fprintf(out, ", ");
+  c_emit_any(ctx, sides[1], ANY_BORROWED, out);
+  fprintf(out, ")))");
+  return true;
 }

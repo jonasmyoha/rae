@@ -1908,7 +1908,8 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 src_opt_struct = true; opt_name_tr = &synth_opt_tr;
             }
         }
-        if (!src_opt_struct && src_tr && src_tr->is_opt
+        bool bind_is_any = c_is_any(&synth_opt_tr);  /* (in this specialization) an Any is its own `none` */
+        if (!src_opt_struct && !bind_is_any && src_tr && src_tr->is_opt
             && !(src_tr->is_view || src_tr->is_mod)
             && rae_opt_is_struct_rep(ctx, src_tr)) {
             src_opt_struct = true; opt_name_tr = src_tr;
@@ -1935,7 +1936,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(out, "    ");
         emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
         fprintf(out, " %.*s = ", (int)bind->as.let_stmt.name.len, bind->as.let_stmt.name.data);
-        if (c_is_any(bind->as.let_stmt.type)) {
+        if (bind_is_any) {
             fprintf(out, "__rae_ifopt%d;\n", ifopt_id);
         } else if (str_eq_cstr(obase, "Int") || str_eq_cstr(obase, "Int64")
             || str_eq_cstr(obase, "Char") || str_eq_cstr(obase, "Char32")) {
@@ -4358,13 +4359,15 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             const AstExpr* handed = stmt->as.ret_stmt.values ? stmt->as.ret_stmt.values->value : NULL;
             bool defer_uses = handed && handed->kind == AST_EXPR_IDENT && c_defer_mentions(ctx, handed->as.ident);
             bool returns_local_any = false;
-            bool returns_any = ctx->func_decl && ctx->func_decl->returns && c_is_any(ctx->func_decl->returns->type)
-                && !ctx->func_decl->returns->type->is_view && !ctx->func_decl->returns->type->is_mod;
+            /* (in an instance for an Any, what it returns is `T`) */
+            const AstTypeRef* handed_back = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
+            bool returns_any = handed_back && c_is_any(c_concrete_type_ref(ctx, handed_back))
+                && !handed_back->is_view && !handed_back->is_mod;
             if (returns_any && handed) {
                 const AstExpr* given = handed;
                 while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
                 int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
-                const AstTypeRef* local_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
+                const AstTypeRef* local_type = local >= 0 ? c_concrete_type_ref(ctx, ctx->local_type_refs[local]) : NULL;
                 bool parameter = local >= 0 && (size_t)local < ctx->func_first_let_idx;
                 returns_local_any = c_is_any(local_type) && !local_type->is_view && !local_type->is_mod && !defer_uses
                     && !c_local_is_slot_alias(ctx, local)

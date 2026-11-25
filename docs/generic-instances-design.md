@@ -177,41 +177,37 @@ of a `ret`, the runtime) stay what they are.
 
 ## 8. A test matrix as a stage of the suite
 
-`compiler/tools/typeMatrix.py` (a prototype, not run by the suite yet) writes one program per element type; each
+`compiler/tools/typeMatrix.py` (`make -C compiler type-matrix`, since 0.4.96) writes two programs per element type; each
 combination is a function that checks its own value:
 
-- 13 types: Int, Float, Bool, UInt8, an enum, String, a struct, List(Int), List(String), a generic struct, a map, an
-  Array of Strings, Any;
+- 15 types: Int, Float, Bool, UInt8, an enum, String, a struct with a List, one with a String, one of numbers,
+  List(Int), List(String), a generic struct, a map, an Array of Strings, Any;
 - 11 sources: a local, `own`, a call, a generic call, a method, a field, an element, a map's values, a match, a task's
   result, a literal;
 - 17 positions: a `let`, a `var` set again, a field, a field set, a list literal, `add`, a map's `set`, an optional,
   arguments by view, own, copy and generic, text, `is`, `ret`, a defer, a spawn.
 
-180 combinations a program (what Rae refuses is left out), 2 340 in all. Values: `WRONG <name>`. Leaks:
-`RAE_MEM_STATS=1` at exit. Memory errors: AddressSanitizer.
+180 combinations a program (what Rae refuses is left out). In the `plain` program the type is written; in the `generic`
+one every function has the type as `T`, the half this design is about. 5 400 in all. One build of each checks it all:
+values (`WRONG <name>`), leaks (`RAE_MEM_STATS=1` at exit), memory errors (AddressSanitizer and UBSan).
 
-**Running time**: a program is 14 400 lines of C on average. The two that compile today: Int takes 0.05 s to emit and
-1 s in all plain, 1.3 s with AddressSanitizer; the Array of Strings 8.7 s with AddressSanitizer on a machine with a load
-of 80. So the 13 programs are some 15 s of CPU plain and at most 60 to 110 s with AddressSanitizer, under 15 s of wall
-time in the ten jobs of the suite. Step 1 measures it again when they compile. As one stage it can run every time; if
-AddressSanitizer is too slow there, that half goes to the existing AddressSanitizer gate.
+**Running time**: 9 s of wall time on ten cores for the 30 programs (8 s of emitting, 46 s of C compiler and 8 s of
+running, summed over the jobs): one `-O0` build with AddressSanitizer, against one runtime object for all.
 
-Every combination once more inside a generic function (T the type) is the second half, the one this design is about: a
-second program per type, the same time again.
+`compiler/tools/type-matrix-known.txt` has what fails today, as `program function kind`. Such a function is left out of
+its program and tried beside it; a line that names something that passes is STALE and fails the stage.
 
-Its first run (two programs compile and are right, without a leak) found three bugs in today's compiler:
-
-1. the expected type of an argument goes into a generic call inside its `is` (section 1);
-2. `same(value: task.get())` makes `same` for another type than the task's (its prototype says it answers an Int);
-3. an `Any` from a generic call or a match, where a plain Any is wanted.
-
-They stay in the list of known failures until a step fixes them; that list may only get shorter.
+Its first run (two of 13 programs compiled) found, all fixed in 0.4.96: the expected type of an argument in a generic
+call inside its `is` or text; a generic call of a task's result; an Any against a String or a number, and from a generic
+call; `is` of a `view List`; a String moved into a task leaked; `make() is label` leaked; and in generic functions an
+`opt T` nobody else names, and a generic call in a list literal. What is left is the spawn inside a generic function
+(step 6): 390 combinations.
 
 ## 9. The steps
 
 In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is useful alone.
 
-1. **The matrix** as a suite stage, with its known failures listed; the three bugs above fixed where that is small.
+1. **The matrix** as a suite stage, with its known failures listed. Done (0.4.96).
 2. **The full clone**: `clone_expr` / `clone_stmt` copy every node, T written out. No behavior change.
 3. **Instances analyzed in full** in `specialize_decl`, the 13 places in `lib/` fixed, errors once and with the
    instance's name, branches of other types left out.

@@ -175,6 +175,15 @@ if [ -f tools/asan-check.sh ]; then
   stage_time "tools/asan-check.sh" "$stage_start"
   echo
 fi
+# The type matrix: every type x source x position, values, leaks and
+# AddressSanitizer (tools/typeMatrix.py, docs/generic-instances-design.md 8).
+TYPE_MATRIX=1
+if [ -f tools/typeMatrix.py ]; then
+  stage_start=$(date +%s)
+  if python3 tools/typeMatrix.py; then TYPE_MATRIX=0; fi
+  stage_time "tools/typeMatrix.py" "$stage_start"
+  echo
+fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh, docs/platform-conditional-code.md §3.4).
 TARGETS_CHECK=1
@@ -252,6 +261,7 @@ if [ "$WASM_STACK_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAIL
 if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
+if [ "$TYPE_MATRIX" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$FLOAT8_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

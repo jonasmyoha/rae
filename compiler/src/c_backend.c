@@ -1443,6 +1443,10 @@ static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInf
      * optional was an Any */
     if (ti->kind == TYPE_OPT && ti->as.opt.base && ti->as.opt.base->kind != TYPE_VOID
         && ti->as.opt.base->kind != TYPE_GENERIC_PARAM) return sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)ti);
+    /* ... and a plain type by its own: `same(value: task.get())` bound T to a
+     * type without a name, and its C function answered an int64_t */
+    if (ti->kind != TYPE_OPT && ti->kind != TYPE_GENERIC_PARAM && ti->kind != TYPE_VOID)
+        return sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)ti);
     if (ti->kind == TYPE_OPT) tr->is_opt = true;
     tr->resolved_type = (TypeInfo*)ti;
     return tr;

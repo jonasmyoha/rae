@@ -660,7 +660,9 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                     // Box(V)`) is the struct for the CONCRETE argument. When
                     // Box is named nowhere else, only this registration emits
                     // `rae_Box_rae_Holder` — without it the C did not compile.
-                    if (type && type->generic_args && ctx->generic_params && ctx->generic_args)
+                    // ... and so is an `opt T` the struct of that optional.
+                    if (type && (type->generic_args || (type->is_opt && !type->is_view && !type->is_mod))
+                        && ctx->generic_params && ctx->generic_args)
                         register_generic_type(ctx->compiler_ctx,
                             substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
                     discover_specializations_expr_impl(ctx, s->as.let_stmt.value); ctx->has_expected_type = false;

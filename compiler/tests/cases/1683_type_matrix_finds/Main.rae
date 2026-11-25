@@ -1,0 +1,123 @@
+# What the first run of the type matrix found (tools/typeMatrix.py), as one program.
+type Note {
+  text: String
+}
+
+type Holder {
+  held: Any
+}
+
+func same(T: type, value: view T) ret T {
+  ret value
+}
+
+func copied(T: type, value: view T) ret T {
+  let held: T = value
+  ret held
+}
+
+func check(at: view String, ok: view Bool) {
+  log("{at} {ok}")
+}
+
+func makeFlag() ret Bool {
+  ret true
+}
+
+func makeText() ret String {
+  ret "task {1}"
+}
+
+func makeByte() ret UInt8 {
+  ret 200
+}
+
+func isText(value: own String, text: copy String) ret Bool {
+  ret value is text
+}
+
+# a generic call inside an `is` and inside a text, where an argument wants a Bool
+func wantedOutside() {
+  let note: Note = { text: "a {1}" }
+  check(at: "is", ok: same(value: note) is note)
+  check(at: "text", ok: "{same(value: note)}".length() > 0)
+  check(at: "right", ok: note is copied(value: note))
+  check(at: "number", ok: same(value: 3) is 3)
+}
+
+func results() {
+  let flag: Task(Bool) = spawn makeFlag()
+  let wide: Task(UInt8) = spawn makeByte()
+  let text: Task(String) = spawn makeText()
+  let a: Bool = same(value: flag.get())
+  let b: UInt8 = same(value: wide.get())
+  let c: String = same(value: text.get())
+  log("{a} {b} {c}")
+}
+
+func movedIntoTask() {
+  let text: String = "moved {1}"
+  let task: Task(Bool) = spawn isText(value: own text, text: "moved 1")
+  var note: Note = { text: "field {1}" }
+  let other: Task(Bool) = spawn isText(value: own note.text, text: "field 1")
+  log("{task.get()} {other.get()}")
+}
+
+func given() ret Any {
+  ret same(value: "ret {1}")
+}
+
+func anyIsText(value: view Any) ret Bool {
+  ret value is "any {1}"
+}
+
+func anys() {
+  let one: Any = same(value: "any {1}")
+  let maybe: opt Any = same(value: "opt {1}")
+  var two: Any = same(value: 3)
+  log("{one} {maybe} {two}")
+  check(at: "any is text", ok: one is "any {1}")
+  check(at: "any is number", ok: two is 3)
+  check(at: "any is other kind", ok: two is "3")
+  check(at: "any is not", ok: one is not "b")
+  check(at: "text is any", ok: "any 1" is one)
+  check(at: "view", ok: anyIsText(value: one))
+  check(at: "opt", ok: maybe is "opt {1}")
+  two = same(value: "two {2}")
+  check(at: "set", ok: two is "two 2")
+  let list: List(Any) = [same(value: "e {1}"), same(value: 4)]
+  check(at: "element", ok: list.copyAtFallback(index: 0, fallback: "f") is "e {1}")
+  check(at: "fallback", ok: list.copyAtFallback(index: 9, fallback: "f") is "f")
+  let holder: Holder = { held: same(value: "h {1}") }
+  check(at: "field", ok: holder.held is "h 1")
+  check(at: "ret", ok: given() is "ret 1")
+}
+
+func listIs(value: view List(Int)) ret Bool {
+  ret value is List(Int) { 1, 2 }
+}
+
+# an optional of a generic function's own, and an instance for each type of a call in a list
+func optIs(T: type, first: view T) ret Bool {
+  let x: opt T = first
+  ret x is first
+}
+
+func listed(T: type, first: view T, second: view T) ret List(T) {
+  ret List(T) { second, copied(value: first) }
+}
+
+func main() {
+  wantedOutside()
+  results()
+  movedIntoTask()
+  anys()
+  let numbers: List(Int) = [1, 2]
+  check(at: "list", ok: listIs(value: numbers))
+  let note: Note = { text: "n {1}" }
+  check(at: "opt note", ok: optIs(first: note))
+  check(at: "opt flag", ok: optIs(first: false))
+  let notes: List(Note) = listed(first: note, second: note)
+  let texts: List(String) = listed(first: "x", second: "y")
+  log("{notes} {texts}")
+}

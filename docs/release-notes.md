@@ -4,6 +4,24 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.96, 2026-11-25: the type matrix
+
+- `compiler/tools/typeMatrix.py` (`make -C compiler type-matrix`, a stage of the suite, about 10 s): 15 types x 11
+  sources x 17 positions, as plain functions and inside generic functions, checked for their values, leaks and
+  AddressSanitizer. What fails today is in `compiler/tools/type-matrix-known.txt`, which only gets shorter: a spawn
+  inside a generic function.
+- What it found, all of it fixed:
+  - `check(ok: same(value: note) is other)` and `"{same(value: note)}".length() > 0` made `same` for a Bool or an Int,
+    the type wanted around it: an error of the C compiler.
+  - `same(value: task.get())` was an error of the C compiler for every type but Int.
+  - An Any and a String or a number in an `is`, `let x: Any = same(value: "text")`, `copyAtFallback` of a List(Any) (an
+    error of the C compiler, then a leak), a `view List` with an `is` inside a function that returns a Bool.
+  - `spawn f(value: own text)` leaked the String; `make() is label` leaked the result of `make` when the struct
+    holds only Strings and numbers.
+  - Inside generic functions: an `opt T` of their own, and a generic call in a list literal that is right ("no overload
+    takes ...").
+- Case 1683; docs/generic-instances-design.md.
+
 ## 0.4.95, 2026-11-25: a loop over a generic call
 
 - A loop over what a call of a generic function or method answers (`loop let key: view String in map.keys()`,

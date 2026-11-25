@@ -7869,7 +7869,11 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     if (!sema_type_is_concrete(expr->resolved_type, 0) && s_current_module && s_lifecycle_symbols
         && (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL)) {
         TypeInfo* made = sema_value_type(ctx, s_current_module, s_lifecycle_symbols, expr, 0);
-        if (made && (made->kind == TYPE_STRUCT || made->kind == TYPE_ARRAY)) expr->resolved_type = made;
+        /* (and one that is wanted as an Any is boxed by what it is) */
+        bool wanted_as_any = expected && sema_strip_ref(expected)->kind == TYPE_ANY;
+        if (made && (made->kind == TYPE_STRUCT || made->kind == TYPE_ARRAY
+                     || (wanted_as_any && made->kind != TYPE_VOID && sema_type_is_concrete(made, 0))))
+            expr->resolved_type = made;
     }
     if (!expr->resolved_type) return;
     if (sema_report_type_mismatch(expected, expr)) return;

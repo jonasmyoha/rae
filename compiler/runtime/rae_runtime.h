@@ -513,17 +513,7 @@ RAE_UNUSED static RaeAny rae_any_view_string(rae_View_String v) { return rae_any
 RAE_UNUSED static RaeAny rae_any_mod_string(rae_Mod_String v) { return rae_any_mod(v.ptr, RAE_TYPE_STRING); }
 
 RAE_UNUSED static bool rae_any_is_none(RaeAny a) { return a.type == RAE_TYPE_NONE; }
-RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
-    if (a.type != b.type) return false;
-    if (a.type == RAE_TYPE_NONE) return true;
-    if (a.type == RAE_TYPE_STRING) {
-        if (a.as.s.len != b.as.s.len) return false;
-        if (a.as.s.len == 0) return true;
-        if (!a.as.s.data || !b.as.s.data) return a.as.s.data == b.as.s.data;
-        return memcmp(a.as.s.data, b.as.s.data, a.as.s.len) == 0;
-    }
-    return a.as.i == b.as.i;
-}
+RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b);
 
 RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, RAE_TYPE_BOOL); }
 
@@ -601,6 +591,24 @@ static inline double rae_ext_rae_any_float(RaeAny value) {
 static inline rae_Bool rae_ext_rae_any_bool(RaeAny value) {
   value = rae_any_resolved(value);
   return (value.is_view || value.is_mod) ? *(int8_t*)value.as.ptr : value.as.b;
+}
+/* Two boxes of the same kind with the same value, each its own or a reference */
+RAE_UNUSED static bool rae_any_eq(RaeAny a, RaeAny b) {
+  a = rae_any_resolved(a);
+  b = rae_any_resolved(b);
+  if (a.type != b.type) return false;
+  if (a.type == RAE_TYPE_NONE) return true;
+  if (a.type == RAE_TYPE_STRING || a.type == RAE_TYPE_KEY) {
+    rae_String left = (a.is_view || a.is_mod) ? *(rae_String*)a.as.ptr : a.as.s;
+    rae_String right = (b.is_view || b.is_mod) ? *(rae_String*)b.as.ptr : b.as.s;
+    if (left.len != right.len) return false;
+    if (left.len == 0) return true;
+    if (!left.data || !right.data) return left.data == right.data;
+    return memcmp(left.data, right.data, left.len) == 0;
+  }
+  if (a.type == RAE_TYPE_FLOAT64 || a.type == RAE_TYPE_FLOAT32) return rae_ext_rae_any_float(a) == rae_ext_rae_any_float(b);
+  if (a.type == RAE_TYPE_BOOL) return rae_ext_rae_any_bool(a) == rae_ext_rae_any_bool(b);
+  return rae_ext_rae_any_int(a) == rae_ext_rae_any_int(b);
 }
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 /* A String or Key box's text as an OWNED copy (the box only borrows it) */

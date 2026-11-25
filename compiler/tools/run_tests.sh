@@ -145,6 +145,12 @@ if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/asan-check.sh" ]; then
   if ! bash tools/asan-check.sh; then ASAN_CHECK_FAILED=1; fi
   echo
 fi
+# The type matrix (tools/typeMatrix.py).
+TYPE_MATRIX_FAILED=0
+if [ -z "$TEST_NAME_FILTER" ] && [ -f "tools/typeMatrix.py" ]; then
+  if ! python3 tools/typeMatrix.py; then TYPE_MATRIX_FAILED=1; fi
+  echo
+fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh), same place.
 TARGETS_CHECK_FAILED=0
@@ -723,6 +729,7 @@ if [ "$WASM_STACK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$STRESS_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$TSAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
+if [ "$TYPE_MATRIX_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$FLOAT8_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK_FAILED" = "1" ]; then FAILED=$((FAILED+1)); fi

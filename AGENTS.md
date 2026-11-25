@@ -1195,6 +1195,16 @@ SKIPs that part without it). A new fixture with `realtime` functions goes on
 its CASES list. Runtime C that `lib/` marks `realtime` carries
 `RAE_NONBLOCKING` on its prototype in the runtime header.
 
+**Type matrix (docs/generic-instances-design.md section 8).**
+`compiler/tools/typeMatrix.py` (`make -C compiler type-matrix`) generates every
+type x source x position as a function, plain and inside a generic function,
+and checks values, leaks and AddressSanitizer; it runs as one pre-suite case of
+every full run (about 10 s). `compiler/tools/type-matrix-known.txt` lists what
+fails today and only gets shorter: a line that names something that passes
+fails as STALE. A compiler change that makes a new combination fail is fixed,
+not listed. `--only plain/Int` runs some programs, `--find` tries each function
+alone.
+
 **Stress cases (docs/stress-tests.md).** `stress/NN_name/` holds small
 foot-gun programs on two shelves: `handles` (Rae does the right thing) and
 `footgun` (Rae still gets it wrong — the case asserts the CURRENT bad

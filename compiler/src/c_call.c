@@ -386,6 +386,25 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     return true;
 }
 
+/* Do the arguments of a call of the generic function `tmpl` say what each of its
+ * type parameters is? Then the type wanted of its result does not: the one an
+ * argument outside wants (`check(ok: same(value: box.held) is other)`) is not the
+ * one of this call. A literal argument takes the type that is wanted. */
+static bool c_args_bind_type_params(CFuncContext* ctx, const AstFuncDecl* tmpl, const AstCallArg* args) {
+    const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t count = 0;
+    const AstParam* p = tmpl->params;
+    for (const AstCallArg* a = args; p && a && count < 32; p = p->next, a = a->next) {
+        const AstExpr* value = c_without_own(a->value);
+        if (value->kind == AST_EXPR_UNARY && value->as.unary.op == AST_UNARY_NEG) value = value->as.unary.operand;
+        if (value->kind == AST_EXPR_INTEGER || value->kind == AST_EXPR_FLOAT || value->kind == AST_EXPR_COLLECTION_LITERAL
+            || value->kind == AST_EXPR_OBJECT || value->kind == AST_EXPR_NONE) continue;
+        const AstTypeRef* type = infer_expr_type_ref(ctx, value);
+        if (!type) continue;
+        patterns[count] = p->type; concretes[count] = type; count++;
+    }
+    return count && infer_generic_args_multi(ctx->compiler_ctx, tmpl, patterns, concretes, count);
+}
+
 /* Sema checks a generic body once, for the template, where an argument of
  * a generic parameter's type (`value: view T`) matches every overload, so it
  * links the FIRST one. Inside each specialization, pick again from the
@@ -398,6 +417,12 @@ static const AstFuncDecl* respecialize_overload(CFuncContext* ctx, const AstExpr
                                                 const AstFuncDecl* fd, bool* no_overload,
                                                 Str* generic_arg_type) {
     if (!ctx->generic_params || !ctx->generic_args || fd->generic_params) return fd;
+    /* a generic function: its instance is the one for what the arguments are here */
+    if (fd->specialization_args) {
+        const AstFuncDecl* tmpl = fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC
+            ? &fd->generic_template->as.func_decl : NULL;
+        return tmpl && !expr->as.call.generic_args && c_args_bind_type_params(ctx, tmpl, expr->as.call.args) ? tmpl : fd;
+    }
     if (expr->as.call.callee->kind != AST_EXPR_IDENT) return fd;
     /* Which arguments have a generic parameter's type, and what it is here */
     enum { max_args = 16 };
@@ -1415,7 +1440,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             /* (an optional that is wanted takes the plain result of a T that is none) */
             bool wraps = ctx->expected_type.is_opt && tmpl->returns && tmpl->returns->type && !tmpl->returns->type->is_opt
                 && !fd->specialization_args->is_opt;
-            if (tmpl->returns && tmpl->returns->type && !wraps) {
+            if (tmpl->returns && tmpl->returns->type && !wraps && !c_args_bind_type_params(ctx, tmpl, expr->as.call.args)) {
                 AstTypeRef* re_inferred = infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->returns->type, &ctx->expected_type);
                 if (re_inferred) { concrete = re_inferred; fd = tmpl; }
             }

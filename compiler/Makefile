@@ -147,7 +147,7 @@ else
 TEST_RUNNER = $(CURDIR)/tools/run_tests_parallel.sh
 endif
 
-.PHONY: ui-model-gate world-input-gate wasm-stack-check module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
+.PHONY: type-matrix ui-model-gate world-input-gate wasm-stack-check module-folder-tools realtime-check wasm-audio-check toolchain-store-test c-warnings-gate wasm-module-check all build test test-examples checks stress clean smoke install uninstall c-surface-gate FORCE
 
 all: build
 
@@ -259,6 +259,11 @@ toolchain-store-test:
 # (tools/asan-check.sh); `make test` runs it as one pre-suite case too.
 asan: build
 	@bash tools/asan-check.sh
+
+# Every type x source x position, plain and in a generic function: values, leaks,
+# AddressSanitizer (tools/typeMatrix.py); `make test` runs it as one pre-suite case.
+type-matrix: build
+	@python3 tools/typeMatrix.py
 
 # Every benchmark program still compiles (tools/benchmarks-compile-check.sh);
 # `make test` runs it as one pre-suite case too.

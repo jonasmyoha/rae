@@ -443,6 +443,8 @@ bool c_is_any(const AstTypeRef* type);
 typedef enum { ANY_BORROWED, ANY_OWNED, ANY_TAKEN } AnyMode;
 void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out);
 void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out);
+const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type);
+bool c_emit_any_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 /* c_discard.c */
 bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call);
 int c_discard_temp(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete);
