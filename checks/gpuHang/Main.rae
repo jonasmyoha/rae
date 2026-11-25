@@ -1,0 +1,100 @@
+# Hardware check: a wait for the GPU ends. Real work is waited for and the device is not lost;
+# Metal's
+# completed command buffers are watched (on Apple); then the GPU's work never ends (a faked hang),
+# and
+# the frame's wait and the runtime's blocking poll each give up within their limit, the device
+# counts as
+# lost, and no later wait waits again. RAE_GPU_WAIT_SECONDS=1 is set by the check itself. Exit code
+# 0 =
+# every check passed.
+import Sys
+import Target
+open Time
+open webgpu/Context
+open webgpu/Webgpu
+open gpu/GpuFault
+open gpu/GpuFaultRules
+open gpu/FramePacer
+open gpu/DeviceFeatures
+
+func seconds(from: view Int) ret Float {
+  ret ((nowNs() - from) as Float) / 1000000000.0
+}
+
+func main() ret Int {
+  Sys.setEnv(name: "RAE_GPU_WAIT_SECONDS", value: "1")
+  chooseDeviceFeatures()
+  var booted: Int = 0
+  unsafe {
+    booted = webgpuBootstrap()
+  }
+  if booted is not 1 {
+    log("no GPU")
+    ret 1
+  }
+  var wrong: Int = 0
+  var pacer: FramePacer = createFramePacer()
+  var began: Int = nowNs()
+  loop var frame: Int = 0, frame < 30, ++frame {
+    paceFrame(pacer: pacer)
+  }
+  if gpuIsLost() or seconds(from: began) > 0.9 {
+    wrong = wrong + 1
+    log("FAIL: 30 empty frames took {seconds(from: began)} s, lost {gpuIsLost()}")
+  }
+  unsafe {
+    if pacer.fault.watched and nativeFaultBuffers() < 10 {
+      wrong = wrong + 1
+      log("FAIL: only {nativeFaultBuffers()} completed command buffers were seen of 30 frames")
+    }
+    log(
+      "30 frames paced; Metal's command buffers watched: {pacer.fault.watched}, {nativeFaultCount()} failed"
+    )
+    if Target.isApple and not pacer.fault.watched {
+      wrong = wrong + 1
+      log("FAIL: Metal's command buffers are not watched")
+    }
+  }
+  # A page fault alone does not end it
+  unsafe {
+    nativeFaultTest(code: metalErrorPageFault)
+  }
+  paceFrame(pacer: pacer)
+  if gpuIsLost() {
+    wrong = wrong + 1
+    log("FAIL: one failed command buffer lost the device")
+  }
+  # The GPU's work never ends: the frame's wait gives up
+  unsafe {
+    nativeTestHang(on: 1)
+  }
+  began = nowNs()
+  paceFrame(pacer: pacer)
+  var took: Float = seconds(from: began)
+  if not gpuIsLost() or took < 0.9 or took > 5.0 {
+    wrong = wrong + 1
+    log("FAIL: the frame's wait took {took} s of its 1, lost {gpuIsLost()}")
+  }
+  # and nothing waits any more: frames, and the runtime's own blocking poll
+  began = nowNs()
+  loop var frame: Int = 0, frame < 20, ++frame {
+    paceFrame(pacer: pacer)
+  }
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+  took = seconds(from: began)
+  if took > 0.5 {
+    wrong = wrong + 1
+    log("FAIL: once lost, 20 frames and a poll still took {took} s")
+  }
+  if not gpuLostClose(title: "Graphics stopped", headless: true) {
+    wrong = wrong + 1
+    log("FAIL: the app's loop does not end")
+  }
+  if wrong is not 0 {
+    ret 1
+  }
+  log("a wait for work that never ends gives up, and the device counts as lost")
+  ret 0
+}

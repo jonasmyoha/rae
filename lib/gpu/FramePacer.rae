@@ -26,6 +26,9 @@
 # means the whole frame is. C only submits, waits on an index and polls; which
 # index to wait on, and when, is decided here.
 #
+# The wait has a limit and looks for failed work (gpu/GpuFault): a GPU fault ends it, and the app,
+# instead of freezing it.
+#
 # RAE_FRAMES_IN_FLIGHT=1 restores the old behavior (wait on the frame just
 # submitted), for comparison. RAE_FRAME_TIMING=1 prints, every 120 frames, the
 # average frame time split into the CPU's own work, the present (and, inside
@@ -36,8 +39,11 @@
 # frame's is kept (lastFrameSeconds and the others) for a capture's counters and
 # its "bound by" mark (lib/app3d/FrameLog frameLogCounters).
 import Sys
+import Target
 open gpu/PipelineWatch
 open gpu/FramePacing
+open gpu/GpuFault
+open gpu/GpuFaultRules
 open webgpu/Webgpu
 open webgpu/Context
 
@@ -66,6 +72,8 @@ type FramePacer {
   cPipelines: CPipelineWatch  # a C pipeline created mid-game is logged (render-perf-13)
   # the frame's marks and pacing in the event recorder (gpu/FramePacing)
   pacing: FramePacing = FramePacing {}
+  # the failed work and the wait's limit (gpu/GpuFault)
+  fault: GpuFault = {}
 }
 
 const timingWindow: Int = 120
@@ -132,6 +140,9 @@ func noteAcquireTime(pacer: mod FramePacer, seconds: view Float64, startedAt: vi
 func paceFrame(pacer: mod FramePacer) {
   checkCPipelines(watch: pacer.cPipelines)
   var frameEnd: UInt64 = 0
+  if gpuIsLost() {
+    ret
+  }
   unsafe {
     # No device (a renderer exercised without one, as the old C present
     # allowed): nothing was submitted, so there is nothing to wait for
@@ -143,16 +154,22 @@ func paceFrame(pacer: mod FramePacer) {
       commandCount: 0
       commands: webgpuNull()
     )
+    webgpuWatchSubmission(index: frameEnd)
   }
+  gpuFaultFrame(fault: pacer.fault)
   pacingPresented(pacing: pacer.pacing)
   let waitStart: Float64 = frameClock()
+  var waitFor: opt UInt64 = pacer.previousEnd
   if pacer.framesInFlight <= 1 {
-    unsafe {
-      webgpuWaitSubmission(index: frameEnd)
-    }
-  } else if let previous: view UInt64 = pacer.previousEnd {
-    unsafe {
-      webgpuWaitSubmission(index: previous)
+    waitFor = frameEnd
+  }
+  if let index: view UInt64 = waitFor {
+    when Target.isNative {
+      let done: Bool = gpuWaitSubmission(fault: pacer.fault, index: index)
+    } else {
+      unsafe {
+        webgpuWaitSubmission(index: index)
+      }
     }
   } else {
     unsafe {

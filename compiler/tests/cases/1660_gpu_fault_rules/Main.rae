@@ -1,0 +1,46 @@
+# gpu/GpuFaultRules: how long a wait for the GPU lasts, and which failed command buffers mean it is
+# lost.
+open gpu/GpuFaultRules
+
+func main() {
+  log(
+    "limits: phone {gpuWaitLimit(setting: "", mobile: true)} s, desktop {gpuWaitLimit(
+      setting: ""
+      mobile: false
+    )} s, asked {gpuWaitLimit(setting: "0.5", mobile: true)} s"
+  )
+  # the time the app was suspended is no wait
+  log(
+    "a sleep of 0.2 ms counts {gpuWaited(waited: 1.0, seconds: 0.0002)}, one of 300 s {gpuWaited(
+      waited: 1.0
+      seconds: 300.0
+    )}"
+  )
+  # a page fault alone is a bad frame; a revoked access is the end; the background is nothing
+  var faults: GpuFaults = {}
+  faults = gpuFaultsWith(faults: faults, code: metalErrorPageFault, seconds: 1.0)
+  log("a page fault: seen {faults.seen}, lost {faults.lost}")
+  faults = gpuFaultsWith(faults: faults, code: metalErrorNotPermitted, seconds: 1.1)
+  log("in the background: seen {faults.seen}, in the window {faults.inWindow}, lost {faults.lost}")
+  faults = gpuFaultsWith(faults: faults, code: metalErrorAccessRevoked, seconds: 1.2)
+  log("access revoked: seen {faults.seen}, lost {faults.lost}")
+  # many bad frames close together are the end too, far apart not
+  var many: GpuFaults = {}
+  loop var i: Int = 0, i < gpuFaultsMost - 1, ++i {
+    many = gpuFaultsWith(faults: many, code: metalErrorTimeout, seconds: 5.0 + i.toFloat())
+  }
+  log("{many.seen} timeouts in {gpuFaultsMost - 2} s: lost {many.lost}")
+  many = gpuFaultsWith(faults: many, code: metalErrorTimeout, seconds: 12.0)
+  log("one more: lost {many.lost}")
+  var apart: GpuFaults = {}
+  loop var i: Int = 0, i < 30, ++i {
+    apart = gpuFaultsWith(faults: apart, code: metalErrorTimeout, seconds: i.toFloat() * 4.0)
+  }
+  log("30 timeouts 4 s apart: lost {apart.lost}")
+  var all: GpuFaults = {}
+  loop var i: Int = 0, i < 50, ++i {
+    all = gpuFaultsWith(faults: all, code: metalErrorNotPermitted, seconds: 1.0)
+  }
+  log("50 in the background: lost {all.lost}")
+  log("names: {gpuFaultName(code: 3)}, {gpuFaultName(code: 4)}, {gpuFaultName(code: 99)}")
+}

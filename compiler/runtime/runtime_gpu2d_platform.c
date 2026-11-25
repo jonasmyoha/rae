@@ -571,6 +571,15 @@ static void rae_loop_trace_tick(void) {
 
 #include "runtime_gpu2d_drops.c"
 
+/* The GPU no more draws, so the OS says it (SDL's message box: an alert of the
+ * platform's own); blocks until it is answered. Platform reason: a system call. */
+rae_Bool rae_gpu_lost_message(rae_String title, rae_String text) {
+    char titleC[256], textC[1024];
+    snprintf(titleC, sizeof(titleC), "%.*s", (int)title.len, title.data ? (const char*)title.data : "");
+    snprintf(textC, sizeof(textC), "%.*s", (int)text.len, text.data ? (const char*)text.data : "");
+    return SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, titleC, textC, g_sdl_win);
+}
+
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
     if (g_g2d_live_frame_depth > 0) return 0;   /* a live-resize frame pumps nothing */
     rae_g2d_test_pointer_advance();

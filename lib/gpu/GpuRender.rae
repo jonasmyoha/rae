@@ -578,6 +578,8 @@ func createRenderPipelineSource(
         target = target + 1
       }
       let vertexC: Buffer(Any) = vertexEntry.toCStr()
+      let label: String = pipelineShaderFile(wgsl: wgsl)
+      let labelC: Buffer(Any) = label.toCStr()
       let fragmentC: Buffer(Any) = fragmentEntry.toCStr()
       let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
       var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
@@ -616,6 +618,7 @@ func createRenderPipelineSource(
       var handle: Ptr = webgpuNull()
       if spec.depthFormat is (0 as Int32) {
         let descriptor: WGPURenderPipelineDescriptor = {
+          label: { data: labelC, length: WGPU_STRLEN }
           vertex: {
             module: shaderModule
             entryPoint: { data: vertexC, length: WGPU_STRLEN }
@@ -635,6 +638,7 @@ func createRenderPipelineSource(
         handle = wgpuDeviceCreateRenderPipeline(device: webgpuDevice(), descriptor: descriptor)
       } else {
         let descriptor: WGPURenderPipelineDescriptor = {
+          label: { data: labelC, length: WGPU_STRLEN }
           vertex: {
             module: shaderModule
             entryPoint: { data: vertexC, length: WGPU_STRLEN }

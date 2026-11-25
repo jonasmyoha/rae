@@ -117,6 +117,8 @@ void rae_set_live_frame(rae_Bool (*frame)(void*), void* state) {
 #include "runtime_platform_apple.c"
 /* RAE_GPU2D_TIMING on Apple: each Metal command buffer's GPU time */
 #include "runtime_gpu_metal_timing.c"
+/* Failed Metal command buffers (lib/gpu/GpuFault.rae) */
+#include "runtime_gpu_metal_fault.c"
 #include "runtime_image_sdl3.c"
 #include "runtime_image_decode.c"
 #ifdef RAE_HAS_SDL3

@@ -7,6 +7,7 @@ open gpu/GpuResources
 open gpu/GpuLifetime
 open gpu/GpuRender
 open gpu/GpuDependencies
+open gpu/GpuFault
 
 func noBufferId() ret BufferId {
   ret BufferId { managerTag: 0, slot: -1, generation: 0 }
@@ -169,11 +170,13 @@ func pollSubmissions(inFlight: mod List(SubmissionId), resources: mod GpuResourc
   }
 }
 
-# Blocks until every tracked submission completed (shutdown / rebuild only).
+# Blocks until every tracked submission completed (shutdown / rebuild only), or the device is lost.
 func drainSubmissions(inFlight: mod List(SubmissionId), resources: mod GpuResources) {
-  var spins: Int = 0
-  loop inFlight.length > 0 and spins < 100000000 {
+  var wait: GpuWait = {}
+  loop inFlight.length > 0 {
     pollSubmissions(inFlight: inFlight, resources: resources)
-    spins = spins + 1
+    if inFlight.length > 0 and gpuWaitEnds(wait: wait) {
+      ret
+    }
   }
 }

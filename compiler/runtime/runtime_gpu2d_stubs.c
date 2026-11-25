@@ -7,6 +7,10 @@
 
 void rae_ext_Gpu2d_initWindow(int64_t w, int64_t h, rae_String t) { (void)w; (void)h; (void)t; }
 rae_Bool rae_ext_Gpu2d_pollClose(void) { return 1; }
+rae_Bool rae_gpu_lost_message(rae_String title, rae_String text) { (void)title; (void)text; return 0; }
+#ifndef RAE_HAS_WEBGPU
+int64_t rae_wgpu_device_is_lost(void) { return 0; }
+#endif
 void rae_ext_Gpu2d_waitEvents(float timeoutSec){ (void)timeoutSec; }
 rae_Bool rae_ext_Gpu2d_headlessRequested(void) { return 0; }
 int64_t rae_ext_Gpu2d_decodeImageProbe(rae_String path) { (void)path; return 0; }

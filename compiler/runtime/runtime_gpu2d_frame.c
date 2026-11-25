@@ -58,8 +58,9 @@ static void rae_g2d_save_screenshot(const char* path, WGPUTexture tex, int w, in
     WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
-    while (!g_wgpu_map_done) rae_wgpu_poll(1);
-    const unsigned char* px = (const unsigned char*)wgpuBufferGetConstMappedRange(staging, 0, bytes);
+    while (!g_wgpu_map_done && !g_wgpu_device_lost) rae_wgpu_poll(1);
+    const unsigned char* px = NULL;
+    if (g_wgpu_map_done) px = (const unsigned char*)wgpuBufferGetConstMappedRange(staging, 0, bytes);
     if (px) {
         unsigned char* rgba = (unsigned char*)malloc((size_t)w * (size_t)h * 4u);
         if (rgba) {

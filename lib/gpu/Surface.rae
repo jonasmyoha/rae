@@ -27,6 +27,7 @@ open gpu/GpuResources
 open gpu/GpuRender
 open gpu/GpuIds
 open gpu/FramePacer
+open gpu/GpuFault
 open gpu/SurfaceRecovery
 
 func nativeSurfaceHandle() unsafe extern("rae_surface_handle") ret Ptr
@@ -36,9 +37,6 @@ func nativeSurfaceWindowVisible() unsafe extern("rae_surface_window_visible") re
 func nativeSurfaceReconfigure() unsafe extern("rae_surface_reconfigure")
 
 func nativeSurfaceNotePresented() unsafe extern("rae_surface_note_presented")
-
-# Whether wgpu reported the device lost (runtime_webgpu.c's device-lost callback)
-func nativeDeviceIsLost() unsafe extern("rae_wgpu_device_is_lost") ret Int
 
 # One frame's choice of target, and what was acquired for it
 type FrameTarget {

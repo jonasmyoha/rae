@@ -16,6 +16,9 @@
  * ints (so the SDL3 backend can present it). v29 API: Future/CallbackInfo +
  * WGPUStringView; readback via wgpuBufferMapAsync + wgpuDevicePoll.
  * ============================================================ */
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #include <webgpu/webgpu.h>
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
@@ -34,15 +37,68 @@ static WGPUInstance g_wgpu_inst = NULL;
 static WGPUDevice   g_wgpu_dev = NULL;
 static WGPUQueue    g_wgpu_queue = NULL;
 
+/* Whether the device has been lost: wgpu said so (rae_wgpu_on_device_lost), or
+ * Rae did (lib/gpu/GpuFault.rae: work that never ends, a driver that refuses
+ * the app's work). */
+static int g_wgpu_device_lost = 0;
+int64_t rae_wgpu_device_is_lost(void) { return g_wgpu_device_lost; }
+void rae_wgpu_mark_device_lost(void) { g_wgpu_device_lost = 1; }
+
+/* For a check (checks/gpuHang): the GPU's work never ends, as after a fault */
+static int g_wgpu_test_hang = 0;
+void rae_wgpu_test_hang(int64_t on) { g_wgpu_test_hang = on != 0; }
+
+/* How long a blocking wait lasts at most (ms): the app does not hang for good
+ * on work that never ends. RAE_GPU_WAIT_SECONDS sets it; long on a desktop,
+ * whose GPU other programs may keep busy. */
+static int64_t rae_wgpu_wait_limit_ms(void) {
+    static int64_t limit = 0;
+    if (limit == 0) {
+        const char* text = getenv("RAE_GPU_WAIT_SECONDS");
+        limit = text && *text ? (int64_t)(atof(text) * 1000.0) : 0;
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+        if (limit <= 0) limit = 5000;
+#else
+        if (limit <= 0) limit = 20000;
+#endif
+    }
+    return limit;
+}
+
 /* wgpu-native exposes device polling; browser WebGPU advances when control
  * returns to JavaScript. WASM builds use Asyncify, so a zero-duration sleep
- * yields to the browser before processing callbacks on the instance. */
+ * yields to the browser before processing callbacks on the instance.
+ *
+ * Natively a wait is a poll that does not block, again and again until the
+ * queue is empty: wgpu's own blocking poll has no limit in its C API, and on
+ * Metal it leaves only for a completed command buffer, never for a failed one,
+ * so after a GPU fault it waited for good (an iPhone, 2026-11-24). Past the
+ * limit the device counts as lost. Each sleep counts at most 50 ms, so the time
+ * the app was suspended does not. */
 static void rae_wgpu_poll(int wait) {
 #ifdef __EMSCRIPTEN__
     if (wait) emscripten_sleep(0);
     if (g_wgpu_inst) wgpuInstanceProcessEvents(g_wgpu_inst);
 #else
-    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, wait != 0, NULL);
+    if (!g_wgpu_dev) return;
+    int64_t waited_us = 0;
+    int64_t limit_us = rae_wgpu_wait_limit_ms() * 1000;
+    for (;;) {
+        int empty = wgpuDevicePoll(g_wgpu_dev, 0, NULL) && !g_wgpu_test_hang;
+        if (!wait || empty || g_wgpu_device_lost) return;
+        if (waited_us >= limit_us) {
+            fprintf(stderr, "[gpu] a wait for the GPU gave up after %lld ms: the device counts as lost\n",
+                    (long long)(waited_us / 1000));
+            g_wgpu_device_lost = 1;
+            return;
+        }
+        struct timespec before, after, nap = { 0, 250000 };
+        clock_gettime(CLOCK_MONOTONIC, &before);
+        nanosleep(&nap, NULL);
+        clock_gettime(CLOCK_MONOTONIC, &after);
+        int64_t us = (after.tv_sec - before.tv_sec) * 1000000LL + (after.tv_nsec - before.tv_nsec) / 1000;
+        waited_us += us > 50000 ? 50000 : us;
+    }
 #endif
 }
 
@@ -66,7 +122,6 @@ static void rae_wgpu_on_device(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStr
  * device (an iOS GPU watchdog, a driver reset) or a validation error was
  * silent, and the next wgpu call that checks the device aborted the app with
  * no reason in the log. They say why, on stderr. */
-static int g_wgpu_device_lost = 0;
 static int g_wgpu_uncaptured_errors = 0;
 static void rae_wgpu_on_device_lost(WGPUDevice const* d, WGPUDeviceLostReason reason, WGPUStringView m,
                                     void* u1, void* u2) {
@@ -82,8 +137,6 @@ static void rae_wgpu_on_uncaptured_error(WGPUDevice const* d, WGPUErrorType type
     fprintf(stderr, "[wgpu] error (type %d): %.*s\n", (int)type,
             m.data ? (int)(m.length == WGPU_STRLEN ? strlen(m.data) : m.length) : 0, m.data ? m.data : "");
 }
-/* Whether the device has been lost (rae_wgpu_on_device_lost) */
-int64_t rae_wgpu_device_is_lost(void) { return g_wgpu_device_lost; }
 
 static int g_wgpu_map_done;
 static void rae_wgpu_on_map(WGPUMapAsyncStatus st, WGPUStringView m, void* u1, void* u2) {
@@ -188,27 +241,23 @@ void rae_wgpu_watch_submission(uint64_t index) {
     ci.userdata1 = (void*)(uintptr_t)index;
     wgpuQueueOnSubmittedWorkDone(g_wgpu_queue, ci);
 }
-/* Block until submission `index` is done (lib/gpu/FramePacer.rae waits on the
- * PREVIOUS frame here, so two frames are in flight; which index, and when, is
- * Rae's). Natively one wgpuDevicePoll on that index. The browser cannot block:
- * a frame callback (RAE_WEB_FRAME_CALLBACK, docs/web-frame-loop.md) is paced
- * by the browser and only processes events; the Asyncify loop yields first. */
+/* The browser's end of a frame (lib/gpu/FramePacer.rae): it cannot block. A
+ * frame callback (RAE_WEB_FRAME_CALLBACK, docs/web-frame-loop.md) is paced by
+ * the browser and only processes events; the Asyncify loop yields first.
+ * Natively Rae waits itself, with a limit (gpu/GpuFault). */
 void rae_wgpu_wait_submission(uint64_t index) {
-#ifdef __EMSCRIPTEN__
     (void)index;
-#ifdef RAE_WEB_FRAME_CALLBACK
-    rae_wgpu_poll(0);
-#else
+#if defined(__EMSCRIPTEN__) && !defined(RAE_WEB_FRAME_CALLBACK)
     rae_wgpu_poll(1);
-#endif
 #else
-    WGPUSubmissionIndex wait_for = (WGPUSubmissionIndex)index;
-    if (g_wgpu_dev) wgpuDevicePoll(g_wgpu_dev, 1, &wait_for);
+    rae_wgpu_poll(0);
 #endif
 }
 /* Nonblocking: pumps callbacks, then answers for this index. The queue-empty
  * flag stays as a second yes — when nothing at all is in flight, everything
- * is done regardless of whether its callback has been observed yet. */
+ * is done regardless of whether its callback has been observed yet. "Done" is
+ * also a command buffer that failed (Metal calls its completed handler, which
+ * wgpu's fence takes for its end): whether it did is rae_gpu_fault_count. */
 uint32_t rae_wgpu_submission_done(uint64_t index) {
     uint32_t queueEmpty = 0;
 #ifdef __EMSCRIPTEN__
@@ -217,9 +266,64 @@ uint32_t rae_wgpu_submission_done(uint64_t index) {
     if (g_wgpu_dev) queueEmpty = (uint32_t)wgpuDevicePoll(g_wgpu_dev, 0, NULL);
     if (g_wgpu_inst) wgpuInstanceProcessEvents(g_wgpu_inst);
 #endif
+    if (g_wgpu_test_hang) return 0;
     if (index <= g_wgpu_done_index) return 1;
     return queueEmpty;
 }
+/* wgpu's own MTLDevice; null elsewhere */
+void* rae_wgpu_metal_device(void) {
+#if defined(__APPLE__)
+    if (g_wgpu_dev) return wgpuDeviceGetNativeMetalDevice(g_wgpu_dev);
+#endif
+    return NULL;
+}
+
+/* After a loss: does a second device take work? 1: an empty submission to its
+ * queue ended within `limit_ms` (a failed one ends too: rae_gpu_fault_count
+ * tells). Platform reason: a device request answers by a callback. */
+static WGPUDevice g_wgpu_probe_dev = NULL;
+static int g_wgpu_probe_done = 0;
+static int g_wgpu_probe_ended = 0;
+static void rae_wgpu_on_probe(WGPURequestDeviceStatus st, WGPUDevice d, WGPUStringView m, void* u1, void* u2) {
+    (void)st;(void)m;(void)u1;(void)u2; g_wgpu_probe_dev = d; g_wgpu_probe_done = 1;
+}
+static void rae_wgpu_on_probe_ended(WGPUQueueWorkDoneStatus st, WGPUStringView m, void* u1, void* u2) {
+    (void)st;(void)m;(void)u1;(void)u2; g_wgpu_probe_ended = 1;
+}
+int64_t rae_wgpu_new_device_works(int64_t limit_ms) {
+#ifdef __EMSCRIPTEN__
+    (void)limit_ms;
+    return 0;
+#else
+    if (!g_wgpu_adapter || !g_wgpu_inst) return 0;
+    WGPUDeviceDescriptor dd; memset(&dd, 0, sizeof(dd));
+    dd.uncapturedErrorCallbackInfo.callback = rae_wgpu_on_uncaptured_error;
+    WGPURequestDeviceCallbackInfo dci; memset(&dci, 0, sizeof(dci));
+    dci.mode = WGPUCallbackMode_AllowProcessEvents; dci.callback = rae_wgpu_on_probe;
+    wgpuAdapterRequestDevice(g_wgpu_adapter, &dd, dci);
+    for (int i = 0; i < 100 && !g_wgpu_probe_done; i++) {
+        wgpuInstanceProcessEvents(g_wgpu_inst);
+        usleep(1000);
+    }
+    if (!g_wgpu_probe_dev) return 0;
+    WGPUQueue queue = wgpuDeviceGetQueue(g_wgpu_probe_dev);
+    WGPUCommandEncoder enc = wgpuDeviceCreateCommandEncoder(g_wgpu_probe_dev, NULL);
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(enc, NULL);
+    wgpuQueueSubmit(queue, 1, &cmd);
+    WGPUQueueWorkDoneCallbackInfo ci; memset(&ci, 0, sizeof(ci));
+    ci.mode = WGPUCallbackMode_AllowProcessEvents; ci.callback = rae_wgpu_on_probe_ended;
+    wgpuQueueOnSubmittedWorkDone(queue, ci);
+    for (int64_t ms = 0; ms < limit_ms && !g_wgpu_probe_ended; ms++) {
+        wgpuDevicePoll(g_wgpu_probe_dev, 0, NULL);
+        wgpuInstanceProcessEvents(g_wgpu_inst);
+        if (!g_wgpu_probe_ended) usleep(1000);
+    }
+    wgpuCommandBufferRelease(cmd); wgpuCommandEncoderRelease(enc);
+    wgpuQueueRelease(queue);
+    return g_wgpu_probe_ended;
+#endif
+}
+
 /* A null opaque pointer, for WebGPU params that take an optional pointer/array
  * (e.g. dynamicOffsets when the count is 0). Rae has no null-Ptr literal yet. */
 void* rae_wgpu_null_ptr(void)       { return (void*)0; }
@@ -292,7 +396,7 @@ int rae_wgpu_map_read(void* buffer, uint64_t size, void* dst) {
     ci.callback = rae_wgpu_on_map;
     wgpuBufferMapAsync(buf, WGPUMapMode_Read, 0, (size_t)size, ci);
     int spins = 0;
-    while (!g_wgpu_map_done && spins++ < 100000) rae_wgpu_poll(1);
+    while (!g_wgpu_map_done && !g_wgpu_device_lost && spins++ < 100000) rae_wgpu_poll(1);
     if (!g_wgpu_map_done) return 0;
     const void* src = wgpuBufferGetConstMappedRange(buf, 0, (size_t)size);
     if (!src) { wgpuBufferUnmap(buf); return 0; }
@@ -374,8 +478,8 @@ void rae_ext_Webgpu_raytrace(const float* scene, int64_t sceneLen, int64_t* fb,
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     g_wgpu_map_done = 0;
     wgpuBufferMapAsync(rbuf, WGPUMapMode_Read, 0, obytes, mci);
-    while (!g_wgpu_map_done) rae_wgpu_poll(1);
-    const uint32_t* px = (const uint32_t*)wgpuBufferGetConstMappedRange(rbuf, 0, obytes);
+    while (!g_wgpu_map_done && !g_wgpu_device_lost) rae_wgpu_poll(1);
+    const uint32_t* px = g_wgpu_map_done ? (const uint32_t*)wgpuBufferGetConstMappedRange(rbuf, 0, obytes) : NULL;
     if (px) {
         int64_t n = width * height;
         for (int64_t i = 0; i < n; i++) {
@@ -533,8 +637,9 @@ static const void* rae_gpu_readback(int64_t buf, size_t bytes, WGPUBuffer* stagi
     WGPUBufferMapCallbackInfo mci; memset(&mci, 0, sizeof(mci));
     mci.mode = WGPUCallbackMode_AllowProcessEvents; mci.callback = rae_wgpu_on_map;
     wgpuBufferMapAsync(staging, WGPUMapMode_Read, 0, bytes, mci);
-    while (!g_wgpu_map_done) rae_wgpu_poll(1);
+    while (!g_wgpu_map_done && !g_wgpu_device_lost) rae_wgpu_poll(1);
     *staging_out = staging;
+    if (!g_wgpu_map_done) return NULL;
     return wgpuBufferGetConstMappedRange(staging, 0, bytes);
 }
 void rae_ext_Gpu_downloadF32(int64_t buf, float* out, int64_t count){

@@ -109,6 +109,8 @@ func createDepthPipelineSource(
         bufferCount = 1
       }
       let vertexC: Buffer(Any) = vertexEntry.toCStr()
+      let label: String = pipelineShaderFile(wgsl: wgsl)
+      let labelC: Buffer(Any) = label.toCStr()
       let fragmentC: Buffer(Any) = spec.fragmentEntry.toCStr()
       var fragments: List(WGPUFragmentState) = List.create(WGPUFragmentState, cap: 1)
       var fragmentData: Ptr = webgpuNull()
@@ -147,6 +149,7 @@ func createDepthPipelineSource(
         depthBiasClamp: 0.0 as Float32
       })
       let descriptor: WGPURenderPipelineDescriptor = {
+        label: { data: labelC, length: WGPU_STRLEN }
         vertex: {
           module: shaderModule
           entryPoint: { data: vertexC, length: WGPU_STRLEN }

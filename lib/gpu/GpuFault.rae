@@ -1,0 +1,232 @@
+# gpu/GpuFault — a GPU fault does not freeze the app for good. Every frame's wait for the GPU
+# (gpu/FramePacer) has a limit and looks at the failed command buffers (on Apple: Metal's own
+# error, runtime_gpu_metal_fault.c; the error's text is on stderr as it happens). Past the limit,
+# or when the driver refuses the app's work (GpuFaultRules), the device counts as lost: the log
+# says so once, with the frame, nothing more is drawn or waited for, and Gpu2d.pollClose ends the
+# app after the OS's message says why (gpuLostClose).
+#
+# Making the device and every GPU resource again is not done: whether the OS lets a new device
+# work after a fault is tried and logged (gpuTryNewDevice), so that can be decided on what it
+# says.
+#
+# RAE_GPU_WAIT_SECONDS=<s> the limit, RAE_GPU_FAULT_WATCH=0 without Metal's errors,
+# RAE_GPU_ENCODER_STATUS=1 (Apple) the log names the pass that failed. For a check:
+# RAE_GPU_TEST_HANG=<frame> the GPU's work never ends from that frame on,
+# RAE_GPU_TEST_FAULT=<frame>,<code> a command buffer fails so.
+import Sys
+import Target
+open Time
+open gpu/GpuFaultRules
+open webgpu/Webgpu
+open webgpu/Context
+
+func nativeDeviceIsLost() unsafe extern("rae_wgpu_device_is_lost") ret Int
+
+func nativeMarkDeviceLost() unsafe extern("rae_wgpu_mark_device_lost")
+
+func nativeTestHang(on: Int) unsafe extern("rae_wgpu_test_hang")
+
+func nativeMetalDevice() unsafe extern("rae_wgpu_metal_device") ret Ptr
+
+func nativeNewDeviceWorks(limitMs: Int) unsafe extern("rae_wgpu_new_device_works") ret Int
+
+func nativeFaultWatch(device: Ptr, encoders: Int) unsafe extern("rae_gpu_fault_watch") ret Int
+
+func nativeFaultBuffers() unsafe extern("rae_gpu_fault_buffers") ret Int
+
+func nativeFaultCount() unsafe extern("rae_gpu_fault_count") ret Int
+
+func nativeFaultCode(index: Int) unsafe extern("rae_gpu_fault_code") ret Int
+
+func nativeFaultTest(code: Int) unsafe extern("rae_gpu_fault_test")
+
+func nativeLostMessage(
+  title: String
+  text: String
+) mainThread unsafe extern("rae_gpu_lost_message") ret Bool
+
+func nativeGpuClock() unsafe extern("rae_ext_Gpu2d_nowSeconds") ret Float64
+
+# A wait outside the frame's own (a drain, a readback) and its limit
+type GpuWait {
+  limitSeconds: Float = gpuWaitLimit(
+    setting: Sys.getEnv(name: "RAE_GPU_WAIT_SECONDS")
+    mobile: Target.isMobileOs
+  )
+  waited: Float = 0.0
+  last: Int = nowNs()
+}
+
+# The app's watch on the GPU (FramePacer owns one)
+type GpuFault {
+  limitSeconds: Float = gpuWaitLimit(
+    setting: Sys.getEnv(name: "RAE_GPU_WAIT_SECONDS")
+    mobile: Target.isMobileOs
+  )
+  # Metal's errors are watched (asked for once, when there is a device)
+  asked: Bool = false
+  watched: Bool = false
+  frame: Int = 0
+  faults: GpuFaults = {}
+  said: Bool = false
+  testHang: Int = Sys.getEnv(name: "RAE_GPU_TEST_HANG").trim().toInt()
+  testFault: String = Sys.getEnv(name: "RAE_GPU_TEST_FAULT").trim()
+}
+
+func gpuIsLost() ret Bool {
+  unsafe {
+    ret nativeDeviceIsLost() is not 0
+  }
+}
+
+# Asked between two looks of a wait: true when it must end, as the device is lost, or its limit is
+# over and the device counts as lost from here on
+func gpuWaitEnds(wait: mod GpuWait) ret Bool {
+  if gpuIsLost() {
+    ret true
+  }
+  let now: Int = nowNs()
+  wait.waited = gpuWaited(waited: wait.waited, seconds: gpuSecondsBetween(from: wait.last, to: now))
+  wait.last = now
+  if wait.waited < wait.limitSeconds {
+    ret false
+  }
+  log("[gpu] work did not end in {wait.limitSeconds} s: the device counts as lost")
+  unsafe {
+    nativeMarkDeviceLost()
+  }
+  ret true
+}
+
+func gpuSecondsBetween(from: view Int, to: view Int) ret Float {
+  ret ((to - from) as Float) / 1000000000.0
+}
+
+# The GPU lost: the OS's message says so (once, not headless), and the app's loop ends
+# (Gpu2d.pollClose)
+func gpuLostClose(title: view String, headless: view Bool) ret Bool {
+  if not gpuIsLost() {
+    ret false
+  }
+  if not headless {
+    unsafe {
+      let shown: Bool = nativeLostMessage(
+        title: title
+        text: "The graphics stopped working, so the app closes. Start it again; if it happens often, restart the device."
+      )
+    }
+  }
+  log("[gpu] the app closes: the device is lost")
+  ret true
+}
+
+# A frame begins to be waited for: the watch asked for, the tests' turn
+func gpuFaultFrame(fault: mod GpuFault) {
+  fault.frame = fault.frame + 1
+  unsafe {
+    if not fault.asked {
+      fault.asked = true
+      if Sys.getEnv(name: "RAE_GPU_FAULT_WATCH") is not "0" {
+        var encoders: Int = 0
+        if Sys.getEnv(name: "RAE_GPU_ENCODER_STATUS") is "1" {
+          encoders = 1
+        }
+        fault.watched = nativeFaultWatch(device: nativeMetalDevice(), encoders: encoders) is 1
+      }
+    }
+    if fault.testHang > 0 and fault.frame is fault.testHang {
+      nativeTestHang(on: 1)
+    }
+    if fault.testFault.length() > 0 {
+      let parts: List(String) = fault.testFault.split(sep: ",")
+      if fault.frame is parts.copyAtFallback(index: 0, fallback: "0").toInt() {
+        nativeFaultTest(code: parts.copyAtFallback(index: 1, fallback: "0").toInt())
+      }
+    }
+  }
+}
+
+# The command buffers that failed since the last look: said, and the device lost when they mean it
+func gpuFaultsLook(fault: mod GpuFault) {
+  unsafe {
+    let count: Int = nativeFaultCount()
+    loop fault.faults.seen < count {
+      let code: Int = nativeFaultCode(index: fault.faults.seen)
+      let before: Int = fault.faults.seen
+      fault.faults = gpuFaultsWith(
+        faults: fault.faults
+        code: code
+        seconds: nativeGpuClock() as Float
+      )
+      if before < 16 {
+        log("[gpu] frame {fault.frame}: a command buffer failed ({gpuFaultName(code: code)})")
+      }
+      if fault.faults.lost {
+        gpuLose(fault: fault, why: "the driver refuses its work ({gpuFaultName(code: code)})")
+        ret
+      }
+    }
+  }
+}
+
+# The device counts as lost from here on
+func gpuLose(fault: mod GpuFault, why: view String) {
+  if fault.said {
+    ret
+  }
+  fault.said = true
+  unsafe {
+    nativeMarkDeviceLost()
+  }
+  log(
+    "[gpu] lost at frame {fault.frame}: {why}; {fault.faults.seen} command buffers failed; nothing more is drawn"
+  )
+  if gpuTryNewDevice() {
+    log("[gpu] a new device takes work: the device could be made again")
+  } else {
+    log("[gpu] a new device takes no work")
+  }
+}
+
+# Would a new device work? An empty submission to one ends, and no command buffer of it fails
+func gpuTryNewDevice() ret Bool {
+  unsafe {
+    let before: Int = nativeFaultCount()
+    ret nativeNewDeviceWorks(limitMs: 2000) is 1 and nativeFaultCount() is before
+  }
+}
+
+# Wait until submission `index` (watched: webgpuWatchSubmission) is done, at most the limit; false
+# when the device is lost, before or by this wait
+func gpuWaitSubmission(fault: mod GpuFault, index: view UInt64) ret Bool {
+  var waited: Float = 0.0
+  var last: Int = nowNs()
+  loop {
+    if gpuIsLost() {
+      if not fault.said {
+        gpuLose(fault: fault, why: "a wait gave up, or wgpu said so")
+      }
+      ret false
+    }
+    var done: UInt32 = 0
+    unsafe {
+      done = webgpuSubmissionDone(index: index)
+    }
+    gpuFaultsLook(fault: fault)
+    if gpuIsLost() {
+      ret false
+    }
+    if done is not (0 as UInt32) {
+      ret true
+    }
+    if waited >= fault.limitSeconds {
+      gpuLose(fault: fault, why: "its work did not end in {fault.limitSeconds} s")
+      ret false
+    }
+    waitUntil(deadlineNs: last + 250000)
+    let now: Int = nowNs()
+    waited = gpuWaited(waited: waited, seconds: gpuSecondsBetween(from: last, to: now))
+    last = now
+  }
+  ret false
+}

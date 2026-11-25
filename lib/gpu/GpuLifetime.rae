@@ -185,8 +185,11 @@ func createComputePipelineSource(
         ret none
       }
       let entryC: Buffer(Any) = entryPoint.toCStr()
+      let label: String = pipelineShaderFile(wgsl: wgsl)
+      let labelC: Buffer(Any) = label.toCStr()
       let entries: List(WGPUConstantEntry) = shaderConstantEntries(constants: constants)
       let pipelineDescriptor: WGPUComputePipelineDescriptor = {
+        label: { data: labelC, length: WGPU_STRLEN }
         compute: {
           module: shaderModule
           entryPoint: { data: entryC, length: WGPU_STRLEN }

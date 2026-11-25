@@ -19,6 +19,7 @@ open webgpu/Context
 open gpu/FramePacer
 open gpu/DeviceFeatures
 open Gpu2dWindowIcon
+open gpu/GpuFault
 
 # --- Window + surface ----------------------------------------------------
 # Open a GPU-presenting window (Metal layer wrapped as a wgpu surface) and
@@ -43,9 +44,12 @@ func initWindow(width: copy Int, height: copy Int, title: copy String) {
 func nativePollClose() mainThread unsafe extern("rae_ext_Gpu2d_pollClose") ret Bool
 
 func pollClose() ret Bool {
+  var close: Bool = false
   unsafe {
-    ret nativePollClose()
+    close = nativePollClose()
   }
+  # The GPU lost, the app cannot draw any more (gpu/GpuFault): said, and closed
+  ret close or gpuLostClose(title: "Graphics stopped", headless: headlessRequested())
 }
 
 # Drawable size in physical pixels (HiDPI-aware; may exceed the logical size).

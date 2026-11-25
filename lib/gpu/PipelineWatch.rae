@@ -32,6 +32,20 @@ func pipelineLabel(wgsl: view String) ret String {
   ret "(no comment line; {wgsl.length()} bytes of WGSL)"
 }
 
+# The file of the shader's own part (the last `// --- <file>` of a composed one), as the pipeline's
+# label: in a GPU capture, in Metal's errors (gpu/GpuFault) and in wgpu's messages
+func pipelineShaderFile(wgsl: view String) ret String {
+  let mark: String = "// --- "
+  if let at: Int = wgsl.lastIndexOf(sub: mark) {
+    let rest: String = wgsl.sub(start: at + mark.length(), len: 120)
+    if let end: Int = rest.indexOf(sub: "\n") {
+      ret rest.sub(start: 0, len: end)
+    }
+    ret rest
+  }
+  ret "shader"
+}
+
 func notePipelineCreated(kind: view String, wgsl: view String) {
   if framePresentedAny() {
     log("[pipeline] {kind} created after the first frame: {pipelineLabel(wgsl: wgsl)}")

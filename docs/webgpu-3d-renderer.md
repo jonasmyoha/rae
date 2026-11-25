@@ -164,6 +164,18 @@ from separate submissions overlaps, so a pass's time can show up in a
 neighboring span. Compare the total and `RAE_FRAME_TIMING=1`, not single
 spans.
 
+**A GPU that fails or hangs** (`lib/gpu/GpuFault`, `GpuFaultRules`): wgpu's
+blocking wait has no limit and, on Metal, never ends for a command buffer that
+failed. Every wait for the GPU has a limit instead (5 s on a phone, 20 s on a
+desktop, `RAE_GPU_WAIT_SECONDS`), and on Apple Metal's own errors are read as
+they happen. Past the limit, or when the driver refuses the app's work, the log
+says `[gpu] lost at frame N: why`, nothing more is drawn or waited for, and
+`pollClose` shows the OS's message and ends the app. `RAE_GPU_ENCODER_STATUS=1`
+(Apple) makes the log name the pass that failed, by its shader file. To try it:
+`RAE_GPU_TEST_HANG=<frame>`, `RAE_GPU_TEST_FAULT=<frame>,<Metal's code>`; check
+`gpuHang`. Not built: making the device and its resources again. The log says
+whether a new device takes work.
+
 ---
 
 ## 5. Lighting, shadows, AA, SSAO

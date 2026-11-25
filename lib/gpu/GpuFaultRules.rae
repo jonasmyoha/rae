@@ -1,0 +1,114 @@
+# gpu/GpuFaultRules — when the GPU counts as lost: work that never ends, or a driver that refuses
+# the app's work. Pure (no GPU, no clock), tested by case 1660. gpu/GpuFault follows it.
+#
+# Found on an iPhone (2026-11-24): after a GPU fault wgpu waited for good for a command buffer
+# that had failed, the app froze, and the OS killed it when it left the screen.
+import Math
+
+# How long a wait for the GPU lasts at most (s): a slow frame and a pipeline's compile fit in it.
+# On a desktop other programs may keep the GPU busy. RAE_GPU_WAIT_SECONDS sets it.
+const gpuWaitLimitMobile: Float = 5.0
+
+const gpuWaitLimitDesktop: Float = 20.0
+
+# A sleep counts at most this long (s): the time the app was suspended is no wait
+const gpuWaitStepMost: Float = 0.05
+
+# This many failed command buffers within gpuFaultWindow s are a loss, whatever their codes; one
+# alone is a bad frame
+const gpuFaultsMost: Int = 8
+
+const gpuFaultWindow: Float = 10.0
+
+# Metal's codes (MTLCommandBufferError)
+const metalErrorTimeout: Int = 2
+
+const metalErrorPageFault: Int = 3
+
+const metalErrorAccessRevoked: Int = 4
+
+const metalErrorNotPermitted: Int = 7
+
+const metalErrorOutOfMemory: Int = 8
+
+const metalErrorDeviceRemoved: Int = 11
+
+# What a failed command buffer means: nothing (the OS lets no app draw in the background), a bad
+# frame, or the loss of the device
+enum GpuFaultMeans { nothing, badFrame, lost }
+
+func gpuWaitLimit(setting: view String, mobile: view Bool) ret Float {
+  let asked: Float = setting.toFloat()
+  if asked > 0.0 {
+    ret asked
+  }
+  if mobile {
+    ret gpuWaitLimitMobile
+  }
+  ret gpuWaitLimitDesktop
+}
+
+# The wait so far after another look `seconds` later
+func gpuWaited(waited: view Float, seconds: view Float) ret Float {
+  ret waited + Math.clamp(val: seconds, low: 0.0, high: gpuWaitStepMost)
+}
+
+func gpuFaultMeans(code: view Int) ret GpuFaultMeans {
+  if code is metalErrorNotPermitted {
+    ret GpuFaultMeans.nothing
+  }
+  if code is metalErrorAccessRevoked or code is metalErrorDeviceRemoved {
+    ret GpuFaultMeans.lost
+  }
+  ret GpuFaultMeans.badFrame
+}
+
+func gpuFaultName(code: view Int) ret String {
+  if code is metalErrorTimeout {
+    ret "timeout"
+  }
+  if code is metalErrorPageFault {
+    ret "page fault"
+  }
+  if code is metalErrorAccessRevoked {
+    ret "access revoked"
+  }
+  if code is metalErrorNotPermitted {
+    ret "not permitted"
+  }
+  if code is metalErrorOutOfMemory {
+    ret "out of memory"
+  }
+  if code is metalErrorDeviceRemoved {
+    ret "device removed"
+  }
+  ret "code {code}"
+}
+
+# The failed command buffers so far, as a frame looks at them
+type GpuFaults {
+  seen: Int = 0
+  # The window's first, and how many in it
+  windowFrom: Float = 0.0
+  inWindow: Int = 0
+  lost: Bool = false
+}
+
+# The faults with one more of `code`, at `seconds`
+func gpuFaultsWith(faults: view GpuFaults, code: view Int, seconds: view Float) ret GpuFaults {
+  var next: GpuFaults = faults
+  next.seen = faults.seen + 1
+  let means: GpuFaultMeans = gpuFaultMeans(code: code)
+  if means is GpuFaultMeans.nothing {
+    ret next
+  }
+  if faults.inWindow is 0 or seconds - faults.windowFrom > gpuFaultWindow {
+    next.windowFrom = seconds
+    next.inWindow = 0
+  }
+  next.inWindow = next.inWindow + 1
+  if means is GpuFaultMeans.lost or next.inWindow >= gpuFaultsMost {
+    next.lost = true
+  }
+  ret next
+}
