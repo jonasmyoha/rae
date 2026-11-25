@@ -53,6 +53,41 @@ type WindowGeometry {
   # The window is fullscreen, whoever made it so; and since when it is not any more
   fullscreen: Bool = false
   leftFullscreenAt: Float64 = -1000.0
+  # Where the window was when last at rest and not fullscreen
+  home: WindowPlace = {}
+}
+
+# A window's place and size in points (0 wide: not known)
+type WindowPlace {
+  x: Int = 0
+  y: Int = 0
+  w: Int = 0
+  h: Int = 0
+}
+
+# UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.
+# Gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
+# setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
+# size and restoring it as logical doubles the window on every launch. It went
+# 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
+func windowPlaceNow() ret WindowPlace {
+  var scale: Float = Gpu2d.dpr()
+  if scale <= 0.0 {
+    scale = 1.0
+  }
+  ret WindowPlace {
+    x: Gpu2d.windowPositionX()
+    y: Gpu2d.windowPositionY()
+    w: (Gpu2d.windowWidth().toFloat() / scale).toInt()
+    h: (Gpu2d.windowHeight().toFloat() / scale).toInt()
+  }
+}
+
+# Just out of fullscreen: is the window to be moved home? Once it has its own size again. (Out by
+# the OS's own control, the green button or its key, SDL on macOS gave it back at the bottom of the
+# screen.)
+func windowPlaceAway(home: view WindowPlace, now: view WindowPlace) ret Bool {
+  ret home.w > 0 and home.w is now.w and home.h is now.h and (home.x is not now.x or home.y is not now.y)
 }
 
 # `dir` is the app's choice, and that is the point: an app wanting one window
@@ -140,20 +175,12 @@ func restoreWindowPosition(windowGeometry: mod WindowGeometry) ret Bool {
   }
 }
 
-# UNITS MATTER HERE, and getting them wrong is not obvious from a screenshot.
-# Gpu2d.windowWidth/Height are the DRAWABLE size in physical pixels, while
-# setWindowSize takes LOGICAL points — so on a 2x display, saving the physical
-# size and restoring it as logical doubles the window on every launch. It went
-# 900x640 -> 1800x1280 -> 3600x2560 across three runs before this converted.
 func writeWindowGeometry(windowGeometry: mod WindowGeometry) {
-  let x: Int = Gpu2d.windowPositionX()
-  let y: Int = Gpu2d.windowPositionY()
-  var scale: Float = Gpu2d.dpr()
-  if scale <= 0.0 {
-    scale = 1.0
-  }
-  let w: Int = (Gpu2d.windowWidth().toFloat() / scale).toInt()
-  let h: Int = (Gpu2d.windowHeight().toFloat() / scale).toInt()
+  let place: WindowPlace = windowPlaceNow()
+  let x: Int = place.x
+  let y: Int = place.y
+  let w: Int = place.w
+  let h: Int = place.h
   # Only a desktop has windows to move: on a phone a turn is a resize too, and its working folder
   # may be read-only
   if w <= 0 or h <= 0 or not Target.isDesktopOs {
@@ -171,11 +198,16 @@ func writeWindowGeometry(windowGeometry: mod WindowGeometry) {
   }
 }
 
+# How long until the window is itself again after fullscreen (s; 0 or less: it is)
+func windowGeometryBack(windowGeometry: view WindowGeometry, now: view Float64) ret Float {
+  ret windowGeometryBackSeconds - (now - windowGeometry.leftFullscreenAt) as Float
+}
+
 # How long a pending write still waits (s): for the drag to settle, and for a window that was
 # fullscreen to be itself again
 func windowGeometryWaitSeconds(windowGeometry: view WindowGeometry, now: view Float64) ret Float {
   let settle: Float = windowGeometrySettleSeconds - (now - windowGeometry.dirtyAt) as Float
-  let back: Float = windowGeometryBackSeconds - (now - windowGeometry.leftFullscreenAt) as Float
+  let back: Float = windowGeometryBack(windowGeometry: windowGeometry, now: now)
   if back > settle {
     ret back
   }
@@ -211,6 +243,14 @@ func updateWindowGeometry(
     windowGeometry.fullscreen = false
     windowGeometry.leftFullscreenAt = now
   }
+  if windowGeometryBack(windowGeometry: windowGeometry, now: now) > 0.0 {
+    let place: WindowPlace = windowPlaceNow()
+    if windowPlaceAway(home: windowGeometry.home, now: place) {
+      Gpu2d.setWindowPosition(x: windowGeometry.home.x, y: windowGeometry.home.y)
+    }
+  } else if windowGeometry.home.w is 0 {
+    windowGeometry.home = windowPlaceNow()
+  }
   if moved or resized {
     windowGeometry.dirty = true
     windowGeometry.dirtyAt = now
@@ -222,6 +262,7 @@ func updateWindowGeometry(
     ret
   }
   windowGeometry.dirty = false
+  windowGeometry.home = windowPlaceNow()
   writeWindowGeometry(windowGeometry: windowGeometry)
 }
 

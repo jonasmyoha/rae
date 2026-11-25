@@ -47,5 +47,17 @@ func main() {
   updateWindowGeometry(windowGeometry: plain, now: 10.4, resized: false)
   log("settled: saved {saved()}")
   let last: Bool = Sys.delete(path: "{folder}/window")
+
+  # Out of fullscreen somewhere else: home, once it has its own size
+  let home: WindowPlace = { x: 150, y: 120, w: 1100, h: 720 }
+  log(
+    "not known {windowPlaceAway(home: WindowPlace {}, now: home)}, still large {windowPlaceAway(
+      home: home
+      now: WindowPlace { x: 0, y: 0, w: 3008, h: 1692 }
+    )}, at the bottom {windowPlaceAway(
+      home: home
+      now: WindowPlace { x: 150, y: 952, w: 1100, h: 720 }
+    )}, home {windowPlaceAway(home: home, now: home)}"
+  )
   Gpu2d.closeWindow()
 }
