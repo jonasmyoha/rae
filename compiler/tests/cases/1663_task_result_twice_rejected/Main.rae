@@ -1,0 +1,70 @@
+# `get` moves a result that owns memory out of its task: a second `get` of the same task is an error
+# where a path reaches it. Not for a task that was given a new value, nor one given to a `mod`, nor
+# a
+# result that owns nothing.
+func words(count: copy Int) ret String {
+  ret "w {count}"
+}
+
+func length(text: own String) ret Int {
+  ret text.length()
+}
+
+func restart(task: mod Task(String)) {
+  task = spawn words(count: 9)
+}
+
+func twice(task: view Task(String)) ret String {
+  let first: String = task.get()
+  ret task.get()  # ERROR
+}
+
+func wrong() {
+  let task: Task(String) = spawn words(count: 1)
+  loop var i: Int = 0, i < 2, ++i {
+    log(task.get())  # ERROR
+  }
+  let other: Task(String) = spawn words(count: 1)
+  if task.isDone() {
+    log(other.get())
+  }
+  log("{other.get()}")  # ERROR
+  let both: Task(String) = spawn words(count: 1)
+  log("{both.get()} {both.get()}")  # ERROR
+}
+
+func right() {
+  let number: Task(Int) = spawn length(text: "x")
+  log("{number.get()} {number.get()}")
+  let branch: Task(String) = spawn words(count: 1)
+  if number.isDone() {
+    log(branch.get())
+  } else {
+    log(branch.get())
+  }
+  let polled: Task(String) = spawn words(count: 1)
+  if let text: String = polled.tryGet() {
+    log(text)
+  } else {
+    log(polled.get())
+  }
+  var task: Task(String) = spawn words(count: 1)
+  log(task.get())
+  restart(task: task)
+  log(task.get())
+  task = spawn words(count: 2)
+  log(task.get())
+  loop var i: Int = 0, i < 2, ++i {
+    let each: Task(String) = spawn words(count: i)
+    log(each.get())
+  }
+  var tasks: List(Task(String)) = { spawn words(count: 1), spawn words(count: 2) }
+  loop let one: view Task(String) in tasks {
+    log(one.get())
+  }
+}
+
+func main() {
+  wrong()
+  right()
+}

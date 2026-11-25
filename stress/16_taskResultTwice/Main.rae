@@ -1,0 +1,16 @@
+# A result taken twice where the compiler cannot see it (the task is in a list): the program stops
+# and says so.
+func words(count: copy Int) ret List(String) {
+  ret List(String) { "w {count}" }
+}
+
+func main() {
+  var tasks: List(Task(List(String))) = {}
+  tasks.add(value: spawn words(count: 1))
+  loop var i: Int = 0, i < 2, ++i {
+    if let task: view Task(List(String)) = tasks.viewAt(index: 0) {
+      let got: List(String) = task.get()
+      log("{i}: {got}")
+    }
+  }
+}

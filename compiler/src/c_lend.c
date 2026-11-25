@@ -203,7 +203,10 @@ bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
   char* text = NULL;
   size_t length = 0;
   FILE* text_out = open_memstream(&text, &length);
+  bool saved_unbox = ctx->suppress_opt_unbox;
+  ctx->suppress_opt_unbox = true;  /* the call alone: an optional result is the thunk's */
   emit_expr(ctx, call, text_out, PREC_LOWEST, false, false);
+  ctx->suppress_opt_unbox = saved_unbox;
   fclose(text_out);
   char head[512];
   snprintf(head, sizeof head, "%s(", mangled);
@@ -220,15 +223,9 @@ bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
   fwrite(text, 1, (size_t)(found - text), out);
   fprintf(out, "__raelend_pack_%s(%s; ", mangled, found + strlen(head));
   free(text);
-  fprintf(out, "RaeTask* __t = rae_task_new(");
-  if (is_void) {
-    fprintf(out, "0");
-  } else {
-    fprintf(out, "sizeof(");
-    emit_type_info_as_c_type(ctx, result, out);
-    fprintf(out, ")");
-  }
-  fprintf(out, "); __s->__task = __t; __s->__group = &__rae_group%d; rae_group_add(&__rae_group%d); ", group, group);
+  fprintf(out, "RaeTask* __t = ");
+  c_emit_task_new(ctx, is_void ? NULL : result, func, out);
+  fprintf(out, "; __s->__task = __t; __s->__group = &__rae_group%d; rae_group_add(&__rae_group%d); ", group, group);
   CompilerContext* compiler = ctx->compiler_ctx;
   const char* submit = core_function_mangled(compiler, "schedulerSubmit");
   const char* forced = getenv("RAE_SPAWN_THREADS");

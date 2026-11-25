@@ -1,0 +1,38 @@
+pack TaskResultTwice {
+  format: "raepack"
+  version: 1
+  defaultTarget: compiled
+  name: "A task result taken twice"
+  description: "The result of one task is taken twice, where the compiler cannot see it: two owners of one list. Rae stops with a position."
+  category: "Stress"
+  targets: {
+    target compiled: {
+      label: "Compiled"
+      entry: "Main.rae"
+      sources: {
+        source: {
+          path: "."
+          emit: compiled
+        }
+      }
+    }
+  }
+  stress: {
+    verdict: "handles"
+    expect: {
+      outcome: "run"
+      exitCode: 1
+      stdout: "0: [\"w 1\"]"
+      stderrMatches: "^.*Main\\.rae:[0-9]+: runtime error: the result of this task was taken already"
+    }
+    elsewhere: {
+      python: "fine: result() answers the same object each time"
+      java: "fine: Future.get answers the same object each time, shared"
+      go: "a second receive from the channel waits for ever"
+      rust: "compile error: join takes the handle; out of a list, the second take answers None"
+      cpp: "std::future::get a second time is undefined behavior (usually future_error)"
+      c: "pthread_join of a joined thread is undefined behavior; the result pointer is freed twice"
+    }
+    fixedBy: "0.4.85"
+  }
+}

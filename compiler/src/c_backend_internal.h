@@ -425,6 +425,11 @@ typedef struct {
 } StructShape;
 size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
 const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
+/* c_task_result.c */
+int c_task_take_temp(CFuncContext* ctx, const AstExpr* expr);
+bool c_task_result_owns(CFuncContext* ctx, const AstTypeRef* type);
+void c_emit_task_new(CFuncContext* ctx, const TypeInfo* result, const AstFuncDecl* callee, FILE* out);
+void c_emit_task_drops(CompilerContext* ctx, const AstModule* module, FILE* out);
 /* c_map_helpers.c */
 bool c_is_map_type(CompilerContext* ctx, const AstTypeRef* type);
 bool c_has_generic_value_helpers(CompilerContext* ctx, const AstTypeRef* type);

@@ -10,13 +10,14 @@
  * thunk (emitted by the C backend) runs the function and stores its result
  * into `result`; `rae_task_await` joins exactly once and hands back the
  * buffer, which the get() call site casts to T. */
-RaeTask* rae_task_new(size_t result_size) {
+RaeTask* rae_task_new(size_t result_size, void (*drop_result)(void* result)) {
   RAE_REALTIME_GUARD("rae_task_new", "starts a task");
   RaeTask* t = (RaeTask*)malloc(sizeof(RaeTask));
   t->result = result_size ? malloc(result_size) : NULL;
   atomic_init(&t->done, 0);
   t->joined = 0;
   t->taken = 0;
+  t->drop_result = drop_result;
   t->on_pool = 0;
   t->thunk = NULL;
   t->args = NULL;
@@ -148,11 +149,19 @@ void* rae_task_await(RaeTask* t) {
   return t->result;
 }
 
+void* rae_task_take(RaeTask* t, const char* file, int line) {
+  void* result = rae_task_await(t);
+  if (t && t->taken) {
+    rae_int_trap(file, line, "the result of this task was taken already: get moves it out, so it is there once "
+                             "(keep it in a variable and use that)");
+  }
+  if (t) t->taken = 1;
+  return result;
+}
+
 /* Scope-exit drop (join-on-drop): a Task local that goes out of scope is
  * joined so its worker can't outlive the scope (and isn't killed mid-run at
- * process teardown), then freed. NOTE: the result buffer's own contents are
- * not cascade-dropped here — a heap result that was never get()'d leaks its
- * payload; acceptable for now (callers normally get() the result). */
+ * process teardown), then freed, with a result that nobody took. */
 void rae_task_drop(RaeTask* t) {
   RAE_REALTIME_GUARD("rae_task_drop", "joins and frees a task");
   if (!t) return;
@@ -168,6 +177,7 @@ void rae_task_drop(RaeTask* t) {
     rae_perf_event(RAE_PERF_WAIT_END, RAE_PERF_TASK_JOIN, 0, 0);
     t->joined = 1;
   }
+  if (t->drop_result && !t->taken && t->result) t->drop_result(t->result);
   free(t->result);
   free(t);
 }

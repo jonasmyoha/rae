@@ -236,3 +236,10 @@ view reads 1 item and then 101. Rae has no rule against overlapping
 arguments of one call; cases 11 and 12 refuse overlap with a *held* borrow
 (a `viewAt` binding), not between two arguments. The fix is a language rule
 (exclusive access for `mod` arguments), queued as a decision.
+
+## A task result taken twice (case 16)
+
+`16_taskResultTwice` reads a list of tasks twice and takes the result of the
+same task both times. On the **handles** shelf since 0.4.85: the program stops
+with the line of the second `get` (a compile error when the task is a local).
+Until then both readers owned the one list, and it was freed twice.

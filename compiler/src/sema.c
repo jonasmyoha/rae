@@ -992,30 +992,38 @@ static bool sema_create_was_attempted(const AstExpr* e);
  * not poison the code after the `if`, nor the next pass of a loop. What a
  * `break` or `continue` had gone meets the code after the loop, or its next
  * pass (FlowLoop). */
-typedef enum { GONE_DROPPED = 0, GONE_INTO_PARAMETER, GONE_BY_OWN } GoneKind;
+/* GONE_RESULT: the name is a task, still there, whose result `get` moved out: it
+ * is an entry of its own beside the others, and only another `get` meets it. */
+typedef enum { GONE_DROPPED = 0, GONE_INTO_PARAMETER, GONE_BY_OWN, GONE_RESULT } GoneKind;
 typedef struct DroppedSet { Str names[64]; GoneKind how[64]; int count; bool unreachable; } DroppedSet;
 
-static bool dropped_has(const DroppedSet* set, Str name) {
-    for (int i = 0; i < set->count; i++) if (str_eq(set->names[i], name)) return true;
+static bool gone_has(const DroppedSet* set, Str name, bool result) {
+    for (int i = 0; i < set->count; i++)
+        if ((set->how[i] == GONE_RESULT) == result && str_eq(set->names[i], name)) return true;
     return false;
 }
+static bool dropped_has(const DroppedSet* set, Str name) {
+    return gone_has(set, name, false);
+}
 static void gone_add(DroppedSet* set, Str name, GoneKind how) {
-    if (dropped_has(set, name) || set->count >= 64) return;
+    if (gone_has(set, name, how == GONE_RESULT) || set->count >= 64) return;
     set->how[set->count] = how;
     set->names[set->count++] = name;
 }
 static void dropped_add(DroppedSet* set, Str name) {
     gone_add(set, name, GONE_DROPPED);
 }
-static void dropped_remove(DroppedSet* set, Str name) {
-    for (int i = 0; i < set->count; i++) {
-        if (str_eq(set->names[i], name)) {
-            --set->count;
-            set->names[i] = set->names[set->count];
-            set->how[i] = set->how[set->count];
-            return;
-        }
+static void gone_remove(DroppedSet* set, Str name, bool result) {
+    for (int i = set->count - 1; i >= 0; i--) {
+        if ((set->how[i] == GONE_RESULT) != result || !str_eq(set->names[i], name)) continue;
+        --set->count;
+        set->names[i] = set->names[set->count];
+        set->how[i] = set->how[set->count];
     }
+}
+static void dropped_remove(DroppedSet* set, Str name) {
+    gone_remove(set, name, false);
+    gone_remove(set, name, true);
 }
 static void dropped_union(DroppedSet* into, const DroppedSet* from) {
     if (from->unreachable) return;
@@ -1055,6 +1063,8 @@ typedef struct LifecycleFlow {
     FlowScope* scope;
     // what was gone before the statement whose moves are being collected
     const DroppedSet* statement_start;
+    // collect only what `get` takes, no moves
+    bool results_only;
     // (line, column) already reported, so a second loop pass stays quiet
     size_t reported_lines[64]; size_t reported_cols[64]; int reported_count;
 } LifecycleFlow;
@@ -1172,7 +1182,7 @@ static void flow_report_gone(LifecycleFlow* flow, Str name, GoneKind how, size_t
 static void flow_check_expr(LifecycleFlow* flow, const AstExpr* e, const DroppedSet* set, size_t line, size_t col) {
     if (!e) return;
     for (int i = 0; i < set->count; i++) {
-        if (!sema_expr_mentions_ident(e, set->names[i])) continue;
+        if (set->how[i] == GONE_RESULT || !sema_expr_mentions_ident(e, set->names[i])) continue;
         flow_report_gone(flow, set->names[i], set->how[i], e->line ? e->line : line, e->line ? e->column : col);
     }
 }
@@ -1257,11 +1267,31 @@ static bool flow_specialization_moves(const LifecycleFlow* flow, const AstExpr* 
     return false;
 }
 static void flow_move_name(LifecycleFlow* flow, DroppedSet* set, const AstExpr* moved, GoneKind how) {
-    if (!moved || moved->kind != AST_EXPR_IDENT) return;
+    if (!moved || moved->kind != AST_EXPR_IDENT || flow->results_only) return;
     Str name = moved->as.ident;
     if (dropped_has(set, name) && !dropped_has(flow->statement_start, name))
         flow_report_gone(flow, name, how, moved->line, moved->column);
     gone_add(set, name, how);
+}
+/* `task.get()` of a result that owns memory moves it out: of one task, once. */
+static void flow_take_result(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
+    if (flow->generic_params || !str_eq_cstr(e->as.method_call.method_name, "get") || e->as.method_call.args) return;
+    const AstExpr* task = e->as.method_call.object;
+    if (!task || task->kind != AST_EXPR_IDENT) return;
+    const TypeInfo* type = task->resolved_type;
+    while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+    if (!type || type->kind != TYPE_TASK || !type->as.task.base) return;
+    if (!type_needs_cascade_drop(flow->ctx, flow->module, sema_type_ref_of(flow->ctx, type->as.task.base), 0)) return;
+    Str name = task->as.ident;
+    if (gone_has(set, name, true)) {
+        char buf[300];
+        snprintf(buf, sizeof buf,
+                 "the result of '%.*s' was taken on a path reaching here: `get` moves it out of the task; keep it in a "
+                 "variable and use that",
+                 (int)name.len, name.data);
+        flow_report(flow, e->line, e->column, buf);
+    }
+    gone_add(set, name, GONE_RESULT);
 }
 static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e);
 static void flow_sweep_moves_args(LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a) {
@@ -1272,6 +1302,11 @@ static void flow_sweep_moves_args(LifecycleFlow* flow, DroppedSet* set, const As
             flow_move_name(flow, set, moved, GONE_INTO_PARAMETER);
         } else {
             flow_sweep_moves(flow, set, value);
+            /* a task given to a `mod` may be another one after the call */
+            const AstExpr* given = value;
+            while (given && (given->kind == AST_EXPR_BOX || (given->kind == AST_EXPR_UNARY && given->as.unary.op == AST_UNARY_MOD)))
+                given = given->as.unary.operand;
+            if (given && given->kind == AST_EXPR_IDENT) gone_remove(set, given->as.ident, true);
         }
     }
 }
@@ -1279,7 +1314,11 @@ static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr
     if (!e) return;
     switch (e->kind) {
         case AST_EXPR_CALL: flow_sweep_moves(flow, set, e->as.call.callee); flow_sweep_moves_args(flow, set, e->as.call.args); break;
-        case AST_EXPR_METHOD_CALL: flow_sweep_moves(flow, set, e->as.method_call.object); flow_sweep_moves_args(flow, set, e->as.method_call.args); break;
+        case AST_EXPR_METHOD_CALL:
+            flow_sweep_moves(flow, set, e->as.method_call.object);
+            flow_sweep_moves_args(flow, set, e->as.method_call.args);
+            flow_take_result(flow, set, e);
+            break;
         case AST_EXPR_BINARY: flow_sweep_moves(flow, set, e->as.binary.lhs); flow_sweep_moves(flow, set, e->as.binary.rhs); break;
         case AST_EXPR_OWN:
             if (e->as.unary.moves_local || flow_specialization_moves(flow, e))
@@ -1426,6 +1465,9 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
                 flow_sweep_create(flow, r->value);
                 flow_check_expr(flow, r->value, set, s->line, s->column);
             }
+            flow->results_only = true;
+            for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) flow_move(flow, set, r->value);
+            flow->results_only = false;
             set->unreachable = true;
             break;
         case AST_STMT_IF: {
@@ -9562,7 +9604,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         module->had_error = true;
                         break;
                     }
-                    expr->resolved_type = type_get_opt(ctx->type_registry, result);
+                    /* (an optional result is its own `none`: Rae has no optional of one) */
+                    expr->resolved_type = result->kind == TYPE_OPT ? result : type_get_opt(ctx->type_registry, result);
                     break;
                 }
                 bool found = false;

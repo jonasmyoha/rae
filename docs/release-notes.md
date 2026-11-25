@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.85, 2026-11-25: the result of a task
+
+- A result that owns memory (a String, a List, a struct of them) is freed with its task when nobody took it; it leaked.
+- Breaking: `get` moves such a result out of its task, once. A second `get` is an error where a path reaches it, and
+  stops the program with a message where the compiler cannot see it; the result was freed twice. `tryGet` after `get` is
+  `none`. A number, or anything else that owns nothing, can be read again.
+- `task.get()` as a statement frees what it took.
+- `tryGet` of a task with an optional result, and a lent spawn of a function that returns one, work; they were errors of
+  the C compiler.
+- Cases 1663 and 1665, stress case 16.
+
 ## 0.4.84, 2026-11-25: spawning a generic function
 
 - `spawn` and `spawn thread` of a generic function work, for every type and result. A String, number or optional result
