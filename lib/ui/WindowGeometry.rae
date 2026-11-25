@@ -32,6 +32,10 @@ func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
 # rather than sixty.
 const windowGeometrySettleSeconds: Float = 0.25
 
+# After fullscreen the OS takes a moment to give the window back its size (on macOS about 0.8 s of
+# animation): until this long after, what it has is not the window's own.
+const windowGeometryBackSeconds: Float = 1.5
+
 type WindowGeometry {
   # Split so the directory can be created before writing into it, without this
   # module having to pick apart a path string.
@@ -46,6 +50,9 @@ type WindowGeometry {
   lastY: Int
   lastW: Int
   lastH: Int
+  # The window is fullscreen, whoever made it so; and since when it is not any more
+  fullscreen: Bool = false
+  leftFullscreenAt: Float64 = -1000.0
 }
 
 # `dir` is the app's choice, and that is the point: an app wanting one window
@@ -164,6 +171,17 @@ func writeWindowGeometry(windowGeometry: mod WindowGeometry) {
   }
 }
 
+# How long a pending write still waits (s): for the drag to settle, and for a window that was
+# fullscreen to be itself again
+func windowGeometryWaitSeconds(windowGeometry: view WindowGeometry, now: view Float64) ret Float {
+  let settle: Float = windowGeometrySettleSeconds - (now - windowGeometry.dirtyAt) as Float
+  let back: Float = windowGeometryBackSeconds - (now - windowGeometry.leftFullscreenAt) as Float
+  if back > settle {
+    ret back
+  }
+  ret settle
+}
+
 # Once per frame. Consumes this frame's move/resize events and writes when the
 # drag has settled.
 #
@@ -181,14 +199,26 @@ func updateWindowGeometry(
   now: view Float64
   resized: view Bool
 ) {
-  if Gpu2d.windowMoved() or resized {
+  # (windowMoved is cleared as it is read: read in fullscreen too, so the move into it is not a
+  # later move)
+  let moved: Bool = Gpu2d.windowMoved()
+  if Gpu2d.isWindowFullscreen() {
+    windowGeometry.fullscreen = true
+    windowGeometry.dirty = false
+    ret
+  }
+  if windowGeometry.fullscreen {
+    windowGeometry.fullscreen = false
+    windowGeometry.leftFullscreenAt = now
+  }
+  if moved or resized {
     windowGeometry.dirty = true
     windowGeometry.dirtyAt = now
   }
   if windowGeometry.dirty is false {
     ret
   }
-  if (now - windowGeometry.dirtyAt) as Float < windowGeometrySettleSeconds {
+  if windowGeometryWaitSeconds(windowGeometry: windowGeometry, now: now) > 0.0 {
     ret
   }
   windowGeometry.dirty = false
@@ -206,7 +236,7 @@ func windowGeometryDeadlineSeconds(
   if windowGeometry.dirty is false {
     ret 0.0
   }
-  let remaining: Float = windowGeometrySettleSeconds - (now - windowGeometry.dirtyAt) as Float
+  let remaining: Float = windowGeometryWaitSeconds(windowGeometry: windowGeometry, now: now)
   if remaining < 0.001 {
     ret 0.001
   }
@@ -214,9 +244,9 @@ func windowGeometryDeadlineSeconds(
 }
 
 # For an app that would rather write on its own schedule — on quit, say — than
-# let the settle timer do it.
+# let the settle timer do it. Nothing while the window is fullscreen.
 func flushWindowGeometry(windowGeometry: mod WindowGeometry) {
-  if windowGeometry.dirty is false {
+  if windowGeometry.dirty is false or Gpu2d.isWindowFullscreen() {
     ret
   }
   windowGeometry.dirty = false

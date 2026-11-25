@@ -1,0 +1,51 @@
+# A fullscreen window's size and place are not saved as the window's (ui/WindowGeometry): not while
+# it is fullscreen, whoever made it so, and not for a moment after, while the OS still brings the
+# window back. Then a resize or a move saves as always.
+import Sys
+import Gpu2d
+open ui/WindowGeometry
+
+const folder: String = "/tmp/rae-case-1670"
+
+func saved() ret Bool {
+  ret Sys.exists(path: "{folder}/window")
+}
+
+func main() {
+  Gpu2d.initWindow(width: 320, height: 200, title: "geometry")
+  let removed: Bool = Sys.exists(path: "{folder}/window") and Sys.delete(path: "{folder}/window")
+  var windowGeometry: WindowGeometry = createWindowGeometry(dir: folder, name: "window")
+  let settled: Bool = Gpu2d.windowMoved()
+
+  Gpu2d.setWindowFullscreen(on: true)
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 1.0, resized: true)
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 5.0, resized: false)
+  flushWindowGeometry(windowGeometry: windowGeometry)
+  log(
+    "fullscreen, resized: saved {saved()}, due in {windowGeometryDeadlineSeconds(
+      windowGeometry: windowGeometry
+      now: 5.0
+    )} s"
+  )
+
+  Gpu2d.setWindowFullscreen(on: false)
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 6.0, resized: true)
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 6.5, resized: false)
+  log("just left, still that size: saved {saved()}")
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 6.9, resized: true)
+  let due: Float = windowGeometryDeadlineSeconds(windowGeometry: windowGeometry, now: 6.9)
+  log("the window is back: saved {saved()}, due later {due > 0.3}")
+  updateWindowGeometry(windowGeometry: windowGeometry, now: 9.0, resized: false)
+  log("at rest: saved {saved()}")
+  let gone: Bool = Sys.delete(path: "{folder}/window")
+
+  # And as always without fullscreen
+  var plain: WindowGeometry = createWindowGeometry(dir: folder, name: "window")
+  updateWindowGeometry(windowGeometry: plain, now: 10.0, resized: true)
+  updateWindowGeometry(windowGeometry: plain, now: 10.1, resized: false)
+  log("a resize, at once: saved {saved()}")
+  updateWindowGeometry(windowGeometry: plain, now: 10.4, resized: false)
+  log("settled: saved {saved()}")
+  let last: Bool = Sys.delete(path: "{folder}/window")
+  Gpu2d.closeWindow()
+}
