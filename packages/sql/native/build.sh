@@ -89,5 +89,5 @@ echo "$SQLITE_VERSION" > "$INSTALL/VERSION"
 end=$(date +%s)
 echo "sqlite: $SQLITE_VERSION built into $INSTALL in $((end - start)) s"
 for lib in "$INSTALL"/lib/libsqlite3.a "$INSTALL"/lib/*/libsqlite3.a; do
-  [ -f "$lib" ] && echo "  ${lib#"$INSTALL"/}: $(( $(wc -c < "$lib") / 1024 )) KiB"
+  if [ -f "$lib" ]; then echo "  ${lib#"$INSTALL"/}: $(( $(wc -c < "$lib") / 1024 )) KiB"; fi
 done
