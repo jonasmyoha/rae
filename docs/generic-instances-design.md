@@ -208,7 +208,11 @@ call; `is` of a `view List`; a String moved into a task leaked; `make() is label
 In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is useful alone.
 
 1. **The matrix** as a suite stage, with its known failures listed. Done (0.4.96).
-2. **The full clone**: `clone_expr` / `clone_stmt` copy every node, T written out. No behavior change.
+2. **The full clone**: every node is copied, T written out (`compiler/src/ast_clone.c`). No behavior change. Done
+   (0.4.97). A type that has no spelling as an expression (an optional) becomes a type argument of its call where it
+   leads it, and stays `T` elsewhere, for the instance's scope to resolve. A node written out of a type parameter is
+   marked (`is_written_out`), so sema knows `enumName(T, ...)` of a type that is no enum from a program's own mistake.
+   `RAE_CHECK_CLONES=1` (on in the suite) compares each copy with its template.
 3. **Instances analyzed in full** in `specialize_decl`, the 13 places in `lib/` fixed, errors once and with the
    instance's name, branches of other types left out.
 4. **Sema decides the instance of every call**; a registry and a worklist; a check in the suite that its instances are

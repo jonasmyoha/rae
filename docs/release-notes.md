@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.97, 2026-11-26: copies of generic functions are complete
+
+- An instance of a generic function, and each pass of a loop over fields, is a copy that shares no node with its
+  template, with the type parameters written out (`compiler/src/ast_clone.c`). The elements of a list literal, a match
+  statement, `own` and a loop's step were shared, so what was found for one instance stayed in the template for the
+  next. The C of the 1 600 programs of this repo is the same but for one function that was emitted for a wrong
+  instance's call.
+- `RAE_CHECK_CLONES=1` (on in the suite) compares each copy with its template.
+- Case 1684; docs/generic-instances-design.md.
+
 ## 0.4.96, 2026-11-25: the type matrix
 
 - `compiler/tools/typeMatrix.py` (`make -C compiler type-matrix`, a stage of the suite, about 10 s): 15 types x 11

@@ -212,6 +212,8 @@ for TARGET in "${TARGETS[@]}"; do
     # A specialization the discovery pass missed (registered only while a plain body was emitted)
     # fails the build under the suite, so discovery stays complete (case 1490)
     export RAE_LATE_SPECIALIZATIONS="${RAE_LATE_SPECIALIZATIONS:-error}"
+    # An instance of a generic function shares no node with its template (src/ast_clone.c)
+    export RAE_CHECK_CLONES="${RAE_CHECK_CLONES:-1}"
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then

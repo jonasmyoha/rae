@@ -5,6 +5,7 @@
 #include "shader_compose.h"
 #include "type.h"
 #include "ast.h"
+#include "ast_clone.h"
 #include "diag.h"
 #include "mangler.h"
 #include "ownership.h"
@@ -1782,28 +1783,6 @@ AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p)
     return res;
 }
 
-static AstTypeRef* clone_type_ref(Arena* arena, const AstTypeRef* tr) {
-    if (!tr) return NULL;
-    AstTypeRef* res = arena_alloc(arena, sizeof(AstTypeRef));
-    *res = *tr;
-    /* Same rule as substitute_type_ref: an Array's count lives in the
-     * TypeInfo, not in its name, so clearing resolved_type would make the
-     * clone unresolvable and mangle every cap to the same name. */
-    res->resolved_type = (tr->resolved_type && tr->resolved_type->kind == TYPE_ARRAY)
-        ? tr->resolved_type : NULL;
-    if (tr->parts) {
-        AstIdentifierPart* head = NULL; AstIdentifierPart* tail = NULL; AstIdentifierPart* curr = tr->parts;
-        while (curr) {
-            AstIdentifierPart* p = arena_alloc(arena, sizeof(AstIdentifierPart)); *p = *curr;
-            if (!head) head = p; if (tail) tail->next = p; tail = p; curr = curr->next;
-        }
-        res->parts = head;
-    }
-    if (tr->generic_args) res->generic_args = clone_type_ref(arena, tr->generic_args);
-    if (tr->next) res->next = clone_type_ref(arena, tr->next);
-    return res;
-}
-
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type) {
     if (!type) return NULL;
     if (generic_params && concrete_args && type->parts && !type->parts->next) {
@@ -1862,169 +1841,15 @@ AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* g
     return result;
 }
 
-static AstCallArg* clone_call_args(Arena* arena, const AstCallArg* arg);
-static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
-    if (!expr) return NULL;
-    AstExpr* res = arena_alloc(arena, sizeof(AstExpr));
-    *res = *expr;
-    res->resolved_type = NULL;
-    res->decl_link = NULL;
-    switch (expr->kind) {
-        case AST_EXPR_BINARY:
-            res->as.binary.lhs = clone_expr(arena, expr->as.binary.lhs);
-            res->as.binary.rhs = clone_expr(arena, expr->as.binary.rhs);
-            break;
-        case AST_EXPR_UNARY:
-            res->as.unary.operand = clone_expr(arena, expr->as.unary.operand);
-            break;
-        case AST_EXPR_CAST:
-            res->as.cast.operand = clone_expr(arena, expr->as.cast.operand);
-            res->as.cast.target = clone_type_ref(arena, expr->as.cast.target);
-            break;
-        case AST_EXPR_CALL:
-            res->as.call.callee = clone_expr(arena, expr->as.call.callee);
-            res->as.call.args = clone_call_args(arena, expr->as.call.args);
-            res->as.call.generic_args = clone_type_ref(arena, expr->as.call.generic_args);
-            break;
-        case AST_EXPR_MEMBER:
-            res->as.member.object = clone_expr(arena, expr->as.member.object);
-            break;
-        case AST_EXPR_INDEX:
-            res->as.index.target = clone_expr(arena, expr->as.index.target);
-            res->as.index.index = clone_expr(arena, expr->as.index.index);
-            break;
-        case AST_EXPR_METHOD_CALL:
-            res->as.method_call.object = clone_expr(arena, expr->as.method_call.object);
-            res->as.method_call.args = clone_call_args(arena, expr->as.method_call.args);
-            res->as.method_call.generic_args = clone_type_ref(arena, expr->as.method_call.generic_args);
-            break;
-        case AST_EXPR_COLLECTION_LITERAL:
-            /* resolved per specialization: shared, `List(T) { value }` was the
-             * first one's List in every later one */
-            res->as.collection.type = clone_type_ref(arena, expr->as.collection.type);
-            break;
-        case AST_EXPR_OBJECT:
-            res->as.object_literal.type = clone_type_ref(arena, expr->as.object_literal.type);
-            {
-                AstObjectField* head = NULL; AstObjectField* tail = NULL;
-                AstObjectField* curr = expr->as.object_literal.fields;
-                while (curr) {
-                    AstObjectField* f = arena_alloc(arena, sizeof(AstObjectField)); *f = *curr;
-                    f->value = clone_expr(arena, curr->value); f->next = NULL;
-                    if (!head) head = f; else tail->next = f; tail = f; curr = curr->next;
-                }
-                res->as.object_literal.fields = head;
-            }
-            break;
-        case AST_EXPR_INTERP: {
-            AstInterpPart* head = NULL; AstInterpPart* tail = NULL;
-            AstInterpPart* curr = expr->as.interp.parts;
-            while (curr) {
-                AstInterpPart* p = arena_alloc(arena, sizeof(AstInterpPart)); *p = *curr;
-                p->value = clone_expr(arena, curr->value); p->next = NULL;
-                if (!head) head = p; else tail->next = p; tail = p; curr = curr->next;
-            }
-            res->as.interp.parts = head;
-            break;
-        }
-        case AST_EXPR_MATCH: {
-            res->as.match_expr.subject = clone_expr(arena, expr->as.match_expr.subject);
-            AstMatchArm* head = NULL; AstMatchArm* tail = NULL;
-            for (AstMatchArm* curr = expr->as.match_expr.arms; curr; curr = curr->next) {
-                AstMatchArm* arm = arena_alloc(arena, sizeof(AstMatchArm)); *arm = *curr;
-                arm->pattern = clone_expr(arena, curr->pattern);
-                arm->value = clone_expr(arena, curr->value); arm->next = NULL;
-                if (!head) head = arm; else tail->next = arm;
-                tail = arm;
-            }
-            res->as.match_expr.arms = head;
-            break;
-        }
-        default: break;
+/* Type arguments as a program writes them (`UInt8`, where the TypeInfo's name is C's) */
+static AstTypeRef* sema_written_args(CompilerContext* ctx, TypeInfo** args, size_t count) {
+    AstTypeRef* head = NULL;
+    AstTypeRef** tail = &head;
+    for (size_t i = 0; i < count; i++) {
+        *tail = sema_type_ref_of(ctx, args[i]);
+        tail = &(*tail)->next;
     }
-    return res;
-}
-
-static AstCallArg* clone_call_args(Arena* arena, const AstCallArg* arg) {
-    if (!arg) return NULL;
-    AstCallArg* res = arena_alloc(arena, sizeof(AstCallArg));
-    *res = *arg;
-    res->value = clone_expr(arena, arg->value);
-    res->next = clone_call_args(arena, arg->next);
-    return res;
-}
-
-static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt);
-static AstBlock* clone_block(Arena* arena, const AstBlock* block) {
-    if (!block) return NULL;
-    AstBlock* res = arena_alloc(arena, sizeof(AstBlock));
-    AstStmt* head = NULL; AstStmt* tail = NULL;
-    AstStmt* curr = block->first;
-    while (curr) {
-        AstStmt* s = clone_stmt(arena, curr);
-        if (!head) head = s; else tail->next = s;
-        tail = s; curr = curr->next;
-    }
-    res->first = head;
-    return res;
-}
-
-static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
-    if (!stmt) return NULL;
-    AstStmt* res = arena_alloc(arena, sizeof(AstStmt));
-    *res = *stmt;
-    res->next = NULL;
-    // Note: some statements like let_stmt have type_info that might need clearing or re-resolving
-    // but the analyzer will overwrite them.
-    switch (stmt->kind) {
-        case AST_STMT_EXPR: res->as.expr_stmt = clone_expr(arena, stmt->as.expr_stmt); break;
-        case AST_STMT_LET:
-            res->as.let_stmt.value = clone_expr(arena, stmt->as.let_stmt.value);
-            // The written type is re-resolved per specialization: a shared
-            // `let x: T` ref would cache the FIRST instantiation's T on the
-            // template (#1007: `if let member: T` in a generic decoder bound to
-            // List(String) reported every later List(Int) body as a mismatch).
-            res->as.let_stmt.type = clone_type_ref(arena, stmt->as.let_stmt.type);
-            break;
-        case AST_STMT_RET: {
-            AstReturnArg* head = NULL; AstReturnArg* tail = NULL;
-            AstReturnArg* curr = stmt->as.ret_stmt.values;
-            while (curr) {
-                AstReturnArg* a = arena_alloc(arena, sizeof(AstReturnArg));
-                *a = *curr; a->value = clone_expr(arena, curr->value); a->next = NULL;
-                if (!head) head = a; else tail->next = a;
-                tail = a; curr = curr->next;
-            }
-            res->as.ret_stmt.values = head;
-            break;
-        }
-        case AST_STMT_IF:
-            res->as.if_stmt.condition = clone_expr(arena, stmt->as.if_stmt.condition);
-            res->as.if_stmt.then_block = clone_block(arena, stmt->as.if_stmt.then_block);
-            res->as.if_stmt.else_block = clone_block(arena, stmt->as.if_stmt.else_block);
-            // The `if let` binding is part of the statement; without this a
-            // generic instantiation would silently lose it.
-            res->as.if_stmt.binding = clone_stmt(arena, stmt->as.if_stmt.binding);
-            break;
-        case AST_STMT_LOOP:
-            res->as.loop_stmt.init = clone_stmt(arena, stmt->as.loop_stmt.init);
-            res->as.loop_stmt.condition = clone_expr(arena, stmt->as.loop_stmt.condition);
-            res->as.loop_stmt.increment = clone_expr(arena, stmt->as.loop_stmt.increment);
-            res->as.loop_stmt.body = clone_block(arena, stmt->as.loop_stmt.body);
-            break;
-        case AST_STMT_ASSIGN:
-            res->as.assign_stmt.target = clone_expr(arena, stmt->as.assign_stmt.target);
-            res->as.assign_stmt.value = clone_expr(arena, stmt->as.assign_stmt.value);
-            break;
-        case AST_STMT_DEFER:
-            res->as.defer_stmt.block = clone_block(arena, stmt->as.defer_stmt.block);
-            break;
-        case AST_STMT_UNSAFE:
-            res->as.unsafe_stmt.block = clone_block(arena, stmt->as.unsafe_stmt.block);
-            break;
-        default: break;
-    }
-    return res;
+    return head;
 }
 
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column) {
@@ -2086,7 +1911,13 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
             }
             spec->as.func_decl.returns = head_ret;
         }
-        spec->as.func_decl.body = clone_block(ctx->ast_arena, generic_decl->as.func_decl.body);
+        AstCloner cloner = {
+            .ctx = ctx,
+            .params = generic_decl->as.func_decl.generic_params,
+            .args = sema_written_args(ctx, args, arg_count),
+        };
+        spec->as.func_decl.body = ast_clone_block(&cloner, generic_decl->as.func_decl.body);
+        ast_clone_check(&cloner, generic_decl->as.func_decl.body, spec->as.func_decl.body, generic_decl->as.func_decl.name);
 
         // Re-analyze body with concrete types. #877: the specialized body is
         // analyzed INSIDE the caller's analysis, so it must not inherit the
@@ -2149,11 +1980,16 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         s_defer_depth = saved_spec_defer_depth;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
         spec->as.type_decl.specialization_args = args_tr;
+        AstCloner cloner = {
+            .ctx = ctx,
+            .params = generic_decl->as.type_decl.generic_params,
+            .args = sema_written_args(ctx, args, arg_count),
+        };
         AstTypeField* head = NULL; AstTypeField* tail = NULL; AstTypeField* f = generic_decl->as.type_decl.fields;
         while (f) {
             AstTypeField* nf = arena_alloc(ctx->ast_arena, sizeof(AstTypeField));
             *nf = *f; nf->type = substitute_type_ref(ctx, generic_decl->as.type_decl.generic_params, args_tr, f->type);
-            nf->default_value = clone_expr(ctx->ast_arena, f->default_value); nf->next = NULL;
+            nf->default_value = ast_clone_expr(&cloner, f->default_value); nf->next = NULL;
             if (!head) head = nf; else tail->next = nf;
             tail = nf; f = f->next;
         }
@@ -2387,6 +2223,13 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
     }
     return head;
 }
+
+/* The first argument of enumName, enumFromName, enumMembers and enumCount: a name.
+ * In an instance of a generic function, also what its type parameter is there. */
+static bool sema_names_enum_type(const AstExpr* value) {
+    return value->kind == AST_EXPR_IDENT || value->is_written_out;
+}
+static AstTypeRef* sema_type_ref_of_expr(CompilerContext* ctx, const AstExpr* expr);
 
 // Is this call argument a bare TYPE name (a primitive like `Float`, or a
 // user/enum type), i.e. a positional type argument filling a `T: type`
@@ -4978,7 +4821,7 @@ static void reflect_fold_field_name_stmt(AstStmt* s, const ReflectFold* rf) {
             if (set_value && rf->target) {
                 reflect_fold_field_name_expr(set_value, rf);
                 s->kind = AST_STMT_ASSIGN;
-                s->as.assign_stmt.target = clone_expr(rf->ctx->ast_arena, rf->target);
+                s->as.assign_stmt.target = ast_clone_expr(&(AstCloner){ .ctx = rf->ctx }, rf->target);
                 s->as.assign_stmt.value = set_value;
                 s->as.assign_stmt.is_bind = false;
                 break;
@@ -5135,7 +4978,7 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
     AstStmt* out_tail = NULL;
     for (AstTypeField* f = fields; f; f = f->next) {
         if (!f->type || !reflect_type_matches(pattern, f->type)) continue;
-        AstTypeRef* ftype = clone_type_ref(ctx->ast_arena, f->type);
+        AstTypeRef* ftype = ast_clone_type_ref(&(AstCloner){ .ctx = ctx }, f->type);
         ftype->is_view = want_view; ftype->is_mod = want_mod;
         ftype->is_val = false; ftype->is_own = false; ftype->is_copy = false;
         ftype->is_opt = f->type->is_opt;   // #959: an `opt T` pattern keeps the opt on the alias
@@ -5143,7 +4986,7 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         memset(member, 0, sizeof *member);
         member->kind = AST_EXPR_MEMBER;
         member->line = value->line; member->column = value->column;
-        member->as.member.object = clone_expr(ctx->ast_arena, value);
+        member->as.member.object = ast_clone_expr(&(AstCloner){ .ctx = ctx }, value);
         member->as.member.member = f->name;
         AstStmt* alias = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
         memset(alias, 0, sizeof *alias);
@@ -5155,7 +4998,9 @@ static void reflect_fill_unrolled(CompilerContext* ctx, AstBlock* out,
         alias->as.let_stmt.value = member;
         AstBlock* iter_block = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
         iter_block->first = alias;
-        AstBlock* iter_body = clone_block(ctx->ast_arena, body);
+        AstCloner cloner = { .ctx = ctx };
+        AstBlock* iter_body = ast_clone_block(&cloner, body);
+        ast_clone_check(&cloner, body, iter_body, bind_name);
         ReflectFold rf = {0};
         rf.ctx = ctx; rf.binding = bind_name; rf.field_name = f->name;
         rf.type_name = reflect_element_type_name(ctx->ast_arena, f->type); rf.target = member;
@@ -5493,7 +5338,9 @@ AstBlock* reflect_instantiate_body(CompilerContext* ctx, const AstModule* module
     bool has_loop = reflect_block_has_fields_loop(template_body);
     bool has_type_name = reflect_block_has_type_name(template_body);
     if (!has_loop && !has_type_name) return NULL;
-    AstBlock* cloned = clone_block(ctx->ast_arena, template_body);
+    AstCloner cloner = { .ctx = ctx };
+    AstBlock* cloned = ast_clone_block(&cloner, template_body);
+    ast_clone_check(&cloner, template_body, cloned, str_from_cstr("a generic function"));
     if (has_type_name) {
         // #960: fold `typeName(param)` to this instantiation's concrete name and
         // decide the `typeName(x) is "..."` arms, so a generic body can carry
@@ -8830,6 +8677,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             } else if (expr->as.unary.operand->resolved_type) expr->resolved_type = expr->as.unary.operand->resolved_type;
             break;
         case AST_EXPR_CALL: {
+            if (expr->is_written_out) {  /* a type, not a call */
+                expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sema_type_ref_of_expr(ctx, expr));
+                break;
+            }
             // #960: `enumFromName(E, name: s)` — compile-time plain function, one
             // per enum: the member of `E` spelled `s`, as `opt E` (none when no
             // member has that name). `E` may be a generic parameter; the backend
@@ -8840,7 +8691,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 AstCallArg* ta = expr->as.call.args;
                 AstCallArg* na = ta ? ta->next : NULL;
                 if (!ta || !na || na->next || ta->name.len != 0 || !ta->value
-                    || ta->value->kind != AST_EXPR_IDENT || !na->value
+                    || !sema_names_enum_type(ta->value) || !na->value
                     || !str_eq_cstr(na->name, "name")) {
                     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
                                "enumFromName takes an enum type and `name: String` — enumFromName(Kind, name: text)");
@@ -8850,15 +8701,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 }
                 sema_analyze_expr(ctx, module, symbols, na->value, true);
                 ensure_type_match(ctx, type_get_string(ctx->type_registry), &na->value);
-                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
-                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
-                etr->parts->text = ta->value->as.ident;
-                etr->line = ta->value->line; etr->column = ta->value->column;
+                AstTypeRef* etr = sema_type_ref_of_expr(ctx, ta->value);
                 TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
                 // A generic parameter: unresolved in the template, or bound to a
                 // concrete type (decl-less symbol) in a sema specialization.
                 Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
-                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                bool is_generic = ta->value->is_written_out || (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
                 if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
                     diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
                                "enumFromName requires an enum type (or a generic type parameter)");
@@ -8911,7 +8759,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     || str_eq_cstr(expr->as.call.callee->as.ident, "enumCount"))) {
                 bool is_members = str_eq_cstr(expr->as.call.callee->as.ident, "enumMembers");
                 AstCallArg* ta = expr->as.call.args;
-                if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) {
+                if (!ta || ta->next || ta->name.len != 0 || !ta->value || !sema_names_enum_type(ta->value)) {
                     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
                                is_members ? "enumMembers takes one enum type — enumMembers(Kind)"
                                           : "enumCount takes one enum type — enumCount(Kind)");
@@ -8919,13 +8767,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     expr->resolved_type = type_get_void(ctx->type_registry);
                     break;
                 }
-                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
-                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
-                etr->parts->text = ta->value->as.ident;
-                etr->line = ta->value->line; etr->column = ta->value->column;
+                AstTypeRef* etr = sema_type_ref_of_expr(ctx, ta->value);
                 TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
                 Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
-                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                bool is_generic = ta->value->is_written_out || (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
                 if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
                     diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
                                is_members ? "enumMembers requires an enum type (or a generic type parameter)"
@@ -8955,7 +8800,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 AstCallArg* ta = expr->as.call.args;
                 AstCallArg* va = ta ? ta->next : NULL;
                 if (!ta || !va || va->next || ta->name.len != 0 || !ta->value
-                    || ta->value->kind != AST_EXPR_IDENT || !va->value
+                    || !sema_names_enum_type(ta->value) || !va->value
                     || !str_eq_cstr(va->name, "value")) {
                     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column,
                                "enumName takes an enum type and `value: E` — enumName(Kind, value: kind)");
@@ -8964,13 +8809,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     break;
                 }
                 sema_analyze_expr(ctx, module, symbols, va->value, true);
-                AstTypeRef* etr = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef)); memset(etr, 0, sizeof *etr);
-                etr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart)); memset(etr->parts, 0, sizeof *etr->parts);
-                etr->parts->text = ta->value->as.ident;
-                etr->line = ta->value->line; etr->column = ta->value->column;
+                AstTypeRef* etr = sema_type_ref_of_expr(ctx, ta->value);
                 TypeInfo* et = sema_resolve_type_internal(ctx, module, symbols, etr);
                 Symbol* esym = symbol_table_lookup(symbols, etr->parts->text);
-                bool is_generic = (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
+                bool is_generic = ta->value->is_written_out || (et && et->kind == TYPE_GENERIC_PARAM) || (esym && !esym->decl);
                 if (!is_generic && !sema_typeref_is_enum(symbols, etr)) {
                     diag_error(sema_diag_file(module), (int)ta->value->line, (int)ta->value->column,
                                "enumName requires an enum type (or a generic type parameter)");
@@ -10821,7 +10663,17 @@ static AstTypeRef* sema_type_ref_of_expr(CompilerContext* ctx, const AstExpr* ex
     type->column = expr->column;
     AstTypeRef* last = NULL;
     for (const AstCallArg* a = expr->kind == AST_EXPR_CALL ? expr->as.call.args : NULL; a; a = a->next) {
-        AstTypeRef* argument = sema_type_ref_of_expr(ctx, a->value);
+        AstTypeRef* argument = NULL;
+        if (a->name.len) {  /* `Array(Int, cap: 4)` */
+            argument = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+            argument->is_value_arg = true;
+            argument->value_name = a->name;
+            argument->value_expr = a->value;
+            argument->line = expr->line;
+            argument->column = expr->column;
+        } else {
+            argument = sema_type_ref_of_expr(ctx, a->value);
+        }
         if (!last) type->generic_args = argument; else last->next = argument;
         last = argument;
     }
@@ -11425,7 +11277,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
             if (!alias_target || !alias_target->parts) break;
             type_ref->parts = clone_parts(ctx, alias_target->parts);
             type_ref->generic_args = alias_target->generic_args
-                ? clone_type_ref(ctx->ast_arena, alias_target->generic_args) : NULL;
+                ? ast_clone_type_ref(&(AstCloner){ .ctx = ctx }, alias_target->generic_args) : NULL;
         }
         Str name = type_ref->parts->text;
         // `any` (#772) is the compile-time type wildcard. It is meaningful ONLY

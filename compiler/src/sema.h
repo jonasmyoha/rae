@@ -32,6 +32,7 @@ void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* modul
                                     const AstIdentifierPart* generic_params, const AstTypeRef* generic_args,
                                     const AstExpr* const* moved_values, size_t moved_value_count);
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
+AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p);
 
 // #773 compile-time field reflection through a generic world parameter. When a
 // generic function's body contains a `loop ... in fields(world)`, the field set

@@ -69,6 +69,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/diag.c \
        $(SRC_DIR)/type.c \
        $(SRC_DIR)/sema.c \
+       $(SRC_DIR)/ast_clone.c \
        $(SRC_DIR)/sema_main_loop.c \
        $(SRC_DIR)/array_methods.c \
        $(SRC_DIR)/shader_compose.c \

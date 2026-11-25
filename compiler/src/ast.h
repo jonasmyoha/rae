@@ -222,6 +222,10 @@ struct AstExpr {
   // so `0.5 * x` is f32 arithmetic like `0.5f * x` in C. Unmarked literals
   // stay C doubles (Float64 contexts, and contexts sema cannot decide).
   bool is_f32_literal;
+  // In an instance of a generic function: a type parameter written out as the
+  // type it is there (`T.default()`, `enumName(T, ...)`), an identifier or a call
+  // (`List(Int)`) that names a type (ast_clone.c)
+  bool is_written_out;
   union {
     Str ident;
     Str integer;

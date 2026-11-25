@@ -283,7 +283,7 @@ class Runner:
         self.folder = folder
         self.seconds = {"emit": 0.0, "cc": 0.0, "run": 0.0}
         self.environment = dict(os.environ, RAE_FORMAT="off", RAE_PROGRESS="off", RAE_TOOLCHAIN_CHECK="off",
-                                RAE_MEM_STATS="1", ASAN_OPTIONS="detect_leaks=0:use_sigaltstack=0")
+                                RAE_MEM_STATS="1", RAE_CHECK_CLONES="1", ASAN_OPTIONS="detect_leaks=0:use_sigaltstack=0")
         self.flags = ["-std=c11", "-O0", "-w", "-ffp-contract=off", "-ferror-limit=0", "-I/opt/homebrew/include"]
         self.libraries = ["-lm", "-lpthread"]
         if sys.platform == "darwin":

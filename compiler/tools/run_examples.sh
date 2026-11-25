@@ -10,6 +10,7 @@ export RAE_FORMAT=check
 # Declared shaders are validated with naga at build time; the gate never skips
 # the check silently (docs/shaders-and-the-compiler.md).
 export RAE_SHADER_VALIDATE="${RAE_SHADER_VALIDATE:-require}"
+export RAE_CHECK_CLONES="${RAE_CHECK_CLONES:-1}"
 # #984: the gate below runs each example's STANDALONE built binary (not
 # `bin/rae`), so nothing sets $RAE_STDLIB or cwd for it automatically — a
 # gate that execs "$TMP_OUT/app" without both stalls on every stdlib asset

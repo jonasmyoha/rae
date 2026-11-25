@@ -1,0 +1,128 @@
+# Every kind of statement and expression in generic functions, each for several types: an instance
+# is a copy that shares no node with its template (RAE_CHECK_CLONES=1, src/ast_clone.c).
+open collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String
+}
+
+type Entry(T: type) {
+  key: Int
+  held: T
+}
+
+type Pair(T: type) {
+  first: T
+  second: T
+}
+
+func copied(T: type, value: view T) ret T {
+  let held: T = value
+  ret held
+}
+
+func matches(T: type, value: view T, number: view Int) ret String {
+  let word: String = match number { case 0 => "zero", case 1 => "one", default => "many" }
+  match number {
+    case 0, 1 {
+      let held: List(T) = [value, copied(value: value)]
+      ret "{word} {held}"
+    }
+    default {
+      ret "{word} {value}"
+    }
+  }
+}
+
+func statements(T: type, value: view T, other: view T) ret List(T) {
+  var list: List(T) = List(T) { value }
+  let pair: Pair(T) = { first: value, second: other }
+  let right: T = copied(value: other)
+  list.add(value: own right)
+  loop var i: Int = 0, i < 4, i += 2 {
+    if i is 2 {
+      continue
+    }
+    list.add(value: other)
+  }
+  loop let item: view T in pair.both() {
+    if "{item}".length() > 100 {
+      break
+    }
+    list.add(value: item)
+  }
+  if let found: view T = list.viewAt(index: 0) {
+    log("found {found}")
+  } else {
+    log("none")
+  }
+  defer {
+    log("left with {list.length}")
+  }
+  unsafe {
+    log("{sizeof(Entry(T)) >= sizeof(T)}")
+  }
+  let moved: T = copied(value: value)
+  let entry: Entry(T) = { key: -3, held: own moved }
+  list.add(value: entry.held)
+  ret list
+}
+
+func both(T: type, this: view Pair(T)) ret List(T) {
+  ret List(T) { this.first, this.second }
+}
+
+func named(T: type, value: view T) ret T {
+  var held: T = T.default()
+  held = value
+  let made: List(T) = List.create(T, cap: 4)
+  var map: StringMap(T) = {}
+  map.set(k: "k", value: value)
+  log("{made.length} {map.length}")
+  if typeName(value) is "Int" {
+    log("an Int")
+  }
+  ret held
+}
+
+func members(E: type, value: view E) ret String {
+  if let member: String = enumName(E, value: value) {
+    ret "{member} of {enumCount(E)}"
+  }
+  ret "no enum"
+}
+
+func maybe(T: type, value: view T, wanted: view Bool) ret opt T {
+  if wanted {
+    ret value
+  }
+  ret none
+}
+
+func narrowed(T: type, value: view T) ret Int {
+  if let found: T = maybe(value: value, wanted: true) {
+    log("got {found}")
+    ret 1
+  }
+  ret 0
+}
+
+func main() {
+  let note: Note = { text: "n {1}" }
+  let other: Note = { text: "o {2}" }
+  log(
+    "{matches(value: 1, number: 0)} {matches(value: "t {1}", number: 1)} {matches(
+      value: note
+      number: 5
+    )}"
+  )
+  log("{matches(value: note, number: 1)} {matches(value: Kind.large, number: 0)}")
+  log("{statements(value: 1, other: 2)}")
+  log("{statements(value: "a {1}", other: "b")}")
+  log("{statements(value: note, other: other)}")
+  log("{named(value: 7)} {named(value: "s {1}")} {named(value: note)}")
+  log("{members(value: Kind.large)} {members(value: 3)} {members(value: note)}")
+  log("{narrowed(value: 3)} {narrowed(value: note)} {narrowed(value: "t {1}")}")
+}
