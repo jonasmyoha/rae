@@ -1,0 +1,239 @@
+# A call written as a statement: nobody keeps its result, and one that owns memory is dropped at the
+# end of the statement. Plain and generic functions, methods, optionals, the language's own calls,
+# in
+# loops, generic bodies and tasks. What a call only refers to (`ret view`, `ret mod`) stays.
+import collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+  size: Int = 0
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Handle {
+  id: Int = 0
+}
+
+type Shelf {
+  words: List(String) = {}
+  handle: Handle = { id: 50 }
+}
+
+func drop(this: mod Handle) {
+  if this.id > 0 {
+    log("drop {this.id}")
+  }
+}
+
+func copy(this: view Handle) ret Handle {
+  ret Handle { id: this.id + 100 }
+}
+
+func words(count: copy Int) ret List(String) {
+  ret List(String) { "word {count}" }
+}
+
+func note(count: copy Int) ret Note {
+  ret Note { text: "note {count}" }
+}
+
+func maybe(count: copy Int) ret opt Note {
+  if count < 0 {
+    ret none
+  }
+  ret Note { text: "maybe {count}" }
+}
+
+func maybeText(count: copy Int) ret opt String {
+  ret "maybe {count}"
+}
+
+func map(count: copy Int) ret StringMap(Note) {
+  var made: StringMap(Note) = {}
+  made.set(k: "key {count}", value: Note { text: "n {count}" })
+  ret made
+}
+
+func pair(count: copy Int) ret Pair(String) {
+  ret Pair(String) { first: "pair {count}" }
+}
+
+func row(count: copy Int) ret Array(String, cap: 2) {
+  var made: Array(String, cap: 2) = Array(String, cap: 2)
+  made.set(index: 0, value: "row {count}")
+  ret made
+}
+
+func handle(count: copy Int) ret Handle {
+  ret Handle { id: count }
+}
+
+func text(count: copy Int) ret String {
+  ret "text {count}"
+}
+
+func started(count: copy Int) ret Task(String) {
+  ret spawn text(count: count)
+}
+
+# a `view` of a temporary, a `mod` number written back
+func named(name: view String, count: mod Int) ret List(String) {
+  count = count + 1
+  ret words(count: count + name.length())
+}
+
+func shown(this: view Note, count: copy Int) ret List(String) {
+  ret List(String) { "{this.text} {count}" }
+}
+
+func listOf(T: type, value: copy T) ret List(T) {
+  ret List(T) { value }
+}
+
+func back(T: type, value: own T) ret T {
+  ret own value
+}
+
+func inner(T: type, value: view T) {
+  words(count: 4)
+  listOf(value: "x {value}")
+  maybe(count: 5)
+}
+
+func slow(count: copy Int) ret List(String) {
+  sleep(ms: 1)
+  ret words(count: count)
+}
+
+func slowUser(count: copy Int) ret Int {
+  slow(count: count)
+  slow(count: count + 1)
+  ret count
+}
+
+func wordsOf(shelf: view Shelf) ret view List(String) {
+  ret shelf.words
+}
+
+func modWordsOf(shelf: mod Shelf) ret mod List(String) {
+  ret shelf.words
+}
+
+func handleOf(shelf: view Shelf) ret Handle {
+  ret shelf.handle
+}
+
+func wordIn(shelf: view Shelf) ret opt view String {
+  ret shelf.words.viewAt(index: 0)
+}
+
+func plain() {
+  words(count: 1)
+  note(count: 1)
+  maybe(count: 1)
+  maybe(count: -1)
+  maybeText(count: 1)
+  map(count: 1)
+  pair(count: 1)
+  row(count: 1)
+  handle(count: 1)
+  text(count: 1)
+  started(count: 1)
+  log("plain")
+}
+
+func calls() {
+  var count: Int = 1
+  named(name: "a {count}", count: count)
+  named(name: "b", count: count)
+  let made: Note = note(count: 2)
+  made.shown(count: 3)
+  shown(made, count: 4)
+  listOf(value: 5)
+  listOf(value: made)
+  back(value: words(count: 6))
+  let held: List(String) = words(count: 7)
+  back(value: own held)
+  inner(value: 8)
+  "a,b".split(sep: ",")
+  log("{count} {made.text}")
+}
+
+func blocks() {
+  loop var i: Int = 1, i < 3, ++i {
+    if i is 1 {
+      handle(count: i)
+      continue
+    }
+    words(count: i)
+    handle(count: i)
+  }
+  slow(count: 1)
+  let task: Task(Int) = spawn slowUser(count: 3)
+  log(task.get())
+}
+
+func references() {
+  var shelf: Shelf = {}
+  shelf.words.add(value: "kept {1}")
+  wordsOf(shelf: shelf)
+  modWordsOf(shelf: shelf)
+  wordIn(shelf: shelf)
+  handleOf(shelf: shelf)
+  log("still {shelf.words} {shelf.handle.id}")
+}
+
+func containers() {
+  var list: List(Note) = { note(count: 1), note(count: 2) }
+  list.copyAt(index: 0)
+  list.copyAt(index: 9)
+  list.copyAtDefault(index: 0)
+  list.viewAt(index: 0)
+  list.modAt(index: 0)
+  list.pop()
+  log("{list}")
+  var found: StringMap(Note) = map(count: 1)
+  found.get(k: "key 1")
+  found.viewGet(key: "key 1")
+  found.values()
+  found.keys()
+  log("{found}")
+  var tasks: List(Task(String)) = { spawn text(count: 1), spawn text(count: 2) }
+  tasks.pop()
+  log(tasks.length)
+  var optionals: List(opt String) = {}
+  optionals.add(value: maybeText(count: 3))
+  optionals.pop()
+  log(optionals.length)
+}
+
+func languageCalls() {
+  enumMembers(Kind)
+  let made: Note = note(count: 1)
+  made.toJson()
+  Note.fromJson(json: made.toJson())
+  made.toBinary()
+  Note.fromBinary(bytes: made.toBinary())
+  let task: Task(List(String)) = spawn words(count: 1)
+  loop not task.isDone() {
+    sleep(ms: 1)
+  }
+  task.tryGet()
+  let other: Task(List(String)) = spawn words(count: 2)
+  other.get()
+  log("{made}")
+}
+
+func main() {
+  plain()
+  calls()
+  blocks()
+  references()
+  containers()
+  languageCalls()
+}

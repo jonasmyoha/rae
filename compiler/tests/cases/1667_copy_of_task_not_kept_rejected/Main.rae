@@ -1,0 +1,11 @@
+# A copyAt that nobody keeps copies all the same, and a Task has no copy
+func text(count: copy Int) ret String {
+  ret "text {count}"
+}
+
+func main() {
+  var tasks: List(Task(String)) = { spawn text(count: 1) }
+  tasks.copyAt(index: 0)  # ERROR
+  tasks.viewAt(index: 0)
+  tasks.pop()
+}

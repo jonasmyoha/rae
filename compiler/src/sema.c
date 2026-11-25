@@ -8198,9 +8198,11 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
     }
     if (!receiver) return;
     bool copies = str_eq_cstr(name, "copyAtDefault") || str_eq_cstr(name, "copyAtFallback");
+    /* (kept, a copyAt is refused where it is bound) */
+    bool copies_statement = str_eq_cstr(name, "copyAt") && expr == s_void_ok_expr;
     bool orders = str_eq_cstr(name, "sort") || str_eq_cstr(name, "sortDesc");
     bool copies_value = str_eq_cstr(name, "get") || str_eq_cstr(name, "values");
-    if (!copies && !orders && !copies_value) return;
+    if (!copies && !copies_statement && !orders && !copies_value) return;
     TypeInfo* list = receiver->resolved_type;
     while (list && list->kind == TYPE_REF) list = list->as.ref.base;
     if (copies_value && expr->kind == AST_EXPR_METHOD_CALL && expr->as.method_call.args
@@ -8224,7 +8226,7 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
     if (!sema_struct_template_is(list, "List") || list->as.structure.generic_count != 1) return;
     const TypeInfo* element = list->as.structure.generic_args[0];
     const char* file = s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module);
-    if (copies && sema_typeinfo_holds_task(symbols, element, 0)) {
+    if ((copies || copies_statement) && sema_typeinfo_holds_task(symbols, element, 0)) {
         sema_report_task_copy(module, file, expr->line, expr->column, NULL,
                               "out of a List (use 'viewAt'/'modAt')");
     }

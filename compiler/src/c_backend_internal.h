@@ -125,6 +125,7 @@ typedef struct {
   size_t temp_counter;
   AstTypeRef expected_type;
   bool has_expected_type;
+  bool discard_result;     // the call emitted next is a statement: its result is dropped (c_discard.c)
   bool suppress_opt_unbox; // when true, skip emit_opt_unbox_suffix (e.g. inside `... is none`)
   bool is_main;
   int scope_depth;
@@ -425,8 +426,10 @@ typedef struct {
 } StructShape;
 size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
 const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
+/* c_discard.c */
+int c_discard_temp(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete);
+int c_discard_builtin_temp(CFuncContext* ctx, const AstExpr* expr);
 /* c_task_result.c */
-int c_task_take_temp(CFuncContext* ctx, const AstExpr* expr);
 bool c_task_result_owns(CFuncContext* ctx, const AstTypeRef* type);
 void c_emit_task_new(CFuncContext* ctx, const TypeInfo* result, const AstFuncDecl* callee, FILE* out);
 void c_emit_task_drops(CompilerContext* ctx, const AstModule* module, FILE* out);
