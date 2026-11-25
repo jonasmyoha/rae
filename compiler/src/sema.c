@@ -693,6 +693,8 @@ static Symbol* sema_resolve_bare_global(SymbolTable* symbols, Str name, const ch
 
 bool has_property(const AstProperty* props, const char* name);  /* c_backend_internal.h */
 void register_decl(CompilerContext* ctx, const AstDecl* decl);       /* c_backend_internal.h */
+void c_rename_hidden_names(CompilerContext* ctx, AstFuncDecl* func);  /* c_hidden_names.c */
+Str rae_shown_name(Str name);                                         /* c_hidden_names.c */
 
 static const char* sema_decl_file(const AstDecl* decl, const AstModule* module) {
     if (decl && decl->origin_file) return decl->origin_file;
@@ -1166,6 +1168,7 @@ static void flow_report(LifecycleFlow* flow, size_t line, size_t col, const char
     flow->module->had_error = true;
 }
 static void flow_report_gone(LifecycleFlow* flow, Str name, GoneKind how, size_t line, size_t col) {
+        name = rae_shown_name(name);
         char buf[300];
         if (how == GONE_BY_OWN) {
             snprintf(buf, sizeof buf,
@@ -1200,7 +1203,7 @@ static void flow_check_destructor_call(LifecycleFlow* flow, const AstExpr* e) {
     if (!target) return;
     char buf[420];
     if (target->kind == AST_EXPR_IDENT) {
-        Str name = target->as.ident;
+        Str name = rae_shown_name(target->as.ident);
         snprintf(buf, sizeof buf,
                  "cannot drop '%.*s' by hand: it does not own the value, and the owner drops it, so the "
                  "destructor would run twice; assign it a new value to release the old one now",
@@ -1295,7 +1298,7 @@ static void flow_take_result(LifecycleFlow* flow, DroppedSet* set, const AstExpr
         snprintf(buf, sizeof buf,
                  "the result of '%.*s' was taken on a path reaching here: `get` moves it out of the task; keep it in a "
                  "variable and use that",
-                 (int)name.len, name.data);
+                 (int)rae_shown_name(name).len, name.data);
         flow_report(flow, e->line, e->column, buf);
     }
     gone_add(set, name, GONE_RESULT);
@@ -1409,7 +1412,7 @@ static void flow_check_handed_over(LifecycleFlow* flow, const FlowScope* scope, 
             snprintf(buf, sizeof buf,
                      "cannot hand over '%.*s': a defer that runs after this 'ret' uses it, so the caller would get a "
                      "copy, and its type cannot be copied; do the defer's work before the 'ret'",
-                     (int)value->as.ident.len, value->as.ident.data);
+                     (int)rae_shown_name(value->as.ident).len, value->as.ident.data);
             flow_report(flow, value->line, value->column, buf);
             return;
         }
@@ -1623,6 +1626,8 @@ static void flow_function(LifecycleFlow* flow, const AstFuncDecl* fd, const AstB
 static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, const char* file,
                                      const AstFuncDecl* fd) {
     if (!fd || !fd->body) return;
+    /* The walk goes by name, so a local that hides another has one of its own */
+    c_rename_hidden_names(ctx, (AstFuncDecl*)fd);
     LifecycleFlow flow = {0};
     flow.ctx = ctx; flow.module = module; flow.file = file;
     flow_function(&flow, fd, fd->body);
@@ -5885,28 +5890,6 @@ static void sema_check_parallel_loop(CompilerContext* ctx, AstModule* module, co
     sema_pl_check_block(&scope, loop->as.loop_stmt.body, 0);
 }
 
-/* A `defer` runs after the statements that follow it: where one of them
- * binds a name it uses again (a nested block may), its code would stand where
- * that name is the other one. */
-static void sema_check_defer_hidden_names(AstModule* module, SymbolTable* symbols, const AstStmt* stmt) {
-    SemaParallelScope* later = calloc(1, sizeof *later);
-    for (const AstStmt* s = stmt->next; s; s = s->next) sema_pl_collect_stmt(later, s);
-    for (size_t i = 0; i < later->local_count; i++) {
-        Str name = later->locals[i];
-        Symbol* sym = symbol_table_lookup(symbols, name);
-        if (!sym || sym->scope_depth <= 0 || !sema_block_mentions_ident(stmt->as.defer_stmt.block, name)) continue;
-        char buf[300];
-        snprintf(buf, sizeof buf,
-                 "this defer uses '%.*s', and a later statement binds the same name again, which would hide it when "
-                 "the defer runs; rename one of them",
-                 (int)name.len, name.data);
-        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buf);
-        module->had_error = true;
-        break;
-    }
-    free(later);
-}
-
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     // #772: a `loop ... in fields(value)` is compile-time field reflection, not
     // a runtime loop. Unroll it into `if true { ... }` here — BEFORE the switch
@@ -6848,7 +6831,6 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             s_defer_depth--;
             s_task_scope_base = saved_base;
             s_loop_depth = saved_loop;
-            sema_check_defer_hidden_names(module, symbols, stmt);
             break;
         }
         default: break;

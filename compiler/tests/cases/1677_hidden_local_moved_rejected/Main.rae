@@ -1,0 +1,44 @@
+# A local that hides an outer one is its own: what moves the outer one before
+# it is hidden, or the inner one, is known where each is used.
+func take(text: own String) {
+  log(text)
+}
+
+func outerMoved(flag: view Bool) {
+  let text: String = "outer {1}"
+  if flag {
+    take(text: own text)
+    let text: String = "inner {2}"
+    log(text)
+  }
+  log(text)
+}
+
+func innerMoved(flag: view Bool) {
+  let text: String = "outer {1}"
+  if flag {
+    let text: String = "inner {2}"
+    take(text: own text)
+    log(text)
+  }
+  log(text)
+}
+
+func inDefer(flag: view Bool) {
+  let text: String = "outer {1}"
+  defer {
+    log(text)
+  }
+  if flag {
+    take(text: own text)
+    let text: String = "inner {2}"
+    log(text)
+    ret
+  }
+}
+
+func main() {
+  outerMoved(flag: true)
+  innerMoved(flag: true)
+  inDefer(flag: true)
+}

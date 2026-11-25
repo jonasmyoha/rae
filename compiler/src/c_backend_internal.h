@@ -449,6 +449,10 @@ bool earlier_same_named_type(CompilerContext* ctx, size_t idx, Str name);
 bool c_reserved_name(Str name);
 Str rae_source_name(Str name);  // the Rae spelling of a renamed identifier
 void c_rename_reserved_names(CompilerContext* ctx);
+
+// c_hidden_names.c: a local that hides an outer one has a C name of its own.
+void c_rename_hidden_names(CompilerContext* ctx, AstFuncDecl* func);
+Str rae_shown_name(Str name);  // the name as it was written
 void c_restore_names_in_literals(const char* src, size_t len, FILE* out);
 void mark_expr_moved_if_local(CFuncContext* ctx, const AstExpr* expr);
 

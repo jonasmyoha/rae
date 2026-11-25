@@ -1,0 +1,286 @@
+# A nested block may bind a name again. Every way out of it drops both: the
+# inner local and the one it hides, each once, and runs the defers that use
+# either.
+open collections/StringMap
+
+type Note {
+  text: String
+  marks: List(Int)
+}
+
+type Handle {
+  id: Int
+}
+
+type Holder(T: type) {
+  held: T
+}
+
+func drop(this: mod Handle) {
+  log("close {this.id}")
+}
+
+const limit: Int = 7
+
+type Span {
+  size: Int = limit
+}
+
+func upTo() ret Int {
+  let span: Span = {}
+  ret span.size + limit
+}
+
+func work(amount: copy Int) ret String {
+  sleep(ms: 1)
+  ret "work {amount}"
+}
+
+func maybe(some: view Bool, number: view Int) ret opt String {
+  if some {
+    ret "maybe {number}"
+  }
+  ret none
+}
+
+func onRet(way: view Int) ret String {
+  let name: String = "outer {way}"
+  let note: Note = { text: "note {way}", marks: [1] }
+  let handle: Handle = { id: 1 }
+  let task: Task(String) = spawn work(amount: 1)
+  if way > 0 {
+    let name: String = "inner {name}"
+    let note: Note = { text: "in {note.text}", marks: [2] }
+    let handle: Handle = { id: handle.id + 1 }
+    let task: Task(String) = spawn work(amount: 2)
+    if way > 1 {
+      let name: String = "innermost {name}"
+      let handle: Handle = { id: handle.id + 1 }
+      ret "{name} {handle.id}"
+    }
+    ret "{name} {note.text} {note.marks} {handle.id} {task.get()}"
+  }
+  ret "{name} {note.text} {task.get()}"
+}
+
+func inLoops() {
+  let word: String = "word {0}"
+  loop var i: Int = 0, i < 4, ++i {
+    let word: List(String) = ["{word}", "{i}"]
+    let handle: Handle = { id: i * 10 }
+    if i is 1 {
+      let handle: Handle = { id: i * 10 + 1 }
+      let word: String = "inner {word.length}"
+      log(word)
+      continue
+    }
+    if i is 2 {
+      let word: Int = word.length
+      let handle: Handle = { id: i * 10 + word }
+      break
+    }
+    log("{word} {handle.id}")
+  }
+  let i: Int = 100
+  let list: List(String) = ["a {1}", "b"]
+  loop let list: view String in list {
+    loop var i: Int = 0, i < 2, i += 2 {
+      let list: String = "{list}{i}"
+      log(list)
+    }
+  }
+  log("{i} {list} {word}")
+}
+
+func narrowed(text: opt view String, some: view Bool) {
+  if let text: view String = text {
+    let text: String = "in {text}"
+    log(text)
+  } else {
+    log("{text is none}")
+  }
+  let name: String = "plain {1}"
+  if let name: String = maybe(some: some, number: 2) {
+    if some {
+      let name: String = "{name} deeper"
+      log(name)
+    }
+  } else {
+    log("else {name}")
+  }
+  match let name: String = maybe(some: some, number: 3) {
+    case none {
+      log("none {name}")
+    }
+    case "maybe 3" {
+      let name: Int = name.length()
+      log("three {name}")
+    }
+    default {
+      log("other {name}")
+    }
+  }
+  log(name)
+}
+
+func aliases() {
+  var count: Int = 1
+  var note: Note = { text: "n {1}", marks: [1] }
+  if true {
+    let note: mod List(Int) = note.marks
+    note.add(5)
+    let count: mod Int = count
+    count += 10
+    if count > 3 {
+      let note: view Int = count
+      log("{note}")
+    }
+  }
+  log("{count} {note.text} {note.marks}")
+}
+
+func parameter(text: own String, handle: own Handle, early: view Bool) ret Int {
+  defer {
+    log("leaving {text} {handle.id}")
+  }
+  if early {
+    let text: String = "local {text}"
+    let handle: Handle = { id: 51 }
+    defer {
+      log("leaving the if {text} {handle.id}")
+    }
+    ret text.length()
+  }
+  ret 0
+}
+
+func takeText(text: own String) {
+  log("took {text}")
+}
+
+func moved(flag: view Bool) {
+  let text: String = "first {1}"
+  if flag {
+    takeText(text: own text)
+    let text: String = "second {2}"
+    takeText(text: own text)
+    ret
+  }
+  takeText(text: own text)
+}
+
+func genericPass(
+  T: type
+  value: own T
+  other: own T
+  way: view Int
+) ret T {
+  let kept: T = own value
+  match way {
+    case 1 {
+      let kept: List(T) = [other]
+      defer {
+        log("kept {kept.length}")
+      }
+      let way: Holder(T) = { held: own other }
+      ret own way.held
+    }
+    default {
+      log("way {way}")
+    }
+  }
+  ret kept
+}
+
+func genericLoop(T: type, value: view T) ret Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < 3, ++i {
+    let value: List(T) = [value, value]
+    if i is 1 {
+      let value: Int = value.length
+      total += value
+      continue
+    }
+    total += value.length
+  }
+  ret total
+}
+
+# A task that sleeps goes on in another step
+func sleeper(name: own String, flag: own Bool) ret Int {
+  let handle: Handle = { id: 60 }
+  sleep(ms: 1)
+  if flag {
+    let name: String = "in {name}"
+    let handle: Handle = { id: 61 }
+    sleep(ms: 1)
+    log("{name} {handle.id}")
+    ret name.length()
+  }
+  sleep(ms: 1)
+  ret name.length()
+}
+
+func parallel() {
+  let names: List(String) = ["a", "b", "c", "d"]
+  var lengths: List(Int) = [0, 0, 0, 0]
+  let size: Int = 2
+  parallelLoop var i: Int = 0, i < 4, ++i {
+    let size: String = "{size}{i}"
+    if i > 0 {
+      let size: List(String) = [size, size]
+      lengths.set(index: i, value: size.length)
+    }
+  }
+  log("{names} {lengths} {size}")
+}
+
+func main() {
+  loop var way: Int = 0, way < 3, ++way {
+    log(onRet(way: way))
+  }
+  inLoops()
+  narrowed(text: "given", some: true)
+  narrowed(text: none, some: false)
+  aliases()
+  log("{parameter(text: "p {1}", handle: { id: 50 }, early: true)}")
+  log("{parameter(text: "p {2}", handle: { id: 52 }, early: false)}")
+  moved(flag: true)
+  moved(flag: false)
+  log(genericPass(
+    String
+    value: "v {1}"
+    other: "o {1}"
+    way: 1
+  ))
+  log(genericPass(
+    String
+    value: "v {2}"
+    other: "o {2}"
+    way: 2
+  ))
+  log("{genericLoop(value: "x {1}")} {genericLoop(value: 2.5)}")
+  let first: Task(Int) = spawn sleeper(name: "s {1}", flag: true)
+  log("{first.get()}")
+  let second: Task(Int) = spawn sleeper(name: "s {2}", flag: false)
+  log("{second.get()}")
+  parallel()
+  if true {
+    let limit: String = "local {limit}"
+    let short: String = "short {limit}"
+    if true {
+      let limit: Int = 3
+      let span: Span = {}
+      let short: Int = limit + upTo() + span.size
+      log("{short} {limit}")
+    }
+    log(short)
+  }
+  var map: StringMap(String) = {}
+  map.set(k: "k", value: "v {1}")
+  if true {
+    let map: List(StringMap(String)) = [map]
+    log("{map.length}")
+  }
+  log("{map.length}")
+}

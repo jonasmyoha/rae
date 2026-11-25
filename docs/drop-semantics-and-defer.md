@@ -844,7 +844,6 @@ Its statements are checked as any others, with these limits:
 - no `ret`, and no `break` or `continue` of a loop around it;
 - a taskScope around it is not its scope: it may open one of its own;
 - a value moved by the time it runs is an error in it;
-- it may not use a name that a later statement of the same block binds again;
 - `main` has no defer before its `mainLoop`: in a browser, main returns before
   the first frame. The body of the `mainLoop` may have one, run every frame.
 

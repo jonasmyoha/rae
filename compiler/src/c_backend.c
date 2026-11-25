@@ -3079,6 +3079,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   // Before anything reads a name: identifiers spelled like C keywords get a
   // C-safe spelling, declaration and uses together (c_names.c).
   c_rename_reserved_names(ctx);
+  // Generic functions: the others were renamed before their move check
+  for (size_t i = 0; i < ctx->all_decl_count; i++) {
+    AstDecl* decl = (AstDecl*)ctx->all_decls[i];
+    if (decl->kind == AST_DECL_FUNC) c_rename_hidden_names(ctx, &decl->as.func_decl);
+  }
 
   // Build progress (progress.h): the emit phase reports its own position, by
   // stage. The stage shares are from the UI editor build (17 s of emission):

@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.91, 2026-11-25: a local that hides an outer one
+
+- A `ret`, `break` or `continue` in a block whose local hides an outer one of the same name frees both, each once. The
+  outer one leaked, and the inner one was dropped twice: a Task hung the program, a destructor ran twice.
+- A move of the outer local before it is hidden is known after the block: using it there is an error (it was freed).
+- A `defer` may use a name that a nested block binds again.
+- Cases 1676 and 1677.
+
 ## 0.4.90, 2026-11-25: `defer`
 
 - The statements of a `defer { }` are checked as any others: types, names, frozen `let`s, moves. They were not checked
