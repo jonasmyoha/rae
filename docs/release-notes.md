@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.94, 2026-11-25: an Any owns what it holds
+
+- A String put in an `Any` (a let, a field, a List, a map, an Array, an optional, a result) is copied, copied again with
+  the Any, and freed with it. The Any pointed at the String of somebody else, which was freed under it.
+- A struct literal makes the Any of its field: a String was an error of the C compiler, and `{ value: 3 }` stored 0.
+- A `view Any`, a `mod Any`, an `opt Any`, `is` of two, and a `match` that gives one work; they were errors of the C
+  compiler, or read what is not there.
+- The text of an Any inside a list, a map or a struct frees what it made. A UInt32 in an Any is a number (it was a
+  character), and so are the other narrow integers and an enum.
+- A struct, a List or a map for an `Any` is an error (`log(value)` takes any value, as before).
+- Cases 1679 and 1680; docs/ownership-model.md.
+
 ## 0.4.93, 2026-11-25: text and `is` of an Array
 
 - `log(array)`, `"{array}"` and `array.toString()` of an `Array(T, cap: N)` write its elements as a List's (`[1, 2]`),

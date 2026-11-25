@@ -131,6 +131,8 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
   if (str_eq_cstr(base, "String")) return true;
   /* a Task is joined and freed when dropped (docs/concurrency-model.md §3) */
   if (str_eq_cstr(base, "Task")) return true;
+  /* an Any owns the String it may hold (c_any.c) */
+  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return true;
   const AstDecl* d = find_type_decl(NULL, module, base);
   if (!d || d->kind != AST_DECL_TYPE) return false;
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;
@@ -164,10 +166,8 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
   if (type_has_user_drop(cctx, type) || type_has_user_copy(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
-  /* Any / RaeAny is an opaque box — shallow assignment is fine
-   * because the heap (if any) is reference-counted at the value
-   * level. */
-  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
+  /* an Any owns the String it may hold (c_any.c) */
+  if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return true;
   const AstDecl* d = find_type_decl(NULL, module, base);
   if (!d || d->kind != AST_DECL_TYPE) return false;
   if (has_property(d->as.type_decl.properties, "c_struct")) return false;

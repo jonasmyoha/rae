@@ -949,7 +949,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             || (elem_tr && str_eq_cstr(get_base_type_name(elem_tr), "Any"));
         if (target_is_any) {
             if (val_expr->kind != AST_EXPR_BOX && val_expr->kind != AST_EXPR_UNBOX) {
-                fprintf(out, "rae_any(("); emit_expr(ctx, val_expr, out, PREC_LOWEST, false, false); fprintf(out, "))");
+                /* (what is stored was made or moved for it) */
+                c_emit_any(ctx, val_expr, ANY_TAKEN, out);
             } else {
                 emit_expr(ctx, val_expr, out, PREC_LOWEST, false, false);
             }
@@ -1057,7 +1058,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 && elem_decl->kind == AST_DECL_TYPE
                 && !has_property(elem_decl->as.type_decl.properties, "c_struct");
             bool has_synth_drop = (is_user_struct && !elem_decl->as.type_decl.generic_params)
-                || str_eq_cstr(ebase, "Array");
+                || str_eq_cstr(ebase, "Array") || c_is_any(elem_tr);
             if (is_user_struct && elem_decl->as.type_decl.generic_params && elem_tr->generic_args) {
                 const char* want = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
                 for (size_t gi = 0; want && gi < ctx->compiler_ctx->generic_type_count; gi++) {
@@ -1770,6 +1771,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             // loadImageKey(k) leaked one string per call). An extern that
             // genuinely consumes its arg must opt in with `own`.
             bool param_consumes = !(fd->is_extern) || p->type->is_own;
+            /* `value: Any` borrows */
+            if (c_is_any(p->type) && !p->type->is_own && !p->type->is_copy) param_consumes = false;
             if (p && p->type && p->type->is_own) c_record_moved_local(ctx, a->value);
             else report_own_argument(ctx, fd, p, a->value);
             bool close_live_flag = false;
@@ -1857,6 +1860,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 }
             }
             bool needs_addr = false; bool needs_deref = false; bool needs_prim_wrap = false; bool needs_box = false;
+            bool any_reference = false; AnyMode any_mode = ANY_BORROWED;
             // When both param and arg are view/mod refs of the same
             // wrapped type (e.g. `view String` -> `view String`), the
             // arg is already a ref wrapper at the C level. Skip the
@@ -1920,7 +1924,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     if ((arg_tr && (arg_tr->is_view || arg_tr->is_mod)) || (a->value->kind == AST_EXPR_IDENT && is_pointer_type(ctx, a->value->as.ident))) needs_deref = true;
                 }
             }
-            if (p && p->type && a->value->kind != AST_EXPR_BOX) {
+            if (p && p->type) {
                 Str pbase_check = get_base_type_name(p->type);
                 bool param_is_any = str_eq_cstr(pbase_check, "Any");
                 // For generic param T that resolves to Any (e.g. List(Any) → T=Any),
@@ -1936,7 +1940,18 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         gp = gp->next; ga = ga->next;
                     }
                 }
-                if (param_is_any) needs_box = true;
+                if (param_is_any && (p->type->is_view || p->type->is_mod) && !fd->is_extern) any_reference = true;
+                else if (param_is_any) needs_box = true;
+                if (needs_box && (p->type->is_own || p->type->is_copy)) {
+                    /* a local that moves into the parameter is handed over as it is */
+                    const AstExpr* given = a->value;
+                    while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
+                    int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
+                    const AstTypeRef* given_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
+                    any_mode = (p->type->is_own && local >= 0 && !c_local_is_slot_alias(ctx, local) && given_type
+                                  && !given_type->is_view && !given_type->is_mod
+                                  && (a->moves_local || c_is_any(given_type))) ? ANY_TAKEN : ANY_OWNED;
+                }
             }
 
             // When SE-wrap is active (see the hoist block above the
@@ -2285,7 +2300,13 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_MATCH ||
                     a->value->kind == AST_EXPR_OBJECT ||
                     member_of_rvalue_call);
-            if (use_hoisted_temp || use_string_place || use_string_view_slot || mod_place) {
+            if (needs_box) {   /* c_emit_any copies */
+                wrap_deep_copy_arg = false;
+                copy_arg_kind = 0;
+            }
+            if (any_reference) {
+                c_emit_any_reference(ctx, a->value, out);
+            } else if (use_hoisted_temp || use_string_place || use_string_view_slot || mod_place) {
                 /* The wrapper was emitted above, pointing either to its
                  * hoisted view temporary, the mutable caller slot (a `mod`
                  * String or number place) or a twin's frame slot. Skip
@@ -2468,9 +2489,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // IDENT-level struct-view auto-deref to avoid `(*(*x))`.
                 bool emit_suppress_deref = pass_view_through || needs_deref;
                 if (needs_box) {
-                    const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
-                    bool is_prim_ref = arg_tr2 && (arg_tr2->is_view || arg_tr2->is_mod) && is_primitive_type(get_base_type_name(arg_tr2));
-                    fprintf(out, "rae_any(("); emit_expr(ctx, a->value, out, PREC_LOWEST, false, is_prim_ref); fprintf(out, "))");
+                    c_emit_any(ctx, a->value, any_mode, out);
                 } else emit_expr(ctx, a->value, out, PREC_LOWEST, false, emit_suppress_deref);
                 if (copy_arg_kind == 1) fprintf(out, ")");
                 if (copy_arg_kind == 3) fprintf(out, ")");

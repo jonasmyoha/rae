@@ -441,32 +441,21 @@ RAE_UNUSED static RaeAny rae_any_owned_ptr(void* v, RaeAnyDropFn drop) {
  * is what keeps it read-only, so const is cast away here, once. */
 RAE_UNUSED static RaeAny rae_any_view(const void* v, RaeType type) {
     if (type == RAE_TYPE_ANY) {
-         const RaeAny* res = (const RaeAny*)v;
-         if (res->is_view || res->is_mod) return *res;
-         RaeAny out = *res;
-         out.is_view = true;
-         return out;
+         return *(const RaeAny*)v;
     }
     return (RaeAny){.type = type, .is_view = true, .as.ptr = (void*)v};
 }
 
 RAE_UNUSED static RaeAny rae_any_mod(void* v, RaeType type) {
     if (type == RAE_TYPE_ANY) {
-         RaeAny* res = (RaeAny*)v;
-         if (res->is_view || res->is_mod) return *res;
-         RaeAny out = *res;
-         out.is_mod = true;
-         return out;
+         return *(RaeAny*)v;
     }
     return (RaeAny){.type = type, .is_mod = true, .as.ptr = v};
 }
 
 RAE_UNUSED static RaeAny rae_any_identity(RaeAny a) { return a; }
-RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { 
-    RaeAny res = *a;
-    res.is_view = true;
-    return res;
-}
+/* (a box that borrows; `is_view` says that a value is behind a pointer) */
+RAE_UNUSED static RaeAny rae_any_identity_ptr(const RaeAny* a) { return *a; }
 
 // Helpers for reference structs
 typedef struct { const int64_t* ptr; } rae_View_Int64;
@@ -547,6 +536,7 @@ RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, 
     rae_String: rae_any_string, \
     RaeAny: rae_any_identity, \
     RaeAny*: rae_any_identity_ptr, \
+    const RaeAny*: rae_any_identity_ptr, \
     bool: rae_any_bool, \
     int8_t: rae_any_bool, \
     rae_Bool*: rae_any_bool_ptr, \
@@ -578,8 +568,8 @@ RAE_UNUSED static RaeAny rae_any_bool_ptr(rae_Bool* v) { return rae_any_view(v, 
 /* Reading an Any box (the compiler's boxed-value ABI) from Rae:
  * lib/core/AnyText.rae formats it. Each is one field read; a `view` / `mod`
  * box holds a pointer to the value, read at the box type's width. A box of
- * kind RAE_TYPE_ANY points at another box: rae_ext_rae_any_resolved follows it. */
-static inline RaeAny rae_ext_rae_any_resolved(RaeAny value) {
+ * kind RAE_TYPE_ANY points at another box: rae_any_resolved follows it. */
+static inline RaeAny rae_any_resolved(RaeAny value) {
   while (value.type == RAE_TYPE_ANY && value.as.ptr) {
     RaeAny inner = *(RaeAny*)value.as.ptr;
     if (value.is_view) inner.is_view = true;
@@ -588,8 +578,9 @@ static inline RaeAny rae_ext_rae_any_resolved(RaeAny value) {
   }
   return value;
 }
-static inline int64_t rae_ext_rae_any_kind(RaeAny value) { return (int64_t)value.type; }
+static inline int64_t rae_ext_rae_any_kind(RaeAny value) { return (int64_t)rae_any_resolved(value).type; }
 static inline int64_t rae_ext_rae_any_int(RaeAny value) {
+  value = rae_any_resolved(value);
   bool ref = value.is_view || value.is_mod;
   switch (value.type) {
     case RAE_TYPE_INT32: return ref ? *(int32_t*)value.as.ptr : (int32_t)value.as.i;
@@ -598,27 +589,32 @@ static inline int64_t rae_ext_rae_any_int(RaeAny value) {
   }
 }
 static inline uint64_t rae_ext_rae_any_uint64(RaeAny value) {
+  value = rae_any_resolved(value);
   return (value.is_view || value.is_mod) ? *(uint64_t*)value.as.ptr : (uint64_t)value.as.i;
 }
 static inline double rae_ext_rae_any_float(RaeAny value) {
+  value = rae_any_resolved(value);
   bool ref = value.is_view || value.is_mod;
   if (value.type == RAE_TYPE_FLOAT32) return ref ? *(float*)value.as.ptr : (float)value.as.f;
   return ref ? *(double*)value.as.ptr : value.as.f;
 }
 static inline rae_Bool rae_ext_rae_any_bool(RaeAny value) {
+  value = rae_any_resolved(value);
   return (value.is_view || value.is_mod) ? *(int8_t*)value.as.ptr : value.as.b;
 }
 rae_String rae_ext_rae_str_from_buf(const uint8_t* data, int64_t len);
 /* A String or Key box's text as an OWNED copy (the box only borrows it) */
 static inline rae_String rae_ext_rae_any_string(RaeAny value) {
+  value = rae_any_resolved(value);
   rae_String text = (value.is_view || value.is_mod) ? *(rae_String*)value.as.ptr : value.as.s;
   return rae_ext_rae_str_from_buf(text.data, text.len);
 }
 static inline rae_Bool rae_ext_rae_any_string_missing(RaeAny value) {
+  value = rae_any_resolved(value);
   rae_String text = (value.is_view || value.is_mod) ? *(rae_String*)value.as.ptr : value.as.s;
   return text.data == NULL;
 }
-static inline int64_t rae_ext_rae_any_address(RaeAny value) { return (int64_t)(intptr_t)value.as.ptr; }
+static inline int64_t rae_ext_rae_any_address(RaeAny value) { return (int64_t)(intptr_t)rae_any_resolved(value).as.ptr; }
 
 /* log / logS write their text (runtime_system_log.c) */
 void rae_ext_rae_log_write(rae_String text, rae_Bool newline);
@@ -1180,6 +1176,33 @@ RAE_UNUSED static inline RaeAny rae_any_copy(RaeAny v) {
     return v;
 }
 
+/* `v` as a box of its own: a `view` / `mod` box is read, a String copied */
+RAE_UNUSED static RaeAny rae_any_own(RaeAny v) {
+    v = rae_any_resolved(v);
+    if (v.is_view || v.is_mod) {
+        const void* at = v.as.ptr;
+        v.is_view = false;
+        v.is_mod = false;
+        if (!at) return rae_any_none();
+        switch (v.type) {
+            case RAE_TYPE_INT64: case RAE_TYPE_UINT64: v.as.i = *(const int64_t*)at; break;
+            case RAE_TYPE_INT32: v.as.i = *(const int32_t*)at; break;
+            case RAE_TYPE_UINT32: case RAE_TYPE_CHAR: v.as.i = *(const uint32_t*)at; break;
+            case RAE_TYPE_FLOAT64: v.as.f = *(const double*)at; break;
+            case RAE_TYPE_FLOAT32: v.as.f = *(const float*)at; break;
+            case RAE_TYPE_BOOL: v.as.i = 0; v.as.b = *(const rae_Bool*)at; break;
+            case RAE_TYPE_STRING: v.as.s = *(const rae_String*)at; break;
+            default: v.is_view = true; return v;
+        }
+    }
+    if (v.type == RAE_TYPE_STRING) v.as.s = rae_string_copy(v.as.s);
+    return v;
+}
+/* The names by which the generated code drops and copies a type that owns memory */
+RAE_UNUSED static void rae_drop_struct_RaeAny(RaeAny* v) { rae_any_drop(v); }
+RAE_UNUSED static void rae_drop_struct_RaeAny_alias(RaeAny* v) { rae_any_drop(v); }
+RAE_UNUSED static void rae_deep_copy_RaeAny(RaeAny* dst, const RaeAny* src) { *dst = rae_any_own(*src); }
+
 /* runtime_crypto_platform.c: Monocypher's ChaCha20-Poly1305 and X25519,
  * every build (lib/crypto's fast path) */
 void rae_ext_Crypto_aeadSeal(uint8_t* key, int64_t keyOffset, uint8_t* nonce, uint8_t* ad, int64_t adOffset, int64_t adCount, uint8_t* plain, int64_t plainOffset, int64_t count, uint8_t* out, int64_t outOffset);
@@ -1299,6 +1322,8 @@ void rae_ext_drawTextWithFont(int64_t slot, rae_String text, float x, float y, f
     int32_t: rae_text_int64, \
     uint64_t: rae_text_uint64, \
     RaeAny: rae_text_any, \
+    RaeAny*: rae_text_any_ptr, \
+    const RaeAny*: rae_text_any_ptr, \
     default: rae_ext_rae_str_string \
 )(X)
 

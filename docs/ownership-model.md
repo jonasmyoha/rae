@@ -388,6 +388,12 @@ sema — no env flag, no opt-in.
   modes (Stage 6 narrowed earlier exemptions). Externs are
   skipped because their parameter lists describe FFI shape, not
   Rae ownership.
+- **An `Any` owns what it holds** (0.4.94): a number, a Bool, a Char, a
+  String or none. A String put in it is copied (`own text` moves it),
+  and copied and freed with the Any as with any type that owns memory.
+  A `value: Any` parameter without a mode (as `log` has) and a
+  `view Any` borrow. A struct or a List is not put in an Any. Cases 1679
+  and 1680.
 - **The legacy `val T` syntax is also a hard error** with a
   "use `copy T` instead" suggestion. `val` was deprecated when
   `copy` landed in Stage 3.

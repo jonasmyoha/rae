@@ -7,8 +7,6 @@
 # `forLog` keeps the two callers' former outputs: a log prints a missing
 # String as "(null)" and spells an Id, a Key, a List and a raw pointer;
 # interpolation gives "" for those.
-func rae_ext_rae_any_resolved(value: Any) unsafe extern ret Any
-
 func rae_ext_rae_any_kind(value: Any) unsafe extern ret Int
 
 func rae_ext_rae_any_int(value: Any) unsafe extern ret Int
@@ -78,28 +76,27 @@ func rae_ext_rae_str_byte_at(s: String, index: Int) unsafe extern ret Int
 
 func anyText(value: Any, forLog: view Bool) ret String {
   unsafe {
-    let box: Any = rae_ext_rae_any_resolved(value: value)
-    let kind: Int = rae_ext_rae_any_kind(value: box)
+    let kind: Int = rae_ext_rae_any_kind(value: value)
     if kind is anyInt64 or kind is anyInt32 or kind is anyUInt32 {
-      ret "{rae_ext_rae_any_int(value: box)}"
+      ret "{rae_ext_rae_any_int(value: value)}"
     }
     if kind is anyUInt64 {
-      ret "{rae_ext_rae_any_uint64(value: box)}"
+      ret "{rae_ext_rae_any_uint64(value: value)}"
     }
     if kind is anyFloat64 or kind is anyFloat32 {
-      ret "{rae_ext_rae_any_float(value: box)}"
+      ret "{rae_ext_rae_any_float(value: value)}"
     }
     if kind is anyBool {
-      ret "{rae_ext_rae_any_bool(value: box)}"
+      ret "{rae_ext_rae_any_bool(value: value)}"
     }
     if kind is anyChar {
-      ret "{rae_ext_rae_char_from_code(code: rae_ext_rae_any_int(value: box))}"
+      ret "{rae_ext_rae_char_from_code(code: rae_ext_rae_any_int(value: value))}"
     }
     if kind is anyString {
-      if forLog and rae_ext_rae_any_string_missing(value: box) {
+      if forLog and rae_ext_rae_any_string_missing(value: value) {
         ret "(null)"
       }
-      ret rae_ext_rae_any_string(value: box)
+      ret rae_ext_rae_any_string(value: value)
     }
     if kind is anyNone {
       ret "none"
@@ -108,16 +105,16 @@ func anyText(value: Any, forLog: view Bool) ret String {
       ret ""
     }
     if kind is anyId {
-      ret "Id({rae_ext_rae_any_int(value: box)})"
+      ret "Id({rae_ext_rae_any_int(value: value)})"
     }
     if kind is anyKey {
-      ret "Key(\"{rae_ext_rae_any_string(value: box)}\")"
+      ret "Key(\"{rae_ext_rae_any_string(value: value)}\")"
     }
     if kind is anyList {
       ret "[...]"
     }
     if kind is anyBuffer {
-      ret addressText(number: rae_ext_rae_any_address(value: box))
+      ret addressText(number: rae_ext_rae_any_address(value: value))
     }
     ret "Any(...)"
   }

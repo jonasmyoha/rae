@@ -21,6 +21,7 @@ bool c_has_deep_copy_helper(CFuncContext* ctx, const AstTypeRef* type) {
   if (ctx->generic_params && ctx->generic_args)
     concrete = *substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   concrete.next = NULL;
+  if (c_is_any(&concrete)) return true;
   Str base = get_base_type_name(&concrete);
   if (str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap") || str_eq_cstr(base, "IntMap"))
     return concrete.generic_args != NULL;

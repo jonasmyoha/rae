@@ -103,11 +103,13 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
     }
   }
   if (!elem_is_any && emit_alias_call_copy(ctx, value, elem_type, out)) return;
-  if (elem_is_any) fprintf(out, "rae_any((");
+  if (elem_is_any) {
+    c_emit_any(ctx, value, ANY_OWNED, out);
+    return;
+  }
   if (elem_is_string) fprintf(out, "rae_string_pool_take(");
   emit_expr(ctx, value, out, PREC_LOWEST, false, false);
   if (elem_is_string) fprintf(out, ")");
-  if (elem_is_any) fprintf(out, "))");
   if (value && value->kind == AST_EXPR_IDENT && elem_type
       && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, elem_type, 0)) {
     mark_expr_moved_if_local(ctx, value);
@@ -126,7 +128,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 // payload owns heap, an aliasing source must be DEEP-COPIED, not moved: the list
 // still owns the element, so moving its heap would double-free at drop (#652).
 static bool c_opt_source_aliases(CFuncContext* ctx, const AstExpr* value);
-static bool expr_is_raw_slot_read(const AstExpr* e);
+bool expr_is_raw_slot_read(const AstExpr* e);
 
 /* `if let element ... list.at/viewAt/modAt(index:)` is the hot-path spelling
  * of checked indexing. Lower it directly instead of calling the generic Rae
@@ -143,7 +145,7 @@ static const AstTypeRef* c_list_element_type(CFuncContext* ctx, const AstTypeRef
 
 /* The type of a slot of a raw read (`rae_ext_rae_buf_get(buf: this.data, ...)`),
  * in the current specialization: the buffer's element */
-static const AstTypeRef* c_raw_slot_type(CFuncContext* ctx, const AstExpr* read) {
+const AstTypeRef* c_raw_slot_type(CFuncContext* ctx, const AstExpr* read) {
   if (!expr_is_raw_slot_read(read) || !read->as.call.args) return NULL;
   const AstTypeRef* buffer = infer_expr_type_ref(ctx, read->as.call.args->value);
   if (buffer && ctx->generic_params && ctx->generic_args)
@@ -605,19 +607,16 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       return;
     }
   }
+  if (c_is_any(val_tr)) {
+    c_emit_any(ctx, value, ANY_OWNED, out);
+    return;
+  }
   if (val_tr && val_tr->is_opt && !c_expr_is_extern_opt_string_call(value)) {
     bool saved_unbox = ctx->suppress_opt_unbox;
     ctx->suppress_opt_unbox = true;
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     ctx->suppress_opt_unbox = saved_unbox;
     return;
-  }
-  if (val_tr) {
-    Str val_base = get_base_type_name(val_tr);
-    if (str_eq_cstr(val_base, "Any") || str_eq_cstr(val_base, "RaeAny")) {
-      emit_expr(ctx, value, out, PREC_LOWEST, false, false);
-      return;
-    }
   }
 
   AstTypeRef* substituted_opt = opt_type
@@ -700,6 +699,10 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   ctx->expected_type = saved_exp_box;
 
   // Non-struct-rep payload (`Any`): keep the inline RaeAny box.
+  if (c_is_any(&payload)) {
+    c_emit_any(ctx, value, ANY_OWNED, out);
+    return;
+  }
   if (c_type_is_plain_string(&payload)) {
     fprintf(out, "rae_any((rae_string_copy(");
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
@@ -787,7 +790,7 @@ static bool visit_push(AliasVisit* v, const AstFuncDecl* fd) {
   v->fns[v->n++] = fd; return true;
 }
 static bool call_is_aliasing(CompilerContext* cctx, const AstExpr* call, AliasVisit* v);
-static bool expr_is_raw_slot_read(const AstExpr* e);
+bool expr_is_raw_slot_read(const AstExpr* e);
 static bool stmt_block_returns_alias_v(CompilerContext* cctx, const AstStmt* first, AliasVisit* v);
 static bool func_returns_alias_v(CompilerContext* cctx, const AstFuncDecl* fd, AliasVisit* v);
 static const AstStmt* find_let_for_ident(const AstStmt* scope_start, Str name) {
@@ -964,7 +967,7 @@ void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExp
                           int id, FILE* out);
 
 // Is `e` the raw slot read itself (`rae_ext_rae_buf_get`, unsafe code)?
-static bool expr_is_raw_slot_read(const AstExpr* e) {
+bool expr_is_raw_slot_read(const AstExpr* e) {
   if (!e || e->kind != AST_EXPR_CALL || !e->as.call.callee || e->as.call.callee->kind != AST_EXPR_IDENT) return false;
   Str name = e->as.call.callee->as.ident;
   return str_eq_cstr(name, "rae_ext_rae_buf_get") || str_eq_cstr(name, "__buf_get")
@@ -1932,7 +1935,9 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(out, "    ");
         emit_type_ref_as_c_type(ctx, bind->as.let_stmt.type, out, false);
         fprintf(out, " %.*s = ", (int)bind->as.let_stmt.name.len, bind->as.let_stmt.name.data);
-        if (str_eq_cstr(obase, "Int") || str_eq_cstr(obase, "Int64")
+        if (c_is_any(bind->as.let_stmt.type)) {
+            fprintf(out, "__rae_ifopt%d;\n", ifopt_id);
+        } else if (str_eq_cstr(obase, "Int") || str_eq_cstr(obase, "Int64")
             || str_eq_cstr(obase, "Char") || str_eq_cstr(obase, "Char32")) {
             fprintf(out, "__rae_ifopt%d.as.i;\n", ifopt_id);
         } else if (str_eq_cstr(obase, "Float") || str_eq_cstr(obase, "Float32")
@@ -3146,7 +3151,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // reconstruct the expression's C type here.
             int materialized_id = -1;
             if (is_ref_bind && stmt->as.let_stmt.value
-                && !is_primitive_type(get_base_type_name(stmt->as.let_stmt.type))
+                && (!is_primitive_type(get_base_type_name(stmt->as.let_stmt.type)) || c_is_any(stmt->as.let_stmt.type))
                 && !ref_bind_value_returns_ref(ctx, stmt->as.let_stmt.value)) {
                 AstExprKind vk = stmt->as.let_stmt.value->kind;
                 bool is_opt_bind = stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt;
@@ -3337,7 +3342,15 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         // emptiness test `if let` emits still holds.
                         const AstExpr* unbox_inner = stmt->as.let_stmt.value->as.unary.operand;
                         const AstTypeRef* inner_tr = infer_expr_type_ref(ctx, unbox_inner);
-                        if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
+                        if (c_is_any(inner_tr) && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)) {
+                            // An `opt Any` is the Any itself, none or not
+                            int oid = ctx->temp_counter++;
+                            fprintf(out, "(");
+                            emit_type_ref_as_c_type(ctx, stmt->as.let_stmt.type, out, false);
+                            fprintf(out, ")({ __auto_type __ov%d = &(", oid);
+                            emit_expr(ctx, unbox_inner, out, PREC_LOWEST, true, false);
+                            fprintf(out, "); rae_any_is_none(*__ov%d) ? NULL : __ov%d; })", oid, oid);
+                        } else if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
                             && rae_opt_is_struct_rep(ctx, inner_tr)) {
                             // A view/mod binding into a struct-rep opt: point at
                             // the inline `.value` when present, else NULL so the
@@ -3485,7 +3498,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // If declared type is `opt T` and the value's inferred type is the
                 // concrete T, wrap with rae_any() so RaeAny holds the boxed value.
                 bool needs_box = false;
-                if (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt) {
+                if (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt && c_is_any(stmt->as.let_stmt.type)) {
+                    needs_box = true;
+                } else if (stmt->as.let_stmt.type && stmt->as.let_stmt.type->is_opt) {
                     /* `own note` has the type of `note`: asked about the `own`
                      * itself, the moved Note was never boxed, and C got a Note
                      * where the binding is a rae_opt_Note */
@@ -4309,7 +4324,21 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // after the value was taken: the caller gets a copy.
             const AstExpr* handed = stmt->as.ret_stmt.values ? stmt->as.ret_stmt.values->value : NULL;
             bool defer_uses = handed && handed->kind == AST_EXPR_IDENT && c_defer_mentions(ctx, handed->as.ident);
-            if (handed && !defer_uses) mark_expr_moved_if_local(ctx, handed);
+            bool returns_local_any = false;
+            bool returns_any = ctx->func_decl && ctx->func_decl->returns && c_is_any(ctx->func_decl->returns->type)
+                && !ctx->func_decl->returns->type->is_view && !ctx->func_decl->returns->type->is_mod;
+            if (returns_any && handed) {
+                const AstExpr* given = handed;
+                while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
+                int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
+                const AstTypeRef* local_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
+                bool parameter = local >= 0 && (size_t)local < ctx->func_first_let_idx;
+                returns_local_any = c_is_any(local_type) && !local_type->is_view && !local_type->is_mod && !defer_uses
+                    && !c_local_is_slot_alias(ctx, local)
+                    && (!parameter || local_type->is_own || local_type->is_copy);
+            }
+            if (handed && !defer_uses && (!returns_any || returns_local_any || handed->kind == AST_EXPR_OWN))
+                mark_expr_moved_if_local(ctx, handed);
             if (defer_uses && ctx->generic_params && ctx->generic_args && ctx->func_decl && ctx->func_decl->returns) {
                 // sema does not know the type in a template (flow_check_handed_over)
                 const AstTypeRef* handed_type = substitute_type_ref(
@@ -4628,9 +4657,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         if (ret_type && ret_type->is_opt) {
                             emit_optional_boxed_expr(ctx, ret_type, ret_val, out);
                         } else {
-                            fprintf(out, "rae_any((");
-                            emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
-                            fprintf(out, "))");
+                            /* a local Any moves out; what is only borrowed is copied */
+                            c_emit_any(ctx, ret_val, returns_local_any ? ANY_TAKEN : ANY_OWNED, out);
                         }
                     } else emit_expr(ctx, ret_val, out, PREC_LOWEST, false, false);
                 }

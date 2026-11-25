@@ -1,0 +1,21 @@
+# An Any holds a number, a Bool, a Char or a String, and nothing else.
+type Note {
+  text: String
+}
+
+type Box {
+  value: Any
+}
+
+func takes(value: Any) {
+  log(value)
+}
+
+func main() {
+  let note: Note = { text: "n" }
+  log(note)
+  let a: Any = note
+  let list: List(Any) = [1, note]
+  let box: Box = { value: note }
+  takes(value: note)
+}

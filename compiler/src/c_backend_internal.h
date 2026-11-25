@@ -119,6 +119,7 @@ typedef struct {
   size_t temp_counter;
   AstTypeRef expected_type;
   bool has_expected_type;
+  bool match_any;          // the match emitted next is an Any: so is each of its arms (c_any.c)
   bool discard_result;     // the call emitted next is a statement: its result is dropped (c_discard.c)
   bool suppress_opt_unbox; // when true, skip emit_opt_unbox_suffix (e.g. inside `... is none`)
   bool is_main;
@@ -435,6 +436,13 @@ void c_emit_array_drop_declarations(CompilerContext* ctx, const CArrayHelpers* a
 void c_emit_array_drops(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
 void c_emit_array_copy_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);
 void c_emit_array_copies(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
+/* c_any.c */
+bool expr_is_raw_slot_read(const AstExpr* e);
+const AstTypeRef* c_raw_slot_type(CFuncContext* ctx, const AstExpr* read);
+bool c_is_any(const AstTypeRef* type);
+typedef enum { ANY_BORROWED, ANY_OWNED, ANY_TAKEN } AnyMode;
+void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out);
+void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out);
 /* c_discard.c */
 bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call);
 int c_discard_temp(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete);

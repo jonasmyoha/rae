@@ -302,6 +302,14 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         fprintf(out, "}))");
         return;
     }
+    /* an Any made by a call is dropped once it is formatted */
+    if (tr && c_is_any(tr) && !tr->is_view && !tr->is_mod
+        && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL || operand->kind == AST_EXPR_MATCH)) {
+        fprintf(out, "rae_text_any(");
+        c_emit_any(ctx, operand, ANY_BORROWED, out);
+        fprintf(out, ")");
+        return;
+    }
     // A struct or List VALUE made by a call (`"{makeWords()}"`) is a temporary
     // this expression owns: hold it in a named temp, format it, release it.
     // Taking `&(call())` did not compile for a plain struct, and the
@@ -310,7 +318,8 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // fields the same way.
     if (tr && !tr->is_opt && !tr->is_view && !tr->is_mod
         && (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL
-            || operand->kind == AST_EXPR_OBJECT || operand->kind == AST_EXPR_COLLECTION_LITERAL)) {
+            || operand->kind == AST_EXPR_OBJECT || operand->kind == AST_EXPR_COLLECTION_LITERAL
+            || operand->kind == AST_EXPR_MATCH)) {
         AstTypeRef value_type = *tr;
         value_type.next = NULL;
         const AstDecl* vd = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
@@ -821,6 +830,8 @@ static void emit_match_arm(CFuncContext* ctx, const AstTypeRef* type, const AstE
  * named). */
 static void emit_match_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     const AstExpr* subject = expr->as.match_expr.subject;
+    bool any = ctx->match_any;
+    ctx->match_any = false;
     const AstTypeRef* subject_type = infer_expr_type_ref(ctx, subject);
     Str subject_base = get_base_type_name(subject_type);
     bool string_subject = str_eq_cstr(subject_base, "String") || str_eq_cstr(subject_base, "rae_String");
@@ -855,7 +866,8 @@ static void emit_match_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         ctx->has_expected_type = type != NULL;
         if (type) ctx->expected_type = *type;
-        emit_match_arm(ctx, type, arm->value, out);
+        if (any) c_emit_any(ctx, arm->value, ANY_OWNED, out);
+        else emit_match_arm(ctx, type, arm->value, out);
         if (last) break;
         fprintf(out, " : ");
     }
@@ -1205,7 +1217,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               AstTypeRef instance = *deep_tr;
               instance.is_view = false; instance.is_mod = false; instance.next = NULL;
               bool is_instance = !is_list && c_has_generic_value_helpers(ctx->compiler_ctx, &instance);
-              if (is_list || is_struct || is_instance) {
+              if (is_list || is_struct || is_instance || c_is_any(deep_tr)) {
                   AstTypeRef plain = *deep_tr;
                   plain.is_view = false; plain.is_mod = false; plain.is_own = false; plain.is_copy = false;
                   plain.next = NULL;
@@ -2039,10 +2051,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         emit_expr(ctx, expr->as.index.target, out, PREC_CALL, false, false); fprintf(out, "["); emit_expr(ctx, expr->as.index.index, out, PREC_LOWEST, false, false); fprintf(out, "]"); break;
     }
     case AST_EXPR_BOX: {
-        // For primitive refs, pass wrapper directly so rae_any picks mod/view variant
-        const AstTypeRef* box_tr = infer_expr_type_ref(ctx, expr->as.unary.operand);
-        bool box_suppress = box_tr && (box_tr->is_view || box_tr->is_mod) && is_primitive_type(get_base_type_name(box_tr));
-        fprintf(out, "rae_any(("); emit_expr(ctx, expr->as.unary.operand, out, PREC_LOWEST, false, box_suppress); fprintf(out, "))");
+        c_emit_any(ctx, expr, ANY_OWNED, out);
         break;
     }
     case AST_EXPR_OWN: {
@@ -2456,7 +2465,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 }
             }
 
-            if (!field_is_view_string && emit_alias_call_copy(ctx, f->value, eff_field_tr, out)) {
+            if (c_is_any(eff_field_tr) && !eff_field_tr->is_view && !eff_field_tr->is_mod && f->value) {
+                c_emit_any(ctx, f->value, ANY_OWNED, out);
+            } else if (!field_is_view_string && emit_alias_call_copy(ctx, f->value, eff_field_tr, out)) {
                 // a slot's value (`{ note: eventAt(...) }`): copied
             } else if (field_needs_deep_copy_nonstring) {
                 // Emit a GCC statement-expression: declare a temp of

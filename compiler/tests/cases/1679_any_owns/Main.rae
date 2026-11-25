@@ -1,0 +1,260 @@
+# An Any owns what it holds: a String put in it is copied, copied again with the Any and freed with
+# it, in a let, a var, a field, a List, a map, an Array, an optional, a result, a task, a generic
+# function and a match. Its text inside another value frees what it made. `value: Any` only borrows.
+open collections/IntMap
+open collections/StringMap
+
+enum Kind { small, large }
+
+type Box {
+  value: Any
+}
+
+type Full {
+  name: String
+  value: Any
+  more: opt Any = none
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+func made(number: copy Int) ret String {
+  ret "made {number}"
+}
+
+func give(way: view Int) ret Any {
+  let text: String = "given {way}"
+  let held: Any = text
+  if way is 0 {
+    ret held
+  }
+  if way is 1 {
+    ret text
+  }
+  if way is 2 {
+    ret 5
+  }
+  ret "literal"
+}
+
+func giveBox(text: view String) ret Box {
+  ret Box { value: text }
+}
+
+func maybe(some: view Bool) ret opt Any {
+  if some {
+    ret "maybe {1}"
+  }
+  ret none
+}
+
+func borrows(value: Any) ret String {
+  let kept: Any = value
+  ret "{value} {kept}"
+}
+
+func same(value: Any) ret Any {
+  ret value
+}
+
+func show(value: view Any) {
+  log("{value}")
+  log(value)
+}
+
+func change(value: mod Any) {
+  value = "changed {1}"
+}
+
+func keep(value: own Any) ret Box {
+  ret Box { value: own value }
+}
+
+func work(value: own Any) ret Box {
+  sleep(ms: 1)
+  ret Box { value: own value }
+}
+
+func twice(T: type, value: view T) ret List(T) {
+  var list: List(T) = []
+  list.add(value: value)
+  list.add(value: value)
+  ret list
+}
+
+func kinds() {
+  let small: UInt8 = 200
+  let wide: UInt32 = 70000
+  let signed: Int16 = -5
+  let big: UInt64 = 9
+  let list: List(Any) = [
+    1
+    2.5
+    true
+    'c'
+    "text"
+    small
+    wide
+    signed
+    big
+    none
+  ]
+  log("{list}")
+  log(list)
+  let values: Array(Any, cap: 2) = Array(Any, cap: 2)
+  log("{values}")
+}
+
+func locals() {
+  let text: String = "local {1}"
+  let a: Any = text
+  var b: Any = a
+  let c: Any = made(number: 2)
+  log("{a} {b} {c} {text}")
+  b = 7
+  b = "again {2}"
+  b = c
+  log("{b} {b is c} {a is b} {a is not b} {equals(a: a, b: c)}")
+  log(a)
+  let number: Int = 2
+  let chosen: Any = match number { case 1 => "one", case 2 => "two {number}", default => number }
+  log(chosen)
+}
+
+func fields() {
+  let text: String = "in a field"
+  var box: Box = { value: "x {1}" }
+  let other: Box = box
+  box.value = text
+  log("{box} {other} {box is other} {other is Box { value: "x {1}" }}")
+  box = Box { value: 3 }
+  let full: Full = { name: "n {1}", value: box.value, more: other.value }
+  let list: List(Full) = [full, full]
+  log("{box} {full}")
+  log("{list}")
+  let taken: Any = own full.value
+  let held: opt Box = other
+  if let there: view Box = held {
+    log("{taken} {there.value}")
+  }
+  log("{giveBox(text: text)} {giveBox(text: text).value}")
+}
+
+func containers() {
+  var list: List(Any) = []
+  list.add(value: "a {1}")
+  list.add(value: made(number: 3))
+  list.add(value: 4)
+  list.set(index: 0, value: "set {1}")
+  list.removeAt(index: 2)
+  let copied: List(Any) = list
+  log("{list} {copied is list}")
+  if let one: Any = list.copyAt(index: 0) {
+    log(one)
+  }
+  if let one: mod Any = list.modAt(index: 1) {
+    one = "by mod {1}"
+  }
+  if let one: view Any = list.viewAt(index: 1) {
+    log("{one}")
+  }
+  log("{list.copyAt(index: 0)} {list.viewAt(index: 1)} {list.copyAt(index: 9)} {copied}")
+  loop let one: view Any in list {
+    log("{one}")
+  }
+  var map: StringMap(Any) = {}
+  map.set(k: "a", value: "first {1}")
+  map.set(k: "a", value: "second {1}")
+  var numbers: IntMap(Any) = {}
+  numbers.set(k: 7, value: "seven")
+  log("{map} {numbers} {map.get(k: "a")} {map.get(k: "b")}")
+  if let one: Any = map.get(k: "a") {
+    log("{one}")
+  }
+  var values: Array(Any, cap: 2) = Array(Any, cap: 2)
+  values.set(index: 0, value: "in an array {1}")
+  let other: Array(Any, cap: 2) = values
+  values.set(index: 0, value: 1)
+  log("{values} {other}")
+  let nested: List(List(Any)) = [list, ["q {1}"]]
+  let maybes: List(opt Any) = ["m {1}", none, 3]
+  log("{nested} {maybes}")
+}
+
+func calls() {
+  let text: String = "argument {1}"
+  log("{borrows(value: text)} {borrows(value: 5)} {borrows(value: give(way: 0))}")
+  log(give(way: 1))
+  log("{give(way: 0)} {give(way: 1)} {give(way: 2)} {give(way: 3)} {same(value: text)}")
+  show(value: text)
+  show(value: 2.5)
+  show(value: give(way: 0))
+  var held: Any = text
+  show(value: held)
+  change(value: held)
+  show(value: held)
+  log("{keep(value: "kept {1}")} {keep(value: own held)}")
+  let task: Task(Box) = spawn work(value: "task {1}")
+  log("{task.get()}")
+  if let one: Any = maybe(some: true) {
+    log("{one}")
+  }
+  let present: opt Any = "present {1}"
+  let nothing: opt Any = none
+  if let one: view Any = present {
+    log("{one} {present} {nothing} {maybe(some: true)} {maybe(some: false)}")
+  }
+  let pair: Pair(Any) = { first: "pair {1}" }
+  log("{pair} {twice(Any, value: pair.first)}")
+  log("{text}")
+}
+
+type Note {
+  text: String
+}
+
+func agreed(n: view Int, place: view String) ret Any {
+  ret match n { case 1 => "one {n}", case 2 => place, default => made(number: n) }
+}
+
+func mixed(n: view Int, place: view String) ret Any {
+  ret match n { case 1 => "one {n}", case 2 => n * 10, case 3 => place, default => true }
+}
+
+func matches(n: view Int, place: view String) {
+  log(match n { case 1 => "one {n}", case 2 => place, default => made(number: n) })
+  log(match n { case 1 => Note { text: "a {n}" }, default => Note { text: "b {n}" } })
+  log("{match n { case 1 => "one {n}", case 2 => place, default => made(number: n) }}")
+  let a: Any = match n { case 1 => "one {n}", case 2 => place, default => made(number: n) }
+  let b: Any = match n { case 1 => "one {n}", case 2 => n * 10, case 3 => place, default => 2.5 }
+  var c: Any = 3
+  c = match n { case 1 => "one {n}", case 2 => n * 10, case 3 => place, default => 2.5 }
+  let box: Box = {
+    value: match n { case 1 => "one {n}", case 2 => place, default => made(number: n) }
+  }
+  let boxed: Box = { value: match n { case 1 => "one {n}", case 2 => 7, default => place } }
+  let list: List(Any) = [match n { case 1 => "one {n}", case 2 => 7, default => place }, 1]
+  log("{a} {b} {c} {box} {boxed} {list}")
+  log(borrows(value: match n { case 1 => "one {n}", case 2 => place, default => made(number: n) }))
+  log(borrows(value: match n { case 1 => "one {n}", case 2 => 8, default => place }))
+  log("{keep(value: match n { case 1 => "one {n}", case 2 => place, default => made(number: n) })}")
+  log("{keep(value: match n { case 1 => "one {n}", case 2 => 8, default => place })}")
+  log("{agreed(n: n, place: place)} {mixed(n: n, place: place)}")
+  log(match n { case 1 => 5, default => 6 })
+  log(match n { case 1 => 5, case 2 => "two {n}", default => place })
+  log("{match n { case 1 => Note { text: "c {n}" }, default => Note { text: "d" } }}")
+}
+
+func main() {
+  kinds()
+  locals()
+  fields()
+  containers()
+  calls()
+  loop var i: Int = 1, i < 5, ++i {
+    let place: String = "place {i}"
+    matches(n: i, place: place)
+  }
+}

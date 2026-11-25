@@ -2939,8 +2939,8 @@ static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
             items[i].wrapper, items[i].ctype, items[i].wrapper);
   }
   /* An interpolated Any (the header's rae_ext_rae_str dispatch): its text
-   * from lib/core/AnyText.rae, taken out of the temporary pool so it is the
-   * same owned String every other rae_text_* answers. */
+   * from lib/core/AnyText.rae, in the statement's pool as every other
+   * rae_text_* answers. */
   const char* any_text = NULL;
   {
     size_t count = 0;
@@ -2953,10 +2953,11 @@ static void emit_text_wrappers(CompilerContext* ctx, FILE* out) {
     }
   }
   if (any_text) {
-    fprintf(out, "RAE_UNUSED static rae_String rae_text_any(RaeAny value) { return rae_string_pool_take(%s(value, 0)); }\n", any_text);
+    fprintf(out, "RAE_UNUSED static rae_String rae_text_any(RaeAny value) { return %s(value, 0); }\n", any_text);
   } else {
     fprintf(out, "RAE_UNUSED static rae_String rae_text_any(RaeAny value) { (void)value; return (rae_String){0}; }\n");
   }
+  fprintf(out, "RAE_UNUSED static rae_String rae_text_any_ptr(const RaeAny* value) { return rae_text_any(*value); }\n");
 }
 
 /* The mangled C name of the lib/core function `name` (non-generic, not an
@@ -3128,7 +3129,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
                "RAE_UNUSED static rae_String rae_text_bool_ptr(const rae_Bool* value);\n"
                "RAE_UNUSED static rae_String rae_text_char(uint32_t value);\n"
                "RAE_UNUSED static rae_String rae_text_char_ptr(const uint32_t* value);\n"
-               "RAE_UNUSED static rae_String rae_text_any(RaeAny value);\n");
+               "RAE_UNUSED static rae_String rae_text_any(RaeAny value);\n"
+               "RAE_UNUSED static rae_String rae_text_any_ptr(const RaeAny* value);\n");
   // The integers formatted by their Rae width (the header's rae_str_<width>
   // dispatch macros select them): through the same Rae text as an Int.
   {
@@ -4508,6 +4510,10 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       } \
       if (str_eq_cstr((fbase), "String")) { \
         fprintf(out, "  %s = rae_string_copy(%s);\n", (dst_expr), (src_expr)); \
+        break; \
+      } \
+      if (c_is_any(ft)) { \
+        fprintf(out, "  %s = rae_any_own(%s);\n", (dst_expr), (src_expr)); \
         break; \
       } \
       bool _f_is_list = str_eq_cstr((fbase), "List"); \

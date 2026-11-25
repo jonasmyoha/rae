@@ -7785,6 +7785,19 @@ static bool sema_report_type_mismatch(TypeInfo* expected, AstExpr* expr) {
     return false;
 }
 
+/* Every arm of a match is of one type: the match as a whole is put in an `Any`
+ * (or formatted, `log(match ...)`); arms of several types are each. */
+static bool sema_match_arms_agree(const AstExpr* match) {
+    const TypeInfo* first = NULL;
+    for (const AstMatchArm* arm = match->as.match_expr.arms; arm; arm = arm->next) {
+        const TypeInfo* type = arm->value ? sema_strip_ref(arm->value->resolved_type) : NULL;
+        if (!type) return true;
+        if (!first) first = type;
+        else if (first != type && (first->kind != type->kind || !str_eq(first->name, type->name))) return false;
+    }
+    return true;
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
     {
@@ -7804,7 +7817,7 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     AstExpr* expr = *expr_ptr;
     /* A match expression: its arms are what lands in the destination. An arm
      * that is `none` or an optional makes the whole one optional. */
-    if (expr->kind == AST_EXPR_MATCH && expected->kind != TYPE_ANY) {
+    if (expr->kind == AST_EXPR_MATCH && (expected->kind != TYPE_ANY || !sema_match_arms_agree(expr))) {
         TypeInfo* arm_type = sema_strip_ref(expected);
         bool optional = false;
         for (const AstMatchArm* arm = expr->as.match_expr.arms; arm; arm = arm->next)
@@ -7849,7 +7862,14 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     }
     if (!expr->resolved_type) return;
     if (sema_report_type_mismatch(expected, expr)) return;
-    if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY) {
+    /* (`value = 5` of a `mod Any`) */
+    if (expected->kind == TYPE_REF && expected->as.ref.base && expected->as.ref.base->kind == TYPE_ANY
+        && sema_strip_ref(expr->resolved_type)->kind != TYPE_ANY)
+        expected = expected->as.ref.base;
+    /* (`if let x: Any = maybe()` narrows an `opt Any`) */
+    bool narrows_any = s_in_if_let_binding && expr->resolved_type->kind == TYPE_OPT
+        && expr->resolved_type->as.opt.base && expr->resolved_type->as.opt.base->kind == TYPE_ANY;
+    if (expected->kind == TYPE_ANY && expr->resolved_type->kind != TYPE_ANY && !narrows_any) {
         // #898: implicit boxing into Any at a ret / assignment / Any argument
         // erases the value's type, hiding raw Ptr storage exactly as an
         // explicit `box` does. The explicit-box guard runs in sema_analyze_expr,
@@ -7865,7 +7885,8 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         AstExpr* box = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *box = (AstExpr){.kind = AST_EXPR_BOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         box->as.unary.operand = expr; *expr_ptr = box;
-    } else if (expected->kind != TYPE_ANY && expr->resolved_type->kind == TYPE_ANY) {
+    } else if (sema_strip_ref(expected)->kind != TYPE_ANY && expr->resolved_type->kind == TYPE_ANY
+               && !(expected->kind == TYPE_OPT && expected->as.opt.base && expected->as.opt.base->kind == TYPE_ANY)) {
         AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr; *expr_ptr = unbox;
