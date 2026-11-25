@@ -130,6 +130,7 @@ static Str drop_flag_name(Str name) {
  * let), whose pointer may point at another local's C storage */
 static bool twin_locals_saveable(CFuncContext* ctx) {
   for (size_t i = 0; i < ctx->local_count; i++) {
+    if (c_local_is_defer(ctx, i)) continue;
     for (size_t j = i + 1; j < ctx->local_count; j++) {
       if (str_eq(ctx->locals[i], ctx->locals[j])) return false;
     }
@@ -154,6 +155,7 @@ static void emit_restore_one(CFuncContext* ctx, FILE* out, Str name) {
 
 static void emit_save_all(CFuncContext* ctx, FILE* out) {
   for (size_t i = 0; i < ctx->local_count; i++) {
+    if (c_local_is_defer(ctx, i)) continue;
     emit_save_one(ctx, out, ctx->locals[i]);
     if (ctx->local_drop_flag[i]) emit_save_one(ctx, out, drop_flag_name(ctx->locals[i]));
   }
@@ -162,6 +164,7 @@ static void emit_save_all(CFuncContext* ctx, FILE* out) {
 
 static void emit_restore_all(CFuncContext* ctx, FILE* out) {
   for (size_t i = 0; i < ctx->local_count; i++) {
+    if (c_local_is_defer(ctx, i)) continue;
     emit_restore_one(ctx, out, ctx->locals[i]);
     if (ctx->local_drop_flag[i]) emit_restore_one(ctx, out, drop_flag_name(ctx->locals[i]));
   }
@@ -814,7 +817,6 @@ static bool twin_emit_one(CompilerContext* ctx, const AstModule* module, TwinEnt
   if (func->body) {
     for (const AstStmt* stmt = func->body->first; stmt; stmt = stmt->next) emit_stmt(&tctx, stmt, body_out);
   }
-  if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, body_out);
   emit_implicit_drops_for_body(&tctx, body_out, first_let);
   emit_implicit_drops_for_own_params(&tctx, body_out, first_let);
   fprintf(body_out, "  rae_string_pool_flush(__rae_spm_func);\n");

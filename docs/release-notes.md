@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.90, 2026-11-25: `defer`
+
+- The statements of a `defer { }` are checked as any others: types, names, frozen `let`s, moves. They were not checked
+  at all. A generic function called only in one is compiled, and a task or a taskScope in one works.
+- **Breaking:** a `defer` runs where the block it is in is left, as documented: at its end, and before a `ret`, `break`
+  or `continue` leaves it. It ran at the end of the function instead: also when its block was never entered, once for
+  all the passes of a loop, and after the locals it used were freed. In a generic function it ran only at a `ret`.
+- `ret x` hands over a copy when a defer uses `x`, and is an error when that type cannot be copied.
+- A `ret` in a defer, a `break` or `continue` out of one, a defer of `main` before its `mainLoop`, and a defer that uses
+  a name that is bound again after it are errors.
+- Cases 1674 and 1675; docs/drop-semantics-and-defer.md.
+
 ## 0.4.89, 2026-11-25: spawns written as statements
 
 - A `spawn work(...)` written as a statement in a taskScope is waited for at the end of the scope, and before a `ret`,

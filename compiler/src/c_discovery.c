@@ -742,6 +742,13 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 }
                 break;
             }
+            case AST_STMT_DEFER:
+                if (s->as.defer_stmt.block) {
+                    size_t scope = ctx->local_count;
+                    discover_specializations_stmt_impl(ctx, s->as.defer_stmt.block->first);
+                    ctx->local_count = scope;
+                }
+                break;
             case AST_STMT_UNSAFE:
                 if (s->as.unsafe_stmt.block) {
                     size_t scope = ctx->local_count;

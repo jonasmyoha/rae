@@ -2421,7 +2421,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                                 for (const AstObjectField* g = expr->as.object_literal.fields; g; g = g->next)
                                     if (g->value && g->value->kind == AST_EXPR_IDENT
                                         && str_eq(g->value->as.ident, mv)) occ++;
-                                if (occ == 1) rhs_is_move_local = true;
+                                if (occ == 1 && !c_defer_mentions(ctx, mv)) rhs_is_move_local = true;
                             }
                             break;
                         }

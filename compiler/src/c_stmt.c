@@ -119,7 +119,6 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static bool emit_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static void emit_counted_for(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 static void declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, FILE* out);
-static bool emit_defers_inner(CFuncContext* ctx, int min_depth, FILE* out);
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                               const AstExpr* value, FILE* out);
 // True if `value` is an ALIAS-returning call — `copyAt`/`buf_get` and any user
@@ -1763,11 +1762,59 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
   }
 }
 
+/* The type in `local_type_refs` that marks a local as a `defer` */
+static const AstTypeRef g_defer_local_type;
+
+bool c_local_is_defer(const CFuncContext* ctx, size_t local) {
+  return ctx->local_type_refs[local] == &g_defer_local_type;
+}
+
+/* Whether a `defer` that will run on the way out of the function uses `name`:
+ * a `ret name` hands over a copy then, since the block may still change it */
+bool c_defer_mentions(const CFuncContext* ctx, Str name) {
+  for (size_t i = 0; i < ctx->local_count; i++)
+    if (c_local_is_defer(ctx, i) && count_ident_refs_block(ctx->local_defer[i], name) > 0) return true;
+  return false;
+}
+
+/* The code of a `defer`, in a C block of its own */
+static void emit_deferred_block(CFuncContext* ctx, const AstBlock* block, FILE* out) {
+  bool saved_has_expected = ctx->has_expected_type;
+  bool saved_discard = ctx->discard_result;
+  bool saved_unbox = ctx->suppress_opt_unbox;
+  bool saved_may_pool = ctx->stmt_may_pool;
+  const AstExpr* saved_return = ctx->return_value_expr;
+  ctx->has_expected_type = false;
+  ctx->discard_result = false;
+  ctx->suppress_opt_unbox = false;
+  ctx->return_value_expr = NULL;
+  /* A wait in it runs on a return path: a resumable twin does not suspend */
+  ctx->twin_no_suspend++;
+  ctx->defer_emitting++;
+  size_t saved_locals = ctx->local_count;
+  fprintf(out, "  { /* defer */\n");
+  for (const AstStmt* s = block ? block->first : NULL; s; s = s->next) emit_stmt(ctx, s, out);
+  emit_implicit_drops_for_body(ctx, out, saved_locals);
+  fprintf(out, "  }\n");
+  ctx->local_count = saved_locals;
+  ctx->defer_emitting--;
+  ctx->twin_no_suspend--;
+  ctx->has_expected_type = saved_has_expected;
+  ctx->discard_result = saved_discard;
+  ctx->suppress_opt_unbox = saved_unbox;
+  ctx->stmt_may_pool = saved_may_pool;
+  ctx->return_value_expr = saved_return;
+}
+
 bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
                                   size_t first_let_index) {
   if (!ctx || !out) return false;
   for (size_t i = ctx->local_count; i > first_let_index; i--) {
     size_t idx = i - 1;
+    if (c_local_is_defer(ctx, idx)) {
+      emit_deferred_block(ctx, ctx->local_defer[idx], out);
+      continue;
+    }
     const AstTypeRef* type = ctx->local_type_refs[idx];
     if (!type) continue;
     if (type->is_view || type->is_mod) continue;
@@ -4251,11 +4298,30 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_RET: {
+            if (ctx->defer_emitting > 0) {
+                diag_error(c_source_file(ctx), (int)stmt->line, (int)stmt->column,
+                           "'ret' cannot leave a defer block: it runs when the block around it is left already");
+                break;
+            }
             // Stage 3 move tracking: returning an owned local moves
             // it out of the function. mark_expr_moved tells the drop
-            // pass below to skip its auto-drop.
-            if (stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value) {
-                mark_expr_moved_if_local(ctx, stmt->as.ret_stmt.values->value);
+            // pass below to skip its auto-drop. A `defer` that uses it runs
+            // after the value was taken: the caller gets a copy.
+            const AstExpr* handed = stmt->as.ret_stmt.values ? stmt->as.ret_stmt.values->value : NULL;
+            bool defer_uses = handed && handed->kind == AST_EXPR_IDENT && c_defer_mentions(ctx, handed->as.ident);
+            if (handed && !defer_uses) mark_expr_moved_if_local(ctx, handed);
+            if (defer_uses && ctx->generic_params && ctx->generic_args && ctx->func_decl && ctx->func_decl->returns) {
+                // sema does not know the type in a template (flow_check_handed_over)
+                const AstTypeRef* handed_type = substitute_type_ref(
+                    ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, ctx->func_decl->returns->type);
+                Str base = handed_type ? get_base_type_name(handed_type) : (Str){0};
+                bool task = str_eq_cstr(base, "Task")
+                    || (handed_type && handed_type->generic_args
+                        && str_eq_cstr(get_base_type_name(handed_type->generic_args), "Task"));
+                if (task || (find_user_drop_for(ctx->compiler_ctx, base) && !find_user_copy_for(ctx->compiler_ctx, base)))
+                    diag_error(c_source_file(ctx), (int)handed->line, (int)handed->column,
+                               "cannot hand over this value: a defer that runs after this 'ret' uses it, so the caller "
+                               "would get a copy, and its type cannot be copied; do the defer's work before the 'ret'");
             }
 
             // Stage 7 cleanup epilogue: every ret runs the same drops +
@@ -4342,6 +4408,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         // own param / copy param are move-tracked
                         // above and transfer ownership cleanly.
                         Str name = ret_val->as.ident;
+                        if (defer_uses) is_alias_source = true;
                         for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
                             if (str_eq(ctx->locals[i], name)) {
                                 const AstTypeRef* lt = ctx->local_type_refs[i];
@@ -4606,7 +4673,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             }
             // Tasks borrowing from an enclosing taskScope finish first
             c_lend_wait_groups(ctx, out, false);
-            if (ctx->defer_stack.count > 0) emit_defers(ctx, 0, out);
             if (ctx->func_first_let_idx != (size_t)-1) {
                 emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
                 emit_implicit_drops_for_own_params(ctx, out, ctx->func_first_let_idx);
@@ -4721,12 +4787,23 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_DEFER: {
-            // Push defer block onto stack — will be emitted before returns and at function end
-            if (ctx->defer_stack.count < 64) {
-                ctx->defer_stack.entries[ctx->defer_stack.count].block = stmt->as.defer_stmt.block;
-                ctx->defer_stack.entries[ctx->defer_stack.count].scope_depth = 0;
-                ctx->defer_stack.count++;
+            // Run where its block ends, whichever way (emit_implicit_drops_for_body)
+            if (ctx->local_count >= 256) {
+                diag_error(c_source_file(ctx), (int)stmt->line, (int)stmt->column,
+                           "too many locals and defers in one function; move some to another function");
+                break;
             }
+            size_t local = ctx->local_count++;
+            ctx->locals[local] = (Str){0};
+            ctx->local_types[local] = (Str){0};
+            ctx->local_type_refs[local] = &g_defer_local_type;
+            ctx->local_defer[local] = stmt->as.defer_stmt.block;
+            ctx->local_is_ptr[local] = false;
+            ctx->local_is_mod[local] = false;
+            ctx->local_moved[local] = false;
+            ctx->local_drop_flag[local] = false;
+            ctx->local_struct_owns_heap[local] = false;
+            ctx->local_slot_alias[local] = NULL;
             break;
         }
         case AST_STMT_UNSAFE: {
@@ -4748,25 +4825,3 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     return true;
 }
 
-bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out) {
-    // A wait in a deferred block runs on a return path: no suspension there
-    ctx->twin_no_suspend++;
-    bool ok = emit_defers_inner(ctx, min_depth, out);
-    ctx->twin_no_suspend--;
-    return ok;
-}
-
-static bool emit_defers_inner(CFuncContext* ctx, int min_depth, FILE* out) {
-    // Emit deferred blocks in reverse order (LIFO)
-    for (int i = ctx->defer_stack.count - 1; i >= min_depth; i--) {
-        const AstBlock* block = ctx->defer_stack.entries[i].block;
-        if (block) {
-            for (AstStmt* s = block->first; s; s = s->next)
-                emit_stmt(ctx, s, out);
-        }
-    }
-    return true;
-}
-void pop_defers(CFuncContext* ctx, int depth) {
-    while (ctx->defer_stack.count > depth) ctx->defer_stack.count--;
-}

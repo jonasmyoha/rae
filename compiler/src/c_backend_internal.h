@@ -36,16 +36,6 @@ enum {
 };
 
 typedef struct {
-  const struct AstBlock* block;
-  int scope_depth;
-} CDeferEntry;
-
-typedef struct {
-  CDeferEntry entries[64];
-  int count;
-} CDeferStack;
-
-typedef struct {
     const char** items;
     size_t count;
     size_t capacity;
@@ -62,6 +52,10 @@ typedef struct {
   Str locals[256];
   Str local_types[256];
   const AstTypeRef* local_type_refs[256];
+  // The block of a `defer` statement: it takes a place among the locals, so
+  // that every way out of its block runs it in order with their drops
+  // (c_local_is_defer)
+  const AstBlock* local_defer[256];
   bool local_is_ptr[256];
   bool local_is_mod[256];
   // Stage 3 move tracking (docs/ownership-model.md). Set true when a
@@ -128,8 +122,6 @@ typedef struct {
   bool discard_result;     // the call emitted next is a statement: its result is dropped (c_discard.c)
   bool suppress_opt_unbox; // when true, skip emit_opt_unbox_suffix (e.g. inside `... is none`)
   bool is_main;
-  int scope_depth;
-  CDeferStack defer_stack;
   // break/continue support: for each open loop, the `locals[]` count at the
   // start of its body. A `break`/`continue` drops every owned local from the
   // current count down to this mark (reverse-construction order) before the
@@ -182,6 +174,7 @@ typedef struct {
   bool lend_group_lends[16];
   bool lend_group_keeps[16];
   int lend_group_count;
+  int defer_emitting;  // how deep in the code of deferred blocks
 } CFuncContext;
 
 // The source file of the code being lowered, for a diagnostic or a runtime
@@ -386,9 +379,9 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* call_concrete, FILE* out);
 
-// -- Defer stack --
-bool emit_defers(CFuncContext* ctx, int min_depth, FILE* out);
-void pop_defers(CFuncContext* ctx, int depth);
+// -- Defer --
+bool c_local_is_defer(const CFuncContext* ctx, size_t local);
+bool c_defer_mentions(const CFuncContext* ctx, Str name);
 
 // -- Scope-exit dealloc (Stage 2; see docs/scope-exit-dealloc.md) --
 // Emit `drop()` calls for heap-owning lets in [first_let_index, local_count).

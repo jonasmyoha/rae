@@ -1,0 +1,146 @@
+# The statements of a `defer { }` are checked as any others, and nothing in it
+# leaves it or the function.
+type Note {
+  text: String
+}
+
+func take(text: own String) ret Int {
+  ret text.length()
+}
+
+type Handle {
+  id: Int
+}
+
+func drop(this: mod Handle) {
+  log("close {this.id}")
+}
+
+func work(amount: copy Int) {
+  log("{amount}")
+}
+
+func types() {
+  let frozen: List(Int) = [1]
+  defer {
+    let text: String = 5
+    log(unknownName)
+    frozen.add(2)
+    let note: Note = { name: "n" }
+  }
+}
+
+func ways() ret Int {
+  loop var i: Int = 0, i < 3, ++i {
+    defer {
+      if i is 1 {
+        break
+      }
+      continue
+    }
+  }
+  defer {
+    ret 3
+  }
+  ret 2
+}
+
+func later() {
+  defer {
+    log(laterName)
+  }
+  let laterName: String = "bound after it"
+  log(laterName)
+}
+
+func hidden(flag: view Bool) {
+  let name: String = "outer"
+  defer {
+    log(name)
+  }
+  if flag {
+    let name: String = "inner"
+    log(name)
+    ret
+  }
+}
+
+func moved(give: view Bool) ret Int {
+  let text: String = "a {1}"
+  defer {
+    log(text)
+  }
+  if give {
+    ret take(text: own text)
+  }
+  ret 0
+}
+
+func movedInBody() {
+  let text: String = "b {1}"
+  defer {
+    log(text)
+  }
+  log("{take(text: own text)}")
+}
+
+func movedTwice() {
+  let text: String = "c {1}"
+  defer {
+    log("{take(text: own text)}")
+  }
+  defer {
+    log("{take(text: own text)}")
+  }
+}
+
+func movedInLoop(words: own List(String)) {
+  loop var i: Int = 0, i < 2, ++i {
+    defer {
+      let gone: List(String) = own words
+      log("{gone}")
+    }
+  }
+}
+
+func handed() ret Handle {
+  let handle: Handle = { id: 1 }
+  defer {
+    log("{handle.id}")
+  }
+  ret handle
+}
+
+func number() ret Int {
+  ret 4
+}
+
+func handedTask() ret Task(Int) {
+  let task: Task(Int) = spawn number()
+  defer {
+    log("{task.isDone()}")
+  }
+  ret task
+}
+
+func scope() {
+  taskScope {
+    defer {
+      spawn work(amount: 1)
+    }
+  }
+}
+
+func main() {
+  types()
+  log("{ways()}")
+  later()
+  hidden(flag: true)
+  log("{moved(give: true)}")
+  movedInBody()
+  movedTwice()
+  movedInLoop(words: ["a"])
+  let handle: Handle = handed()
+  log("{handle.id} {handedTask().get()}")
+  scope()
+}

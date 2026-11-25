@@ -2502,9 +2502,6 @@ bool emit_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* 
   declare_param_live_flags(&tctx, f->body, out);
   if (f->body) { for (AstStmt* s = f->body->first; s; s = s->next) emit_stmt(&tctx, s, out); }
 
-  // Emit any remaining defers at function end
-  if (tctx.defer_stack.count > 0) emit_defers(&tctx, 0, out);
-
   // Stage 2 + 3 (docs/scope-exit-dealloc.md, docs/ownership-model.md):
   // drop heap-owning lets at end-of-body fallthrough, then `own T`
   // parameters that haven't been moved onward.

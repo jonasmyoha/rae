@@ -825,6 +825,31 @@ use(texture) // compile error
 That part — "explicit drop must invalidate the binding" — is
 likely. The spelling is open.
 
+## How `defer` works (0.4.90)
+
+`defer { ... }` runs its statements when the block it stands in is left:
+
+- at the end of the block (a function, an `if`, a `match` case, one pass of a
+  loop, an `unsafe` or `taskScope`), and before a `ret`, `break` or `continue`
+  leaves it. A block that is not entered runs no defer;
+- the last one first, each before the locals bound ahead of it are dropped and
+  after the ones bound behind it are. In a `taskScope`, after its tasks ended;
+- after the value of a `ret` is computed. `ret x` hands over a copy when a
+  defer that still runs uses `x`, so a change the defer makes is not seen by
+  the caller. For a type that cannot be copied (a Task, a type with a
+  destructor and no `copy`) that is an error.
+
+Its statements are checked as any others, with these limits:
+
+- no `ret`, and no `break` or `continue` of a loop around it;
+- a taskScope around it is not its scope: it may open one of its own;
+- a value moved by the time it runs is an error in it;
+- it may not use a name that a later statement of the same block binds again;
+- `main` has no defer before its `mainLoop`: in a browser, main returns before
+  the first frame. The body of the `mainLoop` may have one, run every frame.
+
+Cases 1674 (under AddressSanitizer and ThreadSanitizer too) and 1675.
+
 ## `defer` is still useful
 
 Even with user-defined drop, `defer` has independent value.

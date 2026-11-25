@@ -134,6 +134,10 @@ void sema_check_main_loops(AstModule* module, const char* file, const AstFuncDec
     }
     const AstStmt* state_decl = NULL;
     for (const AstStmt* before = func->body->first; before != stmt; before = before->next) {
+      if (before->kind == AST_STMT_DEFER)
+        main_loop_error(module, file, before,
+                        "a 'defer' of main cannot stand before mainLoop: in a browser, main returns before the first frame; "
+                        "put it in the mainLoop body, or in a function that main calls");
       if (before->kind == AST_STMT_LET && str_eq(before->as.let_stmt.name, stmt->as.loop_stmt.main_loop_state))
         state_decl = before;
     }

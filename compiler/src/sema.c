@@ -61,6 +61,7 @@ static const AstExpr* s_void_ok_expr = NULL;
  * each loop body; there are no nested function bodies, so it returns to
  * 0 between top-level function analyses. */
 static int s_loop_depth = 0;
+static int s_defer_depth = 0;  // inside a `defer { }`: no way out of it but its end
 
 /* #868/#877 unsafe boundary, unconditional for every source file (the staged
  * source-file adoption bypass was removed by #877). Unsafe function bodies
@@ -1042,7 +1043,13 @@ typedef struct FlowScope {
     const AstBlock* block;
     Str name;
     FlowLoop* loop;
+    struct FlowDefer* defers;    /* the last one first */
+    bool is_defer;               /* a defer's code: no way out of it */
 } FlowScope;
+typedef struct FlowDefer {
+    struct FlowDefer* earlier;
+    const AstBlock* block;
+} FlowDefer;
 
 typedef struct LifecycleFlow {
     CompilerContext* ctx;
@@ -1376,20 +1383,54 @@ static void flow_end_scope(DroppedSet* set, const FlowScope* scope) {
     for (const AstStmt* s = scope->block ? scope->block->first : NULL; s; s = s->next)
         if (s->kind == AST_STMT_LET) flow_end_name(set, scope->outer, s->as.let_stmt.name);
 }
+static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
+/* The way out of a scope runs its `defer`s: they see what is gone there. */
+static void flow_run_defers(LifecycleFlow* flow, const FlowScope* scope, DroppedSet* set) {
+    FlowScope* saved = flow->scope;
+    DroppedSet outer = *set;
+    FlowScope inside = { .parent = saved, .outer = &outer, .is_defer = true };
+    flow->scope = &inside;
+    for (const FlowDefer* d = scope->defers; d && !set->unreachable; d = d->earlier) flow_block(flow, d->block, set);
+    flow->scope = saved;
+}
+/* `ret x` while a `defer` that will still run uses x hands over a copy, so x
+ * must be of a type that can be copied. */
+static void flow_check_handed_over(LifecycleFlow* flow, const FlowScope* scope, const AstExpr* value) {
+    while (value && value->kind == AST_EXPR_BOX) value = value->as.unary.operand;
+    if (!value || value->kind != AST_EXPR_IDENT || flow->generic_params) return;
+    TypeInfo* type = value->resolved_type;
+    if (type && type->kind == TYPE_OPT) type = type->as.opt.base;
+    if (!type || type->kind == TYPE_REF) return;
+    if (!sema_typeinfo_uncopyable(flow->ctx, type) && !sema_typeinfo_holds_task(s_lifecycle_symbols, type, 0)) return;
+    for (; scope; scope = scope->parent)
+        for (const FlowDefer* d = scope->defers; d; d = d->earlier) {
+            if (!sema_block_mentions_ident(d->block, value->as.ident)) continue;
+            char buf[300];
+            snprintf(buf, sizeof buf,
+                     "cannot hand over '%.*s': a defer that runs after this 'ret' uses it, so the caller would get a "
+                     "copy, and its type cannot be copied; do the defer's work before the 'ret'",
+                     (int)value->as.ident.len, value->as.ident.data);
+            flow_report(flow, value->line, value->column, buf);
+            return;
+        }
+}
 /* `break` / `continue`: the path goes on after the loop, or at its next pass,
  * without the names of the scopes it leaves. */
 static void flow_jump(LifecycleFlow* flow, DroppedSet* set, bool is_break) {
     DroppedSet left = *set;
     const FlowScope* scope = flow->scope;
-    for (; scope && !scope->loop; scope = scope->parent) flow_end_scope(&left, scope);
-    if (scope) {
+    for (; scope && !scope->loop && !scope->is_defer; scope = scope->parent) {
+        flow_run_defers(flow, scope, &left);
+        flow_end_scope(&left, scope);
+    }
+    if (scope && scope->loop) {
+        flow_run_defers(flow, scope, &left);
         flow_end_scope(&left, scope);
         dropped_union(is_break ? &scope->loop->breaks : &scope->loop->continues, &left);
     }
     set->unreachable = true;
 }
 
-static void flow_block(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set);
 static void flow_body(LifecycleFlow* flow, const AstBlock* block, DroppedSet* set, FlowLoop* loop);
 static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set);
 /* The names a statement's own blocks bind end with it, so that one hiding an
@@ -1397,7 +1438,7 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
 static void flow_stmt(LifecycleFlow* flow, const AstStmt* s, DroppedSet* set) {
     if (!s) return;
     if (s->kind != AST_STMT_IF && s->kind != AST_STMT_LOOP && s->kind != AST_STMT_MATCH
-        && s->kind != AST_STMT_DEFER && s->kind != AST_STMT_UNSAFE) {
+        && s->kind != AST_STMT_UNSAFE) {
         flow_stmt_inner(flow, s, set);
         return;
     }
@@ -1468,6 +1509,15 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             flow->results_only = true;
             for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) flow_move(flow, set, r->value);
             flow->results_only = false;
+            for (const FlowScope* scope = flow->scope; scope && !scope->is_defer; scope = scope->parent) {
+                if (!scope->defers) continue;
+                flow_check_handed_over(flow, scope, s->as.ret_stmt.values ? s->as.ret_stmt.values->value : NULL);
+                /* what the value moves is gone for them */
+                DroppedSet left = *set;
+                for (const AstReturnArg* r = s->as.ret_stmt.values; r; r = r->next) flow_move(flow, &left, r->value);
+                for (; scope; scope = scope->parent) flow_run_defers(flow, scope, &left);
+                break;
+            }
             set->unreachable = true;
             break;
         case AST_STMT_IF: {
@@ -1530,8 +1580,13 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
         case AST_STMT_BREAK: flow_jump(flow, set, true); break;
         case AST_STMT_CONTINUE: flow_jump(flow, set, false); break;
         case AST_STMT_DEFER: {
-            DroppedSet defer_set = *set;
-            flow_block(flow, s->as.defer_stmt.block, &defer_set);
+            /* It runs where its block is left: flow_run_defers */
+            FlowScope* scope = flow->scope;
+            while (scope && !scope->block) scope = scope->parent;
+            if (!scope) break;
+            FlowDefer* later = arena_alloc(flow->ctx->ast_arena, sizeof *later);
+            *later = (FlowDefer){ .earlier = scope->defers, .block = s->as.defer_stmt.block };
+            scope->defers = later;
             break;
         }
         case AST_STMT_UNSAFE:
@@ -1549,6 +1604,7 @@ static void flow_body(LifecycleFlow* flow, const AstBlock* block, DroppedSet* se
     flow->scope = &scope;
     for (const AstStmt* s = block ? block->first : NULL; s && !set->unreachable; s = s->next)
         flow_stmt(flow, s, set);
+    if (!set->unreachable) flow_run_defers(flow, &scope, set);
     flow->scope = scope.parent;
     flow_end_scope(set, &scope);
 }
@@ -1952,6 +2008,9 @@ static AstStmt* clone_stmt(Arena* arena, const AstStmt* stmt) {
             res->as.assign_stmt.target = clone_expr(arena, stmt->as.assign_stmt.target);
             res->as.assign_stmt.value = clone_expr(arena, stmt->as.assign_stmt.value);
             break;
+        case AST_STMT_DEFER:
+            res->as.defer_stmt.block = clone_block(arena, stmt->as.defer_stmt.block);
+            break;
         case AST_STMT_UNSAFE:
             res->as.unsafe_stmt.block = clone_block(arena, stmt->as.unsafe_stmt.block);
             break;
@@ -2032,10 +2091,12 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         int saved_spec_unsafe_depth = s_unsafe_depth;
         int saved_spec_loop_depth = s_loop_depth;
         int saved_spec_scope_base = s_task_scope_base;
+        int saved_spec_defer_depth = s_defer_depth;
         if (generic_decl->origin_file) s_current_decl_origin = generic_decl->origin_file;
         s_unsafe_depth = 0;
         s_loop_depth = 0;
         s_task_scope_base = s_task_scope_count;
+        s_defer_depth = 0;
         if (spec->as.func_decl.body && symbols) {
             symbol_table_push_scope(symbols);
 
@@ -2077,6 +2138,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         s_unsafe_depth = saved_spec_unsafe_depth;
         s_loop_depth = saved_spec_loop_depth;
         s_task_scope_base = saved_spec_scope_base;
+        s_defer_depth = saved_spec_defer_depth;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
         spec->as.type_decl.specialization_args = args_tr;
         AstTypeField* head = NULL; AstTypeField* tail = NULL; AstTypeField* f = generic_decl->as.type_decl.fields;
@@ -5022,7 +5084,15 @@ static void sema_check_template_loop_context(AstModule* module,
                     sema_check_template_loop_context(module, arm->block, depth);
                 break;
             case AST_STMT_DEFER:
-                sema_check_template_loop_context(module, stmt->as.defer_stmt.block, depth);
+                s_defer_depth++;
+                sema_check_template_loop_context(module, stmt->as.defer_stmt.block, 0);
+                s_defer_depth--;
+                break;
+            case AST_STMT_RET:
+                if (s_defer_depth == 0) break;
+                diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                           "'ret' cannot leave a defer block: it runs when the block around it is left already");
+                module->had_error = true;
                 break;
             case AST_STMT_UNSAFE:
                 sema_check_template_loop_context(module, stmt->as.unsafe_stmt.block, depth);
@@ -5815,6 +5885,28 @@ static void sema_check_parallel_loop(CompilerContext* ctx, AstModule* module, co
     sema_pl_check_block(&scope, loop->as.loop_stmt.body, 0);
 }
 
+/* A `defer` runs after the statements that follow it: where one of them
+ * binds a name it uses again (a nested block may), its code would stand where
+ * that name is the other one. */
+static void sema_check_defer_hidden_names(AstModule* module, SymbolTable* symbols, const AstStmt* stmt) {
+    SemaParallelScope* later = calloc(1, sizeof *later);
+    for (const AstStmt* s = stmt->next; s; s = s->next) sema_pl_collect_stmt(later, s);
+    for (size_t i = 0; i < later->local_count; i++) {
+        Str name = later->locals[i];
+        Symbol* sym = symbol_table_lookup(symbols, name);
+        if (!sym || sym->scope_depth <= 0 || !sema_block_mentions_ident(stmt->as.defer_stmt.block, name)) continue;
+        char buf[300];
+        snprintf(buf, sizeof buf,
+                 "this defer uses '%.*s', and a later statement binds the same name again, which would hide it when "
+                 "the defer runs; rename one of them",
+                 (int)name.len, name.data);
+        diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column, buf);
+        module->had_error = true;
+        break;
+    }
+    free(later);
+}
+
 static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt, TypeInfo* current_return_type) {
     // #772: a `loop ... in fields(value)` is compile-time field reflection, not
     // a runtime loop. Unroll it into `if true { ... }` here — BEFORE the switch
@@ -6088,6 +6180,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             break;
         }
         case AST_STMT_RET: {
+            if (s_defer_depth > 0) {
+                diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                           "'ret' cannot leave a defer block: it runs when the block around it is left already");
+                module->had_error = true;
+            }
             AstReturnArg* arg = stmt->as.ret_stmt.values;
             // Spec 2.3.1 for `ret`: a function returning a VALUE cannot return
             // a reference-returning call, for the same reason an owned `let`
@@ -6482,7 +6579,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
         case AST_STMT_CONTINUE:
              if (s_loop_depth == 0) {
                  diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
-                            stmt->kind == AST_STMT_BREAK
+                            s_defer_depth > 0
+                                ? (stmt->kind == AST_STMT_BREAK
+                                   ? "'break' cannot leave a defer block: it runs when the block around it is left already"
+                                   : "'continue' cannot leave a defer block: it runs when the block around it is left already")
+                            : stmt->kind == AST_STMT_BREAK
                                 ? "'break' is only valid inside a loop"
                                 : "'continue' is only valid inside a loop");
                  module->had_error = true;
@@ -6730,6 +6831,24 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             }
             s_unsafe_depth--;
             symbol_table_pop_scope(symbols);
+            break;
+        }
+        case AST_STMT_DEFER: {
+            /* It runs at the end of the block it is in: it sees what is bound
+             * before it, and has no loop or taskScope around it. */
+            int saved_loop = s_loop_depth, saved_base = s_task_scope_base;
+            s_loop_depth = 0;
+            s_task_scope_base = s_task_scope_count;
+            s_defer_depth++;
+            symbol_table_push_scope(symbols);
+            for (AstStmt* inner = stmt->as.defer_stmt.block ? stmt->as.defer_stmt.block->first : NULL; inner;
+                 inner = inner->next)
+                sema_analyze_stmt(ctx, module, symbols, inner, current_return_type);
+            symbol_table_pop_scope(symbols);
+            s_defer_depth--;
+            s_task_scope_base = saved_base;
+            s_loop_depth = saved_loop;
+            sema_check_defer_hidden_names(module, symbols, stmt);
             break;
         }
         default: break;
@@ -12209,13 +12328,14 @@ static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, Sym
         module->decls = wrapper;
 
         const char* saved_origin = s_current_decl_origin;
-        int saved_unsafe = s_unsafe_depth, saved_loop = s_loop_depth, saved_base = s_task_scope_base;
+        int saved_unsafe = s_unsafe_depth, saved_loop = s_loop_depth, saved_base = s_task_scope_base, saved_defer = s_defer_depth;
         const AstParam* saved_params = s_current_params;
         const AstIdentifierPart* saved_generic = s_current_generic_params;
         if (generic->origin_file) s_current_decl_origin = generic->origin_file;
         s_unsafe_depth = 0;
         s_loop_depth = 0;
         s_task_scope_base = s_task_scope_count;
+        s_defer_depth = 0;
         symbol_table_push_scope(symbols);
         for (AstParam* p = wf->params; p; p = p->next)
             symbol_table_define(symbols, ctx->ast_arena, p->name, NULL,
@@ -12232,6 +12352,7 @@ static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, Sym
         s_unsafe_depth = saved_unsafe;
         s_loop_depth = saved_loop;
         s_task_scope_base = saved_base;
+        s_defer_depth = saved_defer;
     }
     call->as.call.args = values;
     call->as.call.generic_args = NULL;

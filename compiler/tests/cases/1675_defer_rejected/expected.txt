@@ -1,0 +1,48 @@
+tests/cases/1675_defer_rejected/Main.rae:26:24: type mismatch: expected String, got Int
+    26 |     let text: String = 5
+       |                        ^~~~
+tests/cases/1675_defer_rejected/Main.rae:27:9: unknown value 'unknownName': no local, parameter, const, or global by that name is in scope here
+    27 |     log(unknownName)
+       |         ^~~~
+tests/cases/1675_defer_rejected/Main.rae:28:15: cannot call mutating method 'add' on 'frozen': 'frozen' (declared at line 24) is a 'let', which is frozen (docs/let-is-frozen.md); declare it 'var'
+    28 |     frozen.add(2)
+       |               ^~~~
+tests/cases/1675_defer_rejected/Main.rae:29:30: unknown field 'name' in literal of type 'Note' — no such field on the struct
+    29 |     let note: Note = { name: "n" }
+       |                              ^~~~
+tests/cases/1675_defer_rejected/Main.rae:37:9: 'break' cannot leave a defer block: it runs when the block around it is left already
+    37 |         break
+       |         ^~~~
+tests/cases/1675_defer_rejected/Main.rae:39:7: 'continue' cannot leave a defer block: it runs when the block around it is left already
+    39 |       continue
+       |       ^~~~
+tests/cases/1675_defer_rejected/Main.rae:43:5: 'ret' cannot leave a defer block: it runs when the block around it is left already
+    43 |     ret 3
+       |     ^~~~
+tests/cases/1675_defer_rejected/Main.rae:50:9: unknown value 'laterName': no local, parameter, const, or global by that name is in scope here
+    50 |     log(laterName)
+       |         ^~~~
+tests/cases/1675_defer_rejected/Main.rae:58:3: this defer uses 'name', and a later statement binds the same name again, which would hide it when the defer runs; rename one of them
+    58 |   defer {
+       |   ^~~~
+tests/cases/1675_defer_rejected/Main.rae:71:8: use of moved value 'text': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'text' a new value before using it again, or pass a copy (`"{text}"`, or a `copy T` parameter) if the caller needs it
+    71 |     log(text)
+       |        ^~~~
+tests/cases/1675_defer_rejected/Main.rae:82:8: use of moved value 'text': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'text' a new value before using it again, or pass a copy (`"{text}"`, or a `copy T` parameter) if the caller needs it
+    82 |     log(text)
+       |        ^~~~
+tests/cases/1675_defer_rejected/Main.rae:90:8: use of moved value 'text': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'text' a new value before using it again, or pass a copy (`"{text}"`, or a `copy T` parameter) if the caller needs it
+    90 |     log("{take(text: own text)}")
+       |        ^~~~
+tests/cases/1675_defer_rejected/Main.rae:100:32: use of moved value 'words': 'own words' moved it on a path reaching here; assign 'words' a new value before using it again, or leave out that 'own' to copy it
+   100 |       let gone: List(String) = own words
+       |                                ^~~~
+tests/cases/1675_defer_rejected/Main.rae:111:7: cannot hand over 'handle': a defer that runs after this 'ret' uses it, so the caller would get a copy, and its type cannot be copied; do the defer's work before the 'ret'
+   111 |   ret handle
+       |       ^~~~
+tests/cases/1675_defer_rejected/Main.rae:123:7: cannot hand over 'task': a defer that runs after this 'ret' uses it, so the caller would get a copy, and its type cannot be copied; do the defer's work before the 'ret'
+   123 |   ret task
+       |       ^~~~
+tests/cases/1675_defer_rejected/Main.rae:129:7: nobody keeps the task of this spawn; write it inside a taskScope, which waits for it, or bind it (`let task: Task(T) = spawn ...`)
+   129 |       spawn work(amount: 1)
+       |       ^~~~

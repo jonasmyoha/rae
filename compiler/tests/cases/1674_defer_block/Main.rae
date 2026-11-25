@@ -1,0 +1,360 @@
+# A `defer { }` runs where the block it is in is left: at its end, and at a
+# `ret`, `break` or `continue` that leaves it, the last one first, before what
+# was bound ahead of it is dropped. Its statements are checked as any others.
+open Atomic
+
+type Note {
+  text: String
+  marks: List(Int)
+}
+
+type Handle {
+  name: String
+}
+
+func drop(this: mod Handle) {
+  log("close {this.name}")
+}
+
+func addTo(list: mod List(String), text: view String) {
+  list.add("{text}")
+}
+
+func inIf(flag: view Bool) {
+  if flag {
+    let name: String = "name {flag}"
+    defer {
+      log("leaving {name}")
+    }
+    log("in the if")
+  } else {
+    defer {
+      log("leaving the else")
+    }
+    log("in the else")
+  }
+  log("after the if")
+}
+
+func inLoops() {
+  loop var i: Int = 0, i < 5, ++i {
+    let word: String = "word {i}"
+    defer {
+      log("end of {word}")
+    }
+    if i is 1 {
+      continue
+    }
+    if i is 3 {
+      break
+    }
+    log("turn {i}")
+  }
+  let names: List(String) = ["a", "b"]
+  loop let name: view String in names {
+    defer {
+      log("after {name}")
+    }
+    defer {
+      let twice: String = "{name}{name}"
+      log("first {twice}")
+    }
+    log("at {name}")
+  }
+  var count: Int = 2
+  loop count > 0 {
+    defer {
+      count -= 1
+    }
+    log("count {count}")
+  }
+}
+
+func early(way: view Int) ret String {
+  let base: String = "base {way}"
+  defer {
+    log("last, {base}")
+  }
+  if way is 0 {
+    ret "zero"
+  }
+  defer {
+    log("second, {base}")
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    defer {
+      log("turn {i} of {base}")
+    }
+    if i is 1 and way is 1 {
+      defer {
+        log("deepest")
+      }
+      ret "one {i}"
+    }
+  }
+  match way {
+    case 2 {
+      defer {
+        log("the case")
+      }
+      ret base
+    }
+    default {
+      log("default")
+    }
+  }
+  ret "end"
+}
+
+# What a defer does to a value that `ret` hands over is not seen by the caller
+func changedList() ret List(String) {
+  var list: List(String) = ["a {1}"]
+  defer {
+    addTo(list: list, text: "later")
+    list.add("more")
+    log("{list}")
+  }
+  ret list
+}
+
+func changedText() ret String {
+  var text: String = "text {1}"
+  defer {
+    text = "other {2}"
+    log(text)
+  }
+  ret text
+}
+
+func changedNote() ret Note {
+  var note: Note = { text: "note {1}", marks: [1] }
+  defer {
+    note.text = "gone {1}"
+    note.marks.add(2)
+  }
+  ret note
+}
+
+func literalNote() ret Note {
+  var text: String = "field {1}"
+  var marks: List(Int) = [1, 2]
+  defer {
+    text = "gone {2}"
+    marks.add(3)
+    log("{marks}")
+  }
+  ret Note { text: text, marks: marks }
+}
+
+func maybeList(some: view Bool) ret opt List(String) {
+  var list: List(String) = ["opt {1}"]
+  defer {
+    list.add("more")
+  }
+  if not some {
+    ret none
+  }
+  ret list
+}
+
+func maybeText() ret opt String {
+  var text: String = "opt text {1}"
+  defer {
+    text = "gone {1}"
+  }
+  ret text
+}
+
+func number() ret Int {
+  var done: Int = 1
+  defer {
+    done = done + 1000
+  }
+  ret done
+}
+
+func ownParameter(text: own String, give: view Bool) ret Int {
+  var kept: List(String) = []
+  defer {
+    log("kept {kept}")
+  }
+  defer {
+    if give {
+      kept.add(own text)
+    }
+  }
+  ret 3
+}
+
+func handles() {
+  let first: Handle = { name: "first" }
+  defer {
+    log("between")
+  }
+  let second: Handle = { name: "second" }
+  var third: Handle = { name: "third" }
+  defer {
+    third.drop()
+    log("third dropped")
+  }
+  log("handles {first.name} {second.name}")
+}
+
+func genericEnd(T: type, value: view T, count: view Int) ret List(T) {
+  var list: List(T) = []
+  defer {
+    log("generic {list.length}")
+    list.add(value)
+  }
+  loop var i: Int = 0, i < count, ++i {
+    defer {
+      list.add(value)
+    }
+    if i is 2 {
+      ret list
+    }
+  }
+  ret list
+}
+
+func genericNothing(T: type, value: view T) {
+  defer {
+    log("value {value}")
+  }
+  log("body")
+}
+
+func wrap(T: type, value: view T) ret List(T) {
+  ret List(T) { value }
+}
+
+func work(amount: copy Int) ret String {
+  ret "work {amount}"
+}
+
+func add(counter: own Atomic(Int), amount: copy Int) {
+  sleep(ms: 1)
+  counter.fetchAdd(amount)
+}
+
+func tasks() {
+  let counter: Atomic(Int) = createAtomic(Int, value: 0)
+  defer {
+    freeAtomic(this: counter)
+  }
+  defer {
+    let task: Task(String) = spawn work(amount: 4)
+    log(task.get())
+    taskScope {
+      loop var i: Int = 0, i < 4, ++i {
+        spawn add(counter: counter, amount: 1)
+      }
+    }
+    log("counted {counter.load()}")
+  }
+  taskScope {
+    defer {
+      log("in the scope {counter.load()}")
+    }
+    spawn add(counter: counter, amount: 10)
+  }
+}
+
+# A task that sleeps goes on in another step
+func sleeper(name: own String) ret Int {
+  var done: Int = 0
+  defer {
+    log("sleeper {name} {done}")
+  }
+  loop var i: Int = 0, i < 3, ++i {
+    defer {
+      done = done + 1
+    }
+    sleep(ms: 1)
+    if i is 1 {
+      ret done
+    }
+  }
+  ret 9
+}
+
+func inParallel() {
+  let counter: Atomic(Int) = createAtomic(Int, value: 0)
+  parallelLoop var i: Int = 0, i < 10, ++i {
+    let text: String = "{i}"
+    defer {
+      counter.fetchAdd(text.length())
+    }
+    counter.fetchAdd(100)
+  }
+  log("parallel {counter.load()}")
+  freeAtomic(this: counter)
+}
+
+func nested() {
+  defer {
+    defer {
+      log("inner, last")
+    }
+    loop var i: Int = 0, i < 3, ++i {
+      if i is 1 {
+        continue
+      }
+      if i is 2 {
+        break
+      }
+      log("loop in the defer {i}")
+    }
+    let maybe: opt String = "maybe {1}"
+    if let text: view String = maybe {
+      log(text)
+    }
+    parallelLoop var i: Int = 0, i < 2, ++i {
+      let text: String = "{i}"
+    }
+  }
+  unsafe {
+    defer {
+      log("end of unsafe")
+    }
+    log("in unsafe")
+  }
+  log("body")
+}
+
+func main() {
+  inIf(flag: true)
+  inIf(flag: false)
+  inLoops()
+  loop var way: Int = 0, way < 4, ++way {
+    log("-> {early(way: way)}")
+  }
+  log("{changedList()}")
+  log(changedText())
+  let note: Note = changedNote()
+  log("{note.text} {note.marks}")
+  let made: Note = literalNote()
+  log("{made.text} {made.marks}")
+  if let list: List(String) = maybeList(some: true) {
+    log("{list}")
+  }
+  log("{maybeList(some: false) is none}")
+  if let text: String = maybeText() {
+    log(text)
+  }
+  log("{number()}")
+  log("{ownParameter(text: "given {1}", give: true)}")
+  log("{ownParameter(text: "not given {1}", give: false)}")
+  handles()
+  log("{genericEnd(value: "x", count: 5)}")
+  log("{genericEnd(value: 2.5, count: 1).length}")
+  genericNothing(value: 7)
+  defer {
+    log("main's defer {wrap(value: true).length}")
+  }
+  tasks()
+  let sleeping: Task(Int) = spawn sleeper(name: "s {1}")
+  log("{sleeping.get()}")
+  inParallel()
+  nested()
+}
