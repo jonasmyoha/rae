@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.86, 2026-11-25: a call whose result nobody keeps
+
+- A call written as a statement (`words(count: 1)`, `list.pop()`, `map.values()`) drops its result at the end of the
+  statement when that owns memory: a List, a map, a struct or an optional of those, a Task. It leaked. The same for the
+  language's own calls (`enumMembers`, `fromJson`, `toBinary`, `fromBinary`, `tryGet`).
+- Breaking: a function that returns a Task, called as a statement, waits for that task, as every dropped Task does.
+- Breaking: `tasks.copyAt(index:)` as a statement is an error, as it is when it is kept: a Task has no copy.
+- A call that returns an `opt String` can be given to an `own T` (`list.add(value: maybeText())` of a
+  `List(opt String)`); it was an error of the C compiler.
+- Cases 1666 and 1667.
+
 ## 0.4.85, 2026-11-25: the result of a task
 
 - A result that owns memory (a String, a List, a struct of them) is freed with its task when nobody took it; it leaked.

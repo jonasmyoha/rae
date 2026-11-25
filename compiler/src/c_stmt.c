@@ -2966,18 +2966,24 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // case: `log("iter {i}")` where the interp result is consumed by log
             // and never bound). Bindings (let/assign/ret) detach captured
             // results via `rae_string_pool_take` so this flush doesn't free them.
-            int taken = c_task_take_temp(ctx, stmt->as.expr_stmt);
+            bool is_call = stmt->as.expr_stmt
+                && (stmt->as.expr_stmt->kind == AST_EXPR_CALL || stmt->as.expr_stmt->kind == AST_EXPR_METHOD_CALL);
+            int taken = c_discard_builtin_temp(ctx, stmt->as.expr_stmt);
             if (ctx->stmt_may_pool) {
                 fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
                 if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
+                ctx->discard_result = is_call && taken < 0;
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                ctx->discard_result = false;
                 if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
             } else {
                 // Nothing in it can register a pool temporary (expr_may_pool).
                 fprintf(out, "  ");
                 if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
+                ctx->discard_result = is_call && taken < 0;
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                ctx->discard_result = false;
                 if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, ";\n");
             }

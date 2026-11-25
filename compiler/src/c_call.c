@@ -616,6 +616,8 @@ void c_record_moved_local(CFuncContext* ctx, const AstExpr* value) {
 }
 
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
+    bool discard = ctx->discard_result;
+    ctx->discard_result = false;
     // #960: `enumFromName(E, name: s)` -> the `opt E` whose member is spelled
     // `s`. One statement-expression: look the name up through the enum's
     // generated index table (-1 = no such member). `E` substituted through
@@ -1688,6 +1690,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
         bool callee_returns_void = !fd->returns || !fd->returns->type;
         bool wb_capture = has_writeback && !callee_returns_void;
+        int dropped = discard ? c_discard_temp(ctx, fd, concrete) : -1;
+        if (dropped >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", dropped);
         if (use_se_wrap) {
             ctx->temp_counter += wrap_count;
             fprintf(out, "(__extension__ ({ ");
@@ -2045,7 +2049,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     a->value->kind == AST_EXPR_MATCH ||
                     a->value->kind == AST_EXPR_BINARY)) {
                 const AstTypeRef* arg_tr2 = infer_expr_type_ref(ctx, a->value);
-                if (arg_tr2 && !(arg_tr2->is_view || arg_tr2->is_mod)
+                /* (an `opt String` for an `own T` that is one is whole: no String) */
+                bool whole_optional = arg_tr2 && arg_tr2->is_opt && ctx->has_expected_type && ctx->expected_type.is_opt;
+                if (arg_tr2 && !(arg_tr2->is_view || arg_tr2->is_mod) && !whole_optional
                     && str_eq_cstr(get_base_type_name(arg_tr2), "String")
                     && !(expr_is_alias_call(ctx, a->value) && !fd->is_extern)) {
                     wrap_pool_take_arg = true;
@@ -2492,7 +2498,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             arg_index++;
         }
         fprintf(out, ")");
-        if (!fd->is_extern && !ctx->suppress_opt_unbox) emit_opt_unbox_suffix(ctx, fd, concrete, out);
+        if (!fd->is_extern && !ctx->suppress_opt_unbox && dropped < 0) emit_opt_unbox_suffix(ctx, fd, concrete, out);
         if (use_se_wrap) {
             if (has_writeback) {
                 fprintf(out, "; ");
@@ -2508,6 +2514,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 fprintf(out, "; }))");
             }
         }
+        if (dropped >= 0) fprintf(out, "), __rae_stmt_tmp%d_set = 1)", dropped);
         return true;
     }
 

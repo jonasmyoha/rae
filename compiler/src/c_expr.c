@@ -856,7 +856,24 @@ static void emit_match_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
 bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_prec, bool is_lvalue, bool suppress_deref) {
   if (!expr) return true;
   /* A wait a resumable twin hoisted before the statement: its result */
-  if (ctx->twin_override_count && c_twin_override_expr(ctx, expr, out)) return true;
+  if (ctx->twin_override_count) {
+    bool discard = ctx->discard_result;
+    ctx->discard_result = false;
+    char* text = NULL;
+    size_t length = 0;
+    FILE* text_out = discard ? open_memstream(&text, &length) : NULL;
+    bool done = c_twin_override_expr(ctx, expr, text_out ? text_out : out);
+    if (text_out) fclose(text_out);
+    if (done && text_out) {
+      int dropped = expr->kind == AST_EXPR_CALL && expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC
+          ? c_discard_temp(ctx, &expr->decl_link->as.func_decl, NULL) : -1;
+      if (dropped >= 0) fprintf(out, "(__rae_stmt_tmp%d = (%s), __rae_stmt_tmp%d_set = 1)", dropped, text, dropped);
+      else fputs(text, out);
+    }
+    free(text);
+    if (done) return true;
+    ctx->discard_result = discard;
+  }
   /* A typed Buffer(T) (a list's `.data`) handed to a `Ptr` (void*): a C
    * struct field or an extern parameter declared with the C library's own
    * pointer type (`WGPUChainedStruct*`, `const WGPUCommandBuffer*`). The
@@ -1524,6 +1541,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     }
     case AST_EXPR_CALL: emit_call_expr(ctx, expr, out); break;
     case AST_EXPR_METHOD_CALL: {
+        /* a statement: for the call itself, not for one in its arguments */
+        bool discard = ctx->discard_result;
+        ctx->discard_result = false;
         // Built-in Task(T).get(): join (no-op for a sequential task) and
         // read the result buffer, cast back to T.
         // A `view`/`mod` Task (a viewAt binding, a parameter) is the same
@@ -1825,7 +1845,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     call.as.call.callee->as.ident = expr->as.method_call.method_name;
                     call.as.call.args = expr->as.method_call.args;
                     call.as.call.generic_args = expr->as.method_call.generic_args;
-                    emit_call_expr(ctx, &call, out); break;
+                    ctx->discard_result = discard; emit_call_expr(ctx, &call, out); break;
                 }
             }
             // Type-on-LHS dot-call (new generic-call syntax): `Type.fn(...)`
@@ -1852,7 +1872,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 type_arg->next = expr->as.method_call.args;
                 call.as.call.args = type_arg;
                 call.as.call.generic_args = expr->as.method_call.generic_args;
-                emit_call_expr(ctx, &call, out); break;
+                ctx->discard_result = discard; emit_call_expr(ctx, &call, out); break;
             }
             if (!obj_has_value && fn_exists) {
                 AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
@@ -1861,14 +1881,14 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 call.as.call.callee->as.ident = expr->as.method_call.method_name;
                 call.as.call.args = expr->as.method_call.args;
                 call.as.call.generic_args = expr->as.method_call.generic_args;
-                emit_call_expr(ctx, &call, out); break;
+                ctx->discard_result = discard; emit_call_expr(ctx, &call, out); break;
             }
         }
         AstExpr call = { .kind = AST_EXPR_CALL, .line = expr->line, .column = expr->column, .decl_link = expr->decl_link };
         call.as.call.callee = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstExpr)); call.as.call.callee->kind = AST_EXPR_IDENT; call.as.call.callee->as.ident = expr->as.method_call.method_name;
         AstCallArg* first_arg = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstCallArg)); first_arg->name = str_from_cstr("this"); first_arg->value = expr->as.method_call.object; first_arg->next = expr->as.method_call.args;
         call.as.call.args = first_arg; call.as.call.generic_args = expr->as.method_call.generic_args;
-        emit_call_expr(ctx, &call, out); break;
+        ctx->discard_result = discard; emit_call_expr(ctx, &call, out); break;
     }
     case AST_EXPR_MEMBER: {
         // Check if this is an enum access (e.g. Color.Green)

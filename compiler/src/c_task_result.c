@@ -43,19 +43,6 @@ void c_emit_task_new(CFuncContext* ctx, const TypeInfo* result, const AstFuncDec
   fprintf(out, "), %s)", drop ? drop : "NULL");
 }
 
-/* `task.get()` as a statement takes the result and keeps nothing of it: the
- * statement temporary that holds it until the statement ends, or -1 when
- * `expr` is another call, or a result that is freed without one (a String is
- * in the statement's pool). */
-int c_task_take_temp(CFuncContext* ctx, const AstExpr* expr) {
-  if (!expr || expr->kind != AST_EXPR_METHOD_CALL || !str_eq_cstr(expr->as.method_call.method_name, "get")) return -1;
-  const TypeInfo* task = expr->as.method_call.object ? expr->as.method_call.object->resolved_type : NULL;
-  while (task && task->kind == TYPE_REF) task = task->as.ref.base;
-  if (!task || task->kind != TYPE_TASK || !task->as.task.base || task->as.task.base->kind == TYPE_STRING) return -1;
-  const AstTypeRef* result = sema_type_ref_of(ctx->compiler_ctx, task->as.task.base);
-  return c_task_result_owns(ctx, result) ? register_stmt_temp(ctx, result, true) : -1;
-}
-
 /* The drop functions, for the result of every function that could be spawned.
  * Into a buffer: a List's drop may be registered here, and is declared first. */
 void c_emit_task_drops(CompilerContext* ctx, const AstModule* module, FILE* out) {
