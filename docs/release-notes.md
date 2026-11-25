@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.84, 2026-11-25: spawning a generic function
+
+- `spawn` and `spawn thread` of a generic function work, for every type and result. A String, number or optional result
+  crashed in `get` or was garbage, and the call ran in place.
+- `spawn value.method(...)` runs as a task like a plain call; it ran in place, and one of a generic method crashed.
+- Breaking: a spawn inside a generic function is an error (its result could not be read), and so is a spawn of a method
+  of the language itself (`spawn number.toString()`, a crash).
+- A spawn that runs in place (a `view` of an enum) hands over a String or an optional whole.
+- `List(T) { value }` in a generic function used for two struct types is the right List in each.
+- `Kind.large` in a generic function used for that enum itself works again (broken in 0.4.83).
+- Cases 1658 and 1659.
+
 ## 0.4.83, 2026-11-25: an enum is its own type inside another type
 
 - A `Pair(Kind)`, `IntMap(Kind)` or `StringMap(opt Kind)` (Kind an enum) can be given to a generic function, as `view`,

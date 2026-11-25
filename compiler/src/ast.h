@@ -497,6 +497,7 @@ typedef struct {
   AstIdentifierPart* generic_params; // Linked list of type parameter names (e.g. T, K, V)
   AstTypeRef* specialization_args; // Concrete types used
   struct AstDecl* generic_template; // Link back
+  struct AstDecl* spawns; // the generic function this one was made for, to be spawned (sema_spawn_generic_call)
   AstProperty* properties;
   AstReturnItem* returns;
   bool labels_in_c_name; // another of the module differs only in its parameter names

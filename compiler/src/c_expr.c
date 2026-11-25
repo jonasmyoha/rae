@@ -1387,6 +1387,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
             case AST_UNARY_SPAWN: {
                 const AstExpr* callexpr = expr->as.unary.operand;
+                /* A generic function's body is compiled from its template, whose
+                 * spawns have no types to pack arguments or read a result by */
+                if (ctx->generic_params) {
+                    diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column,
+                               "a spawn inside a generic function is not supported; put it in a function that is not "
+                               "generic, and call that");
+                    fprintf(out, "NULL");
+                    break;
+                }
                 // A spawn inside a taskScope that lends views (c_lend.c)
                 if (expr->as.unary.spawn_lends && c_lend_emit_spawn(ctx, expr, out)) break;
                 TypeInfo* resT = (expr->resolved_type && expr->resolved_type->kind == TYPE_TASK)
@@ -1499,7 +1508,15 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 else { fprintf(out, "sizeof("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, ")"); }
                 fprintf(out, "); ");
                 if (!is_void) { fprintf(out, "*("); emit_type_info_as_c_type(ctx, resT, out); fprintf(out, "*)__raet->result = "); }
+                /* the task keeps the result: an optional whole, a String out of
+                 * the statement's pool */
+                bool saved_unbox = ctx->suppress_opt_unbox;
+                ctx->suppress_opt_unbox = true;
+                bool string_result = !is_void && resT->kind == TYPE_STRING;
+                if (string_result) fprintf(out, "rae_string_pool_take(");
                 emit_expr(ctx, callexpr, out, PREC_LOWEST, false, false);
+                if (string_result) fprintf(out, ")");
+                ctx->suppress_opt_unbox = saved_unbox;
                 fprintf(out, "; __raet->done = 1; __raet->joined = 1; __raet; })");
                 break;
             }

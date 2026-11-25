@@ -1646,6 +1646,9 @@ static void sema_report_unknown_member(AstModule* module, AstExpr* expr);
 static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, TypeInfo* t);
 static TypeInfo* sema_generic_call_result(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                           const AstExpr* call);
+static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                    AstExpr* spawn, AstExpr* call);
+static void sema_spawn_method_call(AstModule* module, SymbolTable* symbols, AstExpr* call);
 static bool sema_type_has_field(TypeInfo* t, Str name);
 static void sema_render_access(const AstExpr* e, char* out, size_t cap);
 static void sema_warn_let_receiver(AstModule* module, SymbolTable* symbols, const AstExpr* call);
@@ -1784,6 +1787,11 @@ static AstExpr* clone_expr(Arena* arena, const AstExpr* expr) {
             res->as.method_call.object = clone_expr(arena, expr->as.method_call.object);
             res->as.method_call.args = clone_call_args(arena, expr->as.method_call.args);
             res->as.method_call.generic_args = clone_type_ref(arena, expr->as.method_call.generic_args);
+            break;
+        case AST_EXPR_COLLECTION_LITERAL:
+            /* resolved per specialization: shared, `List(T) { value }` was the
+             * first one's List in every later one */
+            res->as.collection.type = clone_type_ref(arena, expr->as.collection.type);
             break;
         case AST_EXPR_OBJECT:
             res->as.object_literal.type = clone_type_ref(arena, expr->as.object_literal.type);
@@ -1925,7 +1933,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         AstTypeRef* tr = NULL;
         if (args[i] && ((args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
                          && args[i]->as.structure.generic_count > 0)
-                        || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY)) {
+                        || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY || args[i]->kind == TYPE_OPT)) {
             // A generic instantiation argument (`decodeField` over a
             // `List(String)` field): spell the template name with its args,
             // not the mangled TypeInfo name `List_String`, so the
@@ -1990,7 +1998,11 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
                 TypeInfo* ti = ga->resolved_type;
                 symbol_table_define(symbols, ctx->ast_arena, gp->text, NULL, ti, false);
                 // Also define the concrete name in case it's used directly
-                if (ti && ti->name.len > 0 && !str_eq(ti->name, gp->text)) {
+                // (an enum this file can name keeps its declaration: without it
+                // `Kind.large` is a field of nothing)
+                bool own_enum = ti && ti->kind == TYPE_INT && ti->as.integer.enum_decl
+                    && sema_package_reaches(s_current_decl_origin, ti->as.integer.enum_decl);
+                if (ti && ti->name.len > 0 && !str_eq(ti->name, gp->text) && !own_enum) {
                     symbol_table_define(symbols, ctx->ast_arena, ti->name, NULL, ti, false);
                 }
                 gp = gp->next; ga = ga->next;
@@ -8556,6 +8568,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 // type. Reading the result is the explicit `task.get()`. A
                 // void-returning callee still yields a Task (Task(void)) so a
                 // bare `spawn f()` statement is recognized and joined on drop.
+                sema_spawn_method_call(module, symbols, expr->as.unary.operand);
+                sema_spawn_generic_call(ctx, module, symbols, expr, expr->as.unary.operand);
                 TypeInfo* inner = expr->as.unary.operand->resolved_type;
                 if (!inner) inner = type_get_void(ctx->type_registry);
                 expr->resolved_type = type_get_task(ctx->type_registry, inner);
@@ -11864,6 +11878,275 @@ static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTabl
     return true;
 }
 
+
+/* The types were resolved in the file of the spawn: names that file could name */
+static void sema_ref_resolve_from(AstTypeRef* type, const char* origin) {
+    for (; type; type = type->next) {
+        if (!type->resolve_origin) type->resolve_origin = origin;
+        sema_ref_resolve_from(type->generic_args, origin);
+    }
+}
+
+/* The generic function that `call` names, NULL when it is not one (or several
+ * are open here that take this many values). */
+static AstDecl* sema_spawned_generic(SymbolTable* symbols, AstExpr* call, AstTypeRef** bound) {
+    AstDecl* decl = call->decl_link;
+    if (decl && decl->kind == AST_DECL_FUNC) {
+        if (decl->as.func_decl.specialization_args && decl->as.func_decl.generic_template) {
+            *bound = decl->as.func_decl.specialization_args;
+            return decl->as.func_decl.generic_template;
+        }
+        return decl->as.func_decl.generic_params ? decl : NULL;
+    }
+    if (decl || !call->as.call.callee || call->as.call.callee->kind != AST_EXPR_IDENT) return NULL;
+    size_t values = 0;
+    for (AstCallArg* a = call->as.call.args; a; a = a->next)
+        if (a->name.len > 0 || !sema_arg_is_type_name(symbols, a->value)) values++;
+    for (Symbol* curr = symbol_table_first(symbols, call->as.call.callee->as.ident); curr; curr = curr->sameNext) {
+        AstDecl* d = curr->decl;
+        if (!d || d->kind != AST_DECL_FUNC || !d->as.func_decl.generic_params || d->as.func_decl.specialization_args) continue;
+        if (!sema_decl_opened(s_current_decl_origin, d)) continue;
+        size_t params = 0;
+        for (AstParam* p = d->as.func_decl.params; p; p = p->next) params++;
+        if (params != values) continue;
+        if (decl) return NULL;
+        decl = d;
+    }
+    return decl;
+}
+
+/* `spawn pair.work(size: 3)` is `spawn work(pair, size: 3)`: the receiver is an
+ * argument as the others are, copied for the task. A method of the language
+ * itself (`toString`) is no function that could be spawned. */
+static void sema_spawn_method_call(AstModule* module, SymbolTable* symbols, AstExpr* call) {
+    if (!call || call->kind != AST_EXPR_METHOD_CALL) return;
+    Str name = call->as.method_call.method_name;
+    AstExpr* object = call->as.method_call.object;
+    AstDecl* decl = call->decl_link;
+    if (!decl || decl->kind != AST_DECL_FUNC) {
+        decl = NULL;
+        TypeInfo* receiver = object ? object->resolved_type : NULL;
+        while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+        Str base = receiver ? sema_struct_template_name(receiver) : (Str){0};
+        size_t values = 1;
+        for (AstCallArg* a = call->as.method_call.args; a; a = a->next) values++;
+        for (Symbol* curr = symbol_table_first(symbols, name); base.len > 0 && curr && !decl; curr = curr->sameNext) {
+            AstDecl* d = curr->decl;
+            if (!d || d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args || !d->as.func_decl.params) continue;
+            if (!sema_decl_visible(s_current_decl_origin, d)) continue;
+            size_t params = 0;
+            for (AstParam* p = d->as.func_decl.params; p; p = p->next) params++;
+            if (params == values && str_eq(get_base_type_name(d->as.func_decl.params->type), base)) decl = d;
+        }
+    }
+    if (!decl) {
+        char message[300];
+        snprintf(message, sizeof message,
+                 "cannot spawn '%.*s': it is not a function of the program or of lib; spawn a function that calls it",
+                 (int)name.len, name.data);
+        diag_error(s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module),
+                   (int)call->line, (int)call->column, message);
+        if (module) module->had_error = true;
+        return;
+    }
+    AstCallArg* receiver_arg = arena_alloc(s_lifecycle_ctx->ast_arena, sizeof(AstCallArg));
+    *receiver_arg = (AstCallArg){ .value = object, .next = call->as.method_call.args };
+    AstTypeRef* generic_args = call->as.method_call.generic_args;
+    AstExpr* callee = arena_alloc(s_lifecycle_ctx->ast_arena, sizeof(AstExpr));
+    *callee = (AstExpr){ .kind = AST_EXPR_IDENT, .line = call->line, .column = call->column };
+    callee->as.ident = name;
+    call->kind = AST_EXPR_CALL;
+    memset(&call->as.call, 0, sizeof call->as.call);
+    call->as.call.callee = callee;
+    call->as.call.args = receiver_arg;
+    call->as.call.generic_args = generic_args;
+    call->decl_link = decl;
+}
+
+/* `spawn work(value: 3)` of a generic function: a spawn needs a function whose
+ * arguments and result have types of their own (its arguments are packed for
+ * another thread, its result is read by `get`). So the call becomes one of a
+ * plain function that has them and calls the generic one:
+ *   func work__spawn_int64_t(value: copy Int) ret String { ret work<Int>(value: value) }
+ * One per set of types, and from here on a spawn like any other. */
+static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                    AstExpr* spawn, AstExpr* call) {
+    if (!call || call->kind != AST_EXPR_CALL || s_current_generic_params) return;
+    AstTypeRef* bound = NULL;
+    AstDecl* generic = sema_spawned_generic(symbols, call, &bound);
+    if (!generic || generic->as.func_decl.is_extern || !generic->as.func_decl.body) return;
+    const AstFuncDecl* fd = &generic->as.func_decl;
+    const char* file = s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module);
+
+    /* the types: written (`work(Int, value: 3)`), or those of the arguments */
+    AstCallArg* values = call->as.call.args;
+    AstTypeRef* written = NULL; AstTypeRef* written_last = NULL;
+    while (values && values->name.len == 0 && values->value && values->value->kind == AST_EXPR_IDENT
+           && sema_arg_is_type_name(symbols, values->value)) {
+        AstTypeRef* ref = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+        memset(ref, 0, sizeof(*ref));
+        ref->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+        memset(ref->parts, 0, sizeof(*ref->parts));
+        ref->parts->text = values->value->as.ident;
+        ref->line = values->value->line; ref->column = values->value->column;
+        if (!written) written = ref; else written_last->next = ref;
+        written_last = ref;
+        values = values->next;
+    }
+    AstTypeRef* types = call->as.call.generic_args ? call->as.call.generic_args : written;
+    if (!types) types = bound;
+    if (!types) {
+        const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t n = 0;
+        const AstParam* p = fd->params;
+        for (AstCallArg* a = values; a && p && n < 32; a = a->next, p = p->next) {
+            TypeInfo* at = a->value ? a->value->resolved_type : NULL;
+            while (at && at->kind == TYPE_REF) at = at->as.ref.base;
+            if (!at && a->value && a->value->kind == AST_EXPR_MEMBER
+                && a->value->as.member.object->kind == AST_EXPR_IDENT) {
+                /* `Kind.large` */
+                Symbol* named = symbol_table_lookup(symbols, a->value->as.member.object->as.ident);
+                if (named && named->decl && named->decl->kind == AST_DECL_ENUM)
+                    at = type_get_enum(ctx->type_registry, named->decl, named->decl->as.enum_decl.name);
+            }
+            if (!at || at->kind == TYPE_VOID || at->kind == TYPE_UNKNOWN) continue;
+            patterns[n] = p->type;
+            concretes[n] = sema_type_ref_of(ctx, at);
+            n++;
+        }
+        types = n ? infer_generic_args_multi(ctx, fd, patterns, concretes, n) : NULL;
+    }
+    size_t want = 0, have = 0;
+    for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) want++;
+    for (const AstTypeRef* t = types; t; t = t->next) have++;
+    char message[420];
+    if (!types || have != want) {
+        snprintf(message, sizeof message,
+                 "cannot spawn: what '%.*s' of '%.*s' is does not show in the arguments; name it, as in "
+                 "`spawn %.*s(Int, ...)`, or give it an argument held by a `let`",
+                 (int)fd->generic_params->text.len, fd->generic_params->text.data,
+                 (int)fd->name.len, fd->name.data, (int)fd->name.len, fd->name.data);
+        diag_error(file, (int)spawn->line, (int)spawn->column, message);
+        if (module) module->had_error = true;
+        return;
+    }
+    char name_buffer[900];
+    size_t name_at = (size_t)snprintf(name_buffer, sizeof name_buffer, "%.*s__spawn", (int)fd->name.len, fd->name.data);
+    for (const AstTypeRef* t = types; t; t = t->next) {
+        if (name_at >= sizeof name_buffer) break;
+        AstTypeRef one = *t;
+        one.next = NULL;
+        name_at += (size_t)snprintf(name_buffer + name_at, sizeof name_buffer - name_at, "_%s",
+                                    rae_mangle_type_specialized(ctx, NULL, NULL, &one));
+    }
+    Str name = str_from_cstr(name_buffer);
+
+    /* made already, for another spawn of it? */
+    AstDecl* wrapper = NULL;
+    size_t named = module_index_function_count(module, name);
+    for (size_t k = 0; k < named && !wrapper; k++) {
+        const AstDecl* d = module_index_function_at(module, name, named, k);
+        if (d->as.func_decl.spawns == generic) wrapper = (AstDecl*)d;
+    }
+    if (!wrapper) {
+        char* kept = arena_alloc(ctx->ast_arena, name.len + 1);
+        memcpy(kept, name.data, name.len + 1);
+        sema_ref_resolve_from(types, s_current_decl_origin);
+        wrapper = arena_alloc(ctx->ast_arena, sizeof(AstDecl));
+        *wrapper = *generic;
+        wrapper->next = NULL;
+        wrapper->resolved_type = NULL;
+        AstFuncDecl* wf = &wrapper->as.func_decl;
+        wf->name = (Str){ .data = kept, .len = name.len };
+        wf->generic_params = NULL;
+        wf->generic_template = NULL;
+        wf->specialization_args = NULL;
+        wf->labels_in_c_name = false;
+        wf->spawns = generic;
+        AstExpr* inner = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        *inner = (AstExpr){ .kind = AST_EXPR_CALL, .line = generic->line, .column = generic->column };
+        inner->as.call.callee = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+        *inner->as.call.callee = (AstExpr){ .kind = AST_EXPR_IDENT, .line = generic->line, .column = generic->column };
+        inner->as.call.callee->as.ident = fd->name;
+        inner->as.call.generic_args = types;
+        AstParam* param_last = NULL; AstCallArg* arg_last = NULL;
+        wf->params = NULL;
+        for (const AstParam* p = fd->params; p; p = p->next) {
+            AstParam* np = arena_alloc(ctx->ast_arena, sizeof(AstParam));
+            *np = *p;
+            np->next = NULL;
+            np->type = substitute_type_ref(ctx, fd->generic_params, types, p->type);
+            if (!wf->params) wf->params = np; else param_last->next = np;
+            param_last = np;
+            AstExpr* value = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+            *value = (AstExpr){ .kind = AST_EXPR_IDENT, .line = generic->line, .column = generic->column };
+            value->as.ident = p->name;
+            if (np->type->is_own) {
+                AstExpr* moved = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
+                *moved = (AstExpr){ .kind = AST_EXPR_OWN, .line = generic->line, .column = generic->column };
+                moved->as.unary.operand = value;
+                value = moved;
+            }
+            AstCallArg* arg = arena_alloc(ctx->ast_arena, sizeof(AstCallArg));
+            *arg = (AstCallArg){ .name = p->name, .value = value };
+            if (!inner->as.call.args) inner->as.call.args = arg; else arg_last->next = arg;
+            arg_last = arg;
+        }
+        AstStmt* body = arena_alloc(ctx->ast_arena, sizeof(AstStmt));
+        *body = (AstStmt){ .kind = AST_STMT_EXPR, .line = generic->line, .column = generic->column };
+        if (fd->returns) {
+            wf->returns = arena_alloc(ctx->ast_arena, sizeof(AstReturnItem));
+            *wf->returns = *fd->returns;
+            wf->returns->next = NULL;
+            wf->returns->type = substitute_type_ref(ctx, fd->generic_params, types, fd->returns->type);
+            body->kind = AST_STMT_RET;
+            body->as.ret_stmt.values = arena_alloc(ctx->ast_arena, sizeof(AstReturnArg));
+            *body->as.ret_stmt.values = (AstReturnArg){ .value = inner };
+        } else {
+            body->as.expr_stmt = inner;
+        }
+        wf->body = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
+        memset(wf->body, 0, sizeof(*wf->body));
+        wf->body->first = body;
+        wrapper->next = module->decls;
+        module->decls = wrapper;
+
+        const char* saved_origin = s_current_decl_origin;
+        int saved_unsafe = s_unsafe_depth, saved_loop = s_loop_depth, saved_scopes = s_task_scope_count;
+        const AstParam* saved_params = s_current_params;
+        const AstIdentifierPart* saved_generic = s_current_generic_params;
+        if (generic->origin_file) s_current_decl_origin = generic->origin_file;
+        s_unsafe_depth = 0;
+        s_loop_depth = 0;
+        s_task_scope_count = 0;
+        symbol_table_push_scope(symbols);
+        for (AstParam* p = wf->params; p; p = p->next)
+            symbol_table_define(symbols, ctx->ast_arena, p->name, NULL,
+                                sema_resolve_type_internal(ctx, module, symbols, p->type), false);
+        TypeInfo* result = wf->returns ? sema_resolve_type_internal(ctx, module, symbols, wf->returns->type) : NULL;
+        s_current_params = wf->params;
+        s_current_generic_params = NULL;
+        sema_analyze_stmt(ctx, module, symbols, body, result);
+        sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), wf);
+        symbol_table_pop_scope(symbols);
+        s_current_params = saved_params;
+        s_current_generic_params = saved_generic;
+        s_current_decl_origin = saved_origin;
+        s_unsafe_depth = saved_unsafe;
+        s_loop_depth = saved_loop;
+        s_task_scope_count = saved_scopes;
+    }
+    call->as.call.args = values;
+    call->as.call.generic_args = NULL;
+    call->as.call.callee->as.ident = wrapper->as.func_decl.name;
+    call->as.call.callee->decl_link = NULL;
+    call->decl_link = wrapper;
+    call->resolved_type = wrapper->as.func_decl.returns
+        ? sema_resolve_type_internal(ctx, module, symbols, wrapper->as.func_decl.returns->type)
+        : type_get_void(ctx->type_registry);
+    AstParam* p = wrapper->as.func_decl.params;
+    for (AstCallArg* a = values; a && p; a = a->next, p = p->next)
+        ensure_type_match(ctx, sema_resolve_type_internal(ctx, module, symbols, p->type), &a->value);
+}
 
 /* The concrete result type of a call to a generic function whose type
  * arguments sema did not bind (the backend infers them per call): `T` from

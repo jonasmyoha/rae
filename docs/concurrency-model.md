@@ -341,7 +341,7 @@ handle out with `copyAt`, `get()`, let the copy drop, remove the slot).
 spawned function a per-function pthread thunk packs the arguments and
 `pthread_create`s. The threadable shapes, per parameter:
 
-- scalars (`Int`/`Float`/`Bool`/`Char`, any mode but `mod`) — by value;
+- scalars (`Int` and the fixed widths/`Float`/`Bool`/`Char`, any mode but `mod`) — by value;
 - enums (`own`/`copy`/plain) — by value;
 - `String` (`own`/`copy`/plain) — the spawn site hands the worker a private
   `rae_string_copy`, the parent keeps and drops its own;
@@ -349,6 +349,12 @@ spawned function a per-function pthread thunk packs the arguments and
   own heap): an aliasing lvalue is deep-copied at the spawn site, a fresh
   rvalue (call result / literal) moves;
 - POD structs (no heap → no cascade drop), `own`/`copy`/plain — by value.
+
+A spawned **generic** function is one of these per set of types: sema makes a
+plain function that has them and calls the generic one
+(`sema_spawn_generic_call`), and the spawn is of that. A spawned method is the
+same call with the receiver as its first argument. A spawn inside a generic
+function's body is an error (fixtures 1658, 1659).
 
 Anything else — `mod` of anything, `view` of a `String`/enum/aggregate,
 generic-instance or `c_struct` args — takes the **sequential fallback**: the

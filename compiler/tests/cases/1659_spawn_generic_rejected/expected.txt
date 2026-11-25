@@ -1,0 +1,12 @@
+tests/cases/1659_spawn_generic_rejected/Main.rae:19:31: cannot spawn: what 'T' of 'make' is does not show in the arguments; name it, as in `spawn make(Int, ...)`, or give it an argument held by a `let`
+    19 |   let list: Task(List(Int)) = spawn make(count: 3)  # ERROR
+       |                               ^~~~
+tests/cases/1659_spawn_generic_rejected/Main.rae:20:28: cannot spawn: parameter 'value' is a view of non-scalar data, which would be shared across the task boundary; pass it as own or copy (inside a taskScope, a view of a local declared before it, or of a parameter, may be lent)
+    20 |   let text: Task(String) = spawn textOf(value: numbers)  # ERROR
+       |                            ^~~~
+tests/cases/1659_spawn_generic_rejected/Main.rae:21:29: cannot spawn: parameter 'value' is a mod of non-scalar data, which would be shared across the task boundary; pass it as own or copy
+    21 |   let changed: Task(Void) = spawn change(value: numbers)  # ERROR
+       |                             ^~~~
+tests/cases/1659_spawn_generic_rejected/Main.rae:22:51: cannot spawn 'toString': it is not a function of the program or of lib; spawn a function that calls it
+    22 |   let method: Task(String) = spawn number.toString()  # ERROR
+       |                                                   ^~~~

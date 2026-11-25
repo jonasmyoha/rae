@@ -1444,7 +1444,12 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (concrete) {
             // already resolved above
         } else if (expr->as.call.generic_args) {
-            concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args);
+            AstTypeRef* last = NULL;
+            for (const AstTypeRef* arg = expr->as.call.generic_args; arg; arg = arg->next) {
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg);
+                if (!concrete) concrete = sub; else last->next = sub;
+                last = sub;
+            }
         } else if (fd->generic_params) {
             // 1. Argument-based inference FIRST, accumulating across ALL
             //    param/arg pairs. This handles top-level calls like

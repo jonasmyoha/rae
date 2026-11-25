@@ -836,6 +836,9 @@ bool c_spawn_threadable(CFuncContext* ctx, const AstFuncDecl* f) {
     bool is_scalar = str_eq_cstr(base, "Int") || str_eq_cstr(base, "Int64")
                   || str_eq_cstr(base, "Float") || str_eq_cstr(base, "Float32") || str_eq_cstr(base, "Float64")
                   || str_eq_cstr(base, "Bool")
+                  || str_eq_cstr(base, "Int8") || str_eq_cstr(base, "Int16") || str_eq_cstr(base, "Int32")
+                  || str_eq_cstr(base, "UInt8") || str_eq_cstr(base, "UInt16") || str_eq_cstr(base, "UInt32")
+                  || str_eq_cstr(base, "UInt64")
                   || str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32");
     if (is_scalar) continue;                      // view-numeric is by value; own/copy/plain too
     bool is_enum = ctx && find_enum_decl(ctx, ctx->module, base) != NULL;
