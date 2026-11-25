@@ -1,0 +1,12 @@
+# A call that does not say what the type parameter is
+func look(T: type, value: opt view T) ret Bool {
+  if let there: view T = value {
+    ret true
+  }
+  ret false
+}
+
+func main() {
+  log("{look(Int, value: none)}")
+  log("{look(value: none)}")  # ERROR
+}

@@ -223,6 +223,10 @@ bool c_primitive_ref_has_wrapper(Str base);
 bool c_expr_is_pointer_list_ident(CFuncContext* ctx, const AstExpr* expr);
 void emit_deep_copy_source(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExpr* source, int id, FILE* out);
+/* The expression an `own` moves: it has the type (`own` has none of its own) */
+static inline const AstExpr* c_without_own(const AstExpr* expr) {
+  return expr && expr->kind == AST_EXPR_OWN ? expr->as.unary.operand : expr;
+}
 /* Does `plain` (an argument or element without its `own`) have to be wrapped to be a value of
  * `opt_type`? Not `none`, and not what already is an optional. */
 bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, const AstExpr* plain);

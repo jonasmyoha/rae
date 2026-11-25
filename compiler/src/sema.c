@@ -2119,6 +2119,26 @@ static bool sema_array_receiver_matches(const AstTypeRef* pattern, const TypeInf
     return sema_array_pattern_cap(pattern) == receiver->as.array.count;
 }
 
+/* Makes a type argument the payload of the optional it is, in its resolved type too */
+static void infer_strip_opt(AstTypeRef* type) {
+    type->is_opt = false;
+    TypeInfo* resolved = type->resolved_type;
+    while (resolved && (resolved->kind == TYPE_OPT || resolved->kind == TYPE_REF))
+        resolved = resolved->kind == TYPE_OPT ? resolved->as.opt.base : resolved->as.ref.base;
+    type->resolved_type = resolved;
+}
+
+/* The type argument a pattern's `T` / `opt T` (`List(T)`, `List(opt T)`) binds
+ * to: an `opt T` binds T to the payload */
+static const AstTypeRef* infer_bound_argument(CompilerContext* ctx, const AstTypeRef* pattern, const AstTypeRef* concrete) {
+    if (!pattern->is_opt || !concrete->is_opt) return concrete;
+    AstTypeRef* payload = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    *payload = *concrete;
+    payload->next = NULL;
+    infer_strip_opt(payload);
+    return payload;
+}
+
 AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* pattern, const AstTypeRef* concrete_type) {
     if (!func || !func->generic_params || !pattern || !concrete_type) return NULL;
     Str pattern_base = get_base_type_name(pattern);
@@ -2141,13 +2161,13 @@ AstTypeRef* infer_generic_args(CompilerContext* ctx, const AstFuncDecl* func, co
             // `opt` IS part of the type argument: an `opt Int` passed to
             // `value: view T` binds T = opt Int (a pattern `value: opt T`
             // binds T to the payload instead).
-            if (pattern->is_opt) bare->is_opt = false;
+            if (pattern->is_opt) infer_strip_opt(bare);
             match = bare;
         } else if (bases_align) {
         const AstTypeRef* p_arg = pattern->generic_args; const AstTypeRef* r_arg = concrete_type->generic_args;
         while (p_arg && r_arg) {
             Str p_name = get_base_type_name(p_arg);
-            if (str_eq(p_name, gp->text)) { match = (AstTypeRef*)r_arg; break; }
+            if (str_eq(p_name, gp->text)) { match = (AstTypeRef*)infer_bound_argument(ctx, p_arg, r_arg); break; }
             p_arg = p_arg->next; r_arg = r_arg->next;
         }
         }
@@ -2197,7 +2217,7 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
                 // `opt` IS part of the type argument (an `opt Int` binds
                 // T = opt Int); only a pattern that spells `opt T` itself
                 // binds T to the payload.
-                if (pat->is_opt) bare->is_opt = false;
+                if (pat->is_opt) infer_strip_opt(bare);
                 binding[gi] = bare; break;
             }
             // Base names must align so the generic_args match positionally
@@ -2206,7 +2226,10 @@ AstTypeRef* infer_generic_args_multi(CompilerContext* ctx, const AstFuncDecl* fu
             const AstTypeRef* p_arg = pat->generic_args;
             const AstTypeRef* r_arg = conc->generic_args;
             while (p_arg && r_arg) {
-                if (str_eq(get_base_type_name(p_arg), gp->text)) { binding[gi] = r_arg; break; }
+                if (str_eq(get_base_type_name(p_arg), gp->text)) {
+                    binding[gi] = infer_bound_argument(ctx, p_arg, r_arg);
+                    break;
+                }
                 p_arg = p_arg->next; r_arg = r_arg->next;
             }
         }
@@ -8033,9 +8056,54 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
     }
 }
 
+/* `copy T` of a generic function where T holds a Task: a declared `copy Task(Int)`
+ * is refused at the declaration, a T is known at the call. */
+static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbols, const AstExpr* expr) {
+    const AstCallArg* arg = NULL;
+    bool method = expr->kind == AST_EXPR_METHOD_CALL;
+    if (method) arg = expr->as.method_call.args;
+    else if (expr->kind == AST_EXPR_CALL) arg = expr->as.call.args;
+    else return;
+    const AstDecl* decl = expr->decl_link;
+    if (!decl) {
+        /* a generic call the backend resolves: the one generic function of that
+         * name and number of parameters */
+        Str name = {0};
+        if (method) name = expr->as.method_call.method_name;
+        else if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) name = expr->as.call.callee->as.ident;
+        size_t count = method ? 1 : 0;
+        for (const AstCallArg* a = arg; a; a = a->next) count++;
+        for (Symbol* curr = name.len > 0 ? symbol_table_first(symbols, name) : NULL; curr; curr = curr->sameNext) {
+            const AstDecl* d = curr->decl;
+            if (!d || d->kind != AST_DECL_FUNC || !d->as.func_decl.generic_params) continue;
+            size_t params = 0;
+            for (const AstParam* p = d->as.func_decl.params; p; p = p->next) params++;
+            if (params != count) continue;
+            if (decl) return;
+            decl = d;
+        }
+    }
+    if (!decl || decl->kind != AST_DECL_FUNC) return;
+    const AstFuncDecl* fd = &decl->as.func_decl;
+    if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC)
+        fd = &fd->generic_template->as.func_decl;
+    if (!fd->generic_params) return;
+    const AstParam* param = fd->params;
+    if (method && param) param = param->next;
+    for (; param && arg; param = param->next, arg = arg->next) {
+        if (!param->type || !param->type->is_copy || !arg->value) continue;
+        TypeInfo* type = arg->value->resolved_type;
+        while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+        if (!sema_typeinfo_holds_task(symbols, type, 0)) continue;
+        sema_report_task_copy(module, s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module),
+                              arg->value->line, arg->value->column, NULL, "through a 'copy' parameter");
+    }
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
+    sema_check_task_copy_arguments(module, symbols, expr);
     sema_check_list_call(module, symbols, expr);
     sema_check_unnarrowed_opt(module, expr);
     sema_check_void_value(module, expr);

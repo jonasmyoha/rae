@@ -241,7 +241,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         const AstParam* p = d->params;
                         const AstCallArg* a = expr->as.call.args;
                         while (p && a && np < 32) {
-                            const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, a->value);
+                            const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
                             if (arg_tr && ctx->generic_params && ctx->generic_args)
                                 arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                             patterns[np] = p->type; concretes[np] = arg_tr; np++;
