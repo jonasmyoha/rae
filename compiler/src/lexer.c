@@ -4,6 +4,7 @@
 
 #include "diag.h"
 
+#include <stdint.h>
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdbool.h>

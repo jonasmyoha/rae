@@ -11,8 +11,17 @@ CC = gcc
 # flags, hence the clean).
 COMPILER_OPT ?= -O2 -flto
 COMMON_CFLAGS = -std=c11 -Wall -Wextra -Wpedantic $(COMPILER_OPT) -g -ffp-contract=off
+COMMON_CFLAGS += -I../third_party/tinyexpr
+# The libraries of the machine the compiler is built on. Linux (glibc) hides
+# POSIX and BSD names (PATH_MAX, realpath, kill) under -std=c11 without
+# _GNU_SOURCE, and the last libraries on the line are the last searched.
+ifeq ($(shell uname -s),Darwin)
+COMMON_CFLAGS += -I/opt/homebrew/include
 LDFLAGS = $(filter -flto,$(COMPILER_OPT)) -framework Foundation -framework ImageIO -framework CoreGraphics -L/opt/homebrew/lib
-COMMON_CFLAGS += -I/opt/homebrew/include -I../third_party/tinyexpr
+else
+COMMON_CFLAGS += -D_GNU_SOURCE
+LDFLAGS = $(filter -flto,$(COMPILER_OPT)) -lm -lpthread -ldl
+endif
 
 ifeq ($(MODE), CI_STRICT)
     CFLAGS = $(COMMON_CFLAGS) -Werror

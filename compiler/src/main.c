@@ -3180,6 +3180,18 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
   char runtime_dir[PATH_MAX];
   snprintf(runtime_dir, sizeof(runtime_dir), "%s", RAE_RUNTIME_SOURCE_DIR);
 
+  // What every program links: Apple's frameworks, or the C library's parts that
+  // are libraries of their own (last on the line, after what uses them).
+#if defined(__APPLE__)
+  const char* system_flags = "-I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics";
+  const char* system_libraries = "";
+  const char* wgpu_system_flags =
+      "-framework Metal -framework QuartzCore -framework CoreFoundation -framework Foundation -framework ImageIO -framework CoreGraphics";
+#else
+  const char* system_flags = "";
+  const char* system_libraries = " -lm -lpthread -ldl";
+  const char* wgpu_system_flags = "";
+#endif
   // SDL3 (lib/sdl3.rae): define the runtime block + link libSDL3 only when the
   // program imports it (brew-installed at /opt/homebrew, not toolchain-bundled).
   const char* sdl3_flags = uses_sdl3 ? "-DRAE_HAS_SDL3 -lSDL3" : "";
@@ -3196,9 +3208,8 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
       wg = wgbuf;
     }
     snprintf(wgpu_flags, sizeof(wgpu_flags),
-             "-DRAE_HAS_WEBGPU -I%s/include -L%s/lib -lwgpu_native -Wl,-rpath,%s/lib "
-             "-framework Metal -framework QuartzCore -framework CoreFoundation -framework Foundation -framework ImageIO -framework CoreGraphics",
-             wg, wg, wg);
+             "-DRAE_HAS_WEBGPU -I%s/include -L%s/lib -lwgpu_native -Wl,-rpath,%s/lib %s",
+             wg, wg, wg, wgpu_system_flags);
   }
   // release: optimize and strip asserts; dev/debug: no opt + symbols so
   // a profiler/debugger reads the generated C and runtime cleanly.
@@ -3316,9 +3327,10 @@ static bool gcc_link_c_to_binary(const char* entry_rae_file,
     return false;
   }
   char cmd[PATH_MAX * 6];
-  snprintf(cmd, sizeof(cmd), "%s -std=c11 %s%s%s %s %s %s %s -I%s -I/opt/homebrew/include -L/opt/homebrew/lib -framework Foundation -framework ImageIO -framework CoreGraphics%s %s %s%s %s %s %s -o %s",
+  snprintf(cmd, sizeof(cmd), "%s -std=c11 %s%s%s %s %s %s %s -I%s %s%s %s %s%s %s %s %s%s -o %s",
            c_compiler, opt_flags, g_float4_scalar ? " -DRAE_FLOAT4_SCALAR" : "", cpu_flags, extra_cflags, program_warnings, sdl3_flags, wgpu_flags, runtime_dir,
-           network_flags, c_path, runtime_object, extra_c_files, box3d_flags, package_flags, wamr_flags, out_bin);
+           system_flags, network_flags, c_path, runtime_object, extra_c_files, box3d_flags, package_flags, wamr_flags,
+           system_libraries, out_bin);
 
   int cc_rc = system(cmd);
   progress_end(cc_rc == 0);
