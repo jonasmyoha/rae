@@ -92,14 +92,7 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
   }
   if (is_place && plain_type && !elem_is_any
       && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)elem_type, 0)) {
-    Str base = get_base_type_name(elem_type);
-    bool is_container = str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap")
-                        || str_eq_cstr(base, "IntMap");
-    const AstDecl* decl = is_container ? NULL : find_type_decl(ctx, ctx->module, base);
-    bool is_user_struct = decl && decl->kind == AST_DECL_TYPE
-                          && !has_property(decl->as.type_decl.properties, "c_struct")
-                          && !decl->as.type_decl.generic_params;
-    if (is_container || is_user_struct) {
+    if (c_has_deep_copy_helper(ctx, elem_type)) {
       const char* type_name = rae_mangle_type_specialized(
           ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
       int id = ctx->temp_counter++;
@@ -1006,11 +999,7 @@ bool emit_alias_call_copy(CFuncContext* ctx, const AstExpr* value, const AstType
     fprintf(out, ")");
     return true;
   }
-  bool is_container = str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap") || str_eq_cstr(base, "IntMap");
-  const AstDecl* decl = is_container ? NULL : find_type_decl(ctx, ctx->module, base);
-  bool is_user_struct = decl && decl->kind == AST_DECL_TYPE
-                        && !has_property(decl->as.type_decl.properties, "c_struct");
-  if (!is_container && !is_user_struct) return false;
+  if (!c_has_deep_copy_helper(ctx, concrete)) return false;
   const char* type_name = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)concrete);
   emit_deep_copy_value(ctx, type_name, value, ctx->temp_counter++, out);
   return true;
@@ -1767,6 +1756,8 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
     const char* struct_mangled = rae_mangle_type_specialized(
         ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
     const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
+    /* the bits of a slot (a map's `entry`): the map owns all they hold */
+    if (c_local_is_slot_alias(ctx, (int)idx)) return;
     fprintf(out, "  rae_drop_struct_%s%s(&%.*s);\n", struct_mangled, suffix,
             (int)name.len, name.data);
   }

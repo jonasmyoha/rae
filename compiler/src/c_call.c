@@ -1056,7 +1056,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             bool is_user_struct = elem_decl
                 && elem_decl->kind == AST_DECL_TYPE
                 && !has_property(elem_decl->as.type_decl.properties, "c_struct");
-            bool has_synth_drop = is_user_struct && !elem_decl->as.type_decl.generic_params;
+            bool has_synth_drop = (is_user_struct && !elem_decl->as.type_decl.generic_params)
+                || str_eq_cstr(ebase, "Array");
             if (is_user_struct && elem_decl->as.type_decl.generic_params && elem_tr->generic_args) {
                 const char* want = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, elem_tr);
                 for (size_t gi = 0; want && gi < ctx->compiler_ctx->generic_type_count; gi++) {
@@ -2226,21 +2227,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     } else if (str_eq_cstr(pbase_copy, "String")) {
                         copy_arg_kind = 1;
                     } else {
-                        bool is_container =
-                            str_eq_cstr(pbase_copy, "List") ||
-                            str_eq_cstr(pbase_copy, "StringMap") ||
-                            str_eq_cstr(pbase_copy, "IntMap");
-                        bool is_user_struct = false;
-                        if (!is_container) {
-                            const AstDecl* td = find_type_decl(ctx,
-                                ctx->module, pbase_copy);
-                            is_user_struct = td
-                                && td->kind == AST_DECL_TYPE
-                                && !has_property(td->as.type_decl.properties,
-                                                 "c_struct")
-                                && !td->as.type_decl.generic_params;
-                        }
-                        if (is_container || is_user_struct) {
+                        if (c_has_deep_copy_helper(ctx, p_target)) {
                             copy_arg_kind = 2;
                         } else {
                             char msg[256];

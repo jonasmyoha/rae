@@ -358,8 +358,8 @@ spawned function a per-function pthread thunk packs the arguments and
 - enums (`own`/`copy`/plain) — by value;
 - `String` (`own`/`copy`/plain) — the spawn site hands the worker a private
   `rae_string_copy`, the parent keeps and drops its own;
-- heap aggregates (`List`/`Map`, non-generic non-`c_struct` user structs that
-  own heap): an aliasing lvalue is deep-copied at the spawn site, a fresh
+- heap aggregates (`List`/`Map`, an `Array`, user structs, generic ones too,
+  that own heap; not `c_struct`): an aliasing lvalue is deep-copied at the spawn site, a fresh
   rvalue (call result / literal) moves;
 - POD structs (no heap → no cascade drop), `own`/`copy`/plain — by value.
 
@@ -370,7 +370,7 @@ same call with the receiver as its first argument. A spawn inside a generic
 function's body is an error (fixtures 1658, 1659).
 
 Anything else — `mod` of anything, `view` of a `String`/enum/aggregate,
-generic-instance or `c_struct` args — takes the **sequential fallback**: the
+`c_struct` args that are not plain bytes — takes the **sequential fallback**: the
 call runs synchronously on the caller and the result is stored into an
 already-completed task. Verified ASan/UBSan-clean for the threaded shapes.
 The String interpolation temp pool is `__thread`, so concurrent workers do

@@ -426,6 +426,14 @@ typedef struct {
 } StructShape;
 size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
 const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
+/* c_array_helpers.c */
+typedef struct { const TypeInfo** infos; size_t count; size_t cap; } CArrayHelpers;
+bool c_has_deep_copy_helper(CFuncContext* ctx, const AstTypeRef* type);
+void c_collect_array_helpers(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays);
+void c_emit_array_drop_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);
+void c_emit_array_drops(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
+void c_emit_array_copy_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);
+void c_emit_array_copies(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
 /* c_discard.c */
 bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call);
 int c_discard_temp(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete);

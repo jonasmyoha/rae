@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.88, 2026-11-25: Arrays that own memory
+
+- An `Array(T, cap: N)` whose elements own memory (a String, a struct, a List, a map, a generic struct, another Array) is
+  copied and dropped with them wherever an Array can be: a let, a field, a List, a map, an optional, a parameter, a
+  task. Most were errors of the C compiler, or of Rae's ("deep-copy is not implemented").
+- `Array(List(Int), cap: 2)` makes one: the element type may have type arguments.
+- A generic struct that owns memory (`Pair(List(String))`) is copied where a plain struct is: a `copy` or `own`
+  parameter, a field, a List, a spawn.
+- Case 1671.
+
 ## 0.4.87, 2026-11-25: optionals and generic functions
 
 - An optional given to a generic function is its T, whole, wherever it comes from: a call's result, `own` of a local, a

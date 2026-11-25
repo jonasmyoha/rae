@@ -1,0 +1,237 @@
+# An Array whose elements own memory is copied with them and dropped with them: in a let, a field, a
+# List, a map, an optional, an Array of Arrays, parameters, a task's result, a generic function.
+# Elements: a String, a struct, a List, a map, a generic struct, a type with its own drop and copy.
+# Nothing leaks, and a change of a copy is the copy's alone.
+import collections/StringMap
+
+type Note {
+  text: String = ""
+  words: List(String) = {}
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Box(T: type) {
+  held: T
+}
+
+type Handle {
+  id: Int = 0
+}
+
+type Shelf {
+  texts: Array(String, cap: 2) = Array(String, cap: 2)
+  notes: Array(Note, cap: 2) = Array(Note, cap: 2)
+  lists: Array(List(Int), cap: 2) = Array(List(Int), cap: 2)
+}
+
+func drop(this: mod Handle) {
+  if this.id > 0 {
+    log("drop {this.id}")
+  }
+}
+
+func copy(this: view Handle) ret Handle {
+  if this.id is 0 {
+    ret Handle {}
+  }
+  ret Handle { id: this.id + 100 }
+}
+
+func noteOf(number: copy Int) ret Note {
+  ret Note { text: "note {number}", words: { "word {number}" } }
+}
+
+func texts() ret Array(String, cap: 2) {
+  var row: Array(String, cap: 2) = Array(String, cap: 2)
+  row.set(index: 0, value: "text {0}")
+  row.set(index: 1, value: "text {1}")
+  ret row
+}
+
+func notes() ret Array(Note, cap: 2) {
+  var row: Array(Note, cap: 2) = Array(Note, cap: 2)
+  row.set(index: 1, value: noteOf(number: 1))
+  ret row
+}
+
+func lists() ret Array(List(Int), cap: 2) {
+  var row: Array(List(Int), cap: 2) = Array(List(Int), cap: 2)
+  row.set(index: 0, value: List(Int) { 1, 2 })
+  ret row
+}
+
+func maps() ret Array(StringMap(String), cap: 2) {
+  var row: Array(StringMap(String), cap: 2) = Array(StringMap(String), cap: 2)
+  var map: StringMap(String) = {}
+  map.set(k: "key {1}", value: "value {1}")
+  row.set(index: 1, value: own map)
+  ret row
+}
+
+func pairs() ret Array(Pair(List(String)), cap: 2) {
+  var row: Array(Pair(List(String)), cap: 2) = Array(Pair(List(String)), cap: 2)
+  row.set(index: 1, value: Pair(List(String)) { first: { "pair {1}" } })
+  ret row
+}
+
+func maybeTexts(there: view Bool) ret opt Array(String, cap: 2) {
+  if there {
+    ret texts()
+  }
+  ret none
+}
+
+func textAt(row: view Array(String, cap: 2), index: view Int) ret String {
+  if let text: view String = row.viewAt(index: index) {
+    ret "{text}"
+  }
+  ret "none"
+}
+
+func copied(row: copy Array(String, cap: 2)) ret Array(String, cap: 2) {
+  ret row
+}
+
+func owned(row: own Array(String, cap: 2)) ret Array(String, cap: 2) {
+  ret own row
+}
+
+func change(row: mod Array(String, cap: 2)) {
+  row.set(index: 0, value: "changed {0}")
+}
+
+func back(T: type, value: copy T) ret T {
+  ret value
+}
+
+func boxOf(T: type, value: copy T) ret Box(T) {
+  ret Box(T) { held: value }
+}
+
+# the places an Array can be in, for a whole Array type T
+func places(T: type, value: view T) ret Int {
+  let first: T = value
+  var second: T = first
+  second = value
+  let list: List(T) = { first, second, value }
+  var more: List(T) = list
+  more.add(value: first)
+  more.set(index: 0, value: value)
+  more.swapRemove(index: 1)
+  var map: StringMap(T) = {}
+  map.set(k: "a", value: value)
+  map.set(k: "a", value: value)
+  map.set(k: "b", value: value)
+  let mapCopy: StringMap(T) = map
+  map.remove(k: "b")
+  let values: List(T) = mapCopy.values()
+  let maybe: opt T = value
+  var other: opt T = maybe
+  other = none
+  other = maybe
+  let box: Box(T) = boxOf(value: value)
+  let boxCopy: Box(T) = box
+  let again: T = back(value: boxCopy.held)
+  var count: Int = list.length + more.length + values.length
+  if let copyOfOne: T = list.copyAt(index: 2) {
+    count = count + 1
+  }
+  if let copyOfOne: T = map.get(k: "a") {
+    count = count + 1
+  }
+  loop let each: T in list {
+    count = count + 1
+  }
+  ret count
+}
+
+func strings() {
+  let row: Array(String, cap: 2) = texts()
+  let other: Array(String, cap: 2) = row
+  var third: Array(String, cap: 2) = row
+  change(row: third)
+  let fourth: Array(String, cap: 2) = copied(row: third)
+  let fifth: Array(String, cap: 2) = owned(row: copied(row: row))
+  log("{textAt(row: row, index: 0)} {textAt(row: other, index: 1)} {textAt(row: third, index: 0)}")
+  log("{textAt(row: fourth, index: 0)} {textAt(row: fifth, index: 1)}")
+  if let there: Array(String, cap: 2) = maybeTexts(there: true) {
+    log(textAt(row: there, index: 1))
+  }
+  if let there: Array(String, cap: 2) = maybeTexts(there: false) {
+    log("wrong")
+  }
+  let task: Task(Array(String, cap: 2)) = spawn texts()
+  loop not task.isDone() {
+    sleep(ms: 1)
+  }
+  if let there: Array(String, cap: 2) = task.tryGet() {
+    log("task {textAt(row: there, index: 0)}")
+  }
+  let untaken: Task(Array(String, cap: 2)) = spawn copied(row: row)
+  var rows: Array(Array(String, cap: 2), cap: 2) = Array(Array(String, cap: 2), cap: 2)
+  rows.set(index: 1, value: row)
+  let rowsCopy: Array(Array(String, cap: 2), cap: 2) = rows
+  if let inner: view Array(String, cap: 2) = rowsCopy.viewAt(index: 1) {
+    log("inner {textAt(row: inner, index: 1)}")
+  }
+}
+
+func fields() {
+  let shelf: Shelf = { texts: texts(), notes: notes(), lists: lists() }
+  var other: Shelf = shelf
+  change(row: other.texts)
+  if let note: mod Note = other.notes.modAt(index: 1) {
+    note.words.add(value: "more {2}")
+  }
+  if let list: mod List(Int) = other.lists.modAt(index: 0) {
+    list.add(value: 3)
+  }
+  loop let note: view Note in shelf.notes {
+    log("{note}")
+  }
+  loop let note: Note in other.notes {
+    log("{note}")
+  }
+  loop let list: view List(Int) in other.lists {
+    log("{list}")
+  }
+  log("{textAt(row: shelf.texts, index: 0)} {textAt(row: other.texts, index: 0)}")
+  let shelves: List(Shelf) = { shelf, other }
+  log(shelves.length)
+}
+
+func handles() {
+  var row: Array(Handle, cap: 2) = Array(Handle, cap: 2)
+  row.set(index: 0, value: Handle { id: 5 })
+  let other: Array(Handle, cap: 2) = row
+  row.set(index: 0, value: Handle { id: 6 })
+  log("set")
+}
+
+# a generic struct that owns memory is copied too
+func pairText(pair: copy Pair(List(String))) ret String {
+  ret "{pair.first}"
+}
+
+func structs() {
+  let pair: Pair(List(String)) = { first: { "a {1}" } }
+  let box: Box(Pair(List(String))) = boxOf(value: pair)
+  let list: List(Pair(List(String))) = { pair, box.held }
+  let task: Task(String) = spawn thread pairText(pair: pair)
+  log("{pairText(pair: pair)} {box} {list.length} {task.get()}")
+}
+
+func main() {
+  strings()
+  fields()
+  handles()
+  structs()
+  log(places(value: texts()))
+  log(places(value: notes()))
+  log(places(value: lists()))
+  log(places(value: maps()))
+  log(places(value: pairs()))
+}

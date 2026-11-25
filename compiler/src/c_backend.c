@@ -811,19 +811,7 @@ bool emit_string_literal(FILE* out, Str literal) {
 // non-generic, non-c_struct user structs that need cascade-drop (collected
 // into copy_entries). Generic-instance structs and c_structs have no helper.
 bool c_spawn_arg_deepcopy_aggregate(CFuncContext* ctx, const AstTypeRef* type) {
-  if (!type || type->is_view || type->is_mod) return false;
-  Str base = get_base_type_name(type);
-  if ((str_eq_cstr(base, "List") || str_eq_cstr(base, "StringMap")
-       || str_eq_cstr(base, "IntMap")) && type->generic_args) {
-    return true;
-  }
-  const AstDecl* td = ctx ? find_type_decl(ctx, ctx->module, base) : NULL;
-  if (td && td->kind == AST_DECL_TYPE && !td->as.type_decl.generic_params
-      && !has_property(td->as.type_decl.properties, "c_struct")) {
-    return type_needs_cascade_drop(ctx->compiler_ctx, ctx->module,
-                                   (AstTypeRef*)type, 0);
-  }
-  return false;
+  return ctx && c_has_deep_copy_helper(ctx, type) && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, (AstTypeRef*)type, 0);
 }
 
 // Path-1/2 thread eligibility — see header. Every param must be capturable
@@ -4109,57 +4097,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       .decl = tdecl, .type_ref = gt, .mangled = mangled,
     };
   }
-  // Array(T, cap: N) drop helpers.
-  //
-  // Emitted by their own pass rather than through StructDropEntry: an Array
-  // has no AstDecl and no fields, just N identical elements, so the body is a
-  // loop where the struct path is a field walk. Only arrays whose ELEMENT
-  // cascades appear here — Array(Float, cap: 16) gets no helper at all, which
-  // is the renderer case and must stay exactly free.
-  size_t array_drop_cap = 128;
-  const TypeInfo** array_drops = malloc(sizeof(const TypeInfo*) * array_drop_cap);
-  size_t array_drop_count = 0;
-  for (size_t gi = 0; gi < ctx->generic_type_count; gi++) {
-    const AstTypeRef* gt = ctx->generic_types[gi];
-    if (!gt || gt->is_view || gt->is_mod || !gt->resolved_type) continue;
-    const TypeInfo* at = gt->resolved_type;
-    if (at->kind == TYPE_REF) at = at->as.ref.base;
-    if (!at || at->kind != TYPE_ARRAY) continue;
-    if (!type_needs_cascade_drop(ctx, module, (AstTypeRef*)gt, 0)) continue;
-    bool seen = false;
-    for (size_t k = 0; k < array_drop_count; k++) if (array_drops[k] == at) { seen = true; break; }
-    if (!seen) { RAE_GROW1(array_drops, array_drop_count, array_drop_cap); array_drops[array_drop_count++] = at; }
-  }
-  for (size_t i = 0; i < array_drop_count; i++) {
-    const TypeInfo* at = array_drops[i];
-    const char* am = type_mangle_name(ctx->ast_arena, (TypeInfo*)at).data;
-    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s(%s* this);\n", am, am);
-    fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s_alias(%s* this);\n", am, am);
-  }
-  for (size_t i = 0; i < array_drop_count; i++) {
-    const TypeInfo* at = array_drops[i];
-    const char* am = type_mangle_name(ctx->ast_arena, (TypeInfo*)at).data;
-    AstTypeRef elem = {0}; elem.resolved_type = (TypeInfo*)at->as.array.base;
-    const char* em = type_mangle_name(ctx->ast_arena, (TypeInfo*)at->as.array.base).data;
-    bool elem_is_string = at->as.array.base->kind == TYPE_STRING;
-    for (int is_alias = 0; is_alias < 2; is_alias++) {
-      fprintf(out, "RAE_UNUSED static void rae_drop_struct_%s%s(%s* this) {\n",
-              am, is_alias ? "_alias" : "", am);
-      /* The _alias variant skips String elements for the same reason the
-       * struct path does: a call-result local's Strings may alias the
-       * callee's storage, and freeing them would double-free. */
-      if (!(is_alias && elem_is_string)) {
-        fprintf(out, "  for (int64_t __i = 0; __i < %lld; __i++) {\n",
-                (long long)at->as.array.count);
-        if (elem_is_string) fprintf(out, "    rae_string_drop(&this->v[__i]);\n");
-        else fprintf(out, "    rae_drop_struct_%s%s(&this->v[__i]);\n", em, is_alias ? "_alias" : "");
-        fprintf(out, "  }\n");
-      } else {
-        fprintf(out, "  (void)this;\n");
-      }
-      fprintf(out, "}\n");
-    }
-  }
+  CArrayHelpers arrays = {0};
+  c_collect_array_helpers(ctx, module, &arrays);
+  c_emit_array_drop_declarations(ctx, &arrays, out);
   // Forward declarations — each struct drop AND each container-drop
   // we plan to call from the bodies. The container-drop forward
   // decls also register the specializations so the iterative spec-
@@ -4230,6 +4170,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static void %s(%s* this);\n", fn, container_mangled);
     }
   }
+  c_emit_array_drops(ctx, module, &arrays, out);
   if (drop_entry_count > 0) fprintf(out, "\n");
   // Re-run discovery so the drop specializations we just registered
   // (e.g. `drop(T)(this: mod ComponentTable(T))` for each T) get
@@ -4518,6 +4459,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src);\n",
             container_entries[i].mangled, container_entries[i].mangled, container_entries[i].mangled);
   }
+  c_emit_array_copy_declarations(ctx, &arrays, out);
   // Legacy compat alias — older codegen paths and tests may still refer
   // to `rae_deep_copy_struct_<T>`. Keep the alias so we don't break them
   // while migrating callers to the unified name. (Marked RAE_UNUSED.)
@@ -4563,6 +4505,11 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       } \
       if ((ft) && !(ft)->is_view && !(ft)->is_mod && !(ft)->is_opt \
           && type_needs_deep_copy(ctx, module, (AstTypeRef*)(ft), 0)) { \
+        if (str_eq_cstr((fbase), "Array")) { \
+          fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)(ft)), \
+                  (dst_expr), (src_expr)); \
+          break; \
+        } \
         const AstDecl* _fd = find_type_decl(NULL, module, (fbase)); \
         bool _is_user_struct = _fd && _fd->kind == AST_DECL_TYPE \
             && !has_property(_fd->as.type_decl.properties, "c_struct") \
@@ -4758,6 +4705,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     fprintf(out, "}\n\n");
   }
   #undef EMIT_FIELD_COPY
+  c_emit_array_copies(ctx, module, &arrays, out);
 
   progress_work(EMIT_STAGE_REDISCOVER_HI, EMIT_STAGE_PLAIN_BODIES_LO, 2, 4);
   // Value-optional helper BODIES. Payload drop/copy helpers are all declared

@@ -2436,25 +2436,8 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 && type_needs_deep_copy(ctx->compiler_ctx, ctx->module,
                                         (AstTypeRef*)eff_field_tr, 0)) {
                 Str fbase = get_base_type_name(eff_field_tr);
-                // Only emit deep-copy when a synthesised helper exists
-                // for the field's type. The helpers cover:
-                //   - non-generic user structs (rae_deep_copy_<T>)
-                //   - List(E) / StringMap(V) / IntMap(V)
-                // If the type doesn't match those shapes we fall
-                // through to the legacy pass-through (today no other
-                // owning type can pass type_needs_deep_copy anyway —
-                // see classifier in c_stmt.c).
-                bool is_container = str_eq_cstr(fbase, "List") ||
-                                    str_eq_cstr(fbase, "StringMap") ||
-                                    str_eq_cstr(fbase, "IntMap");
-                bool is_user_struct = false;
-                if (!is_container) {
-                    const AstDecl* fd = find_type_decl(ctx, ctx->module, fbase);
-                    is_user_struct = fd && fd->kind == AST_DECL_TYPE
-                        && !has_property(fd->as.type_decl.properties, "c_struct")
-                        && !fd->as.type_decl.generic_params;
-                }
-                if (is_container || is_user_struct) {
+                // Only where a synthesised helper exists for the field's type
+                if (c_has_deep_copy_helper(ctx, eff_field_tr)) {
                     field_needs_deep_copy_nonstring = true;
                 } else {
                     // Stage 2 hard error: an owning field type we can't

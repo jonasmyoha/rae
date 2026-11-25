@@ -24,11 +24,20 @@
  * type does. Written once here so the four answers cannot drift apart.
  *
  * Returns false when `type` is not an Array. */
-static bool array_element_ref(const AstTypeRef* type, AstTypeRef* out) {
+static bool array_element_ref(CompilerContext* cctx, const AstTypeRef* type, AstTypeRef* out) {
   if (!type) return false;
   const TypeInfo* t = type->resolved_type;
   if (t && t->kind == TYPE_REF) t = t->as.ref.base;
+  if (t && t->kind == TYPE_OPT) t = t->as.opt.base;
   if (t && t->kind == TYPE_ARRAY) {
+    const TypeInfo* base = t->as.array.base;
+    /* (a List(Int) is told by its template's name and its arguments, which its
+     * resolved type alone does not spell) */
+    if (cctx && base && ((base->kind == TYPE_STRUCT && base->as.structure.generic_count > 0)
+                         || base->kind == TYPE_OPT || base->kind == TYPE_TASK || base->kind == TYPE_ARRAY)) {
+      *out = *sema_type_ref_of(cctx, (TypeInfo*)base);
+      return true;
+    }
     memset(out, 0, sizeof(*out));
     out->resolved_type = (TypeInfo*)t->as.array.base;
     return true;
@@ -74,7 +83,7 @@ bool is_drop_target_type(const AstTypeRef* type) {
   if (type->is_opt) return false;
   /* Borrows don't own — they're someone else's value. */
   if (type->is_view || type->is_mod) return false;
-  { AstTypeRef elem; if (array_element_ref(type, &elem)) return is_drop_target_type(&elem); }
+  /* (an Array of Lists is none: its own helper drops its elements, c_array_helpers.c) */
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "List")) return true;
   if (str_eq_cstr(base, "StringMap")) return true;
@@ -92,7 +101,7 @@ bool type_owns_heap_storage(CompilerContext* cctx, const AstModule* module,
     return type_owns_heap_storage(cctx, module, &inner, depth + 1);
   }
   if (is_drop_target_type(type)) return true;
-  { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_owns_heap_storage(cctx, module, &elem, depth + 1); }
+  { AstTypeRef elem; if (array_element_ref(cctx, type, &elem)) return type_owns_heap_storage(cctx, module, &elem, depth + 1); }
   if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   /* c_struct (raylib Color / Vector2 / etc.) and primitives never
@@ -116,7 +125,7 @@ bool type_needs_cascade_drop(CompilerContext* cctx, const AstModule* module,
     return type_needs_cascade_drop(cctx, module, &inner, depth + 1);
   }
   if (is_drop_target_type(type)) return true;
-  { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_needs_cascade_drop(cctx, module, &elem, depth + 1); }
+  { AstTypeRef elem; if (array_element_ref(cctx, type, &elem)) return type_needs_cascade_drop(cctx, module, &elem, depth + 1); }
   if (type_has_user_drop(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;
@@ -151,7 +160,7 @@ bool type_needs_deep_copy(CompilerContext* cctx, const AstModule* module,
     return type_needs_deep_copy(cctx, module, &inner, depth + 1);
   }
   if (is_drop_target_type(type)) return true;
-  { AstTypeRef elem; if (array_element_ref(type, &elem)) return type_needs_deep_copy(cctx, module, &elem, depth + 1); }
+  { AstTypeRef elem; if (array_element_ref(cctx, type, &elem)) return type_needs_deep_copy(cctx, module, &elem, depth + 1); }
   if (type_has_user_drop(cctx, type) || type_has_user_copy(cctx, type)) return true;
   Str base = get_base_type_name(type);
   if (str_eq_cstr(base, "String")) return true;

@@ -10656,6 +10656,25 @@ static TypeInfo* sema_resolve_array_type(CompilerContext* ctx, AstModule* module
  * constructor and the type annotation can never disagree.
  *
  * Returns NULL (with a diagnostic) if the call is not a well-formed Array. */
+/* The type a type argument's expression names: `Int`, `List(Int)`, `Pair(List(Int))` */
+static AstTypeRef* sema_type_ref_of_expr(CompilerContext* ctx, const AstExpr* expr) {
+    const AstExpr* named = expr->kind == AST_EXPR_CALL ? expr->as.call.callee : expr;
+    AstTypeRef* type = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+    memset(type, 0, sizeof(*type));
+    type->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(type->parts, 0, sizeof(*type->parts));
+    if (named && named->kind == AST_EXPR_IDENT) type->parts->text = named->as.ident;
+    type->line = expr->line;
+    type->column = expr->column;
+    AstTypeRef* last = NULL;
+    for (const AstCallArg* a = expr->kind == AST_EXPR_CALL ? expr->as.call.args : NULL; a; a = a->next) {
+        AstTypeRef* argument = sema_type_ref_of_expr(ctx, a->value);
+        if (!last) type->generic_args = argument; else last->next = argument;
+        last = argument;
+    }
+    return type;
+}
+
 static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* module,
                                            SymbolTable* symbols, AstExpr* expr) {
     const char* file = sema_diag_file(module);
@@ -10701,6 +10720,8 @@ static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* modu
                elem_arg->value->as.call.callee->kind == AST_EXPR_IDENT &&
                str_eq_cstr(elem_arg->value->as.call.callee->as.ident, "Array")) {
         elem = sema_array_type_from_call(ctx, module, symbols, elem_arg->value);
+    } else if (sema_arg_is_type_name(symbols, elem_arg->value)) {
+        elem = sema_resolve_type_internal(ctx, module, symbols, sema_type_ref_of_expr(ctx, elem_arg->value));
     }
     if (!elem || elem->kind == TYPE_VOID) {
         diag_error(file, (int)expr->line, (int)expr->column,
