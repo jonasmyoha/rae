@@ -1774,6 +1774,29 @@ bool emit_implicit_drops_for_body(CFuncContext* ctx, FILE* out,
   return true;
 }
 
+/* In the branch of `if let x: view T = ...` the binding is no optional: what it
+ * was declared as is what a generic function binds its T to, what its text is
+ * and what it is compared as. (Its C type is the same.) */
+void c_narrow_binding(CFuncContext* ctx, const AstStmt* binding) {
+    if (!binding || binding->kind != AST_STMT_LET) return;
+    for (size_t i = ctx->local_count; i > 0; i--) {
+        const AstTypeRef* type = ctx->local_type_refs[i - 1];
+        if (!str_eq(ctx->locals[i - 1], binding->as.let_stmt.name)) continue;
+        if (!type || !type->is_opt || !(type->is_view || type->is_mod)) return;
+        AstTypeRef* narrowed = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+        *narrowed = *type;
+        narrowed->is_opt = false;
+        if (narrowed->resolved_type) {
+            TypeInfo* resolved = narrowed->resolved_type;
+            while (resolved && (resolved->kind == TYPE_OPT || resolved->kind == TYPE_REF))
+                resolved = resolved->kind == TYPE_OPT ? resolved->as.opt.base : resolved->as.ref.base;
+            narrowed->resolved_type = resolved;
+        }
+        ctx->local_type_refs[i - 1] = narrowed;
+        return;
+    }
+}
+
 static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (emit_list_if_let(ctx, stmt, out)) return true;
     // `if let` (spec 4.2): the binding is emitted before the condition, inside
@@ -1892,6 +1915,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(out, "  if (");
         emit_expr(ctx, stmt->as.if_stmt.condition, out, PREC_LOWEST, false, false);
         fprintf(out, ") {\n");
+        if (has_binding) c_narrow_binding(ctx, stmt->as.if_stmt.binding);
     }
     // Stage 2 scope tracking: save/restore local_count around each
     // branch so lets declared inside the block don't pollute the

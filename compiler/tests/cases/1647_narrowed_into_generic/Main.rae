@@ -1,0 +1,79 @@
+# A binding that `if let` narrowed is given to a generic function as what it was narrowed to: T is
+# the
+# payload, not the optional it came from. A `mod` one is stored through. Nothing leaks.
+func work(number: copy Int) ret Int {
+  ret number
+}
+
+func taken(T: type, value: view T) ret Bool {
+  ret true
+}
+
+func show(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func held(T: type, value: view T) ret T {
+  ret value
+}
+
+func swapIn(T: type, place: mod T, value: own T) {
+  place = own value
+}
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+func main() {
+  var number: opt Int = 3
+  if let there: view Int = number {
+    let copied: Int = held(value: there)
+    log("{show(value: there)} {copied}")
+  }
+  if let there: mod Int = number {
+    swapIn(place: there, value: 5)
+  }
+  var text: opt String = "s {1}"
+  if let there: view String = text {
+    let copied: String = held(value: there)
+    log("{show(value: there)} {copied}")
+  }
+  if let there: mod String = text {
+    swapIn(place: there, value: "t {1}")
+  }
+  var note: opt Note = { text: "n {1}" }
+  if let there: view Note = note {
+    let copied: Note = held(value: there)
+    log("{show(value: there)} {copied.text}")
+  }
+  if let there: mod Note = note {
+    swapIn(place: there, value: Note { text: "m {1}" })
+  }
+  var list: opt List(Int) = List(Int) { 1 }
+  if let there: view List(Int) = list {
+    let copied: List(Int) = held(value: there)
+    log("{show(value: there)} {copied.length}")
+  }
+  if let there: mod List(Int) = list {
+    swapIn(place: there, value: List(Int) { 1, 2 })
+    there.add(value: 3)
+  }
+  let kinds: List(Kind) = { Kind.large }
+  if let kind: view Kind = kinds.viewAt(index: 0) {
+    let copied: Kind = held(value: kind)
+    log("{show(value: kind)} {copied}")
+  }
+  var wide: opt UInt64 = 7
+  if let there: mod UInt64 = wide {
+    swapIn(place: there, value: held(value: there))
+    log("{show(value: there)} {there is 7}")
+  }
+  let task: opt Task(Int) = spawn work(number: 4)
+  if let there: view Task(Int) = task {
+    log("{there.get()} {taken(value: there)}")
+  }
+  log("{number} {text} {note} {list}")
+}

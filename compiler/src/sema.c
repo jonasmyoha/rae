@@ -7023,6 +7023,19 @@ AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     tr->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
     memset(tr->parts, 0, sizeof(*tr->parts));
     tr->parts->text = t->name;
+    /* A fixed-width integer's TypeInfo is named as in C (`uint8_t`), which is no
+     * Rae type: a List(UInt8) given to a `view T` became a List of nothing */
+    if (t->kind == TYPE_INT && (t->as.integer.bits != 64 || t->as.integer.is_unsigned)) {
+        const char* rae_name = NULL;
+        switch (t->as.integer.bits) {
+            case 8: rae_name = t->as.integer.is_unsigned ? "UInt8" : "Int8"; break;
+            case 16: rae_name = t->as.integer.is_unsigned ? "UInt16" : "Int16"; break;
+            case 32: rae_name = t->as.integer.is_unsigned ? "UInt32" : "Int32"; break;
+            case 64: rae_name = "UInt64"; break;
+            default: break;
+        }
+        if (rae_name) tr->parts->text = str_from_cstr(rae_name);
+    }
     tr->resolved_type = t;
     /* A Task(T) TypeInfo has no name: spell it `Task` with its T, or a
      * `List(Task(Int))` came out as an unnamed element (`rae_List_rae_`) */

@@ -402,7 +402,7 @@ static void type_mangle_recursive(Arena* arena, TypeInfo* t, char* buf, size_t* 
         case TYPE_FLOAT: *pos += snprintf(buf + *pos, cap - *pos, "float"); break;
         case TYPE_FLOAT64: *pos += snprintf(buf + *pos, cap - *pos, "double"); break;
         case TYPE_BOOL: *pos += snprintf(buf + *pos, cap - *pos, "rae_Bool"); break;
-        case TYPE_CHAR: *pos += snprintf(buf + *pos, cap - *pos, "uint32_t"); break;
+        case TYPE_CHAR: *pos += snprintf(buf + *pos, cap - *pos, "rae_Char"); break;
         case TYPE_STRING: *pos += snprintf(buf + *pos, cap - *pos, "rae_String"); break;
         case TYPE_ANY: *pos += snprintf(buf + *pos, cap - *pos, "RaeAny"); break;
         case TYPE_OPT: {

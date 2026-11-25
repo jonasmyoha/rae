@@ -917,7 +917,12 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
           const char* inm = rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned);
           bool is_canonical_int = (t->as.integer.bits == 64 && !t->as.integer.is_unsigned);
           if (is_ptr && is_canonical_int) { fprintf(out, "rae_%s_Int64", type->is_mod ? "Mod" : "View"); }
-          else if (is_ptr) { if (type->is_view) fprintf(out, "const "); fprintf(out, "%s", inm); /* '*' added by caller */ }
+          else if (is_ptr) {
+              // a fixed-width integer has no wrapper: a plain pointer. The caller of a
+              // `view` adds its own, or passes the number by value
+              if (type->is_view && !type->is_mod) fprintf(out, "const ");
+              fprintf(out, type->is_mod ? "%s*" : "%s", inm);
+          }
           else fprintf(out, "%s", inm);
           return true;
       }
@@ -1029,9 +1034,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
               // Stage 6: `view`(not `mod`) on a NUMERIC primitive still passes by
               // value — don't re-introduce the ref wrapper when T resolves to one.
               Str cb = get_base_type_name(arg);
-              bool num = str_eq_cstr(cb, "Int") || str_eq_cstr(cb, "Int64") ||
-                  str_eq_cstr(cb, "Float") || str_eq_cstr(cb, "Float32") || str_eq_cstr(cb, "Float64") ||
-                  str_eq_cstr(cb, "Bool") || str_eq_cstr(cb, "Char") || str_eq_cstr(cb, "Char32");
+              bool num = is_scalar_primitive_type(cb);
               // A T that is itself an optional is passed by its address, whatever it
               // holds: `view T` of one is a `const rae_opt_X*`, `mod T` a `rae_opt_X*`
               // (c_type_parameter_is_optional).
@@ -1174,6 +1177,8 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
           else if (str_eq_cstr(base, "Bool")) primitive = "rae_Bool";
           else if (str_eq_cstr(base, "Char") || str_eq_cstr(base, "Char32")) primitive = "uint32_t";
           else if (str_eq_cstr(base, "String")) primitive = "rae_String";
+          else if (!str_eq_cstr(base, "Int") && !str_eq_cstr(base, "Int64") && is_scalar_primitive_type(base))
+            primitive = map_rae_type_to_c(base);  /* a fixed-width integer */
           char* pointer_type = malloc(strlen(const_prefix) + strlen(primitive) + 2);
           sprintf(pointer_type, "%s%s*", const_prefix, primitive);
           return pointer_type;

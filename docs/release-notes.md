@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.79, 2026-11-25: generic functions and fixed-width integers
+
+- `mod T` of a generic function works when T is a fixed-width integer (`UInt8`, `Int32`, `UInt64` ...), and so does
+  a `view T` given a `view`; they were errors of the C compiler.
+- A binding that `if let x: view T` narrowed is given to a generic function as that T, not as the optional it came from.
+- A `List(UInt8)` (or of another fixed-width integer) can be given to a `view T`; it was an error about a `List_void`.
+- `Char` and `UInt32` in one program are two types to a generic function and a List: a Char was printed as its number,
+  or the program did not compile.
+- Cases 1646 and 1647.
+
 ## 0.4.78, 2026-11-25: `is` between optionals
 
 - `a is b` and `a is not b` compare optionals: equal when both are `none`, or both are there and equal as

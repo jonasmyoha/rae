@@ -227,6 +227,7 @@ void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExp
 static inline const AstExpr* c_without_own(const AstExpr* expr) {
   return expr && expr->kind == AST_EXPR_OWN ? expr->as.unary.operand : expr;
 }
+void c_narrow_binding(CFuncContext* ctx, const AstStmt* binding);
 bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type);
 /* Does `plain` (an argument or element without its `own`) have to be wrapped to be a value of
  * `opt_type`? Not `none`, and not what already is an optional. */

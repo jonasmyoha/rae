@@ -693,6 +693,7 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 size_t scope = ctx->local_count;
                 if (s->as.if_stmt.binding) discover_specializations_stmt_impl(ctx, s->as.if_stmt.binding);
                 discover_specializations_expr_impl(ctx, s->as.if_stmt.condition);
+                if (s->as.if_stmt.binding) c_narrow_binding(ctx, s->as.if_stmt.binding);
                 size_t then_scope = ctx->local_count;
                 if (s->as.if_stmt.then_block) discover_specializations_stmt_impl(ctx, s->as.if_stmt.then_block->first);
                 ctx->local_count = then_scope;

@@ -1,0 +1,691 @@
+# `mod T` and `view T` of a generic function for every number type (and Bool, Char, an enum): a
+# store
+# through `mod T` reaches the place, also passed on, into a field, a list row, through a `mod`
+# local and
+# from a declared `mod`. A fixed-width integer was passed by value, which the C compiler refused; a
+# `view T` of one, given a `view`, was refused too. A Char and a UInt32 in one program are two
+# types.
+enum Kind { small, large }
+
+type Box(T: type) {
+  inside: T
+}
+
+func swapIn(T: type, place: mod T, value: own T) {
+  place = own value
+}
+
+func copyIn(T: type, place: mod T, value: view T) {
+  place = value
+}
+
+func passOn(T: type, place: mod T, value: view T) {
+  copyIn(place: place, value: value)
+}
+
+func swapPlaces(T: type, a: mod T, b: mod T) {
+  let held: T = a
+  a = b
+  b = held
+}
+
+func boxIn(T: type, box: mod Box(T), value: view T) {
+  copyIn(place: box.inside, value: value)
+}
+
+func rowIn(T: type, list: mod List(T), value: view T) {
+  if let there: mod T = list.modAt(index: 0) {
+    there = value
+  }
+}
+
+func show(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func showOn(T: type, value: view T) ret String {
+  ret show(value: value)
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b
+}
+
+func intFirst() ret Int {
+  ret 3
+}
+
+func intSecond() ret Int {
+  ret 4
+}
+
+func intDeclared(place: mod Int, value: view Int) ret String {
+  swapIn(place: place, value: intSecond())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func intRound() {
+  var place: Int = 3
+  let other: Int = 4
+  swapIn(place: place, value: intSecond())
+  let swapped: Int = place
+  copyIn(place: place, value: intFirst())
+  let copied: Int = place
+  passOn(place: place, value: other)
+  var twin: Int = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(Int) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = intDeclared(place: place, value: other)
+  log("Int {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Int = place
+  swapIn(place: through, value: intFirst())
+  let window: view Int = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Int) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod Int = list.modAt(index: 1) {
+    swapIn(place: row, value: intSecond())
+  }
+  loop let row: mod Int in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: intSecond())
+    }
+  }
+  log("  rows {list.contains(value: intFirst())} {list.indexOf(value: other)} {list.length}")
+}
+
+func int8First() ret Int8 {
+  ret 3
+}
+
+func int8Second() ret Int8 {
+  ret 4
+}
+
+func int8Declared(place: mod Int8, value: view Int8) ret String {
+  swapIn(place: place, value: int8Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func int8Round() {
+  var place: Int8 = 3
+  let other: Int8 = 4
+  swapIn(place: place, value: int8Second())
+  let swapped: Int8 = place
+  copyIn(place: place, value: int8First())
+  let copied: Int8 = place
+  passOn(place: place, value: other)
+  var twin: Int8 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(Int8) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = int8Declared(place: place, value: other)
+  log("Int8 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Int8 = place
+  swapIn(place: through, value: int8First())
+  let window: view Int8 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Int8) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod Int8 = list.modAt(index: 1) {
+    swapIn(place: row, value: int8Second())
+  }
+  loop let row: mod Int8 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: int8Second())
+    }
+  }
+  log("  rows {list.contains(value: int8First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func int16First() ret Int16 {
+  ret 3
+}
+
+func int16Second() ret Int16 {
+  ret 4
+}
+
+func int16Declared(place: mod Int16, value: view Int16) ret String {
+  swapIn(place: place, value: int16Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func int16Round() {
+  var place: Int16 = 3
+  let other: Int16 = 4
+  swapIn(place: place, value: int16Second())
+  let swapped: Int16 = place
+  copyIn(place: place, value: int16First())
+  let copied: Int16 = place
+  passOn(place: place, value: other)
+  var twin: Int16 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(Int16) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = int16Declared(place: place, value: other)
+  log("Int16 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Int16 = place
+  swapIn(place: through, value: int16First())
+  let window: view Int16 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Int16) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod Int16 = list.modAt(index: 1) {
+    swapIn(place: row, value: int16Second())
+  }
+  loop let row: mod Int16 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: int16Second())
+    }
+  }
+  log("  rows {list.contains(value: int16First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func int32First() ret Int32 {
+  ret 3
+}
+
+func int32Second() ret Int32 {
+  ret 4
+}
+
+func int32Declared(place: mod Int32, value: view Int32) ret String {
+  swapIn(place: place, value: int32Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func int32Round() {
+  var place: Int32 = 3
+  let other: Int32 = 4
+  swapIn(place: place, value: int32Second())
+  let swapped: Int32 = place
+  copyIn(place: place, value: int32First())
+  let copied: Int32 = place
+  passOn(place: place, value: other)
+  var twin: Int32 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(Int32) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = int32Declared(place: place, value: other)
+  log("Int32 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Int32 = place
+  swapIn(place: through, value: int32First())
+  let window: view Int32 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Int32) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod Int32 = list.modAt(index: 1) {
+    swapIn(place: row, value: int32Second())
+  }
+  loop let row: mod Int32 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: int32Second())
+    }
+  }
+  log("  rows {list.contains(value: int32First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func uint8First() ret UInt8 {
+  ret 3
+}
+
+func uint8Second() ret UInt8 {
+  ret 4
+}
+
+func uint8Declared(place: mod UInt8, value: view UInt8) ret String {
+  swapIn(place: place, value: uint8Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func uint8Round() {
+  var place: UInt8 = 3
+  let other: UInt8 = 4
+  swapIn(place: place, value: uint8Second())
+  let swapped: UInt8 = place
+  copyIn(place: place, value: uint8First())
+  let copied: UInt8 = place
+  passOn(place: place, value: other)
+  var twin: UInt8 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(UInt8) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = uint8Declared(place: place, value: other)
+  log("UInt8 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod UInt8 = place
+  swapIn(place: through, value: uint8First())
+  let window: view UInt8 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(UInt8) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod UInt8 = list.modAt(index: 1) {
+    swapIn(place: row, value: uint8Second())
+  }
+  loop let row: mod UInt8 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: uint8Second())
+    }
+  }
+  log("  rows {list.contains(value: uint8First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func uint16First() ret UInt16 {
+  ret 3
+}
+
+func uint16Second() ret UInt16 {
+  ret 4
+}
+
+func uint16Declared(place: mod UInt16, value: view UInt16) ret String {
+  swapIn(place: place, value: uint16Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func uint16Round() {
+  var place: UInt16 = 3
+  let other: UInt16 = 4
+  swapIn(place: place, value: uint16Second())
+  let swapped: UInt16 = place
+  copyIn(place: place, value: uint16First())
+  let copied: UInt16 = place
+  passOn(place: place, value: other)
+  var twin: UInt16 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(UInt16) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = uint16Declared(place: place, value: other)
+  log("UInt16 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod UInt16 = place
+  swapIn(place: through, value: uint16First())
+  let window: view UInt16 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(UInt16) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod UInt16 = list.modAt(index: 1) {
+    swapIn(place: row, value: uint16Second())
+  }
+  loop let row: mod UInt16 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: uint16Second())
+    }
+  }
+  log("  rows {list.contains(value: uint16First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func uint32First() ret UInt32 {
+  ret 3
+}
+
+func uint32Second() ret UInt32 {
+  ret 4
+}
+
+func uint32Declared(place: mod UInt32, value: view UInt32) ret String {
+  swapIn(place: place, value: uint32Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func uint32Round() {
+  var place: UInt32 = 3
+  let other: UInt32 = 4
+  swapIn(place: place, value: uint32Second())
+  let swapped: UInt32 = place
+  copyIn(place: place, value: uint32First())
+  let copied: UInt32 = place
+  passOn(place: place, value: other)
+  var twin: UInt32 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(UInt32) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = uint32Declared(place: place, value: other)
+  log("UInt32 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod UInt32 = place
+  swapIn(place: through, value: uint32First())
+  let window: view UInt32 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(UInt32) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod UInt32 = list.modAt(index: 1) {
+    swapIn(place: row, value: uint32Second())
+  }
+  loop let row: mod UInt32 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: uint32Second())
+    }
+  }
+  log("  rows {list.contains(value: uint32First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func uint64First() ret UInt64 {
+  ret 3
+}
+
+func uint64Second() ret UInt64 {
+  ret 4
+}
+
+func uint64Declared(place: mod UInt64, value: view UInt64) ret String {
+  swapIn(place: place, value: uint64Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func uint64Round() {
+  var place: UInt64 = 3
+  let other: UInt64 = 4
+  swapIn(place: place, value: uint64Second())
+  let swapped: UInt64 = place
+  copyIn(place: place, value: uint64First())
+  let copied: UInt64 = place
+  passOn(place: place, value: other)
+  var twin: UInt64 = 3
+  swapPlaces(a: place, b: twin)
+  var box: Box(UInt64) = { inside: 3 }
+  boxIn(box: box, value: other)
+  let shown: String = uint64Declared(place: place, value: other)
+  log("UInt64 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod UInt64 = place
+  swapIn(place: through, value: uint64First())
+  let window: view UInt64 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(UInt64) = { 3, 3 }
+  rowIn(list: list, value: other)
+  if let row: mod UInt64 = list.modAt(index: 1) {
+    swapIn(place: row, value: uint64Second())
+  }
+  loop let row: mod UInt64 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: uint64Second())
+    }
+  }
+  log("  rows {list.contains(value: uint64First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func floatFirst() ret Float {
+  ret 1.5
+}
+
+func floatSecond() ret Float {
+  ret 2.5
+}
+
+func floatDeclared(place: mod Float, value: view Float) ret String {
+  swapIn(place: place, value: floatSecond())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func floatRound() {
+  var place: Float = 1.5
+  let other: Float = 2.5
+  swapIn(place: place, value: floatSecond())
+  let swapped: Float = place
+  copyIn(place: place, value: floatFirst())
+  let copied: Float = place
+  passOn(place: place, value: other)
+  var twin: Float = 1.5
+  swapPlaces(a: place, b: twin)
+  var box: Box(Float) = { inside: 1.5 }
+  boxIn(box: box, value: other)
+  let shown: String = floatDeclared(place: place, value: other)
+  log("Float {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Float = place
+  swapIn(place: through, value: floatFirst())
+  let window: view Float = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Float) = { 1.5, 1.5 }
+  rowIn(list: list, value: other)
+  if let row: mod Float = list.modAt(index: 1) {
+    swapIn(place: row, value: floatSecond())
+  }
+  loop let row: mod Float in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: floatSecond())
+    }
+  }
+  log("  rows {list.contains(value: floatFirst())} {list.indexOf(value: other)} {list.length}")
+}
+
+func float64First() ret Float64 {
+  ret 1.5
+}
+
+func float64Second() ret Float64 {
+  ret 2.5
+}
+
+func float64Declared(place: mod Float64, value: view Float64) ret String {
+  swapIn(place: place, value: float64Second())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func float64Round() {
+  var place: Float64 = 1.5
+  let other: Float64 = 2.5
+  swapIn(place: place, value: float64Second())
+  let swapped: Float64 = place
+  copyIn(place: place, value: float64First())
+  let copied: Float64 = place
+  passOn(place: place, value: other)
+  var twin: Float64 = 1.5
+  swapPlaces(a: place, b: twin)
+  var box: Box(Float64) = { inside: 1.5 }
+  boxIn(box: box, value: other)
+  let shown: String = float64Declared(place: place, value: other)
+  log("Float64 {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Float64 = place
+  swapIn(place: through, value: float64First())
+  let window: view Float64 = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Float64) = { 1.5, 1.5 }
+  rowIn(list: list, value: other)
+  if let row: mod Float64 = list.modAt(index: 1) {
+    swapIn(place: row, value: float64Second())
+  }
+  loop let row: mod Float64 in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: float64Second())
+    }
+  }
+  log("  rows {list.contains(value: float64First())} {list.indexOf(value: other)} {list.length}")
+}
+
+func boolFirst() ret Bool {
+  ret true
+}
+
+func boolSecond() ret Bool {
+  ret false
+}
+
+func boolDeclared(place: mod Bool, value: view Bool) ret String {
+  swapIn(place: place, value: boolSecond())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func boolRound() {
+  var place: Bool = true
+  let other: Bool = false
+  swapIn(place: place, value: boolSecond())
+  let swapped: Bool = place
+  copyIn(place: place, value: boolFirst())
+  let copied: Bool = place
+  passOn(place: place, value: other)
+  var twin: Bool = true
+  swapPlaces(a: place, b: twin)
+  var box: Box(Bool) = { inside: true }
+  boxIn(box: box, value: other)
+  let shown: String = boolDeclared(place: place, value: other)
+  log("Bool {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Bool = place
+  swapIn(place: through, value: boolFirst())
+  let window: view Bool = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Bool) = { true, true }
+  rowIn(list: list, value: other)
+  if let row: mod Bool = list.modAt(index: 1) {
+    swapIn(place: row, value: boolSecond())
+  }
+  loop let row: mod Bool in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: boolSecond())
+    }
+  }
+  log("  rows {list.contains(value: boolFirst())} {list.indexOf(value: other)} {list.length}")
+}
+
+func charFirst() ret Char {
+  ret 'x'
+}
+
+func charSecond() ret Char {
+  ret 'y'
+}
+
+func charDeclared(place: mod Char, value: view Char) ret String {
+  swapIn(place: place, value: charSecond())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func charRound() {
+  var place: Char = 'x'
+  let other: Char = 'y'
+  swapIn(place: place, value: charSecond())
+  let swapped: Char = place
+  copyIn(place: place, value: charFirst())
+  let copied: Char = place
+  passOn(place: place, value: other)
+  var twin: Char = 'x'
+  swapPlaces(a: place, b: twin)
+  var box: Box(Char) = { inside: 'x' }
+  boxIn(box: box, value: other)
+  let shown: String = charDeclared(place: place, value: other)
+  log("Char {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Char = place
+  swapIn(place: through, value: charFirst())
+  let window: view Char = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Char) = { 'x', 'x' }
+  rowIn(list: list, value: other)
+  if let row: mod Char = list.modAt(index: 1) {
+    swapIn(place: row, value: charSecond())
+  }
+  loop let row: mod Char in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: charSecond())
+    }
+  }
+  log("  rows {list.contains(value: charFirst())} {list.indexOf(value: other)} {list.length}")
+}
+
+func kindFirst() ret Kind {
+  ret Kind.large
+}
+
+func kindSecond() ret Kind {
+  ret Kind.small
+}
+
+func kindDeclared(place: mod Kind, value: view Kind) ret String {
+  swapIn(place: place, value: kindSecond())
+  passOn(place: place, value: value)
+  ret show(value: value)
+}
+
+func kindRound() {
+  var place: Kind = Kind.large
+  let other: Kind = Kind.small
+  swapIn(place: place, value: kindSecond())
+  let swapped: Kind = place
+  copyIn(place: place, value: kindFirst())
+  let copied: Kind = place
+  passOn(place: place, value: other)
+  var twin: Kind = Kind.large
+  swapPlaces(a: place, b: twin)
+  var box: Box(Kind) = { inside: Kind.large }
+  boxIn(box: box, value: other)
+  let shown: String = kindDeclared(place: place, value: other)
+  log("Kind {swapped} {copied} {place} {twin} {box.inside} {shown}")
+  let through: mod Kind = place
+  swapIn(place: through, value: kindFirst())
+  let window: view Kind = other
+  log(
+    "  by mod {place}, view {show(value: window)} {showOn(value: window)} {same(a: window, b: other)}"
+  )
+  var list: List(Kind) = { Kind.large, Kind.large }
+  rowIn(list: list, value: other)
+  if let row: mod Kind = list.modAt(index: 1) {
+    swapIn(place: row, value: kindSecond())
+  }
+  loop let row: mod Kind in list {
+    if same(a: row, b: other) {
+      copyIn(place: row, value: kindSecond())
+    }
+  }
+  log("  rows {list.contains(value: kindFirst())} {list.indexOf(value: other)} {list.length}")
+}
+
+func charAndUInt32() {
+  let number: UInt32 = 120
+  let letter: Char = 'x'
+  let numbers: List(UInt32) = { 120, 121 }
+  let letters: List(Char) = { 'x', 'y' }
+  let maybeNumber: opt UInt32 = 120
+  let maybeLetter: opt Char = 'x'
+  log("{show(value: number)} {show(value: letter)} {numbers} {letters} {maybeNumber} {maybeLetter}")
+  log("{show(value: numbers)} {show(value: letters)} {letters.contains(value: 'y')}")
+}
+
+func main() {
+  intRound()
+  int8Round()
+  int16Round()
+  int32Round()
+  uint8Round()
+  uint16Round()
+  uint32Round()
+  uint64Round()
+  floatRound()
+  float64Round()
+  boolRound()
+  charRound()
+  kindRound()
+  charAndUInt32()
+}
