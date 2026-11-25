@@ -1,0 +1,235 @@
+# The "..." menu's items are all within the screen (app3d/MenuColumns): the walker's own scene, its
+# menu open with the app's four items added, laid out on a desktop, a phone on its side (852 x 393
+# pt less its safe area) and that phone upright, and back on the desktop. With one column the
+# phone's last items were under the screen's edge.
+import Math
+import Sys
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/LayoutSystem
+open ui/UiSystems
+open ui/InputSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open Scene3d
+open app3d/CameraRig
+open app3d/MenuColumns
+open app3d/ModeMenu
+open app3d/UiModes
+open app3d/UiShell
+
+const appItems: String = "\{\"type\":\"Scene\",\"version\":2,\"root\":\"AppItem\",\"nodes\":\{\"AppItem\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":260,\"h\":40\},\"Size\":\{\"w\":\{\"mode\":\"Fill\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\}\}\}"
+
+# The menu laid out on a screen of `width` x `height`, and where its items are
+func place(
+  name: view String
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  menu: mod ModeMenuState
+  rig: mod CameraRig
+  width: view Float
+  height: view Float
+) {
+  world.layoutW = width
+  world.layoutH = height
+  layoutSystem(world: world, uiSystems: uiSystems)
+  let input: UiInput = createUiInput()
+  let first: Bool = updateModeMenuItems(
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    input: input
+    rig: rig
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  # A second frame changes nothing more
+  let again: Bool = updateModeMenuItems(
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    input: input
+    rig: rig
+  )
+  let panel: EntityId = nodeEntityFor(world: world, nodeId: modeMenuNodeId)
+  let box: view ComputedRect = componentView(this: uiSystems.layout.computedRects, entityId: panel)
+  let items: List(EntityId) = activeChildren(world: world, entityId: panel)
+  var inside: Int = 0
+  var overlaps: Int = 0
+  loop var i: Int = 0, i < items.length, ++i {
+    let item: view ComputedRect = componentView(
+      this: uiSystems.layout.computedRects
+      entityId: items.copyAtDefault(index: i)
+    )
+    let x: Float = box.position.x + item.position.x
+    let y: Float = box.position.y + item.position.y
+    if x >= 0.0 and y >= 0.0 and x + item.size.x <= width and y + item.size.y <= height {
+      inside = inside + 1
+    }
+    loop var k: Int = 0, k < i, ++k {
+      let other: view ComputedRect = componentView(
+        this: uiSystems.layout.computedRects
+        entityId: items.copyAtDefault(index: k)
+      )
+      let apartX: Bool = item.position.x >= other.position.x + other.size.x or other.position.x >= item.position.x + item.size.x
+      let apartY: Bool = item.position.y >= other.position.y + other.size.y or other.position.y >= item.position.y + item.size.y
+      if not apartX and not apartY {
+        overlaps = overlaps + 1
+      }
+    }
+  }
+  log(
+    "{name}: {menu.columns.columns} columns, {inside} of {items.length} items within the screen, {overlaps} overlap; the panel {box.size.x} x {box.size.y} at ({box.position.x}, {box.position.y}); settled {again is false}"
+  )
+}
+
+func rule(
+  name: view String
+  items: view Int
+  room: view Float
+  width: view Float
+) {
+  let columns: Int = menuColumnsFor(
+    items: items
+    itemHeight: 40.0
+    gap: 4.0
+    frame: 16.0
+    room: room
+    width: width
+  )
+  log("{name}: {columns}")
+}
+
+func main() {
+  rule(
+    name: "5 items fit in one column"
+    items: 5
+    room: 300.0
+    width: 700.0
+  )
+  rule(
+    name: "12 items in 280 pt"
+    items: 12
+    room: 280.0
+    width: 700.0
+  )
+  rule(
+    name: "12 items in 275 pt"
+    items: 12
+    room: 275.0
+    width: 700.0
+  )
+  rule(
+    name: "12 items in 275 pt, room for two columns"
+    items: 12
+    room: 275.0
+    width: 400.0
+  )
+  rule(
+    name: "12 items in 275 pt, room for one"
+    items: 12
+    room: 275.0
+    width: 300.0
+  )
+  rule(
+    name: "no items"
+    items: 0
+    room: 10.0
+    width: 700.0
+  )
+
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 1280.0
+  world.layoutH = 800.0
+  let path: String = Sys.stdlibPath(path: "lib/assets/walker/ui.raescene")
+  var source: String = ""
+  if let text: String = Sys.readFile(path: path) {
+    source = text
+  }
+  let scene: Scene = parseScene(source: source)
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: ""
+  )
+  let panel: EntityId = nodeEntityFor(world: world, nodeId: modeMenuNodeId)
+  loop var i: Int = 0, i < 4, ++i {
+    let item: EntityId = loadSceneIntoPage(
+      world: world
+      uiSystems: uiSystems
+      scene: parseScene(source: appItems)
+      pageId: "app{i}"
+    )
+    insertChild(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      parent: panel
+      child: item
+      index: 5 + i
+    )
+  }
+  var camera: Camera3d = defaultCamera3d()
+  var rig: CameraRig = createCameraRig(camera: camera)
+  var menu: ModeMenuState = createModeMenuState()
+  menu.open = true
+  # The bindings' first write, as an app's first frame does
+  place(
+    name: "a desktop"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 1280.0
+    height: 800.0
+  )
+  setNodeActive(world: world, nodeId: modeMenuNodeId, value: true)
+  place(
+    name: "a desktop, open"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 1280.0
+    height: 800.0
+  )
+  place(
+    name: "a phone on its side"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 734.0
+    height: 372.0
+  )
+  place(
+    name: "a small phone on its side"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 667.0
+    height: 375.0
+  )
+  place(
+    name: "a phone upright"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 393.0
+    height: 759.0
+  )
+  place(
+    name: "the desktop again"
+    world: world
+    uiSystems: uiSystems
+    menu: menu
+    rig: rig
+    width: 1280.0
+    height: 800.0
+  )
+}

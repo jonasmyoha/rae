@@ -473,7 +473,8 @@ func placeVertical(
 # wide as its widest child, a row as tall as its tallest (the same rule as
 # measureGrid, so the measured extent and the placed extent agree). A child
 # whose axis is `Fill` takes its whole cell on that axis; every other child
-# resolves its own size and sits at its cell's top-left.
+# resolves its own size and sits at its cell's top-left. A `Fill` width asks
+# for an even share of the grid's width, not for all of it.
 func placeGrid(
   world: mod UiWorld
   uiSystems: mod UiSystems
@@ -488,6 +489,7 @@ func placeGrid(
     let n: Int = kids.length
     let cols: Int = gridColumns(layout: layout)
     let rows: Int = (n + cols - 1) / cols
+    let share: Float = (contentW - layout.columnGap * (cols - 1).toFloat()) / cols.toFloat()
     var sizes: List(Vec2) = List.create(Vec2, cap: n)
     var colWidths: List(Float) = List.create(Float, cap: cols)
     var c: Int = 0
@@ -504,11 +506,15 @@ func placeGrid(
     var i: Int = 0
     loop i < n {
       let cid: EntityId = rae_ext_rae_buf_get(buf: kids.data, index: i)
+      var availableW: Float = contentW
+      if entitySize(world: world, entityId: cid).w.mode is SizeMode.fill {
+        availableW = share
+      }
       let resolved: Vec2 = resolveOwnSize(
         world: world
         uiSystems: uiSystems
         entityId: cid
-        parentAvailW: contentW
+        parentAvailW: availableW
         parentAvailH: contentH
         hasParentAvail: true
       )

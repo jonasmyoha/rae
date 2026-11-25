@@ -1,0 +1,190 @@
+# app3d/MenuColumns — the "..." menu stands in as many columns as it needs to fit the screen (a
+# phone on its side is not as tall as the menu in one column, and an item past the screen's edge
+# cannot be reached). The scene's one column stays while it fits. app3d/ModeMenu runs it while the
+# menu is open, so a turned phone or an item that comes or goes changes the columns.
+import Math
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/hierarchySystem/HierarchySystem
+open ui/Components
+open ui/Ecs
+open ui/LayoutSystem
+open ui/UiSystems
+
+# A column is not narrower than this (pt); an item's text shrinks to its item
+const menuColumnLeast: Float = 180.0
+
+# A menu's scene as authored, kept so one column comes back as it was
+type MenuColumns {
+  known: Bool = false
+  width: Float = 0.0
+  gap: Float = 0.0
+  # As last set, for a check to read
+  columns: Int = 1
+}
+
+# A menu's height with its items in `columns` columns (pt), `frame` its padding above and below
+func menuHeightOf(
+  items: view Int
+  itemHeight: view Float
+  gap: view Float
+  frame: view Float
+  columns: view Int
+) ret Float {
+  if items < 1 {
+    ret frame
+  }
+  let rows: Int = (items + columns - 1) / columns
+  ret frame + rows.toFloat() * itemHeight + (rows - 1).toFloat() * gap
+}
+
+# The fewest columns that fit `room` points of height, of those that have room side by side in
+# `width` (without the menu's padding); when none fits, as many as have room
+func menuColumnsFor(
+  items: view Int
+  itemHeight: view Float
+  gap: view Float
+  frame: view Float
+  room: view Float
+  width: view Float
+) ret Int {
+  var columns: Int = 1
+  loop columns < items {
+    if menuHeightOf(
+      items: items
+      itemHeight: itemHeight
+      gap: gap
+      frame: frame
+      columns: columns
+    ) <= room {
+      ret columns
+    }
+    let next: Float = (columns + 1).toFloat()
+    if next * menuColumnLeast + (next - 1.0) * gap > width {
+      ret columns
+    }
+    columns = columns + 1
+  }
+  ret columns
+}
+
+# A menu's width in `columns` columns: each as wide as the one the scene has, within the room
+func menuWidthOf(
+  columns: view Int
+  authored: view Float
+  frame: view Float
+  gap: view Float
+  width: view Float
+) ret Float {
+  let count: Float = columns.toFloat()
+  let wanted: Float = count * (authored - frame) + (count - 1.0) * gap + frame
+  ret Math.min(a: wanted, b: Math.max(a: width + frame, b: authored))
+}
+
+# The columns of the menu `menuNodeId` (a vertical list with a fixed width, in a vertical overlay)
+# for the room its overlay leaves it. True when it changed: the UI must be laid out again.
+func updateMenuColumns(
+  world: mod UiWorld
+  uiSystems: view UiSystems
+  columns: mod MenuColumns
+  menuNodeId: view String
+) ret Bool {
+  let menu: EntityId = nodeEntityFor(world: world, nodeId: menuNodeId)
+  if isNone(this: menu) or componentHas(this: uiSystems.hierarchy.parents, entityId: menu) is false or componentHas(
+    this: world.layouts
+    entityId: menu
+  ) is false or componentHas(this: world.rects, entityId: menu) is false {
+    ret false
+  }
+  let overlay: EntityId = componentView(this: uiSystems.hierarchy.parents, entityId: menu).parent
+  if componentHas(this: uiSystems.layout.computedRects, entityId: overlay) is false or entityLayout(
+    world: world
+    entityId: overlay
+  ).kind is not LayoutType.vertical {
+    ret false
+  }
+  if columns.known is false {
+    let layout: view Layout = componentView(this: world.layouts, entityId: menu)
+    if layout.kind is not LayoutType.vertical {
+      ret false
+    }
+    columns.known = true
+    columns.gap = layout.gap
+    columns.width = componentView(this: world.rects, entityId: menu).size.x
+  }
+  let items: List(EntityId) = activeChildren(world: world, entityId: menu)
+  var itemHeight: Float = 0.0
+  loop let item: view EntityId in items {
+    itemHeight = Math.max(
+      a: itemHeight
+      b: childMeasuredH(world: world, uiSystems: uiSystems, entityId: item)
+    )
+  }
+  let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: menu)
+  let frame: Float = padding.l + padding.r
+  let room: Vec2 = menuRoom(
+    world: world
+    uiSystems: uiSystems
+    overlay: overlay
+    menu: menu
+  )
+  let count: Int = menuColumnsFor(
+    items: items.length
+    itemHeight: itemHeight
+    gap: columns.gap
+    frame: padding.t + padding.b
+    room: room.y
+    width: room.x - frame
+  )
+  var width: Float = columns.width
+  var kind: LayoutType = LayoutType.vertical
+  if count > 1 {
+    kind = LayoutType.grid
+    width = menuWidthOf(
+      columns: count
+      authored: columns.width
+      frame: frame
+      gap: columns.gap
+      width: room.x - frame
+    )
+  }
+  columns.columns = count
+  let now: Layout = entityLayout(world: world, entityId: menu)
+  let widthNow: Float = entityRect(world: world, entityId: menu).size.x
+  if now.kind is kind and widthNow is width and (count is 1 or now.columns is count) {
+    ret false
+  }
+  let layout: mod Layout = componentMod(this: world.layouts, entityId: menu)
+  layout.kind = kind
+  layout.columns = count
+  layout.rowGap = columns.gap
+  layout.columnGap = columns.gap
+  let rect: mod Rect = componentMod(this: world.rects, entityId: menu)
+  rect.size.x = width
+  ret true
+}
+
+# The room the overlay leaves the menu: its width, and its height under what stands above it
+func menuRoom(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  overlay: view EntityId
+  menu: view EntityId
+) ret Vec2 {
+  let box: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: overlay
+  )
+  let padding: Insets = entityPadding(world: world, uiSystems: uiSystems, entityId: overlay)
+  let gap: Float = entityLayout(world: world, entityId: overlay).gap
+  var above: Float = 0.0
+  loop let sibling: view EntityId in getChildren(childrens: world.childrens, parent: overlay) {
+    if sibling is menu {
+      break
+    }
+    if layoutActive(world: world, entityId: sibling) {
+      above = above + gap + childMeasuredH(world: world, uiSystems: uiSystems, entityId: sibling)
+    }
+  }
+  ret Vec2 { x: box.size.x - padding.l - padding.r, y: box.size.y - padding.t - padding.b - above }
+}

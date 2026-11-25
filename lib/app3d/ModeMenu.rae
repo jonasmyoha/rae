@@ -14,7 +14,7 @@
 # the touch controls are nodes). Which items show is
 # the scene's `editor` state (app3d/UiModes); the menu's own open/close is set
 # here, outside the state bags. Choosing an item, or a press anywhere else,
-# closes it.
+# closes it. A menu taller than the screen stands in columns (app3d/MenuColumns).
 #
 # The scene names the nodes below. A layout that keeps the button on screen
 # whatever the editor chrome does: the button and the menu in an overlay over
@@ -44,6 +44,7 @@ open ecs/ComponentTable
 open ecs/Event
 open HotReload
 open app3d/WindowPresetMenu
+open app3d/MenuColumns
 import Gpu2d
 import Gpu2dWheel
 import Math
@@ -382,6 +383,23 @@ func updateModeMenuItems(
     menu.open = open
     menu.openWritten = true
     bindNodeActive(world: world, nodeId: modeMenuNodeId, value: open)
+    changed = true
+  }
+  # Every item within the screen: more columns when one is too tall (a phone on its side)
+  if menu.open and updateMenuColumns(
+    world: world
+    uiSystems: uiSystems
+    columns: menu.columns
+    menuNodeId: modeMenuNodeId
+  ) {
+    changed = true
+  }
+  if menu.presetOpen and updateMenuColumns(
+    world: world
+    uiSystems: uiSystems
+    columns: menu.presetColumns
+    menuNodeId: windowPresetMenuNodeId
+  ) {
     changed = true
   }
   ret changed
