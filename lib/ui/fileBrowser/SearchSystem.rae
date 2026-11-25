@@ -549,6 +549,9 @@ func startSearch(systems: mod FileBrowserSystems, browser: view EntityId) {
   begun.generation = generation
   begun.running = true
   begun.capped = false
+  begun.askedWords = "{begun.words}"
+  begun.atOnce = begun.shownWords is begun.words
+  begun.found.clear()
   let column: EntityId = begun.column
   componentMod(this: systems.columns, entityId: column).askedSeconds = systems.now
   let stop: Signal = createSignal()
@@ -621,13 +624,20 @@ func takeSearchAnswers(
       componentMod(this: systems.columns, entityId: column).state = ColumnState.outside
       continue
     }
-    var entries: List(FileEntry) = {}
-    if answer.first is false {
-      let held: view ColumnEntries = componentView(this: systems.entries, entityId: column)
-      entries = held.entries
+    if answer.first {
+      search.found.clear()
     }
     loop let entry: view FileEntry in answer.entries {
-      entries.add(value: entry)
+      search.found.add(value: entry)
+    }
+    # the same words again: a part alone would take away rows, and the selection with them
+    if answer.finished is false and search.atOnce {
+      continue
+    }
+    search.shownWords = "{search.askedWords}"
+    let entries: List(FileEntry) = search.found
+    if answer.finished {
+      search.found.clear()
     }
     let names: List(String) = namesOf(entries: entries)
     setEntries(

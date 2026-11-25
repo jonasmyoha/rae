@@ -7,6 +7,7 @@
 # to its root.
 import Files
 import Sys
+open Channel
 open ecs/ComponentTable
 open ecs/Entity
 open ui/Ecs
@@ -18,6 +19,7 @@ open ui/fileBrowser/FileBrowserComponents
 open ui/fileBrowser/NavigationSystem
 open ui/fileBrowser/OperationsSystem
 open ui/fileBrowser/SearchSystem
+open ui/fileBrowser/SearchThread
 open ui/textFieldSystem/TextFieldSystem
 
 func shown(app: mod App, step: view String) {
@@ -86,6 +88,105 @@ func using(app: mod App) {
   shown(app: app, step: "back")
 }
 
+# What a search found comes in parts: `from` to `to` of `found`, as its thread sends them
+func sendPart(
+  app: mod App
+  found: view List(FileEntry)
+  from: view Int
+  to: view Int
+  finished: view Bool
+) {
+  let search: view BrowserSearch = componentView(this: app.files.searches, entityId: app.left)
+  var answer: SearchAnswer = { generation: search.generation, first: from is 0, finished: finished }
+  loop var i: Int = from, i < to, ++i {
+    if let entry: view FileEntry = found.viewAt(index: i) {
+      answer.entries.add(value: entry)
+    }
+  }
+  app.files.search.answers.channelSend(value: own answer)
+  loop var i: Int = 0, i < 5, ++i {
+    idle(app: app)
+  }
+}
+
+# The same words searched again show what they found when all of it is there: the first part, alone
+# in a frame on a slow disk, leaves the rows and the selection as they are.
+func inParts(app: mod App) {
+  pick(
+    app: app
+    browser: app.left
+    place: 0
+    name: "Sounds/door sound.wav"
+  )
+  let column: EntityId = columnAt(systems: app.files, browser: app.left, place: 0)
+  let found: List(FileEntry) = componentView(this: app.files.entries, entityId: column).entries
+  componentMod(this: app.files.searches, entityId: app.left).atOnce = true
+  sendPart(
+    app: app
+    found: found
+    from: 0
+    to: 2
+    finished: false
+  )
+  shown(app: app, step: "searched again, its first part")
+  sendPart(
+    app: app
+    found: found
+    from: 2
+    to: 4
+    finished: false
+  )
+  sendPart(
+    app: app
+    found: found
+    from: 4
+    to: found.length
+    finished: true
+  )
+  shown(app: app, step: "all of it")
+  sendPart(
+    app: app
+    found: found
+    from: 0
+    to: 2
+    finished: false
+  )
+  sendPart(
+    app: app
+    found: found
+    from: 2
+    to: found.length - 1
+    finished: true
+  )
+  shown(app: app, step: "once more, without the one selected")
+  sendPart(
+    app: app
+    found: found
+    from: 0
+    to: found.length
+    finished: true
+  )
+  # other words show each part as it comes
+  componentMod(this: app.files.searches, entityId: app.left).atOnce = false
+  sendPart(
+    app: app
+    found: found
+    from: 0
+    to: 2
+    finished: false
+  )
+  shown(app: app, step: "the first part of other words")
+  sendPart(
+    app: app
+    found: found
+    from: 2
+    to: found.length
+    finished: true
+  )
+  shown(app: app, step: "all of them")
+  app.lines.clear()
+}
+
 func find(app: mod App, text: view String) {
   let focused: Bool = focusSearch(
     systems: app.files
@@ -107,6 +208,7 @@ func notThere(app: mod App) {
   )
   settle(app: app)
   find(app: app, text: "sound")
+  inParts(app: app)
   pick(
     app: app
     browser: app.left

@@ -601,6 +601,8 @@ Step 7e, the search:
   row. Its width is kept apart (`resultsWidth`).
 - It ends by Escape, by emptying the field, and by going anywhere (`openTrail`, `setBrowserRoot`). Escape brings
   back the folder it began in; "Show in Its Folder" (Cmd+R) opens the trail to the entry and selects it.
+- What a search finds comes in parts and each is shown as it comes; the same words searched again are shown when all
+  of it is found, so the rows and the selection stay until then.
 - It is searched again when an operation ends, or the folder itself was changed on the disk. A folder below it
   is not watched.
 - `BrowserMemory` is what was the end of `NavigationSystem`. Case 1628; the picture is `checks/uiFileBrowser`

@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.92, 2026-11-25: a search of files done again
+
+- A file browser that searches the same words again (after a move, a trash, a change on the disk) shows what it found
+  when all of it is there. A first part alone, on a slow disk or a busy machine, took the other rows away for a moment,
+  and the selection with them: it went to another row, and a folder there opened.
+- Case 1628.
+
 ## 0.4.91, 2026-11-25: a local that hides an outer one
 
 - A `ret`, `break` or `continue` in a block whose local hides an outer one of the same name frees both, each once. The
