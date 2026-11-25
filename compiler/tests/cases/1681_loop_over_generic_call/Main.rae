@@ -1,0 +1,214 @@
+# A loop over what a call of a generic function or method answers, over what is read of one, over a
+# match, an own list and an Array made for it: every element, and what was made is freed when the
+# loop is left, also by a break, a continue or a ret.
+open collections/IntMap
+open collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String
+}
+
+type Pair(T: type) {
+  first: T
+  more: List(T)
+}
+
+type Shelf {
+  row: Array(String, cap: 2) = Array(String, cap: 2)
+  numbers: Array(Int, cap: 2) = Array(Int, cap: 2)
+}
+
+type Holder {
+  map: StringMap(Note)
+}
+
+func listOf(T: type, first: view T, second: view T) ret List(T) {
+  var list: List(T) = []
+  list.add(value: first)
+  list.add(value: second)
+  ret list
+}
+
+func pairOf(T: type, first: view T, more: own List(T)) ret Pair(T) {
+  ret Pair(T) { first: first, more: own more }
+}
+
+func all(T: type, this: view Pair(T)) ret List(T) {
+  var list: List(T) = [this.first]
+  loop let one: view T in this.more {
+    list.add(value: one)
+  }
+  ret list
+}
+
+func allView(T: type, this: view Pair(T)) ret view List(T) {
+  ret this.more
+}
+
+func same(T: type, list: own List(T)) ret List(T) {
+  ret list
+}
+
+func count(T: type, this: view Pair(T)) ret Int {
+  var total: Int = 0
+  loop let one: view T in this.all() {
+    total += 1
+  }
+  loop let one: T in listOf(first: this.first, second: this.first) {
+    total += 10
+  }
+  loop let one: view T in pairOf(first: this.first, more: this.more).more {
+    total += 100
+  }
+  ret total
+}
+
+func shelfOf(number: view Int) ret Shelf {
+  var shelf: Shelf = {}
+  shelf.row.set(index: 0, value: "row {number}")
+  shelf.numbers.set(index: 1, value: number)
+  ret shelf
+}
+
+func rowOf(text: view String) ret Array(String, cap: 2) {
+  var row: Array(String, cap: 2) = Array(String, cap: 2)
+  row.set(index: 0, value: text)
+  row.set(index: 1, value: "{text}!")
+  ret row
+}
+
+func rowView(shelf: view Shelf) ret view Array(String, cap: 2) {
+  ret shelf.row
+}
+
+func notes() ret StringMap(Note) {
+  var map: StringMap(Note) = {}
+  map.set(k: "only", value: Note { text: "note {1}" })
+  ret map
+}
+
+func work(number: copy Int) ret List(String) {
+  ret listOf(first: "task {number}", second: "done")
+}
+
+func maps() {
+  var map: StringMap(Int) = {}
+  map.set(k: "one", value: 1)
+  loop let value: Int in map.values() {
+    log("value {value}")
+  }
+  loop let key: view String in map.keys() {
+    log("key {key}")
+  }
+  var numbers: IntMap(Note) = {}
+  numbers.set(k: 7, value: Note { text: "seven {7}" })
+  loop let note: view Note in numbers.values() {
+    log(note.text)
+  }
+  loop let key: view Int in numbers.keys() {
+    log("{key}")
+  }
+  let holder: Holder = { map: notes() }
+  loop let note: Note in holder.map.values() {
+    log(note.text)
+  }
+  loop let key: String in notes().keys() {
+    log(key)
+  }
+}
+
+func calls(text: view String) {
+  loop let one: view String in listOf(first: text, second: "b {2}") {
+    log(one)
+  }
+  loop var one: Int in listOf(Int, first: 3, second: 4) {
+    one += 1
+    log("{one}")
+  }
+  loop let one: Kind in listOf(first: Kind.large, second: Kind.small) {
+    log("{one}")
+  }
+  loop let one: view List(Int) in listOf(first: List(Int) { 1 }, second: List(Int) { 2, 3 }) {
+    log("{one}")
+  }
+  loop let one: view String in same(list: same(list: listOf(first: text, second: "c {3}"))) {
+    log(one)
+  }
+  let pair: Pair(String) = pairOf(first: text, more: ["m {1}"])
+  loop let one: view String in pair.all() {
+    log(one)
+  }
+  loop let one: view String in pair.allView() {
+    log(one)
+  }
+  loop let one: view Float in pairOf(first: 1.5, more: [2.5]).all() {
+    log("{one}")
+  }
+  loop let one: view Note in pairOf(first: Note { text: "n" }, more: [Note { text: "o {1}" }]).more {
+    log(one.text)
+  }
+  log("{pair.count()} {pairOf(first: 3, more: [4, 5]).count()}")
+  loop let one: view String in match pair.more.length { case 1 => pair.all(), default => listOf(
+    first: text
+    second: text
+  ) } {
+    log(one)
+  }
+  let task: Task(List(String)) = spawn work(number: 1)
+  loop let one: view String in task.get() {
+    log(one)
+  }
+  let list: List(String) = [text, "own {1}"]
+  loop let one: view String in own list {
+    log(one)
+  }
+}
+
+func arrays() {
+  let shelf: Shelf = shelfOf(number: 5)
+  loop let one: view String in rowOf(text: "made {1}") {
+    log(one)
+  }
+  loop let one: String in rowView(shelf: shelf) {
+    log("[{one}]")
+  }
+  loop let one: view String in shelfOf(number: 6).row {
+    log("[{one}]")
+  }
+  loop let one: Int in shelfOf(number: 7).numbers {
+    log("{one}")
+  }
+  let row: Array(String, cap: 2) = rowOf(text: "own {2}")
+  loop let one: view String in own row {
+    log(one)
+  }
+}
+
+func left(way: view Int) ret Int {
+  loop let one: view String in listOf(first: "left {1}", second: "left {2}") {
+    if way is 0 {
+      continue
+    }
+    if way is 1 {
+      break
+    }
+    loop let inner: view String in rowOf(text: one) {
+      if way is 2 {
+        ret inner.length()
+      }
+      log(inner)
+    }
+  }
+  ret 0
+}
+
+func main() {
+  maps()
+  calls(text: "a {1}")
+  arrays()
+  loop var way: Int = 0, way < 4, ++way {
+    log("{left(way: way)}")
+  }
+}

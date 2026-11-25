@@ -2525,6 +2525,10 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 if (eff_field_tr && !eff_field_tr->is_view && !eff_field_tr->is_mod
                     && f->value && f->value->kind == AST_EXPR_IDENT) {
                     const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
+                    // (a `view T` of a number is the number in this instance)
+                    if (rhs_tr && ctx->generic_params && ctx->generic_args)
+                        rhs_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                                     (AstTypeRef*)rhs_tr);
                     if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
                         && !is_primitive_ref(ctx, rhs_tr)) {
                         // Stage 6: view-on-numeric-primitive is a value at

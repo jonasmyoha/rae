@@ -1,0 +1,39 @@
+# What a call of a generic function answers has a type, checked where it lands.
+open collections/StringMap
+
+type Pair(T: type) {
+  first: T
+}
+
+func listOf(T: type, first: view T) ret List(T) {
+  var list: List(T) = []
+  list.add(value: first)
+  ret list
+}
+
+func pairOf(T: type, first: view T) ret Pair(T) {
+  ret Pair(T) { first: first }
+}
+
+func takes(list: view List(String)) {
+  log("{list}")
+}
+
+func gives() ret List(String) {
+  ret listOf(first: 3)
+}
+
+func main() {
+  var map: StringMap(Int) = {}
+  var list: List(String) = listOf(first: 3)
+  let pair: Pair(String) = pairOf(first: 3)
+  let keys: List(Int) = map.keys()
+  takes(list: listOf(first: 3))
+  list = map.values()
+  loop let one: String in map.values() {
+    log(one)
+  }
+  loop let one: view Int in pairOf(first: 3) {
+    log("{one}")
+  }
+}

@@ -2079,7 +2079,8 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
                     }
                 }
                 if (!best) best = misnamed;
-                if (!best) {
+                /* (`ret List(T)` too: the template's own T says nothing here) */
+                if (!best || (best->returns && type_ref_mentions_params(best->returns->type, best->generic_params))) {
                     const AstTypeRef* generic_result = c_generic_call_type(ctx, expr);
                     if (generic_result) return generic_result;
                 }

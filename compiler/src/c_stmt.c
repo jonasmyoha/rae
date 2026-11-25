@@ -2260,6 +2260,19 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         const AstTypeRef* binding_type = binding ? binding->as.let_stmt.type : NULL;
         const AstTypeRef* collection_type = infer_expr_type_ref(
             ctx, stmt->as.loop_stmt.condition);
+        /* What sema found (`own list`, a call of a generic function), written
+         * with its type arguments: the inferred one may be missing, or be the
+         * internal name of the instance */
+        TypeInfo* resolved = stmt->as.loop_stmt.condition ? stmt->as.loop_stmt.condition->resolved_type : NULL;
+        bool resolved_ref = resolved && resolved->kind == TYPE_REF;
+        if (resolved && !ctx->generic_params && (!collection_type || !collection_type->generic_args)) {
+            AstTypeRef* written = sema_type_ref_of(ctx->compiler_ctx, resolved_ref ? resolved->as.ref.base : resolved);
+            if (written) {
+                written->is_view = resolved_ref && !resolved->as.ref.is_mod;
+                written->is_mod = resolved_ref && resolved->as.ref.is_mod;
+                collection_type = written;
+            }
+        }
         if (!binding || binding->kind != AST_STMT_LET || !binding_type
             || !collection_type) {
             fprintf(out, "  /* invalid collection loop; rejected by sema */\n");
@@ -2292,9 +2305,32 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         bool collection_is_array = array_cap >= 0;
         bool collection_is_ref = collection_type->is_view || collection_type->is_mod;
         const char* elements = collection_is_array ? "->v" : ".data";
+        const AstExpr* iterable = stmt->as.loop_stmt.condition;
+        bool iterable_is_place = iterable && (iterable->kind == AST_EXPR_IDENT
+            || iterable->kind == AST_EXPR_MEMBER || iterable->kind == AST_EXPR_INDEX);
+        bool iterable_is_call = iterable && (iterable->kind == AST_EXPR_CALL || iterable->kind == AST_EXPR_METHOD_CALL);
+        const AstExpr* iterable_root = iterable;
+        while (iterable_root && iterable_root->kind == AST_EXPR_MEMBER) iterable_root = iterable_root->as.member.object;
+        /* `makeShelf().row` of plain numbers: in C the field has no address */
+        bool array_of_call = iterable && iterable->kind == AST_EXPR_MEMBER && iterable_root->kind != AST_EXPR_IDENT
+            && iterable_root->kind != AST_EXPR_INDEX
+            && !type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, collection_sub, 0);
+        bool array_made = collection_is_array && !collection_is_ref && (!iterable_is_place || array_of_call);
         fprintf(out, "  {\n    ");
         if (!collection_is_array) emit_type_ref_as_c_type(ctx, &collection_value_type, out, false);
-        if (collection_is_array) {
+        if (collection_is_array && collection_is_ref && iterable_is_call) {
+            /* a call that answers a reference hands back the pointer */
+            fprintf(out, "__auto_type __rae_collection%d = ", loop_id);
+            emit_expr(ctx, iterable, out, PREC_LOWEST, false, false);
+            fprintf(out, ";\n    int64_t __rae_collection_length%d = %lldLL;\n", loop_id, array_cap);
+        } else if (array_made) {
+            /* an Array made for the loop: it lives in a variable of its own */
+            fprintf(out, "__auto_type __rae_collection_value%d = ", loop_id);
+            emit_expr(ctx, iterable, out, PREC_LOWEST, false, false);
+            fprintf(out, ";\n    __auto_type __rae_collection%d = &__rae_collection_value%d;\n"
+                         "    int64_t __rae_collection_length%d = %lldLL;\n",
+                    loop_id, loop_id, loop_id, array_cap);
+        } else if (collection_is_array) {
             /* emit_expr already dereferences a view/mod parameter, so the
              * expression is the struct itself in every case. `__auto_type`
              * keeps its constness: an Array field of a `view` is const. */
@@ -2318,10 +2354,7 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         // the loop's own temporaries and leave it alone (continue still needs
         // it; after a break the drop below runs), and the end of the loop
         // releases it. Guarded by a set flag like every statement temporary.
-        const AstExpr* iterable = stmt->as.loop_stmt.condition;
-        bool iterable_is_place = iterable && (iterable->kind == AST_EXPR_IDENT
-            || iterable->kind == AST_EXPR_MEMBER || iterable->kind == AST_EXPR_INDEX);
-        bool owns_collection = !collection_is_array && !collection_is_ref && !iterable_is_place
+        bool owns_collection = !collection_is_ref && !iterable_is_place
             && ctx->stmt_temps
             && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, collection_sub, 0);
         CStmtTemps collection_temps = {0};
@@ -2333,7 +2366,7 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             collection_temps.drops = open_memstream(&collection_temps.drops_buf, &collection_temps.drops_len);
             if (collection_temps.drops) {
                 char cname[48];
-                snprintf(cname, sizeof cname, "__rae_collection%d", loop_id);
+                snprintf(cname, sizeof cname, "__rae_collection%s%d", array_made ? "_value" : "", loop_id);
                 fprintf(collection_temps.drops, "  if (__rae_collection%d_set) { __rae_collection%d_set = 0;",
                         loop_id, loop_id);
                 emit_drop_for_value(ctx, collection_temps.drops, &owned_type, cname, true);

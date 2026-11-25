@@ -1,0 +1,27 @@
+tests/cases/1682_generic_call_type_rejected/Main.rae:23:13: cannot convert List_int64_t to List_String; they are different types
+    23 |   ret listOf(first: 3)
+       |             ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:28:34: cannot convert List_int64_t to List_String; they are different types
+    28 |   var list: List(String) = listOf(first: 3)
+       |                                  ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:29:34: cannot convert Pair_int64_t to Pair_String; they are different types
+    29 |   let pair: Pair(String) = pairOf(first: 3)
+       |                                  ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:30:33: cannot convert List_String to List_int64_t; they are different types
+    30 |   let keys: List(Int) = map.keys()
+       |                                 ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:31:21: cannot convert List_int64_t to List_String; they are different types
+    31 |   takes(list: listOf(first: 3))
+       |                     ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:32:20: cannot convert List_int64_t to List_String; they are different types
+    32 |   list = map.values()
+       |                    ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:33:12: collection loop binding type must match the collection's element type
+    33 |   loop let one: String in map.values() {
+       |            ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:36:3: collection loops require a List(T) or Array(T, cap: N) expression
+    36 |   loop let one: view Int in pairOf(first: 3) {
+       |   ^~~~
+tests/cases/1682_generic_call_type_rejected/Main.rae:37:11: unknown value 'one': no local, parameter, const, or global by that name is in scope here
+    37 |     log("{one}")
+       |           ^~~~

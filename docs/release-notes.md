@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.95, 2026-11-25: a loop over a generic call
+
+- A loop over what a call of a generic function or method answers (`loop let key: view String in map.keys()`,
+  `in listOf(...)`, `in pair.all()`), over a field of one and over a match: they were errors ("collection loops require a
+  List(T)"). `in own list` ran no pass at all, and an Array made for the loop was an error of the C compiler. What was
+  made is freed when the loop is left.
+- What a generic call answers is checked where it lands: `let list: List(String) = listOf(first: 3)` is an error of
+  Rae's, where it was one of the C compiler.
+- Generic calls in generic calls over lists (`same(list: same(list: listOf(...)))`), and `{ first: value }` with a
+  `view T` that is a number, were errors of the C compiler.
+- Cases 1681 and 1682.
+
 ## 0.4.94, 2026-11-25: an Any owns what it holds
 
 - A String put in an `Any` (a let, a field, a List, a map, an Array, an optional, a result) is copied, copied again with
