@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.80, 2026-11-25: which of several functions a call means
+
+- A program's function named like one of the prelude (`add(list:, value:)`, `contains(list:, value:)`) is called when
+  the argument names are its own, and where the names say nothing the program's wins over the lib's. The prelude's was
+  called: an error of the C compiler, or without a word.
+- A method call (`numbers.add(value: 3)`) is the function with `this`; a program's `add(list:, value:)` took it, and one
+  that called `list.add(...)` called itself.
+- Overloads of one module that differ only in their parameter names work (`pair(first:, second:)` and
+  `pair(left:, right:)`), plain, generic and as methods. A plain pair did not compile, and of a generic one the first
+  was always called.
+- Breaking: an argument name of a generic call that no function has at that place is an error; it was read as another
+  parameter's (`map.get(key: ...)` for `k`).
+- Cases 1648, 1649 and 1650.
+
 ## 0.4.79, 2026-11-25: generic functions and fixed-width integers
 
 - `mod T` of a generic function works when T is a fixed-width integer (`UInt8`, `Int32`, `UInt64` ...), and so does

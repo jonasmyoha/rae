@@ -31,8 +31,8 @@ func sumVec(v: view Vec3) ret Int {
 
 func main() {
   var particles: List(Particle) = List.create(Particle, cap: 4)
-  particles.add(item: Particle { pos: Vec3 { x: 0, y: 0, z: 0 }, mass: 10, tag: "alpha" })
-  particles.add(item: Particle { pos: Vec3 { x: 1, y: 1, z: 1 }, mass: 20, tag: "beta" })
+  particles.add(value: Particle { pos: Vec3 { x: 0, y: 0, z: 0 }, mass: 10, tag: "alpha" })
+  particles.add(value: Particle { pos: Vec3 { x: 1, y: 1, z: 1 }, mass: 20, tag: "beta" })
 
   # opt Particle (String-owning payload) built and unwrapped in place.
   if let particle: Particle = particles.copyAt(index: 1) {
@@ -41,7 +41,7 @@ func main() {
   }
 
   var vecs: List(Vec3) = List.create(Vec3, cap: 4)
-  vecs.add(item: Vec3 { x: 4, y: 5, z: 6 })
+  vecs.add(value: Vec3 { x: 4, y: 5, z: 6 })
 
   # opt Vec3 crossing a function boundary, unwrapped by the caller.
   if let v: Vec3 = pickVec(vs: vecs, index: 0) {

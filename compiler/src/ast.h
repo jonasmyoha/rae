@@ -499,6 +499,7 @@ typedef struct {
   struct AstDecl* generic_template; // Link back
   AstProperty* properties;
   AstReturnItem* returns;
+  bool labels_in_c_name; // another of the module differs only in its parameter names
   bool is_extern;
   bool is_unsafe;
   bool extern_before_func;

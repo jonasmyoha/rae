@@ -184,6 +184,113 @@ static void emit_optional_address(CFuncContext* ctx, const AstTypeRef* opt_type,
     else fprintf(out, " }");
 }
 
+/* ---- which of several functions of one name a call means ------------------
+ * The argument names say it first (`add(list: numbers, value: 3)` is not the
+ * prelude's `add(this:, value:)`), then whose function it is: in the project's
+ * own code the project's wins over the lib's. A function whose parameters
+ * cannot take the arguments' types is never the one. What is left is for the
+ * levels of emit_call_expr. Discovery asks the same, or it would register one
+ * function and the emitter call another. */
+
+/* 2: every named argument has its parameter's name. 1: but a method call's
+ * receiver (`this`), whose function calls its first parameter something else.
+ * 0: some name is another's. */
+static int c_call_name_score(const AstExpr* call, const AstFuncDecl* fd) {
+    int score = 2;
+    const AstParam* p = fd->params;
+    bool first = true;
+    for (const AstCallArg* a = call->as.call.args; a && p; a = a->next, p = p->next, first = false) {
+        if (a->name.len == 0 || str_eq(a->name, p->name)) continue;
+        if (!first || !str_eq_cstr(a->name, "this")) return 0;
+        score = 1;
+    }
+    return score;
+}
+
+/* The base types of a call's arguments, worked out once: an argument can be a
+ * long chain of calls itself */
+static void c_call_argument_bases(CFuncContext* ctx, const AstExpr* call, CCallChoice* choice) {
+    for (const AstCallArg* a = call->as.call.args; a && choice->arg_count < C_CALL_CHOICE_ARGS; a = a->next) {
+        const AstTypeRef* type = a->value ? infer_expr_type_ref(ctx, c_without_own(a->value)) : NULL;
+        if (type && ctx->generic_params && ctx->generic_args)
+            type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+        choice->arg_bases[choice->arg_count++] = type ? get_base_type_name(type) : (Str){0};
+    }
+}
+
+static bool c_call_types_fit(CFuncContext* ctx, const CCallChoice* choice, const AstFuncDecl* fd) {
+    size_t i = 0;
+    for (const AstParam* p = fd->params; p && i < choice->arg_count; p = p->next, i++) {
+        if (!p->type) continue;
+        Str given = choice->arg_bases[i];
+        Str wanted = get_base_type_name(p->type);
+        if (given.len == 0 || wanted.len == 0 || str_eq(given, wanted)) continue;
+        if (str_eq_cstr(given, "Any") || str_eq_cstr(wanted, "Any")) continue;
+        bool parameter = false;
+        for (const AstIdentifierPart* gp = fd->generic_params; gp && !parameter; gp = gp->next)
+            parameter = str_eq(gp->text, wanted);
+        if (parameter) continue;
+        /* numbers and enums of other kinds are the argument checks' */
+        bool given_scalar = is_scalar_primitive_type(given) || find_enum_decl(ctx, ctx->module, given);
+        bool wanted_scalar = is_scalar_primitive_type(wanted) || find_enum_decl(ctx, ctx->module, wanted);
+        if (given_scalar && wanted_scalar) continue;
+        return false;
+    }
+    return true;
+}
+
+static bool c_call_is_own(CFuncContext* ctx, const AstDecl* d) {
+    const char* file = ctx->func_decl ? ctx->func_decl->origin_file : NULL;
+    if (!file || !d->origin_file || sema_decl_in_lib(d)) return false;
+    AstDecl caller = {0};
+    caller.kind = AST_DECL_FUNC;
+    caller.origin_file = file;
+    return !sema_decl_in_lib(&caller) && sema_decl_bare_visible(file, d);
+}
+
+static bool c_call_candidate(const AstExpr* call, const AstFuncDecl* fd) {
+    if (fd->specialization_args) return false;
+    size_t params = 0, args = 0;
+    for (const AstParam* p = fd->params; p; p = p->next) params++;
+    for (const AstCallArg* a = call->as.call.args; a; a = a->next) args++;
+    return params == args;
+}
+
+CCallChoice c_call_choice(CFuncContext* ctx, const AstExpr* call, Str name) {
+    CCallChoice choice = {0};
+    size_t count = 0;
+    const size_t* named = decl_index_functions(ctx->compiler_ctx, name, &count);
+    if (count < 2 || !call->as.call.args) return choice;
+    /* (nothing to choose between one candidate) */
+    size_t candidates = 0;
+    for (size_t k = 0; k < count; k++)
+        if (c_call_candidate(call, &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl)) candidates++;
+    if (candidates < 2) return choice;
+    c_call_argument_bases(ctx, call, &choice);
+    for (size_t k = 0; k < count; k++) {
+        const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
+        if (!c_call_candidate(call, &d->as.func_decl)) continue;
+        int score = c_call_name_score(call, &d->as.func_decl);
+        if (score == 0 || score < choice.score || !c_call_types_fit(ctx, &choice, &d->as.func_decl)) continue;
+        bool own = c_call_is_own(ctx, d);
+        if (score > choice.score) choice.own = own;
+        else choice.own = choice.own || own;
+        choice.score = score;
+    }
+    return choice;
+}
+
+bool c_call_choice_allows(CFuncContext* ctx, const CCallChoice* choice, const AstExpr* call, const AstDecl* d) {
+    if (choice->score == 0) return true;
+    return c_call_name_score(call, &d->as.func_decl) == choice->score
+        && (!choice->own || c_call_is_own(ctx, d)) && c_call_types_fit(ctx, choice, &d->as.func_decl);
+}
+
+/* The names alone, for what must not work out the arguments' types */
+bool c_call_names_fit(const AstExpr* call, const AstFuncDecl* fd) {
+    return c_call_name_score(call, fd) > 0;
+}
+
 static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
                              const AstExpr* value, FILE* out) {
     Str base = get_base_type_name(param_type);
@@ -1120,6 +1227,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             generic_takes_type_args = param_count == call_arg_count && type_params == call_type_args;
         }
         const char* calling_file = (ctx->func_decl && ctx->func_decl->origin_file) ? ctx->func_decl->origin_file : NULL;
+        CCallChoice choice = c_call_choice(ctx, expr, callee_name);
         bool nongeneric_receiver_seen = false, receiver_seen = false, nongeneric_fallback_seen = false,
              generic_fallback_seen = false, nongeneric_typed_seen = false;
         for (size_t k = 0; k < named_count; k++) {
@@ -1128,6 +1236,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             uint16_t param_count = 0; for (const AstParam* pp = candidate->params; pp; pp = pp->next) param_count++;
             if (param_count != call_arg_count) continue;
             if (candidate->specialization_args) continue;
+            if (!c_call_choice_allows(ctx, &choice, expr, d)) continue;
             if (generic_takes_type_args) {
                 size_t type_params = 0;
                 for (const AstIdentifierPart* gp = candidate->generic_params; gp; gp = gp->next) type_params++;
@@ -1183,6 +1292,23 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                : nongeneric_typed_match ? nongeneric_typed_match
                : nongeneric_fallback ? nongeneric_fallback
                : generic_fallback;
+            /* A name no candidate has at its place: the arguments are positional,
+             * so it would be read as another parameter's */
+            if (fd && c_call_name_score(expr, fd) == 0) {
+                const AstParam* pp = fd->params;
+                for (const AstCallArg* ca = expr->as.call.args; ca && pp; ca = ca->next, pp = pp->next) {
+                    if (ca->name.len == 0 || str_eq(ca->name, pp->name)) continue;
+                    char message[512];
+                    snprintf(message, sizeof message,
+                        "argument '%.*s' does not match parameter '%.*s' of '%.*s' — arguments are positional and "
+                        "their names must match the parameters",
+                        (int)ca->name.len, ca->name.data, (int)pp->name.len, pp->name.data,
+                        (int)fd->name.len, fd->name.data);
+                    const AstExpr* at = ca->value ? ca->value : expr;
+                    diag_error(c_source_file(ctx), (int)at->line, (int)at->column, message);
+                    break;
+                }
+            }
             /* An overload set where a struct argument fits none of them (a
              * generic body instantiated with a type nobody wrote an overload
              * for): calling the first would pass the wrong struct. Refuse. */

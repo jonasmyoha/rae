@@ -1,0 +1,75 @@
+# A program's function named like one of the prelude: the argument names say which is called, and
+# where
+# they say nothing the program's own is. A method call is the function with `this`, also inside the
+# program's function of that name (which called itself). The prelude's was called before: an error
+# of
+# the C compiler, or without a word.
+type Stack(T: type) {
+  items: List(T)
+}
+
+type Note {
+  text: String = ""
+}
+
+func add(T: type, list: mod List(T), value: view T) ret Int {
+  list.add(value: value)
+  ret list.length
+}
+
+func add(T: type, this: mod Stack(T), value: own T) {
+  this.items.add(value: own value)
+}
+
+func add(first: view Note, second: view Note) ret String {
+  ret "{first.text}{second.text}"
+}
+
+func insert(list: mod List(Int), index: view Int, value: view Int) ret Int {
+  list.insert(index: index, value: value)
+  ret list.length
+}
+
+func contains(T: type, list: view List(T), value: view T) ret String {
+  ret "mine {list.contains(value: value)}"
+}
+
+func indexOf(T: type, list: view List(T), value: view T) ret Int {
+  if let index: Int = list.indexOf(value: value) {
+    ret index
+  }
+  ret -1
+}
+
+func isEmpty(T: type, value: view T) ret String {
+  ret "mine {value}"
+}
+
+func twice(T: type, list: mod List(T), value: view T) ret Int {
+  let first: Int = add(list: list, value: value)
+  ret first + add(list, value: value)
+}
+
+func main() {
+  var numbers: List(Int) = {}
+  log("by names {add(list: numbers, value: 3)}, by position {add(numbers, value: 4)}")
+  log("with its type {add(Int, list: numbers, value: 5)}")
+  numbers.add(value: 6)
+  add(this: numbers, value: 7)
+  log("{numbers}")
+  var words: List(String) = {}
+  log("in a generic function {twice(list: words, value: "a {1}")} {words}")
+  var stack: Stack(Int) = {}
+  stack.add(value: 8)
+  add(this: stack, value: 9)
+  log("a type of its own {stack.items}")
+  log("not generic {add(first: Note { text: "a" }, second: Note { text: "b" })}")
+  log("{insert(list: numbers, index: 0, value: 1)} {numbers}")
+  numbers.insert(index: 0, value: 0)
+  log("{contains(list: numbers, value: 3)}, {numbers.contains(value: 3)}")
+  log("{indexOf(list: numbers, value: 4)} {indexOf(list: numbers, value: 99)}")
+  if let index: Int = numbers.indexOf(value: 4) {
+    log("the prelude's {index}")
+  }
+  log("{isEmpty(value: 3)}, {isEmpty(value: words)}, {words.isEmpty()}")
+}

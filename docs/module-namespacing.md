@@ -334,6 +334,18 @@ Point` could not be in one program at all, and a lib adding a type could
 break any program with a type of that name (lib/physics' `MeshData` was
 renamed `PhysicsMeshData` for this).
 
+### Which of several functions of one name
+
+Among the functions of a name that are open here and take that many arguments:
+
+1. The **argument names** decide: a function with other parameter names at those places is not meant.
+2. A **method call** (`x.f(...)`) is a function whose first parameter is `this` when there is one for x's type, and any
+   function that takes x first otherwise.
+3. The **argument types** decide among the rest.
+4. In the project's own code the **project's function** wins over the lib's or the prelude's.
+
+An argument name that none of them has at its place is an error. (Fixtures 1648, 1649, 1650.)
+
 ## Contextual keywords
 
 `import` and `open` are **contextual** top-level keywords — special only in

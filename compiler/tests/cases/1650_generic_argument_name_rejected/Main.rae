@@ -1,0 +1,15 @@
+# An argument name that no function of that name has at that place: a generic call's was read as
+# another
+# parameter's
+func pair(T: type, first: view T, second: view T) ret String {
+  ret "{first}{second}"
+}
+
+func main() {
+  var numbers: List(Int) = {}
+  add(list: numbers, value: 3)  # ERROR
+  add(numbers, thing: 3)  # ERROR
+  numbers.add(thing: 3)  # ERROR
+  log("{pair(first: 1, third: 2)}")  # ERROR
+  log("{pair(second: 1, first: 2)}")  # ERROR
+}

@@ -571,9 +571,7 @@ void rae_mangle_module_path(const char* module_path, char* out, size_t out_cap) 
  * entry points and are not ours to rename. The entry/project module has no
  * module_name, so `main` and single-file programs mangle exactly as before.
  * Queue #362. */
-static size_t mangle_func_prefix(CompilerContext* ctx, const AstFuncDecl* func,
-                                 char* buf, size_t cap) {
-    (void)ctx;
+static size_t mangle_func_name(const AstFuncDecl* func, char* buf, size_t cap) {
     if (str_starts_with_cstr(func->name, "rae_")) {
         return snprintf(buf, cap, "%.*s_", (int)func->name.len, func->name.data);
     }
@@ -583,6 +581,20 @@ static size_t mangle_func_prefix(CompilerContext* ctx, const AstFuncDecl* func,
         return snprintf(buf, cap, "rae_%s_%.*s_", mp, (int)func->name.len, func->name.data);
     }
     return snprintf(buf, cap, "rae_%.*s_", (int)func->name.len, func->name.data);
+}
+
+/* The module and the name; and the parameter names, of overloads that differ
+ * only in them */
+static size_t mangle_func_prefix(CompilerContext* ctx, const AstFuncDecl* func,
+                                 char* buf, size_t cap) {
+    (void)ctx;
+    size_t pos = mangle_func_name(func, buf, cap);
+    bool labels = func->labels_in_c_name
+        || (func->generic_template && func->generic_template->kind == AST_DECL_FUNC
+            && func->generic_template->as.func_decl.labels_in_c_name);
+    for (const AstParam* p = labels ? func->params : NULL; p && pos < cap; p = p->next)
+        pos += snprintf(buf + pos, cap - pos, "%.*s_", (int)p->name.len, p->name.data);
+    return pos < cap ? pos : cap - 1;
 }
 
 const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {

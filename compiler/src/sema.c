@@ -2339,6 +2339,28 @@ static void sema_render_signature(const AstFuncDecl* fd, char* out, size_t cap) 
     if (pos < cap) snprintf(out + pos, cap - pos, ")");
 }
 
+/* Does every named argument name the parameter at its position? (A type argument
+ * of a generic function has no parameter.) */
+static bool sema_call_names_fit(SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args) {
+    const AstParam* p = fd->params;
+    for (AstCallArg* a = args; a; a = a->next) {
+        if (fd->generic_params && !a->name.len && sema_arg_is_type_name(symbols, a->value)) continue;
+        if (!p) return true;
+        if (a->name.len && !str_eq(a->name, p->name)) return false;
+        p = p->next;
+    }
+    return true;
+}
+
+/* A function of the project, called from the project */
+static bool sema_decl_is_own(const AstDecl* d) {
+    if (!d || !d->origin_file || !s_current_decl_origin || sema_decl_in_lib(d)) return false;
+    AstDecl caller = {0};
+    caller.kind = AST_DECL_FUNC;
+    caller.origin_file = s_current_decl_origin;
+    return !sema_decl_in_lib(&caller);
+}
+
 // The call is bound to `fd`: every NAMED argument must name the parameter at
 // its position (arguments are positional; the name is checked, not used to
 // reorder), and no name may appear twice. A bare type argument filling a
@@ -2532,15 +2554,35 @@ static bool sema_same_bare_module(const AstDecl* a, const AstDecl* b) {
 // cannot pick by `view` / `mod`). A parameter type its own module already
 // resolved is taken as resolved there, so two modules' own `World` types
 // stay two types.
+/* Are two types written the same? (A type parameter is its name.) */
+static bool sema_same_written_type(const AstTypeRef* a, const AstTypeRef* b) {
+    if (!a || !b) return a == b;
+    if (a->is_value_arg != b->is_value_arg) return false;
+    if (a->is_value_arg) {
+        int64_t va = a->value_is_folded ? a->value_folded : -1;
+        int64_t vb = b->value_is_folded ? b->value_folded : -1;
+        return va == vb && va >= 0;
+    }
+    if (a->is_opt != b->is_opt || a->is_view != b->is_view || a->is_mod != b->is_mod) return false;
+    if (!str_eq(get_base_type_name(a), get_base_type_name(b))) return false;
+    const AstTypeRef* ga = a->generic_args;
+    const AstTypeRef* gb = b->generic_args;
+    for (; ga && gb; ga = ga->next, gb = gb->next)
+        if (!sema_same_written_type(ga, gb)) return false;
+    return !ga && !gb;
+}
+
 static bool sema_same_param_types(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
                                   const AstDecl* a, const AstDecl* b) {
     const AstFuncDecl* fa = &a->as.func_decl;
     const AstFuncDecl* fb = &b->as.func_decl;
     if (fa->generic_params || fb->generic_params) {
-        char sa[512], sb[512];
-        sema_render_signature(fa, sa, sizeof sa);
-        sema_render_signature(fb, sb, sizeof sb);
-        return strcmp(sa, sb) == 0;
+        if (!fa->generic_params || !fb->generic_params) return false;
+        const AstParam* ga = fa->params;
+        const AstParam* gb = fb->params;
+        for (; ga && gb; ga = ga->next, gb = gb->next)
+            if (!sema_same_written_type(ga->type, gb->type)) return false;
+        return !ga && !gb;
     }
     const AstParam* pa = fa->params;
     const AstParam* pb = fb->params;
@@ -2718,8 +2760,23 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
     // (the previous rule: first kind match wins).
     AstDecl* first_kind_match = NULL;
 
+    /* The argument names say which of several functions is meant (`add(list:, value:)`
+     * is not the prelude's `add(this:, value:)`): when they are those of one that
+     * takes this many, the others are no candidates */
+    bool named_candidate = false;
+    for (Symbol* curr = symbol_table_first(symbols, name); curr && !named_candidate; curr = curr->sameNext) {
+        if (!curr->decl || curr->decl->kind != AST_DECL_FUNC || curr->decl->as.func_decl.specialization_args) continue;
+        if (!sema_decl_opened(s_current_decl_origin, curr->decl)) continue;
+        size_t params = 0, values = 0;
+        for (AstParam* p = curr->decl->as.func_decl.params; p; p = p->next) params++;
+        for (AstCallArg* a = args; a; a = a->next)
+            if (!(curr->decl->as.func_decl.generic_params && !a->name.len && sema_arg_is_type_name(symbols, a->value))) values++;
+        named_candidate = params == values && sema_call_names_fit(symbols, &curr->decl->as.func_decl, args);
+    }
+
     for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         if (!curr->decl || curr->decl->kind != AST_DECL_FUNC) continue;
+        if (named_candidate && !sema_call_names_fit(symbols, &curr->decl->as.func_decl, args)) continue;
         if (!sema_package_reaches(s_current_decl_origin, curr->decl)) {
             if (!across_boundary) across_boundary = curr->decl;
             continue;
@@ -2822,7 +2879,8 @@ static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* modul
             }
 
             if (inferred || !fd->generic_params) { // inferred or no generics
-                if (!best_sym) {
+                /* the project's own, in the project's code */
+                if (!best_sym || (sema_decl_is_own(curr->decl) && !sema_decl_is_own(best_sym->decl))) {
                     best_sym = curr;
                     best_inferred = inferred;
                 }
@@ -8252,6 +8310,33 @@ static bool sema_fold_binary_schema(CompilerContext* ctx, AstModule* module, Sym
     return true;
 }
 
+/* `numbers.add(value: 3)` is List's `add(this:, value:)`, not a function of the
+ * program that only happens to take a List first (`add(list:, value:)`): a
+ * function without `this` gives way to one with it, for this receiver and these
+ * argument names. */
+static bool sema_yields_to_method(SymbolTable* symbols, const AstDecl* decl, const AstExpr* call) {
+    const AstParam* first = decl->as.func_decl.params;
+    if (!first || str_eq_cstr(first->name, "this")) return false;
+    const TypeInfo* receiver = call->as.method_call.object->resolved_type;
+    while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+    if (!receiver) return false;
+    Str receiver_base = sema_struct_template_name((TypeInfo*)receiver);
+    if (receiver_base.len == 0) receiver_base = receiver->kind == TYPE_STRING ? str_from_cstr("String") : receiver->name;
+    for (Symbol* curr = symbol_table_first(symbols, decl->as.func_decl.name); curr; curr = curr->sameNext) {
+        const AstDecl* d = curr->decl;
+        if (!d || d == decl || d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+        if (!sema_decl_visible(s_current_decl_origin, d)) continue;
+        const AstParam* p = d->as.func_decl.params;
+        if (!p || !str_eq_cstr(p->name, "this") || !str_eq(get_base_type_name(p->type), receiver_base)) continue;
+        const AstCallArg* a = call->as.method_call.args;
+        bool fits = true;
+        for (p = p->next; p && a && fits; p = p->next, a = a->next)
+            fits = a->name.len == 0 || str_eq(a->name, p->name);
+        if (fits && !p && !a) return true;
+    }
+    return false;
+}
+
 static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     switch (expr->kind) {
@@ -9440,7 +9525,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                      * the stdlib, its dependencies): a same-named method of a
                      * package it does not depend on is never the callee */
                     if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC
-                        && sema_package_reaches(s_current_decl_origin, sym->decl)) {
+                        && sema_package_reaches(s_current_decl_origin, sym->decl)
+                        && !sema_yields_to_method(symbols, sym->decl, expr)) {
                         AstFuncDecl* fd = &sym->decl->as.func_decl;
                         if (!fd->generic_params && fd->params) {
                             // Check if this param type matches receiver
@@ -9629,6 +9715,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         AstFuncDecl* fd = &dd->as.func_decl;
                         if (fd->generic_params || fd->specialization_args || !fd->params) continue;
                         if (!sema_decl_visible(s_current_decl_origin, dd)) continue;  // module must be visible here
+                        if (sema_yields_to_method(symbols, dd, expr)) continue;
                         size_t pc = 0; for (AstParam* p = fd->params; p; p = p->next) pc++;
                         if (pc != want) continue;
                         TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, fd->params->type);
@@ -11441,8 +11528,9 @@ static void sema_report_duplicate_functions(CompilerContext* ctx, AstModule* mod
             /* the same labels and the same modes: `view` and `mod` of one
              * type are two overloads (the C names differ) */
             bool same_labels = true;
+            bool labels_differ = false;
             for (; a && b; a = a->next, b = b->next) {
-                if (!str_eq(a->name, b->name)) same_labels = false;
+                if (!str_eq(a->name, b->name)) labels_differ = true;
                 const AstTypeRef* ta = a->type; const AstTypeRef* tb = b->type;
                 if (!ta || !tb) { if (ta != tb) same_labels = false; continue; }
                 if (ta->is_view != tb->is_view || ta->is_mod != tb->is_mod || ta->is_own != tb->is_own
@@ -11450,6 +11538,12 @@ static void sema_report_duplicate_functions(CompilerContext* ctx, AstModule* mod
             }
             if (!same_labels || a || b) continue;
             if (!sema_same_param_types(ctx, module, symbols, d, earlier)) continue;
+            if (labels_differ) {
+                /* two overloads, told apart by their argument names: in C by them too */
+                ((AstDecl*)d)->as.func_decl.labels_in_c_name = true;
+                ((AstDecl*)earlier)->as.func_decl.labels_in_c_name = true;
+                continue;
+            }
             char message[1024];
             snprintf(message, sizeof(message),
                 "function '%.*s' is declared twice with the same parameters: here and at %s:%zu:%zu; "

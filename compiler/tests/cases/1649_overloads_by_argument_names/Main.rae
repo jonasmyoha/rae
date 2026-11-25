@@ -1,0 +1,58 @@
+# Overloads of one module that differ only in their parameter names: the argument names say which is
+# called, of plain and of generic functions, as a method and in a generic body. The two had one C
+# name:
+# the C compiler refused a plain pair, and of a generic one the first was always called.
+type Note {
+  text: String = ""
+}
+
+func pair(T: type, first: view T, second: view T) ret String {
+  ret "one {first} {second}"
+}
+
+func pair(T: type, left: view T, right: view T) ret String {
+  ret "two {left} {right}"
+}
+
+func joined(first: view Int, second: view Int) ret String {
+  ret "one {first + second}"
+}
+
+func joined(left: view Int, right: view Int) ret String {
+  ret "two {left - right}"
+}
+
+func move(this: mod Note, by: view Int) {
+  this.text = "{this.text} by {by}"
+}
+
+func move(this: mod Note, to: view Int) {
+  this.text = "{this.text} to {to}"
+}
+
+func count(T: type, list: view List(T), from: view Int) ret Int {
+  ret list.length - from
+}
+
+func count(T: type, list: view List(T), upTo: view Int) ret Int {
+  ret upTo
+}
+
+func both(T: type, value: view T) ret String {
+  ret "{pair(first: value, second: value)}, {pair(left: value, right: value)}"
+}
+
+func main() {
+  log("{pair(first: 1, second: 2)}, {pair(left: 1, right: 2)}")
+  log("{pair(first: "a {1}", second: "b")}, {pair(left: "a {1}", right: "b")}")
+  log("{joined(first: 5, second: 2)}, {joined(left: 5, right: 2)}")
+  log(both(value: 1.5))
+  var note: Note = { text: "note" }
+  note.move(by: 1)
+  note.move(to: 2)
+  move(this: note, by: 3)
+  move(this: note, to: 4)
+  log(note.text)
+  let list: List(Int) = { 1, 2, 3 }
+  log("{count(list: list, from: 1)} {count(list: list, upTo: 1)}")
+}

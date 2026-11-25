@@ -189,10 +189,12 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         for (const AstIdentifierPart* gp = candidate->generic_params; gp; gp = gp->next) type_params++;
                         generic_takes_type_args = pc == param_count && type_params == call_type_args;
                     }
+                    CCallChoice choice = c_call_choice(ctx, expr, callee->as.ident);
                     for (size_t k = 0; k < named_count && !d; k++) {
                         const AstDecl* dd = ctx->compiler_ctx->all_decls[named[k]];
                         uint16_t pc = 0; for (const AstParam* pp = dd->as.func_decl.params; pp; pp = pp->next) pc++;
                         if (pc != param_count) continue;
+                        if (!c_call_choice_allows(ctx, &choice, expr, dd)) continue;
                         // Skip specialization clones — they would force their own concrete
                         // args; we want the generic template so we can re-infer per call.
                         if (dd->as.func_decl.specialization_args) continue;
@@ -383,6 +385,25 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
             uint16_t param_count = 1; for (const AstCallArg* a = expr->as.method_call.args; a; a = a->next) param_count++;
             Str obj_type = infer_expr_type(ctx, expr->as.method_call.object);
             const AstFuncDecl* d = find_function_overload(ctx->module, ctx, expr->as.method_call.method_name, &obj_type, param_count, true, expr);
+            /* the project's own function of this name, as the emitter's call of
+             * it with the receiver first will choose */
+            {
+                AstCallArg receiver = { .name = str_from_cstr("this"), .value = expr->as.method_call.object,
+                                        .next = expr->as.method_call.args };
+                AstExpr as_call = { .kind = AST_EXPR_CALL };
+                as_call.as.call.args = &receiver;
+                CCallChoice choice = c_call_choice(ctx, &as_call, expr->as.method_call.method_name);
+                size_t named_count = 0;
+                const size_t* named = decl_index_functions(ctx->compiler_ctx, expr->as.method_call.method_name, &named_count);
+                for (size_t k = 0; choice.own && k < named_count; k++) {
+                    const AstDecl* dd = ctx->compiler_ctx->all_decls[named[k]];
+                    uint16_t pc = 0; for (const AstParam* pp = dd->as.func_decl.params; pp; pp = pp->next) pc++;
+                    if (pc != param_count || dd->as.func_decl.specialization_args) continue;
+                    if (!c_call_choice_allows(ctx, &choice, &as_call, dd)) continue;
+                    d = &dd->as.func_decl;
+                    break;
+                }
+            }
             AstTypeRef* method_generic_args = NULL;
             if (d && d->generic_params) {
                 const AstTypeRef* receiver_type = infer_expr_type_ref(ctx, expr->as.method_call.object);

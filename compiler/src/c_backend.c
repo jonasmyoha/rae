@@ -1989,6 +1989,7 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                 const AstFuncDecl* best = NULL;
                 size_t named_count = 0;
                 const size_t* named = decl_index_functions(ctx->compiler_ctx, fname, &named_count);
+                const AstFuncDecl* misnamed = NULL;
                 for (size_t k = 0; k < named_count; k++) {
                     const AstFuncDecl* cfd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
                     if (!cfd->returns) continue;
@@ -1999,9 +2000,15 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                     // decisions (string-pool-take on an Int, #651).
                     if (a0base.len > 0 && cfd->params
                         && str_eq(get_base_type_name(cfd->params->type), a0base)) {
+                        // one whose argument names are the call's, when there is
+                        if (!c_call_names_fit(expr, cfd)) {
+                            if (!misnamed) misnamed = cfd;
+                            continue;
+                        }
                         best = cfd; break;
                     }
                 }
+                if (!best) best = misnamed;
                 if (best && best->returns) {
                     const AstTypeRef* rt2 = best->returns->type;
                     // If the return is a generic type param (or `opt <param>`),
