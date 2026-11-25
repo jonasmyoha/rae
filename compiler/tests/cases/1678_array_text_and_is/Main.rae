@@ -1,0 +1,196 @@
+# The text of an Array (its elements, as a List writes them) and `is` / `equals` of two (element by
+# element, with the rule of the element type), for every kind of element, on its own and inside a
+# List, a map, a struct, an optional, an Array, a generic struct and a generic function, and from
+# wherever one comes.
+open collections/IntMap
+open collections/StringMap
+
+enum Kind { small, large }
+
+type Point {
+  x: Int
+  y: Float
+}
+
+type Note {
+  text: String
+  marks: List(Int)
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+type Ring(T: type) {
+  items: Array(T, cap: 2)
+}
+
+type Shelf {
+  ints: Array(Int, cap: 2) = Array(Int, cap: 2)
+  floats: Array(Float, cap: 2) = Array(Float, cap: 2)
+  bytes: Array(UInt8, cap: 2) = Array(UInt8, cap: 2)
+  flags: Array(Bool, cap: 2) = Array(Bool, cap: 2)
+  letters: Array(Char, cap: 2) = Array(Char, cap: 2)
+  kinds: Array(Kind, cap: 2) = Array(Kind, cap: 2)
+  points: Array(Point, cap: 2) = Array(Point, cap: 2)
+  texts: Array(String, cap: 2) = Array(String, cap: 2)
+  notes: Array(Note, cap: 2) = Array(Note, cap: 2)
+  lists: Array(List(Int), cap: 2) = Array(List(Int), cap: 2)
+  pairs: Array(Pair(Kind), cap: 2) = Array(Pair(Kind), cap: 2)
+  grid: Array(Array(Int, cap: 2), cap: 2) = Array(Array(Int, cap: 2), cap: 2)
+}
+
+# never made, only compiled
+type Raw {
+  pointers: Array(Ptr, cap: 2)
+  tasks: Array(opt Task(Int), cap: 2)
+}
+
+func numbers(first: copy Int, second: copy Int) ret Array(Int, cap: 2) {
+  var made: Array(Int, cap: 2) = Array(Int, cap: 2)
+  made.set(index: 0, value: first)
+  made.set(index: 1, value: second)
+  ret made
+}
+
+func words(number: copy Int) ret Array(String, cap: 2) {
+  var made: Array(String, cap: 2) = Array(String, cap: 2)
+  made.set(index: 0, value: "word {number}")
+  ret made
+}
+
+func maybe(some: view Bool) ret opt Array(String, cap: 2) {
+  if some {
+    ret words(number: 1)
+  }
+  ret none
+}
+
+func shelf() ret Shelf {
+  var made: Shelf = {}
+  made.ints = numbers(first: 1, second: -2)
+  made.floats.set(index: 0, value: 1.5)
+  made.bytes.set(index: 0, value: 200)
+  made.flags.set(index: 1, value: true)
+  made.letters.set(index: 0, value: 'a')
+  made.letters.set(index: 1, value: 'b')
+  made.kinds.set(index: 1, value: Kind.large)
+  made.points.set(index: 0, value: Point { x: 1, y: 2.5 })
+  made.texts = words(number: 1)
+  made.notes.set(index: 0, value: Note { text: "note {1}", marks: { 1, 2 } })
+  made.lists.set(index: 1, value: List(Int) { 3 })
+  made.pairs.set(index: 0, value: Pair(Kind) { first: Kind.large })
+  made.grid.set(index: 1, value: numbers(first: 3, second: 4))
+  ret made
+}
+
+func text(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func same(T: type, a: view T, b: view T) ret Bool {
+  ret a is b and equals(a: a, b: b)
+}
+
+func ringText(T: type, ring: view Ring(T)) ret String {
+  ret "{ring.items}"
+}
+
+func each(one: view Shelf, other: mod Shelf) {
+  log("{one.ints} {one.ints is other.ints}")
+  log("{one.floats} {one.floats is other.floats}")
+  log("{one.bytes} {one.bytes is other.bytes}")
+  log("{one.flags} {one.flags is other.flags}")
+  log("{one.letters} {one.letters is other.letters}")
+  log("{one.kinds} {one.kinds is other.kinds}")
+  log("{one.points} {one.points is other.points}")
+  log("{one.texts} {one.texts is other.texts}")
+  log("{one.notes} {one.notes is other.notes}")
+  log("{one.lists} {one.lists is other.lists}")
+  log("{one.pairs} {one.pairs is other.pairs}")
+  log("{one.grid} {one.grid is other.grid}")
+  log("{one is other} {equals(a: one, b: other)}")
+}
+
+func inside() {
+  let list: List(Array(String, cap: 2)) = [words(number: 1), words(number: 2)]
+  log("{list}")
+  log(list)
+  log("{list is list} {list.contains(value: words(number: 2))}")
+  loop let row: view Array(String, cap: 2) in list {
+    log("{row} {row is words(number: 2)}")
+  }
+  if let row: view Array(String, cap: 2) = list.viewAt(index: 1) {
+    log(row)
+  }
+  log("{list.viewAt(index: 0)} {list.viewAt(index: 9)}")
+  var byName: StringMap(Array(Int, cap: 2)) = {}
+  byName.set(k: "one", value: numbers(first: 1, second: 2))
+  var byNumber: IntMap(Array(String, cap: 2)) = {}
+  byNumber.set(k: 7, value: words(number: 7))
+  log("{byName} {byNumber} {byName.get(k: "one")} {byNumber.get(k: 8)}")
+  let present: opt Array(String, cap: 2) = words(number: 1)
+  let nothing: opt Array(String, cap: 2) = none
+  log("{present} {nothing} {maybe(some: true)} {maybe(some: false)}")
+  log(present)
+  log(
+    "{present is present} {present is nothing} {maybe(some: true) is present} {present is words(
+      number: 1
+    )}"
+  )
+  let rows: List(opt Array(Int, cap: 2)) = [numbers(first: 1, second: 2), none]
+  log("{rows}")
+  let pair: Pair(Array(Int, cap: 2)) = { first: numbers(first: 5, second: 6) }
+  log("{pair} {pair is pair}")
+  let ring: Ring(Point) = { items: shelf().points }
+  let empty: Ring(Point) = { items: Array(Point, cap: 2) }
+  log("{ring} {ring is empty} {ring is ring} {ringText(ring: ring)}")
+  log("{text(value: words(number: 4))} {text(value: ring)}")
+  log(
+    "{same(a: words(number: 4), b: words(number: 4))} {same(
+      a: numbers(first: 1, second: 2)
+      b: numbers(first: 1, second: 3)
+    )}"
+  )
+}
+
+func places() {
+  log(words(number: 1))
+  log("{words(number: 1) is words(number: 1)} {words(number: 1) is not words(number: 2)}")
+  log("{equals(a: words(number: 1), b: words(number: 2))}")
+  log("{shelf().texts} {shelf().ints is numbers(first: 1, second: -2)}")
+  let task: Task(Array(String, cap: 2)) = spawn words(number: 3)
+  log("{task.get()}")
+  let other: Task(Array(Int, cap: 2)) = spawn numbers(first: 3, second: 4)
+  log(other.get())
+  var row: Array(Int, cap: 2) = numbers(first: 9, second: 8)
+  let aliased: mod Array(Int, cap: 2) = row
+  aliased.set(index: 1, value: 10)
+  log("{aliased} {row} {aliased is row}")
+  log("row " + row.toString())
+  # by the rule of Float, not by its bytes
+  let zero: Array(Float, cap: 1) = Array(Float, cap: 1)
+  var minus: Array(Float, cap: 1) = Array(Float, cap: 1)
+  minus.set(index: 0, value: -0.0)
+  log("{zero is minus}")
+  if minus is zero and row is not numbers(first: 1, second: 2) {
+    log("compared")
+  }
+}
+
+func main() {
+  let one: Shelf = shelf()
+  var other: Shelf = shelf()
+  each(one: one, other: other)
+  other.texts.set(index: 1, value: "x {1}")
+  other.grid.set(index: 0, value: numbers(first: 0, second: 1))
+  other.kinds.set(index: 0, value: Kind.large)
+  other.floats.set(index: 1, value: 0.5)
+  log(
+    "{one.texts is other.texts} {one.grid is other.grid} {one.kinds is other.kinds} {one.floats is other.floats}"
+  )
+  log("{one is other} {one is not other}")
+  log(other)
+  inside()
+  places()
+}

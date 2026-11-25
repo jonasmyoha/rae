@@ -1582,7 +1582,8 @@ const AstTypeRef* c_call_list_string_type(CFuncContext* ctx) {
 //   primitives, String, Char, Bool -> rae_ext_rae_str(X)      (the _Generic)
 //   enum                           -> rae_enum_toString_<E>((int64_t)X)
 //   user struct                    -> rae_to_str_<T>_(&X)     (generated)
-//   List(T), StringMap(V), IntMap(V) -> rae_to_str_<type>_(&X) (generated, recursive)
+//   List(T), Array(T, cap: N), StringMap(V), IntMap(V)
+//                                  -> rae_to_str_<type>_(&X) (generated, recursive)
 //   opt T (struct rep)             -> X.has ? <payload rule> : "none"
 //   c_struct / Ptr / Buffer / other -> a "<Type>" placeholder, never a C error
 // `nested` is true inside a literal (a struct field, a list element): there a
@@ -1598,6 +1599,7 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
     }
     if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
         AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
+        c_unwrap_array_payload(&payload);
         char inner[512]; snprintf(inner, sizeof inner, "(%s).value", cexpr);
         fprintf(out, "((%s).has ? ", cexpr);
         rae_value_to_str_expr(ctx, module, &payload, inner, nested, out);
@@ -1623,6 +1625,12 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         return;
     }
     bool is_c_struct = d && d->kind == AST_DECL_TYPE && has_property(d->as.type_decl.properties, "c_struct");
+    if (type->resolved_type && type->resolved_type->kind == TYPE_BUFFER && !type->is_opt) {
+        // (a Ptr's written name may be missing: an Array's element)
+        bool pointer = base.len == 0 || str_eq_cstr(base, "Ptr");
+        fprintf(out, pointer ? "(rae_String){(uint8_t*)\"<Ptr>\", 5}" : "(rae_String){(uint8_t*)\"<Buffer>\", 8}");
+        return;
+    }
     if (is_c_struct || type->generic_args || (d && d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params)
         || str_eq_cstr(base, "Ptr") || str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "Array")) {
         fprintf(out, "(rae_String){(uint8_t*)\"<%.*s>\", %d}", (int)base.len, base.data, (int)base.len + 2);
@@ -1652,17 +1660,19 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
 //   primitives, Char, Bool, enum   -> (A) == (B)          (an enum by ordinal)
 //   String                         -> rae_ext_rae_str_eq(A, B)
 //   user struct                    -> rae_eq_<T>_(&A, &B)     (generated)
-//   List(T), StringMap(V), IntMap(V) -> rae_eq_<type>_(&A, &B) (generated, recursive)
+//   List(T), Array(T, cap: N), StringMap(V), IntMap(V)
+//                                  -> rae_eq_<type>_(&A, &B) (generated, recursive)
 //   opt T (struct rep)             -> presence, then the payload rule
 //   Any                            -> rae_any_eq(A, B)
 //   Ptr / Buffer                   -> pointer IDENTITY, not the pointee
-//   c_struct / Array / other       -> memcmp of the bytes
+//   c_struct / other               -> memcmp of the bytes
 void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const AstTypeRef* type,
                            const char* aexpr, const char* bexpr, FILE* out) {
     CFuncContext lctx = {0}; lctx.compiler_ctx = ctx; lctx.module = (AstModule*)module;
     Str base = get_base_type_name(type);
     if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
         AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
+        c_unwrap_array_payload(&payload);
         char ai[512], bi[512];
         snprintf(ai, sizeof ai, "(%s).value", aexpr);
         snprintf(bi, sizeof bi, "(%s).value", bexpr);
@@ -1704,11 +1714,10 @@ void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const 
         return;
     }
     bool is_c_struct = d && d->kind == AST_DECL_TYPE && has_property(d->as.type_decl.properties, "c_struct");
-    bool is_array = type->resolved_type && type->resolved_type->kind == TYPE_ARRAY;
-    if (is_c_struct || is_array || type->generic_args
+    if (is_c_struct || type->generic_args
         || (d && d->kind == AST_DECL_TYPE && d->as.type_decl.generic_params)) {
-        // A foreign struct, an Array(T, cap: N) or a container this compiler
-        // has no per-type comparison for: the bytes.
+        // A foreign struct or a container this compiler has no per-type
+        // comparison for: the bytes.
         fprintf(out, "(memcmp(&(%s), &(%s), sizeof(%s)) == 0)", aexpr, bexpr, aexpr);
         return;
     }
@@ -3845,6 +3854,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "RAE_UNUSED static rae_String rae_log_text_%s_(const %s* this);\n", mangled, mangled);
   }
   emit_map_helper_declarations(ctx, out);
+  CArrayHelpers value_arrays = {0};
+  c_collect_array_helpers(ctx, module, &value_arrays, false);
+  c_emit_array_value_declarations(ctx, &value_arrays, out);
   fprintf(out, "\n");
   for (size_t si = 0; si < shape_count; si++) {
       const AstTypeDecl* td = &shapes[si].decl;
@@ -3974,6 +3986,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     free(done);
   }
   emit_map_helper_definitions(ctx, module, out);
+  c_emit_array_values(ctx, module, &value_arrays, out);
 
   // Layer 5 (docs/scope-exit-dealloc.md) — synthesised per-struct
   // drop fns. For every non-generic user struct that transitively
@@ -4100,7 +4113,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     };
   }
   CArrayHelpers arrays = {0};
-  c_collect_array_helpers(ctx, module, &arrays);
+  c_collect_array_helpers(ctx, module, &arrays, true);
   c_emit_array_drop_declarations(ctx, &arrays, out);
   // Forward declarations — each struct drop AND each container-drop
   // we plan to call from the bodies. The container-drop forward

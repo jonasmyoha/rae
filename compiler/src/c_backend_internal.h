@@ -426,7 +426,11 @@ const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* t
 /* c_array_helpers.c */
 typedef struct { const TypeInfo** infos; size_t count; size_t cap; } CArrayHelpers;
 bool c_has_deep_copy_helper(CFuncContext* ctx, const AstTypeRef* type);
-void c_collect_array_helpers(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays);
+bool c_is_array_type(const AstTypeRef* type);
+void c_unwrap_array_payload(AstTypeRef* payload);
+void c_collect_array_helpers(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays, bool owning);
+void c_emit_array_value_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);
+void c_emit_array_values(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
 void c_emit_array_drop_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);
 void c_emit_array_drops(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out);
 void c_emit_array_copy_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out);

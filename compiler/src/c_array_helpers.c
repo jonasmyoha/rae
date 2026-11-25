@@ -1,8 +1,8 @@
-/* The drop and the deep copy of an Array(T, cap: N) whose elements need one
- * (an Array(Float, cap: 16) gets neither: it is plain bytes). An Array has no
- * declaration and no fields, just N elements, so its helpers are a loop where a
- * struct's are a field walk (c_backend.c). Also: which types have a deep copy
- * helper at all. */
+/* The text and the comparison of every Array(T, cap: N), and the drop and the
+ * deep copy of one whose elements need them (an Array(Float, cap: 16) is plain
+ * bytes). An Array has no declaration and no fields, just N elements, so its
+ * helpers are a loop where a struct's are a field walk (c_backend.c). Also:
+ * which types have a deep copy helper at all. */
 #include <stdio.h>
 #include <string.h>
 
@@ -38,11 +38,30 @@ static const TypeInfo* array_info(const AstTypeRef* type) {
   return info && info->kind == TYPE_ARRAY ? info : NULL;
 }
 
+/* An Array of a known element type and cap (a value, or a view / mod of one; not
+ * an optional): it has a generated text and comparison. */
+bool c_is_array_type(const AstTypeRef* type) {
+  if (!type || type->is_opt) return false;
+  /* (a narrowed binding may still be resolved as the optional) */
+  const TypeInfo* info = array_info(type);
+  if (info) return info->as.array.base->kind != TYPE_GENERIC_PARAM && info->as.array.base->kind != TYPE_VOID;
+  return str_eq_cstr(get_base_type_name(type), "Array") && rae_array_ref_cap(type) >= 0;
+}
+
+/* `payload` is what an optional holds, its type still resolved as the optional:
+ * an Array is told by its resolved type. */
+void c_unwrap_array_payload(AstTypeRef* payload) {
+  TypeInfo* info = payload->resolved_type;
+  if (info && info->kind == TYPE_OPT && info->as.opt.base && info->as.opt.base->kind == TYPE_ARRAY)
+    payload->resolved_type = info->as.opt.base;
+}
+
 /* (an Array of Arrays: the inner one first) */
-static void add_array(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays, const TypeInfo* info) {
+static void add_array(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays, const TypeInfo* info,
+                      bool owning) {
   for (size_t k = 0; k < arrays->count; k++) if (arrays->infos[k] == info) return;
-  if (!type_needs_cascade_drop(ctx, module, sema_type_ref_of(ctx, (TypeInfo*)info), 0)) return;
-  if (info->as.array.base->kind == TYPE_ARRAY) add_array(ctx, module, arrays, info->as.array.base);
+  if (owning && !type_needs_cascade_drop(ctx, module, sema_type_ref_of(ctx, (TypeInfo*)info), 0)) return;
+  if (info->as.array.base->kind == TYPE_ARRAY) add_array(ctx, module, arrays, info->as.array.base, owning);
   if (arrays->count == arrays->cap) {
     size_t cap = arrays->cap ? arrays->cap * 2 : 32;
     const TypeInfo** grown = arena_alloc(ctx->ast_arena, cap * sizeof *grown);
@@ -53,13 +72,13 @@ static void add_array(CompilerContext* ctx, const AstModule* module, CArrayHelpe
   arrays->infos[arrays->count++] = info;
 }
 
-/* Every Array the program's types name */
-void c_collect_array_helpers(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays) {
+/* Every Array the program's types name; `owning`: whose elements own memory */
+void c_collect_array_helpers(CompilerContext* ctx, const AstModule* module, CArrayHelpers* arrays, bool owning) {
   for (size_t i = 0; i < ctx->generic_type_count; i++) {
     const TypeInfo* info = array_info(ctx->generic_types[i]);
     if (info && info->as.array.base && info->as.array.base->kind != TYPE_GENERIC_PARAM
         && info->as.array.base->kind != TYPE_VOID)
-      add_array(ctx, module, arrays, info);
+      add_array(ctx, module, arrays, info, owning);
   }
 }
 
@@ -123,7 +142,9 @@ void c_emit_array_copies(CompilerContext* ctx, const AstModule* module, const CA
     const AstTypeRef* element = sema_type_ref_of(ctx, info->as.array.base);
     fprintf(out, "RAE_UNUSED static void rae_deep_copy_%s(%s* dst, const %s* src) {\n", name, name, name);
     fprintf(out, "  for (int64_t __i = 0; __i < %lld; __i++) ", (long long)info->as.array.count);
-    if (element->is_opt && rae_opt_is_struct_rep(&fctx, element))
+    /* (an Array that holds a Task is never copied: sema) */
+    bool task = str_eq_cstr(get_base_type_name(element), "Task");
+    if (element->is_opt && !task && rae_opt_is_struct_rep(&fctx, element))
       fprintf(out, "rae_deep_copy_%s(&dst->v[__i], &src->v[__i]);\n", rae_opt_type_name(&fctx, element));
     else if (info->as.array.base->kind == TYPE_STRING)
       fprintf(out, "dst->v[__i] = rae_string_copy(src->v[__i]);\n");
@@ -133,5 +154,36 @@ void c_emit_array_copies(CompilerContext* ctx, const AstModule* module, const CA
     else
       fprintf(out, "dst->v[__i] = src->v[__i];\n");
     fprintf(out, "}\n\n");
+  }
+}
+
+void c_emit_array_value_declarations(CompilerContext* ctx, const CArrayHelpers* arrays, FILE* out) {
+  for (size_t i = 0; i < arrays->count; i++) {
+    const char* name = array_name(ctx, arrays->infos[i]);
+    fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this);\n", name, name);
+    fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b);\n", name, name, name);
+  }
+}
+
+/* The text as a List's, `[1, 2]`, and the comparison element by element, with
+ * the rules of the element type */
+void c_emit_array_values(CompilerContext* ctx, const AstModule* module, const CArrayHelpers* arrays, FILE* out) {
+  for (size_t i = 0; i < arrays->count; i++) {
+    const TypeInfo* info = arrays->infos[i];
+    const char* name = array_name(ctx, info);
+    const AstTypeRef* element = sema_type_ref_of(ctx, info->as.array.base);
+    long long count = (long long)info->as.array.count;
+    fprintf(out, "RAE_UNUSED static rae_String rae_to_str_%s_(const %s* this) {\n", name, name);
+    fprintf(out, "  rae_String __out = (rae_String){(uint8_t*)\"[\", 1};\n"
+                 "  for (int64_t __i = 0; __i < %lld; __i++) {\n"
+                 "    if (__i > 0) __out = rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\", \", 2});\n"
+                 "    __out = rae_ext_rae_str_concat(__out, ", count);
+    rae_value_to_str_expr(ctx, module, element, "this->v[__i]", true, out);
+    fprintf(out, ");\n  }\n"
+                 "  return rae_ext_rae_str_concat(__out, (rae_String){(uint8_t*)\"]\", 1});\n}\n\n");
+    fprintf(out, "RAE_UNUSED static rae_Bool rae_eq_%s_(const %s* a, const %s* b) {\n", name, name, name);
+    fprintf(out, "  for (int64_t __i = 0; __i < %lld; __i++) {\n    if (!(", count);
+    rae_value_equals_expr(ctx, module, element, "a->v[__i]", "b->v[__i]", out);
+    fprintf(out, ")) return 0;\n  }\n  return 1;\n}\n\n");
   }
 }

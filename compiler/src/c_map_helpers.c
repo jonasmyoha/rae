@@ -28,11 +28,11 @@ bool c_is_map_type(CompilerContext* ctx, const AstTypeRef* type) {
 }
 
 /* Does `type` have its own generated text and comparison (`rae_to_str_<T>_`,
- * `rae_eq_<T>_`): a List(T), a map, or an instance of a generic struct? */
+ * `rae_eq_<T>_`): a List(T), a map, an Array, or an instance of a generic struct? */
 bool c_has_generic_value_helpers(CompilerContext* ctx, const AstTypeRef* type) {
   if (!type) return false;
   return (str_eq_cstr(get_base_type_name(type), "List") && type->generic_args)
-      || c_is_map_type(ctx, type) || generic_struct_template(ctx, type);
+      || c_is_map_type(ctx, type) || c_is_array_type(type) || generic_struct_template(ctx, type);
 }
 
 /* The i-th registered type's C name when it is a map that no earlier one names. */

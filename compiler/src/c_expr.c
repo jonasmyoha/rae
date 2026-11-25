@@ -274,6 +274,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         (void)payload_is_user_struct;
         {
             AstTypeRef payload = *tr; payload.is_opt = false; payload.next = NULL;
+            c_unwrap_array_payload(&payload);
             char inner[96];
             // An `opt String` made by a call (`"{list.copyAt(index: 0)}"`)
             // owns its String, and unlike a plain String return it is not in
@@ -338,7 +339,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // A map and a generic struct instance (Pair(String)) the same way: the
     // generated rae_to_str_<instance>_ (c_map_helpers.c, c_struct_shapes.c).
     const AstTypeRef* generic_sub = NULL;
-    if (tr && !tr->is_opt && tr->generic_args && !str_eq_cstr(base, "List")) {
+    if (tr && !tr->is_opt && (tr->generic_args || c_is_array_type(tr)) && !str_eq_cstr(base, "List")) {
         generic_sub = tr;
         if (ctx->generic_params && ctx->generic_args) {
             const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);

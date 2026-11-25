@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.93, 2026-11-25: text and `is` of an Array
+
+- `log(array)`, `"{array}"` and `array.toString()` of an `Array(T, cap: N)` write its elements as a List's (`[1, 2]`),
+  also inside a List, a map, a struct, an optional, a task's result and a generic function. They were errors of the C
+  compiler, and `<Array>` inside another value.
+- `a is b` and `equals(a:, b:)` of two Arrays, and of values that hold them, compare element by element with the rule of
+  T. They were errors of the C compiler, or compared the bytes: Arrays of Strings with the same text were not equal, and
+  neither were `0.0` and `-0.0`.
+- An `Array(opt Task(T), cap: N)` compiles.
+- Case 1678.
+
 ## 0.4.92, 2026-11-25: a search of files done again
 
 - A file browser that searches the same words again (after a move, a trash, a change on the disk) shows what it found
