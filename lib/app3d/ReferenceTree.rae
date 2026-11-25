@@ -9,7 +9,9 @@
 # instance batch, one draw of its leaf pass over its trees' placements
 # (treeGen/LeafPass), the shadows as two instance batches. They have no
 # physics bodies: the walker passes through their trunks.
+import Filesystem
 import Sys
+import Target
 import Math
 import Vec3
 open Scene3d
@@ -33,8 +35,14 @@ open treeGen/LeafPass
 open treeGen/TreeGrower
 open treeGen/TreeKind
 
-# The bark picture, painted once
-const referenceBarkImagePath: String = ".rae/treeGen/warmBark.png"
+# The bark picture, painted once: beside the project on a desktop, elsewhere (a phone, whose working
+# folder is read-only) in the platform's own folder for an app's files
+func referenceBarkFolder() ret String {
+  if Target.isDesktopOs {
+    ret ".rae/treeGen"
+  }
+  ret Filesystem.trimTrailingSeparators(path: Filesystem.prefDir(org: "rae", app: "treeGen"))
+}
 
 # Floats per tree in a stand's list: x y z yaw scale
 const referenceStandFloats: Int = 5
@@ -62,14 +70,16 @@ type ReferenceTree {
 # The bark picture's layer in the renderer's material images (painted the
 # first time), or -1
 func referenceBarkLayer(renderer: mod DeferredRenderer) ret Int {
-  if not Sys.exists(path: referenceBarkImagePath) {
-    let made: Bool = Sys.makeDir(path: ".rae/treeGen")
-    if not writeBarkImage(barkKind: warmBroadleafKind().bark, path: referenceBarkImagePath) {
-      log("[referenceTree] could not write the bark picture {referenceBarkImagePath}")
+  let folder: String = referenceBarkFolder()
+  let path: String = "{folder}/warmBark.png"
+  if not Sys.exists(path: path) {
+    let made: Bool = Sys.makeDir(path: folder)
+    if not writeBarkImage(barkKind: warmBroadleafKind().bark, path: path) {
+      log("[referenceTree] could not write the bark picture {path}")
       ret -1
     }
   }
-  ret rendererLoadSurfaceImage(renderer: renderer, path: referenceBarkImagePath)
+  ret rendererLoadSurfaceImage(renderer: renderer, path: path)
 }
 
 # Grown variety `seed` at every `variety`-th place of `stand`

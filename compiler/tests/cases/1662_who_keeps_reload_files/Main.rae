@@ -1,0 +1,24 @@
+# A program keeps files for its next run (hot-reload state, launch counter, window place) when a
+# supervisor or `rae run` gave it a folder for them, or on a desktop; not on a phone or the web,
+# where the working folder may be read-only and every attempt is denied.
+import Sys
+open HotReload
+
+func say(name: view String, channel: view String, desktop: view Bool) {
+  log("{name}: {keepsReloadFiles(channel: channel, desktop: desktop)}")
+}
+
+func main() {
+  say(name: "a supervisor's child on a desktop", channel: "/work/.rae/apps/game", desktop: true)
+  say(name: "a program started alone on a desktop", channel: "", desktop: true)
+  say(name: "a phone's app", channel: "", desktop: false)
+  say(name: "a phone's app with a folder given", channel: "/data/reload", desktop: false)
+
+  # This run, on a desktop: the state goes round
+  let written: Bool = writeHotReloadStateFor(appId: "case1662", state: "here")
+  log(
+    "saves {savesReloadState()}, written {written}, read {readHotReloadStateFor(appId: "case1662")}"
+  )
+  let removed: Bool = Sys.delete(path: statePathFor(appId: "case1662"))
+  log("removed {removed}")
+}

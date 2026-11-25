@@ -30,6 +30,7 @@
 # timestamp are recorded but not consumed by the runtime — they're
 # for log forensics and supervisor-side dedup.
 import Sys
+import Target
 open FileNotify
 
 # ----- paths ----------------------------------------------------------
@@ -54,6 +55,19 @@ func dir() pub ret String {
     ret override
   }
   ret ".rae"
+}
+
+# Who keeps files for the next run (the state, the launch counter): a program a supervisor or `rae
+# run` started (`channel`, its RAE_HOT_RELOAD_DIR), or any on a desktop, where the next run may be a
+# reload. Not a phone's or the web's: nothing restarts it, and its working folder may be read-only
+# (an iOS bundle: the system denied, and logged, each attempt).
+func keepsReloadFiles(channel: view String, desktop: view Bool) ret Bool {
+  ret channel.length() > 0 or desktop
+}
+
+# Does this program? An app asks before it puts its state into text.
+func savesReloadState() ret Bool {
+  ret keepsReloadFiles(channel: getEnv(name: "RAE_HOT_RELOAD_DIR"), desktop: Target.isDesktopOs)
 }
 
 func statePath() pub ret String {
@@ -99,9 +113,12 @@ func readHotReloadState() pub ret String {
 # Save state for the next run. Apps should call this just before
 # `exit(0)` on a `Reload` signal. Returns false if the write
 # failed (most often because `.rae/` doesn't exist; the supervisor
-# normally pre-creates it, but apps can call `ensureHotReloadDir()`
-# defensively).
+# normally pre-creates it), and, with nothing tried, where no state is
+# kept (savesReloadState).
 func writeHotReloadState(state: view String) pub ret Bool {
+  if not savesReloadState() {
+    ret false
+  }
   ret writeFile(path: statePath(), content: state)
 }
 
@@ -126,6 +143,9 @@ func readHotReloadStateFor(appId: view String) pub ret String {
 }
 
 func writeHotReloadStateFor(appId: view String, state: view String) pub ret Bool {
+  if not savesReloadState() {
+    ret false
+  }
   makeDir(path: dir())
   ret writeFile(path: statePathFor(appId: appId), content: state)
 }
@@ -175,8 +195,12 @@ func restartFresh() ret Bool {
 #
 # Call ONCE at startup. Returns 1 on the first ever launch. A corrupt or
 # missing file restarts at 1 rather than failing: this is a diagnostic,
-# and it should never be the reason an app does not boot.
+# and it should never be the reason an app does not boot. Always 1 where no files are kept
+# (savesReloadState).
 func nextReloadGeneration() pub ret Int {
+  if not savesReloadState() {
+    ret 1
+  }
   var raw: String = ""
   unsafe {
     raw = rae_ext_rae_sys_read_file(path: generationPath())

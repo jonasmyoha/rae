@@ -19,6 +19,7 @@
 # gpu2d input surface, and everything below is built on them.
 import Sys
 import Gpu2d
+import Target
 open Filesystem
 
 # Whole-file read. `Sys.readFile` returns `opt String`, and the C backend has a
@@ -146,7 +147,9 @@ func writeWindowGeometry(windowGeometry: mod WindowGeometry) {
   }
   let w: Int = (Gpu2d.windowWidth().toFloat() / scale).toInt()
   let h: Int = (Gpu2d.windowHeight().toFloat() / scale).toInt()
-  if w <= 0 or h <= 0 {
+  # Only a desktop has windows to move: on a phone a turn is a resize too, and its working folder
+  # may be read-only
+  if w <= 0 or h <= 0 or not Target.isDesktopOs {
     ret
   }
   if x is windowGeometry.lastX and y is windowGeometry.lastY and w is windowGeometry.lastW and h is windowGeometry.lastH {
