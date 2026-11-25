@@ -7,6 +7,7 @@
 
 #include "c_backend_internal.h"
 #include "c_binary.h"
+#include "c_decl_index.h"
 #include "ownership.h"
 #include "sema.h"
 
@@ -76,4 +77,25 @@ int c_discard_builtin_temp(CFuncContext* ctx, const AstExpr* expr) {
   if (str_eq_cstr(get_base_type_name(type), "String") && !type->is_opt) return -1;
   if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return -1;
   return register_stmt_temp(ctx, type, true);
+}
+
+/* Is the result of the method call `call` a value of its own (`map.values()`)?
+ * Of the functions it could mean (those of its name that take as many values),
+ * none answers a reference or an alias. */
+bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call) {
+  size_t values = 1;
+  for (const AstCallArg* a = call->as.method_call.args; a; a = a->next) values++;
+  size_t count = 0, found = 0;
+  const size_t* named = decl_index_functions(ctx->compiler_ctx, call->as.method_call.method_name, &count);
+  for (size_t k = 0; k < count; k++) {
+    const AstFuncDecl* fd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+    if (fd->specialization_args) continue;
+    size_t params = 0;
+    for (const AstParam* p = fd->params; p; p = p->next) params++;
+    if (params != values) continue;
+    if (!fd->body || !fd->returns || !fd->returns->type || fd->returns->type->is_view || fd->returns->type->is_mod
+        || rae_func_returns_alias(ctx->compiler_ctx, fd)) return false;
+    found++;
+  }
+  return found > 0;
 }

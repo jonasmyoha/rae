@@ -1,0 +1,211 @@
+# An optional given to a generic function is its T, whole: a local, `own` of one, a call's result, a
+# field, an element, a task's result, there or `none`; to `view T`, `copy T`, `own T`, and back as
+# T,
+# in a generic struct and a list. A plain result is wrapped where an optional is wanted. Nothing
+# leaks.
+import collections/StringMap
+
+enum Kind { small, large }
+
+type Note {
+  text: String = ""
+}
+
+type Box(T: type) {
+  held: T
+}
+
+type Shelf {
+  note: opt Note = none
+  words: opt List(String) = none
+}
+
+func noteOf(text: view String) ret Note {
+  ret Note { text: "{text}!" }
+}
+
+func someInt() ret opt Int {
+  ret 7
+}
+
+func noInt() ret opt Int {
+  ret none
+}
+
+func someText() ret opt String {
+  ret "text {1}"
+}
+
+func someNote(there: view Bool) ret opt Note {
+  if there {
+    ret noteOf(text: "some")
+  }
+  ret none
+}
+
+func someWords() ret opt List(String) {
+  ret List(String) { "word {1}" }
+}
+
+func someKind() ret opt Kind {
+  ret Kind.large
+}
+
+func textOf(T: type, value: view T) ret String {
+  ret "{value}"
+}
+
+func textOfCopy(T: type, value: copy T) ret String {
+  ret "{value}"
+}
+
+func textOfOwn(T: type, value: own T) ret String {
+  ret "{value}"
+}
+
+func back(T: type, value: copy T) ret T {
+  ret value
+}
+
+func moved(T: type, value: own T) ret T {
+  ret own value
+}
+
+func through(T: type, value: own T) ret T {
+  let first: T = value
+  var second: T = first
+  second = value
+  ret second
+}
+
+func boxOf(T: type, value: copy T) ret Box(T) {
+  ret Box(T) { held: value }
+}
+
+func boxInLocal(T: type, value: copy T) ret Box(T) {
+  let box: Box(T) = { held: value }
+  ret box
+}
+
+func boxOfView(T: type, value: view T) ret Box(T) {
+  ret Box(T) { held: value }
+}
+
+func boxOfOwn(T: type, value: own T) ret Box(T) {
+  ret Box(T) { held: own value }
+}
+
+func boxThrough(T: type, value: copy T) ret Box(T) {
+  ret boxOf(value: value)
+}
+
+func listOf(T: type, value: copy T) ret List(T) {
+  let list: List(T) = { value, value }
+  ret list
+}
+
+func addedOwn(T: type, value: own T) ret List(T) {
+  var list: List(T) = {}
+  list.add(value: own value)
+  ret list
+}
+
+func last(T: type, this: view List(T)) ret opt T {
+  ret this.copyAt(index: this.length - 1)
+}
+
+func two(
+  A: type
+  B: type
+  a: copy A
+  b: own B
+) ret String {
+  ret "{a} {b}"
+}
+
+# each of the functions above, for one optional
+func all(T: type, value: view T) {
+  log("{textOf(value: value)} {textOfCopy(value: value)} {textOfOwn(value: value)}")
+  log("{back(value: value)} {moved(value: value)} {through(value: value)}")
+  let a: Box(T) = boxOf(value: value)
+  let b: Box(T) = boxInLocal(value: value)
+  let c: Box(T) = boxOfView(value: value)
+  let d: Box(T) = boxOfOwn(value: value)
+  let e: Box(T) = boxThrough(value: value)
+  log("{a.held} {b.held} {c.held} {d.held} {e.held}")
+  let list: List(T) = listOf(value: value)
+  let added: List(T) = addedOwn(value: value)
+  log("{list} {added} {two(a: 1, b: value)}")
+}
+
+func sources() {
+  all(value: someInt())
+  all(value: noInt())
+  all(value: someText())
+  all(value: someNote(there: true))
+  all(value: someNote(there: false))
+  all(value: someWords())
+  all(value: someKind())
+  let shelf: Shelf = { words: List(String) { "shelf {1}" } }
+  all(value: shelf.words)
+  all(value: shelf.note)
+  let held: opt String = someText()
+  all(value: held)
+  log("still {held}")
+}
+
+func straight() {
+  let held: opt Note = someNote(there: true)
+  let kept: opt Note = moved(value: own held)
+  let other: opt Note = someNote(there: true)
+  moved(value: own other)
+  moved(value: someNote(there: true))
+  log("{kept} {textOfOwn(value: someNote(there: true))} {textOfOwn(value: noInt())}")
+  let notes: List(Note) = { noteOf(text: "a"), noteOf(text: "b") }
+  let empty: List(Int) = {}
+  log("{textOf(value: notes.copyAt(index: 1))} {textOf(value: notes.copyAt(index: 9))}")
+  log("{textOf(value: notes.last())} {textOf(value: last(notes))} {textOf(value: empty.last())}")
+  var map: StringMap(Note) = {}
+  map.set(k: "a", value: noteOf(text: "in map"))
+  log("{textOfOwn(value: map.get(k: "a"))} {textOfOwn(value: map.get(k: "b"))}")
+  var optionals: List(opt String) = {}
+  optionals.add(value: someText())
+  optionals.add(value: none)
+  log("{textOf(value: optionals.pop())} {textOf(value: optionals.pop())}")
+  let task: Task(opt Note) = spawn someNote(there: true)
+  log(textOfOwn(value: task.get()))
+}
+
+# the type of a generic call given straight to another
+func calls() {
+  log(textOf(value: boxOf(value: 3)))
+  log(textOf(value: boxOf(value: someText())))
+  log(textOf(value: back(value: boxOf(value: back(value: "x {1}")))))
+  log("{back(value: back(value: back(value: back(value: back(value: someInt())))))}")
+  var map: StringMap(opt Int) = {}
+  map.set(k: "a", value: 1)
+  log("{textOf(value: map.values())} {textOf(value: map.keys())}")
+  log(map.values())
+  log("{map.values()} {map.values().length} {map.values() is map.values()}")
+}
+
+# a plain result, where an optional is wanted
+func wrapped() {
+  let number: opt Int = back(value: 7)
+  let note: Note = noteOf(text: "plain")
+  let a: opt Note = back(value: note)
+  let b: opt Note = moved(value: noteOf(text: "made"))
+  var c: opt List(Int) = none
+  let numbers: List(Int) = { 1 }
+  c = back(value: numbers)
+  let d: opt String = back(value: "d {1}")
+  let e: opt Box(Int) = boxOf(value: 4)
+  log("{number} {a} {b} {c} {d} {e}")
+}
+
+func main() {
+  sources()
+  straight()
+  calls()
+  wrapped()
+}

@@ -447,7 +447,11 @@ int g_type_equal_depth = 0;
 bool type_refs_equal(const AstTypeRef* a, const AstTypeRef* b) {
     if (a == b) return true;
     if (!a || !b) return false;
-    if (a->resolved_type && b->resolved_type && a->resolved_type == b->resolved_type) return true;
+    if (a->resolved_type && b->resolved_type && a->resolved_type == b->resolved_type) {
+        /* (`opt Int` may carry its payload's type: it is not `Int`) */
+        bool opt = a->resolved_type->kind == TYPE_OPT;
+        return opt || a->is_opt == b->is_opt;
+    }
     if ((uintptr_t)a < 0x1000 || (uintptr_t)b < 0x1000) return false;
     if (g_type_equal_depth > 32) return false;
     g_type_equal_depth++;
@@ -1447,6 +1451,10 @@ static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInf
         tr->resolved_type = (TypeInfo*)ti;
         return tr;
     }
+    /* an optional by its payload's name: without one, a generic T that is an
+     * optional was an Any */
+    if (ti->kind == TYPE_OPT && ti->as.opt.base && ti->as.opt.base->kind != TYPE_VOID
+        && ti->as.opt.base->kind != TYPE_GENERIC_PARAM) return sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)ti);
     if (ti->kind == TYPE_OPT) tr->is_opt = true;
     tr->resolved_type = (TypeInfo*)ti;
     return tr;
@@ -1730,7 +1738,66 @@ static bool type_ref_mentions_params(const AstTypeRef* tr, const AstIdentifierPa
   return false;
 }
 
+/* The result type of a call of a generic function that the call names alone (one
+ * of that name takes these arguments): its return type with the type parameters
+ * the arguments bind. NULL when that cannot be told. */
+static const AstTypeRef* c_generic_call_type(CFuncContext* ctx, const AstExpr* expr) {
+    size_t arg_count = 0;
+    for (const AstCallArg* a = expr->as.call.args; a; a = a->next) arg_count++;
+    size_t named_count = 0;
+    const size_t* named = decl_index_functions(ctx->compiler_ctx, expr->as.call.callee->as.ident, &named_count);
+    const AstFuncDecl* callee = NULL;
+    for (size_t k = 0; k < named_count; k++) {
+        const AstFuncDecl* fd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+        if (fd->specialization_args) continue;
+        size_t params = 0;
+        for (const AstParam* p = fd->params; p; p = p->next) params++;
+        if (params != arg_count || !c_call_names_fit(expr, fd)) continue;
+        if (callee) return NULL;
+        callee = fd;
+    }
+    if (!callee || !callee->generic_params || !callee->returns || callee->returns->next || !callee->returns->type) return NULL;
+    const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t count = 0;
+    const AstParam* p = callee->params;
+    for (const AstCallArg* a = expr->as.call.args; a && p && count < 32; a = a->next, p = p->next) {
+        const AstTypeRef* type = infer_expr_type_ref(ctx, c_without_own(a->value));
+        if (type && ctx->generic_params && ctx->generic_args)
+            type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
+        patterns[count] = p->type;
+        concretes[count++] = type;
+    }
+    const AstTypeRef* bound = infer_generic_args_multi(ctx->compiler_ctx, callee, patterns, concretes, count);
+    return bound ? substitute_type_ref(ctx->compiler_ctx, callee->generic_params, bound, callee->returns->type) : NULL;
+}
+
+static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstExpr* expr);
+
+/* The type of a call asks for its arguments' types, more than once each: a
+ * chain of calls in calls (`f(value: f(value: ...))`) took twice as long per
+ * level. So within one question the type of each call is worked out once. (Not
+ * longer: what a name means changes as the body is walked.) */
+#define INFER_CALLS_MAX 128
+static _Thread_local struct { const AstExpr* expr; const AstTypeRef* type; } s_infer_calls[INFER_CALLS_MAX];
+static _Thread_local int s_infer_call_count = 0;
+static _Thread_local int s_infer_depth = 0;
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
+    if (!expr) return NULL;
+    if (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL) return infer_expr_type_ref_once(ctx, expr);
+    if (s_infer_depth == 0) s_infer_call_count = 0;
+    for (int i = 0; i < s_infer_call_count; i++)
+        if (s_infer_calls[i].expr == expr) return s_infer_calls[i].type;
+    s_infer_depth++;
+    const AstTypeRef* type = infer_expr_type_ref_once(ctx, expr);
+    s_infer_depth--;
+    if (s_infer_call_count < INFER_CALLS_MAX) {
+        s_infer_calls[s_infer_call_count].expr = expr;
+        s_infer_calls[s_infer_call_count++].type = type;
+    }
+    return type;
+}
+
+static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     // Cache primitive literal type-refs in static storage so callers can hold a
     // pointer past the function return.
@@ -2015,6 +2082,10 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                     }
                 }
                 if (!best) best = misnamed;
+                if (!best) {
+                    const AstTypeRef* generic_result = c_generic_call_type(ctx, expr);
+                    if (generic_result) return generic_result;
+                }
                 if (best && best->returns) {
                     const AstTypeRef* rt2 = best->returns->type;
                     // If the return is a generic type param (or `opt <param>`),
@@ -2055,6 +2126,8 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                                 w->is_opt = rt2->is_opt;
                                 w->is_view = rt2->is_view;
                                 w->is_mod = rt2->is_mod;
+                                if (w->is_opt && w->resolved_type && w->resolved_type->kind != TYPE_OPT)
+                                    w->resolved_type = type_get_opt(ctx->compiler_ctx->type_registry, w->resolved_type);
                                 return w;
                             }
                             return concrete;
@@ -2217,6 +2290,8 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                                     w->is_opt = rt->is_opt;
                                     w->is_view = rt->is_view;
                                     w->is_mod = rt->is_mod;
+                                    if (w->is_opt && w->resolved_type && w->resolved_type->kind != TYPE_OPT)
+                                        w->resolved_type = type_get_opt(ctx->compiler_ctx->type_registry, w->resolved_type);
                                     return w;
                                 }
                                 return ga;
@@ -2224,6 +2299,16 @@ const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
                         }
                     }
                 }
+            }
+            /* `map.values()` is `ret List(V)`: its V is the receiver's */
+            const AstFuncDecl* tmpl = mfd->generic_params ? mfd
+                : mfd->generic_template && mfd->generic_template->kind == AST_DECL_FUNC ? &mfd->generic_template->as.func_decl : NULL;
+            if (tmpl && tmpl->params && !mfd->specialization_args && type_ref_mentions_params(rt, tmpl->generic_params)) {
+                const AstTypeRef* receiver = infer_expr_type_ref(ctx, expr->as.method_call.object);
+                if (receiver && ctx->generic_params && ctx->generic_args)
+                    receiver = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)receiver);
+                const AstTypeRef* bound = receiver ? infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->params->type, receiver) : NULL;
+                if (bound) return substitute_type_ref(ctx->compiler_ctx, tmpl->generic_params, bound, tmpl->returns->type);
             }
             return rt;
         }

@@ -77,6 +77,12 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
   }
   bool is_place = value && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
                             || value->kind == AST_EXPR_INDEX);
+  /* an optional that is in a place stays there: the element is a copy of it */
+  if (is_place && !elem_is_any && elem_type && elem_type->is_opt && !elem_type->is_view && !elem_type->is_mod
+      && rae_opt_is_struct_rep(ctx, elem_type)) {
+    emit_optional_boxed_expr(ctx, elem_type, value, out);
+    return;
+  }
   bool plain_type = elem_type && !elem_type->is_view && !elem_type->is_mod && !elem_type->is_opt;
   if (is_place && plain_type && !elem_is_any && elem_is_string) {
     fprintf(out, "rae_string_copy(");
@@ -505,6 +511,9 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
           || value->kind == AST_EXPR_INDEX)) {
     const AstTypeRef* value_tr = infer_expr_type_ref(ctx, value);
+    /* (a `copy T` / `own T` parameter, or a `T` local, whose T is an optional) */
+    if (value_tr && ctx->generic_params && ctx->generic_args)
+      value_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)value_tr);
     AstTypeRef payload = {0};
     AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                                   ctx->generic_args, (AstTypeRef*)opt_type);

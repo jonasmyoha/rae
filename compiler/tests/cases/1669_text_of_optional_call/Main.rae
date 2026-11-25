@@ -1,0 +1,81 @@
+# The text of an optional that a call or a task's get hands over, on its own and inside a text: what
+# it holds is freed once it is written.
+import collections/StringMap
+
+type Note {
+  text: String = ""
+}
+
+type Pair(T: type) {
+  first: T
+}
+
+func note() ret opt Note {
+  ret Note { text: "n {1}" }
+}
+
+func list() ret opt List(String) {
+  ret List(String) { "w {1}" }
+}
+
+func pair() ret opt Pair(String) {
+  ret Pair(String) { first: "p {1}" }
+}
+
+func map() ret opt StringMap(Int) {
+  var made: StringMap(Int) = {}
+  made.set(k: "a", value: 1)
+  ret made
+}
+
+func text() ret opt String {
+  ret "t {1}"
+}
+
+func number() ret opt Int {
+  ret 3
+}
+
+func none1() ret opt Note {
+  ret none
+}
+
+func words(number: view Int) ret List(String) {
+  ret List(String) { "w {number}" }
+}
+
+func main() {
+  log("{note()} {list()} {pair()} {map()} {text()} {number()} {none1()}")
+  log(note())
+  log(list())
+  log(pair())
+  log(map())
+  log(text())
+  log(number())
+  log(none1())
+  let a: Task(opt Note) = spawn note()
+  let b: Task(opt List(String)) = spawn list()
+  let c: Task(opt Pair(String)) = spawn pair()
+  let d: Task(opt StringMap(Int)) = spawn map()
+  let e: Task(opt String) = spawn text()
+  let f: Task(opt Int) = spawn number()
+  log("{a.get()} {b.get()} {c.get()} {d.get()} {e.get()} {f.get()}")
+  let g: Task(opt Note) = spawn note()
+  let h: Task(opt List(String)) = spawn list()
+  let i: Task(opt String) = spawn text()
+  log(g.get())
+  log(h.get())
+  log(i.get())
+  let j: Task(List(String)) = spawn words(number: 1)
+  let k: Task(StringMap(Int)) = spawn mapOf()
+  log("{j.get()} {k.get()}")
+  let notes: List(Note) = { Note { text: "x {1}" } }
+  log("{notes.copyAt(index: 0)} {notes.viewAt(index: 0)} {notes.copyAt(index: 4)}")
+  log("{note().toString()} {text().toString()}")
+}
+
+func mapOf() ret StringMap(Int) {
+  var made: StringMap(Int) = {}
+  made.set(k: "b", value: 2)
+  ret made
+}

@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.87, 2026-11-25: optionals and generic functions
+
+- An optional given to a generic function is its T, whole, wherever it comes from: a call's result, `own` of a local, a
+  task's result. A call's was an error of the C compiler.
+- The type of a generic call is known where it is given straight to another (`textOf(value: pairOf(value: 3))`,
+  `textOf(value: map.values())`).
+- A plain result of a generic call is wrapped where an optional is wanted (`let number: opt Int = back(value: 7)`).
+- `Box(T) { held: value }` and `{ value, value }` copy an optional that is in a place; the box or list and the place
+  freed the same memory.
+- The text of an optional that a call hands over (`"{note()}"`, `log(task.get())`) frees what it holds, and works for a
+  List, a map and a generic struct.
+- `log(map.values())` frees the list.
+- Cases 1668 and 1669.
+
 ## 0.4.86, 2026-11-25: a call whose result nobody keeps
 
 - A call written as a statement (`words(count: 1)`, `list.pop()`, `map.values()`) drops its result at the end of the

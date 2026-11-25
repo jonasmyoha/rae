@@ -1370,10 +1370,11 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 if (arg_val->kind == AST_EXPR_CALL && arg_val->decl_link && arg_val->decl_link->kind == AST_DECL_FUNC
                     && arg_val->decl_link->as.func_decl.body)
                     fresh_list = !rae_func_returns_alias(ctx->compiler_ctx, &arg_val->decl_link->as.func_decl);
+                if (arg_val->kind == AST_EXPR_METHOD_CALL) fresh_list = c_method_makes_its_result(ctx, arg_val);
                 if (arg_val->kind == AST_EXPR_METHOD_CALL && str_eq_cstr(arg_val->as.method_call.method_name, "get")) {
                     const TypeInfo* receiver = arg_val->as.method_call.object ? arg_val->as.method_call.object->resolved_type : NULL;
                     while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
-                    fresh_list = receiver && receiver->kind == TYPE_TASK;
+                    if (receiver && receiver->kind == TYPE_TASK) fresh_list = true;
                 }
                 if (fresh_list) emit_drop_for_value(ctx, out, &list_tr, "__logged", true);
                 fprintf(out, " }))");
@@ -1409,7 +1410,10 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC &&
             ctx->has_expected_type && !expected_is_any && !expr->as.call.generic_args) {
             const AstFuncDecl* tmpl = &fd->generic_template->as.func_decl;
-            if (tmpl->returns && tmpl->returns->type) {
+            /* (an optional that is wanted takes the plain result of a T that is none) */
+            bool wraps = ctx->expected_type.is_opt && tmpl->returns && tmpl->returns->type && !tmpl->returns->type->is_opt
+                && !fd->specialization_args->is_opt;
+            if (tmpl->returns && tmpl->returns->type && !wraps) {
                 AstTypeRef* re_inferred = infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->returns->type, &ctx->expected_type);
                 if (re_inferred) { concrete = re_inferred; fd = tmpl; }
             }

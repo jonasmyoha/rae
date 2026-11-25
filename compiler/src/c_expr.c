@@ -267,7 +267,10 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
         ctx->suppress_opt_unbox = true;
         emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
         ctx->suppress_opt_unbox = saved_unbox;
-        fprintf(out, "); __ostr%d.has ? ", oid);
+        /* any other payload a call hands over is dropped once it is formatted */
+        bool dropped_call = (operand->kind == AST_EXPR_CALL || operand->kind == AST_EXPR_METHOD_CALL)
+            && !str_eq_cstr(base, "String") && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, tr, 0);
+        fprintf(out, dropped_call ? "); rae_String __otxt%d = __ostr%d.has ? " : "); __ostr%d.has ? ", oid, oid);
         (void)payload_is_user_struct;
         {
             AstTypeRef payload = *tr; payload.is_opt = false; payload.next = NULL;
@@ -286,7 +289,16 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
             }
             rae_value_to_str_expr(ctx->compiler_ctx, ctx->module, &payload, inner, false, out);
         }
-        fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; }))");
+        fprintf(out, " : (rae_String){(uint8_t*)\"none\", 4}; ");
+        if (dropped_call) {
+            AstTypeRef whole = *tr;
+            whole.next = NULL;
+            char held[32];
+            snprintf(held, sizeof held, "__ostr%d", oid);
+            emit_drop_for_value(ctx, out, &whole, held, true);
+            fprintf(out, " __otxt%d; ", oid);
+        }
+        fprintf(out, "}))");
         return;
     }
     // A struct or List VALUE made by a call (`"{makeWords()}"`) is a temporary

@@ -427,6 +427,7 @@ typedef struct {
 size_t collect_struct_shapes(CompilerContext* ctx, StructShape** out_shapes);
 const AstDecl* generic_struct_template(CompilerContext* ctx, const AstTypeRef* type);
 /* c_discard.c */
+bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call);
 int c_discard_temp(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete);
 int c_discard_builtin_temp(CFuncContext* ctx, const AstExpr* expr);
 /* c_task_result.c */
