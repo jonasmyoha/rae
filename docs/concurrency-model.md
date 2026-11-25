@@ -213,6 +213,30 @@ cancellation rules below). Children cannot outlive the scope unless their
 ownership/lifetime model explicitly permits it. `taskScope` is the **preferred
 user-facing form** for a fixed set of concurrent operations.
 
+**A spawn written as a statement belongs to its scope (0.4.89).** When nobody
+needs the task, the spawn is a statement, and the taskScope it is in keeps the
+task: also when it stands in a loop, an `if` or a `match` inside the scope.
+
+```rae
+taskScope {
+  loop let path: view String in paths {
+    spawn convert(path: path)
+  }
+}
+# every one is done here
+```
+
+- The scope waits for them at its end, and before a `ret`, `break` or
+  `continue` leaves it. A result is freed. A `ret`'s value is computed before
+  the wait, as every value of a `ret` is.
+- The finished ones are freed on the way, so a scope that spawns for as long
+  as the program runs (a server's accept loop) does not grow.
+- Outside a taskScope it is an error: nobody would wait for the task. Bind it
+  (`let task: Task(Int) = spawn ...`; it is joined at the end of the block that
+  `task` is in), or write it in a taskScope. A function and a `parallelLoop`
+  body are no part of a taskScope around them: they open their own.
+- Cases 1672 (under ThreadSanitizer too) and 1673.
+
 Internally `taskScope` may be backed by a `TaskGroup`, but most users should not
 need to name that type. A `TaskGroup` **may** still be exposed as a library type
 for *dynamic* task collections (spawning a variable number of tasks in a loop

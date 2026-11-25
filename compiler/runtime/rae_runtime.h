@@ -60,7 +60,7 @@ typedef void* Buffer_void;
  * `RaeTask*` (type-erased): the worker thread stores its T result into the
  * `result` buffer (malloc'd to sizeof(T)); `task.get()` joins and reads it.
  * One pthread per spawned task; join happens exactly once (guarded). */
-typedef struct {
+typedef struct RaeTask {
   pthread_t thread;
   void* result;   /* malloc'd to sizeof(T), or NULL for a void task */
   _Atomic int done; /* stored by the worker after the result (a release); read
@@ -85,6 +85,7 @@ typedef struct {
   int io_filter;
   int io_timer;
   int64_t io_fd;
+  struct RaeTask* next_kept; /* the next one of a taskScope's list (RaeTaskList) */
 } RaeTask;
 
 RaeTask* rae_task_new(size_t result_size, void (*drop_result)(void* result));
@@ -170,6 +171,12 @@ static inline int rae_task_claim(RaeTask* t) {
   return 1;
 }
 void rae_task_drop(RaeTask* t);     /* join (if not joined) + free, its untaken result too; scope-exit drop */
+/* The tasks of a taskScope's spawns written as statements: the scope joins
+ * and frees them. Finished ones are freed on the way, so a scope that spawns
+ * for as long as the program runs does not grow. */
+typedef struct { RaeTask* first; int64_t count; int64_t sweep_at; } RaeTaskList;
+void rae_task_keep(RaeTaskList* list, RaeTask* t);
+void rae_tasks_drop(RaeTaskList* list);
 
 #ifdef __GNUC__
 #define RAE_UNUSED __attribute__((unused))

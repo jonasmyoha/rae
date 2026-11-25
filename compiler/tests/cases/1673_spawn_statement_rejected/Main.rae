@@ -1,0 +1,41 @@
+# A `spawn` written as a statement with no taskScope around it: nobody would
+# wait for its task, so it is refused. A taskScope around a parallelLoop is
+# not the scope of its iterations.
+func work(amount: copy Int) {
+  log("{amount}")
+}
+
+func outside() {
+  spawn work(amount: 1)
+}
+
+func nested() {
+  loop var i: Int = 0, i < 3, ++i {
+    if i is 1 {
+      spawn thread work(amount: i)
+    }
+  }
+}
+
+func after() {
+  taskScope {
+    spawn work(amount: 2)
+  }
+  spawn work(amount: 3)
+}
+
+func iterations() {
+  taskScope {
+    spawn work(amount: 4)
+    parallelLoop var i: Int = 0, i < 3, ++i {
+      spawn work(amount: 5)
+    }
+  }
+}
+
+func main() {
+  outside()
+  nested()
+  after()
+  iterations()
+}

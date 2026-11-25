@@ -182,6 +182,37 @@ void rae_task_drop(RaeTask* t) {
   free(t);
 }
 
+void rae_task_keep(RaeTaskList* list, RaeTask* t) {
+  if (!t) return;
+  t->next_kept = list->first;
+  list->first = t;
+  list->count++;
+  if (list->count < (list->sweep_at ? list->sweep_at : 64)) return;
+  RaeTask** link = &list->first;
+  while (*link) {
+    RaeTask* task = *link;
+    if (!rae_task_is_done(task)) {
+      link = &task->next_kept;
+      continue;
+    }
+    *link = task->next_kept;
+    list->count--;
+    rae_task_drop(task);
+  }
+  list->sweep_at = list->count * 2 < 64 ? 64 : list->count * 2;
+}
+
+void rae_tasks_drop(RaeTaskList* list) {
+  RaeTask* task = list->first;
+  list->first = NULL;
+  list->count = 0;
+  while (task) {
+    RaeTask* next = task->next_kept;
+    rae_task_drop(task);
+    task = next;
+  }
+}
+
 /* ----- Channel(T) runtime: MPSC ring of T-sized slots (#271, #969) ------ */
 /* Backs lib/Channel.rae's `Channel(T)`, Rae's first message-passing
  * primitive. Multi-producer, single-consumer: any thread may send; only the

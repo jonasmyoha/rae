@@ -175,9 +175,12 @@ typedef struct {
   Str twin_hoist_temps[16];
   int twin_hoist_count;
   // The open taskScopes whose spawns lend views (c_lend.c): their task
-  // groups (`__rae_group<id>`) and the loop depth each opened at
-  int lend_group_ids[8];
-  int lend_group_loop_depth[8];
+  // groups (`__rae_group<id>`) and the loop depth each opened at; and those
+  // that keep the tasks of statement spawns (`__rae_tasks<id>`)
+  int lend_group_ids[16];
+  int lend_group_loop_depth[16];
+  bool lend_group_lends[16];
+  bool lend_group_keeps[16];
   int lend_group_count;
 } CFuncContext;
 
@@ -342,7 +345,8 @@ bool c_blocking_find_call(const char* text, const char* symbol, size_t* start, s
 /* Spawns that lend views (c_lend.c) */
 void c_lend_emit_helpers(CompilerContext* ctx, const AstModule* module, FILE* out);
 bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out);
-void c_lend_open_group(CFuncContext* ctx, FILE* out);
+bool c_kept_spawn_open(CFuncContext* ctx, const AstExpr* spawn, FILE* out);
+void c_lend_open_group(CFuncContext* ctx, bool lends, bool keeps, FILE* out);
 void c_lend_close_group(CFuncContext* ctx, FILE* out);
 void c_lend_wait_groups(CFuncContext* ctx, FILE* out, bool loop_exit);
 /* Resumable twins (c_twin.c) */

@@ -1939,14 +1939,14 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     // is included in the branch's drop range (and unregistered with it), so
     // its heap is released exactly where its scope ends.
     size_t saved_locals_then = ctx->local_count - (owned_bind ? 1 : 0);
-    // A taskScope whose spawns lend views waits for those tasks before it
-    // ends (c_lend.c)
-    bool lends = stmt->as.if_stmt.lends_views;
-    if (lends) c_lend_open_group(ctx, out);
+    // A taskScope whose spawns lend views, or are statements, waits for those
+    // tasks before it ends (c_lend.c)
+    bool group = stmt->as.if_stmt.lends_views || stmt->as.if_stmt.keeps_tasks;
+    if (group) c_lend_open_group(ctx, stmt->as.if_stmt.lends_views, stmt->as.if_stmt.keeps_tasks, out);
     if (stmt->as.if_stmt.then_block) {
         for (const AstStmt* s = stmt->as.if_stmt.then_block->first; s; s = s->next) emit_stmt(ctx, s, out);
     }
-    if (lends) c_lend_close_group(ctx, out);
+    if (group) c_lend_close_group(ctx, out);
     emit_implicit_drops_for_body(ctx, out, saved_locals_then);
     ctx->local_count = saved_locals_then;
     fprintf(out, "  }");
@@ -2969,11 +2969,14 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool is_call = stmt->as.expr_stmt
                 && (stmt->as.expr_stmt->kind == AST_EXPR_CALL || stmt->as.expr_stmt->kind == AST_EXPR_METHOD_CALL);
             int taken = c_discard_builtin_temp(ctx, stmt->as.expr_stmt);
+            bool kept = false;
             if (ctx->stmt_may_pool) {
                 fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); ");
                 if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
                 ctx->discard_result = is_call && taken < 0;
+                kept = c_kept_spawn_open(ctx, stmt->as.expr_stmt, out);
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                if (kept) fprintf(out, ")");
                 ctx->discard_result = false;
                 if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, "; rae_string_pool_flush(__rae_spm); }\n");
@@ -2982,7 +2985,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 fprintf(out, "  ");
                 if (taken >= 0) fprintf(out, "__rae_stmt_tmp%d = (", taken);
                 ctx->discard_result = is_call && taken < 0;
+                kept = c_kept_spawn_open(ctx, stmt->as.expr_stmt, out);
                 emit_expr(ctx, stmt->as.expr_stmt, out, PREC_LOWEST, false, false);
+                if (kept) fprintf(out, ")");
                 ctx->discard_result = false;
                 if (taken >= 0) fprintf(out, "); __rae_stmt_tmp%d_set = 1", taken);
                 fprintf(out, ";\n");

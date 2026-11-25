@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.89, 2026-11-25: spawns written as statements
+
+- A `spawn work(...)` written as a statement in a taskScope is waited for at the end of the scope, and before a `ret`,
+  `break` or `continue` leaves it, and its task, arguments and result are freed. Nothing waited for it before, and it
+  leaked. Finished tasks are freed while the scope goes on.
+- **Breaking:** outside a taskScope a spawn written as a statement is an error. Bind it
+  (`let task: Task(T) = spawn ...`) or write it in a taskScope.
+- A spawn in a `parallelLoop` body cannot lend a view through a taskScope outside the loop: an error of Rae's.
+- Cases 1672 and 1673; docs/concurrency-model.md §3.
+
 ## 0.4.88, 2026-11-25: Arrays that own memory
 
 - An `Array(T, cap: N)` whose elements own memory (a String, a struct, a List, a map, a generic struct, another Array) is

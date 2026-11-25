@@ -1683,6 +1683,10 @@ typedef struct {
 } SemaTaskScope;
 static SemaTaskScope s_task_scopes[SEMA_MAX_TASK_SCOPES];
 static int s_task_scope_count = 0;
+/* The first one of the C function being analyzed: a parallelLoop's body is a
+ * function of its own, and so is a generic one analyzed at its use */
+static int s_task_scope_base = 0;
+static void sema_statement_spawn(AstModule* module, AstExpr* spawn);
 static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call);
 static void sema_report_unknown_member(AstModule* module, AstExpr* expr);
 static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, TypeInfo* t);
@@ -2027,9 +2031,11 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         const char* saved_spec_origin = s_current_decl_origin;
         int saved_spec_unsafe_depth = s_unsafe_depth;
         int saved_spec_loop_depth = s_loop_depth;
+        int saved_spec_scope_base = s_task_scope_base;
         if (generic_decl->origin_file) s_current_decl_origin = generic_decl->origin_file;
         s_unsafe_depth = 0;
         s_loop_depth = 0;
+        s_task_scope_base = s_task_scope_count;
         if (spec->as.func_decl.body && symbols) {
             symbol_table_push_scope(symbols);
 
@@ -2070,6 +2076,7 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         s_current_decl_origin = saved_spec_origin;
         s_unsafe_depth = saved_spec_unsafe_depth;
         s_loop_depth = saved_spec_loop_depth;
+        s_task_scope_base = saved_spec_scope_base;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
         spec->as.type_decl.specialization_args = args_tr;
         AstTypeField* head = NULL; AstTypeField* tail = NULL; AstTypeField* f = generic_decl->as.type_decl.fields;
@@ -5824,6 +5831,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 s_void_ok_expr = stmt->as.expr_stmt;
                 sema_analyze_expr(ctx, module, symbols, stmt->as.expr_stmt, true);
                 s_void_ok_expr = saved_void_ok;
+                sema_statement_spawn(module, stmt->as.expr_stmt);
             }
             // #880/#881/#885: stray `create(...)` and use after `x.drop()` are
             // reported by sema_lifecycle_post_pass over the whole body.
@@ -6304,6 +6312,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 /* A taskScope: its spawns may lend views of what lives
                  * outside it, frozen until here (sema_task_scope_*) */
                 bool task_scope = stmt->as.if_stmt.is_task_scope && s_task_scope_count < SEMA_MAX_TASK_SCOPES;
+                if (stmt->as.if_stmt.is_task_scope && !task_scope) {
+                    diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
+                               "more than 16 taskScopes inside each other; move the inner ones to a function");
+                    module->had_error = true;
+                }
                 if (task_scope) {
                     SemaTaskScope* scope = &s_task_scopes[s_task_scope_count++];
                     scope->outer_depth = symbols->current_depth;
@@ -6437,6 +6450,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  }
              }
              s_loop_depth++;
+             int saved_scope_base = s_task_scope_base;
+             if (stmt->as.loop_stmt.is_parallel) s_task_scope_base = s_task_scope_count;
              if (stmt->as.loop_stmt.body) {
                  AstStmt* s = stmt->as.loop_stmt.body->first;
                  while (s) {
@@ -6458,6 +6473,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                  }
              }
              s_loop_depth--;
+             s_task_scope_base = saved_scope_base;
              if (stmt->as.loop_stmt.is_parallel) sema_check_parallel_loop(ctx, module, stmt);
              symbol_table_pop_scope(symbols);
              break;
@@ -11898,6 +11914,22 @@ static bool sema_param_is_value(CompilerContext* ctx, AstModule* module, SymbolT
     return false;
 }
 
+/* A spawn written as a statement: nobody keeps its task, so the taskScope it
+ * is in does (docs/concurrency-model.md §3). Without one, its end would be
+ * waited for nowhere: an error. */
+static void sema_statement_spawn(AstModule* module, AstExpr* spawn) {
+    if (spawn->kind != AST_EXPR_UNARY || spawn->as.unary.op != AST_UNARY_SPAWN) return;
+    if (s_task_scope_count > s_task_scope_base) {
+        spawn->as.unary.spawn_kept = true;
+        s_task_scopes[s_task_scope_count - 1].stmt->as.if_stmt.keeps_tasks = true;
+        return;
+    }
+    diag_error(sema_diag_file(module), (int)spawn->line, (int)spawn->column,
+               "nobody keeps the task of this spawn; write it inside a taskScope, which waits for it, or bind it "
+               "(`let task: Task(T) = spawn ...`)");
+    if (module) module->had_error = true;
+}
+
 /* A spawn inside a taskScope may LEND a `view` of non-scalar data to its task
  * (docs/lightweight-spawn-design.md §14.2) when every such argument is a path
  * into a local declared before the scope, or a parameter: those outlive it.
@@ -11906,7 +11938,7 @@ static bool sema_param_is_value(CompilerContext* ctx, AstModule* module, SymbolT
  * argument or move (expr_roots_in_let). A `mod` of non-scalar data is never
  * lent: two tasks writing one place would race. */
 static bool sema_spawn_lends(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* spawn, AstExpr* call) {
-    if (s_task_scope_count == 0) return false;
+    if (s_task_scope_count <= s_task_scope_base) return false;
     if (!call->decl_link || call->decl_link->kind != AST_DECL_FUNC) return false;
     AstFuncDecl* func = &call->decl_link->as.func_decl;
     if (func->generic_params || func->is_extern) return false;
@@ -12177,13 +12209,13 @@ static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, Sym
         module->decls = wrapper;
 
         const char* saved_origin = s_current_decl_origin;
-        int saved_unsafe = s_unsafe_depth, saved_loop = s_loop_depth, saved_scopes = s_task_scope_count;
+        int saved_unsafe = s_unsafe_depth, saved_loop = s_loop_depth, saved_base = s_task_scope_base;
         const AstParam* saved_params = s_current_params;
         const AstIdentifierPart* saved_generic = s_current_generic_params;
         if (generic->origin_file) s_current_decl_origin = generic->origin_file;
         s_unsafe_depth = 0;
         s_loop_depth = 0;
-        s_task_scope_count = 0;
+        s_task_scope_base = s_task_scope_count;
         symbol_table_push_scope(symbols);
         for (AstParam* p = wf->params; p; p = p->next)
             symbol_table_define(symbols, ctx->ast_arena, p->name, NULL,
@@ -12199,7 +12231,7 @@ static void sema_spawn_generic_call(CompilerContext* ctx, AstModule* module, Sym
         s_current_decl_origin = saved_origin;
         s_unsafe_depth = saved_unsafe;
         s_loop_depth = saved_loop;
-        s_task_scope_count = saved_scopes;
+        s_task_scope_base = saved_base;
     }
     call->as.call.args = values;
     call->as.call.generic_args = NULL;

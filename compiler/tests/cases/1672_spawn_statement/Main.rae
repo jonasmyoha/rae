@@ -1,0 +1,192 @@
+# A `spawn` written as a statement in a taskScope: the scope keeps its task,
+# waits for it at its end (and before a `ret`, `break` or `continue` leaves
+# it) and frees it, with the result that nobody took.
+open Atomic
+
+type Worker {
+  counter: Atomic(Int)
+  amount: Int
+}
+
+func add(counter: own Atomic(Int), amount: copy Int) {
+  sleep(ms: 2)
+  counter.fetchAdd(amount)
+}
+
+func addFor(this: own Worker, times: copy Int) {
+  loop var i: Int = 0, i < times, ++i {
+    this.counter.fetchAdd(this.amount)
+  }
+}
+
+func addAny(T: type, counter: own Atomic(Int), value: own List(T)) {
+  counter.fetchAdd(value.length)
+}
+
+func addText(counter: own Atomic(Int), name: own String) ret String {
+  counter.fetchAdd(1)
+  ret "{name} {name}"
+}
+
+func addMany(counter: own Atomic(Int)) ret opt List(String) {
+  counter.fetchAdd(1)
+  var names: List(String) = []
+  loop var i: Int = 0, i < 3, ++i {
+    names.add("name {i}")
+  }
+  ret names
+}
+
+func addLengths(counter: own Atomic(Int), names: view List(String)) {
+  sleep(ms: 2)
+  loop let name: view String in names {
+    counter.fetchAdd(name.length())
+  }
+}
+
+# The scope's end on a `ret`
+func retOut(counter: view Atomic(Int), early: view Bool) ret Int {
+  taskScope {
+    loop var i: Int = 0, i < 4, ++i {
+      spawn add(counter: counter, amount: 1)
+      if early and i is 1 {
+        ret 1
+      }
+    }
+  }
+  ret 2
+}
+
+# The end on a `break` and a `continue`: each round has a scope of its own
+func leave(counter: view Atomic(Int)) ret List(Int) {
+  var seen: List(Int) = []
+  loop var i: Int = 0, i < 4, ++i {
+    if i > 0 {
+      seen.add(counter.load())
+    }
+    taskScope {
+      spawn add(counter: counter, amount: 1)
+      if i is 1 {
+        continue
+      }
+      spawn addText(counter: counter, name: "round {i}")
+      if i is 2 {
+        break
+      }
+    }
+  }
+  seen.add(counter.load())
+  ret seen
+}
+
+# A task that spawns statements itself
+func spawner(counter: own Atomic(Int)) ret Int {
+  taskScope {
+    loop var i: Int = 0, i < 5, ++i {
+      spawn add(counter: counter, amount: 2)
+    }
+  }
+  sleep(ms: 1)
+  ret counter.load()
+}
+
+func inIteration(counter: view Atomic(Int)) {
+  parallelLoop var i: Int = 0, i < 6, ++i {
+    taskScope {
+      spawn add(counter: counter, amount: 1)
+      spawn add(counter: counter, amount: 1)
+      if i is not 3 {
+        spawn add(counter: counter, amount: 1)
+      }
+    }
+  }
+}
+
+func show(label: view String, counter: view Atomic(Int)) {
+  log("{label}: {counter.load()}")
+  counter.store(0)
+}
+
+func main() {
+  let counter: Atomic(Int) = createAtomic(Int, value: 0)
+  taskScope {
+    loop var i: Int = 0, i < 10, ++i {
+      spawn add(counter: counter, amount: 1)
+    }
+  }
+  show(label: "ten", counter: counter)
+
+  taskScope {
+    spawn thread add(counter: counter, amount: 3)
+    if counter.load() > -1 {
+      unsafe {
+        spawn add(counter: counter, amount: 4)
+      }
+    }
+  }
+  show(label: "a thread, and one in an if", counter: counter)
+
+  let worker: Worker = { counter: counter, amount: 2 }
+  let numbers: List(Float) = [1.0, 2.0]
+  taskScope {
+    spawn worker.addFor(times: 5)
+    spawn addAny(Float, counter: counter, value: numbers)
+    spawn addAny(String, counter: counter, value: ["a", "b", "c"])
+  }
+  show(label: "a method and a generic function", counter: counter)
+
+  taskScope {
+    loop var i: Int = 0, i < 3, ++i {
+      spawn addText(counter: counter, name: "text {i}")
+      spawn addMany(counter: counter)
+    }
+  }
+  show(label: "results nobody takes", counter: counter)
+
+  let names: List(String) = ["one", "three"]
+  taskScope {
+    spawn addLengths(counter: counter, names: names)
+    spawn addLengths(counter: counter, names: names)
+    let kept: Task(String) = spawn addText(counter: counter, name: "kept")
+    log(kept.get())
+  }
+  show(label: "lent views", counter: counter)
+
+  taskScope {
+    spawn add(counter: counter, amount: 1)
+    taskScope {
+      spawn add(counter: counter, amount: 10)
+      loop var i: Int = 0, i < 2, ++i {
+        spawn add(counter: counter, amount: 100)
+      }
+    }
+    spawn add(counter: counter, amount: 1000)
+  }
+  show(label: "a scope in a scope", counter: counter)
+
+  log("early {retOut(counter: counter, early: true)}")
+  show(label: "two before the ret", counter: counter)
+  log("late {retOut(counter: counter, early: false)}")
+  show(label: "four", counter: counter)
+
+  log("seen {leave(counter: counter)}")
+  show(label: "break and continue", counter: counter)
+
+  taskScope {
+    spawn spawner(counter: counter)
+    spawn spawner(counter: counter)
+  }
+  show(label: "tasks that spawn", counter: counter)
+
+  inIteration(counter: counter)
+  show(label: "in a parallelLoop", counter: counter)
+
+  # Many: the finished ones are freed on the way
+  taskScope {
+    loop var i: Int = 0, i < 2000, ++i {
+      spawn addText(counter: counter, name: "n")
+    }
+  }
+  show(label: "many", counter: counter)
+  freeAtomic(this: counter)
+}

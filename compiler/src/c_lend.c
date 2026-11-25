@@ -14,9 +14,14 @@
  *     `break` or `continue` leaves it. So the borrow ends before the lent
  *     place can change or be freed, wherever the task's handle went.
  *
+ * The same group keeps the tasks of spawns written as statements in a
+ * taskScope (a RaeTaskList): nobody else has them, so the scope joins and
+ * frees them where it waits for the lending ones.
+ *
  * A lending task runs on the scheduler's pool when it can (it waits only on
  * other tasks), and on a thread of its own otherwise. */
 #include "c_backend_internal.h"
+#include "diag.h"
 #include "may_wait.h"
 #include "mangler.h"
 
@@ -239,22 +244,50 @@ bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
   return true;
 }
 
-void c_lend_open_group(CFuncContext* ctx, FILE* out) {
-  int id = (int)ctx->temp_counter++;
-  fprintf(out, "  RaeTaskGroup __rae_group%d = {0};\n", id);
-  if (ctx->lend_group_count < 8) {
-    ctx->lend_group_ids[ctx->lend_group_count] = id;
-    ctx->lend_group_loop_depth[ctx->lend_group_count] = ctx->loop_depth;
-    ctx->lend_group_count++;
+/* A `spawn` written as a statement: its task goes to the taskScope it is in,
+ * `rae_task_keep(&__rae_tasks<id>, ` (the caller closes it). Sema refused one
+ * outside a taskScope where it analyzes the code; here where it does not. */
+bool c_kept_spawn_open(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
+  if (!spawn || spawn->kind != AST_EXPR_UNARY || spawn->as.unary.op != AST_UNARY_SPAWN) return false;
+  if (ctx->generic_params) return false;  /* the spawn itself is refused */
+  int top = ctx->lend_group_count - 1;
+  if (!spawn->as.unary.spawn_kept || top < 0 || !ctx->lend_group_keeps[top]) {
+    diag_error(c_source_file(ctx), (int)spawn->line, (int)spawn->column,
+               "nobody keeps the task of this spawn; write it inside a taskScope, which waits for it, or bind it "
+               "(`let task: Task(T) = spawn ...`)");
+    return false;
   }
-  /* A resumable twin cannot suspend while tasks borrow its C locals */
+  fprintf(out, "rae_task_keep(&__rae_tasks%d, ", ctx->lend_group_ids[top]);
+  return true;
+}
+
+/* The end of one scope: the tasks that borrow from it finish, and so do the
+ * ones nobody else keeps, which are freed */
+static void emit_group_end(CFuncContext* ctx, int index, FILE* out) {
+  int id = ctx->lend_group_ids[index];
+  if (ctx->lend_group_lends[index]) fprintf(out, "  rae_group_wait(&__rae_group%d);\n", id);
+  if (ctx->lend_group_keeps[index]) fprintf(out, "  rae_tasks_drop(&__rae_tasks%d);\n", id);
+}
+
+/* Sema allows 16 taskScopes inside each other */
+void c_lend_open_group(CFuncContext* ctx, bool lends, bool keeps, FILE* out) {
+  int id = (int)ctx->temp_counter++;
+  if (lends) fprintf(out, "  RaeTaskGroup __rae_group%d = {0};\n", id);
+  if (keeps) fprintf(out, "  RaeTaskList __rae_tasks%d = {0};\n", id);
+  int index = ctx->lend_group_count++;
+  ctx->lend_group_ids[index] = id;
+  ctx->lend_group_loop_depth[index] = ctx->loop_depth;
+  ctx->lend_group_lends[index] = lends;
+  ctx->lend_group_keeps[index] = keeps;
+  /* A resumable twin cannot suspend while tasks borrow its C locals, nor
+   * while the list is one */
   ctx->twin_no_suspend++;
 }
 
 void c_lend_close_group(CFuncContext* ctx, FILE* out) {
   if (ctx->lend_group_count == 0) return;
   ctx->lend_group_count--;
-  fprintf(out, "  rae_group_wait(&__rae_group%d);\n", ctx->lend_group_ids[ctx->lend_group_count]);
+  emit_group_end(ctx, ctx->lend_group_count, out);
   ctx->twin_no_suspend--;
 }
 
@@ -263,6 +296,6 @@ void c_lend_close_group(CFuncContext* ctx, FILE* out) {
 void c_lend_wait_groups(CFuncContext* ctx, FILE* out, bool loop_exit) {
   for (int i = ctx->lend_group_count - 1; i >= 0; i--) {
     if (loop_exit && ctx->lend_group_loop_depth[i] < ctx->loop_depth) continue;
-    fprintf(out, "  rae_group_wait(&__rae_group%d);\n", ctx->lend_group_ids[i]);
+    emit_group_end(ctx, i, out);
   }
 }

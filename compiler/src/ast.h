@@ -250,6 +250,9 @@ struct AstExpr {
       // `spawn thread f(...)` (docs/realtime-language-design.md §6.6.1): this
       // spawn always starts its own OS thread, never a pool task
       bool spawn_thread;
+      // A `spawn` written as a statement: nobody keeps its task, so the
+      // taskScope it is in does, and joins it at its end (sema)
+      bool spawn_kept;
       // `own x` of a local that owns heap (sema): x is gone after it
       bool moves_local;
     } unary;
@@ -401,6 +404,7 @@ struct AstStmt {
       AstStmt* binding;
       bool is_task_scope;  // spelled `taskScope { }` in source (desugared to `if true`)
       bool lends_views;    // a taskScope whose spawns borrow from outside it (spawn_lends)
+      bool keeps_tasks;    // a taskScope with spawns written as statements (spawn_kept)
     } if_stmt;
     struct {
       AstStmt* init;
