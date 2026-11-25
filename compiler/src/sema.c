@@ -797,6 +797,18 @@ static void sema_type_text(const AstTypeRef* type, char* out, size_t cap, size_t
     }
 }
 
+/* A `match` compares its subject with each case; an optional has no case for `none` */
+static void sema_check_match_subject(AstModule* module, const AstExpr* subject) {
+    const TypeInfo* type = subject ? subject->resolved_type : NULL;
+    if (type && type->kind == TYPE_REF && type->as.ref.base && type->as.ref.base->kind == TYPE_OPT) type = type->as.ref.base;
+    if (!type || type->kind != TYPE_OPT || !type->as.opt.base || type->as.opt.base->kind == TYPE_ANY) return;
+    diag_error(s_current_decl_origin ? s_current_decl_origin : sema_diag_file(module),
+               (int)subject->line, (int)subject->column,
+               "this is optional, and a match needs a value: take what is there with `if let`, or with "
+               "`match let name: T = call() { ... case none { ... } }`");
+    if (module) module->had_error = true;
+}
+
 static void sema_report_task_copy(AstModule* module, const char* file, size_t line, size_t col,
                                   const AstTypeRef* type, const char* how) {
     char type_text[160] = "this value";
@@ -6358,6 +6370,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 break;
             }
             if (stmt->as.match_stmt.subject) sema_analyze_expr(ctx, module, symbols, stmt->as.match_stmt.subject, true);
+            sema_check_match_subject(module, stmt->as.match_stmt.subject);
             // A plain match's subject cannot be absent, so it never has a
             // `none` arm — the subject's TYPE decides the arm list.
             for (AstMatchCase* mc = stmt->as.match_stmt.cases; mc; mc = mc->next) {
@@ -8018,8 +8031,8 @@ static void sema_check_void_value(AstModule* module, const AstExpr* expr) {
     module->had_error = true;
 }
 
-/* What a List's elements cannot do: a Task has no copy, and optionals are not
- * compared (a `none` row reads as a row that is not there). */
+/* What a List's elements cannot do: a Task has no copy, and optionals have no
+ * order. */
 static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const AstExpr* expr) {
     Str name = {0};
     const AstExpr* receiver = NULL;
@@ -8033,9 +8046,8 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
     }
     if (!receiver) return;
     bool copies = str_eq_cstr(name, "copyAtDefault") || str_eq_cstr(name, "copyAtFallback");
-    bool compares = str_eq_cstr(name, "contains") || str_eq_cstr(name, "indexOf")
-        || str_eq_cstr(name, "sort") || str_eq_cstr(name, "sortDesc");
-    if (!copies && !compares) return;
+    bool orders = str_eq_cstr(name, "sort") || str_eq_cstr(name, "sortDesc");
+    if (!copies && !orders) return;
     TypeInfo* list = receiver->resolved_type;
     while (list && list->kind == TYPE_REF) list = list->as.ref.base;
     if (!sema_struct_template_is(list, "List") || list->as.structure.generic_count != 1) return;
@@ -8045,11 +8057,11 @@ static void sema_check_list_call(AstModule* module, SymbolTable* symbols, const 
         sema_report_task_copy(module, file, expr->line, expr->column, NULL,
                               "out of a List (use 'viewAt'/'modAt')");
     }
-    if (compares && element && element->kind == TYPE_OPT) {
+    if (orders && element && element->kind == TYPE_OPT) {
         char message[240];
         snprintf(message, sizeof message,
-                 "'%.*s' compares the elements, and two optionals are not compared: loop over the list "
-                 "('loop let element: opt view T in list') and compare what is there with 'if let'",
+                 "'%.*s' orders the elements, and a `none` is neither before nor after a value: "
+                 "sort a list of what is there",
                  (int)name.len, name.data);
         diag_error(file, (int)expr->line, (int)expr->column, message);
         if (module) module->had_error = true;
@@ -10796,6 +10808,7 @@ static void sema_reject_view_to_mod_unbound(AstModule* module, SymbolTable* symb
 static void sema_analyze_match_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
     AstExpr* subject = expr->as.match_expr.subject;
     if (subject) sema_analyze_expr(ctx, module, symbols, subject, true);
+    sema_check_match_subject(module, subject);
     const AstDecl* enum_decl = NULL;
     Str enum_name = {0};
     bool has_default = false;

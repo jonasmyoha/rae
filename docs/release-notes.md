@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.78, 2026-11-25: `is` between optionals
+
+- `a is b` and `a is not b` compare optionals: equal when both are `none`, or both are there and equal as
+  `equals(a:, b:)` says; with a plain value on one side, when it is there and equal. Most were errors of the C
+  compiler, and two `opt view` parameters were compared by their addresses.
+- Breaking: `call() is 0`, where the call returns an `opt Int`, is false when it returned `none`; it was true.
+- `contains` and `indexOf` work on a list of optionals; `sort` is an error there.
+- `is` compares two generic structs (`Pair(Int)`). A `view T` or `mod T` of a generic function works when T is an
+  optional.
+- Breaking: a `match` on an optional is an error that names `if let` and `match let`.
+- Cases 1645 and 1639.
+
 ## 0.4.77, 2026-11-25: generic parameters of an optional type
 
 - `opt view T`, `opt mod T`, `opt own T` and `opt copy T` of a generic function, and a `List(opt T)` or another generic

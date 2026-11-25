@@ -448,6 +448,24 @@ static bool c_optional_payload_is_boxed_pointer(CFuncContext* ctx,
 
 void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
                                      const AstExpr* value, FILE* out) {
+  /* a `view T` / `mod T` parameter whose T is the optional: a copy of it */
+  const AstExpr* parameter = value->kind == AST_EXPR_UNBOX || value->kind == AST_EXPR_BOX ? value->as.unary.operand : value;
+  if (parameter->kind == AST_EXPR_IDENT
+      && c_type_parameter_is_optional(ctx, infer_expr_type_ref(ctx, parameter))) {
+    AstTypeRef optional = *substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                                               (AstTypeRef*)infer_expr_type_ref(ctx, parameter));
+    optional.is_view = false; optional.is_mod = false; optional.next = NULL;
+    if (!type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &optional, 0)) {
+      emit_expr(ctx, parameter, out, PREC_LOWEST, false, false);
+      return;
+    }
+    const char* opt_c = rae_opt_type_name(ctx, &optional);
+    int tmpn = ctx->temp_counter++;
+    fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ", opt_c, tmpn, opt_c, tmpn);
+    emit_expr(ctx, parameter, out, PREC_LOWEST, false, true);
+    fprintf(out, "); __dc%d; }))", tmpn);
+    return;
+  }
   if (!value || value->kind == AST_EXPR_NONE) {
     if (opt_type && !(opt_type->is_view || opt_type->is_mod)
         && rae_opt_is_struct_rep(ctx, opt_type))
@@ -3669,6 +3687,26 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (target_tr && ctx->generic_params && ctx->generic_args)
                 target_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
                                                  ctx->generic_args, target_tr);
+            /* `mod T` whose T is an optional: the whole optional is stored, and
+             * the one that was there released */
+            if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT
+                && c_type_parameter_is_optional(ctx, infer_expr_type_ref(ctx, stmt->as.assign_stmt.target))) {
+                AstTypeRef optional = *target_tr;
+                optional.is_mod = false; optional.is_view = false; optional.next = NULL;
+                const char* optional_c = rae_opt_type_name(ctx, &optional);
+                int tmpn = ctx->temp_counter++;
+                fprintf(out, "{ %s __asg%d = ", optional_c, tmpn);
+                if (stmt->as.assign_stmt.value->kind == AST_EXPR_NONE) fprintf(out, "(%s){0}", optional_c);
+                else emit_optional_boxed_expr(ctx, &optional, stmt->as.assign_stmt.value, out);
+                fprintf(out, "; %s* __asgp%d = ", optional_c, tmpn);
+                emit_expr(ctx, stmt->as.assign_stmt.target, out, PREC_LOWEST, true, true);
+                fprintf(out, ";");
+                char old_value[48];
+                snprintf(old_value, sizeof old_value, "(*__asgp%d)", tmpn);
+                emit_drop_for_value(ctx, out, &optional, old_value, true);
+                fprintf(out, " *__asgp%d = __asg%d; };\n", tmpn, tmpn);
+                break;
+            }
             bool is_mod_ref = target_tr && target_tr->is_mod;
             bool is_prim_mod_ref = is_mod_ref && c_primitive_ref_has_wrapper(get_base_type_name(target_tr));
 
