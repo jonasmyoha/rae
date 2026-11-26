@@ -8,7 +8,8 @@
 # physics are cleared and the entity freed, so its index is reused clean.
 # The character is DRIVEN through the same mover drive the crowd walks with:
 # toward where the remote walker is, at a walk or a run, with a jump when it
-# jumps and a knock when it falls. So a remote walker walks, jumps and falls
+# rises off the ground (not when it only falls: RemoteCopyDrive remoteAirStep) and
+# a knock when it is knocked down. So a remote walker walks, jumps and falls
 # with this app's own physics and clips, on this app's ground. One more than
 # 3 m away (a bot whose made-up walk crosses a tree) is put there at once.
 # In a networked session the app has no crowd (app3d/WalkerApp): every
@@ -41,13 +42,13 @@ open app3d/remoteWalkerSystem/RemoteCopyDrive
 const remoteWalkerMax: Int = 32
 
 # One remote walker shown: the WalkerNetWorld entity it is, the app's
-# character that shows it, and its last airborne and knocked-down state (a
-# jump or a fall starts on the change)
+# character that shows it, its time in the air (a jump starts when it rises) and
+# its last knocked-down state (a knock starts on the change)
 type RemoteWalker {
   netEntityId: EntityId
   entityId: EntityId
   number: Int
-  wasAirborne: Bool
+  air: RemoteAir
   wasDown: Bool
 }
 
@@ -307,7 +308,11 @@ func syncRemoteCharacters(
           netEntityId: netEntityId
           entityId: entityId
           number: number
-          wasAirborne: pose.airborne
+          air: RemoteAir {
+            wasAirborne: pose.airborne
+            fromZ: pose.position.z
+            jumped: pose.airborne
+          }
           wasDown: pose.knockedDown
         })
         log(
@@ -331,11 +336,11 @@ func driveRemoteWalker(
   groundZ: view Float
 ) {
   var entityId: EntityId = noEntity()
-  var wasAirborne: Bool = false
+  var air: RemoteAir = {}
   var wasDown: Bool = false
   if let walker: view RemoteWalker = remoteWalkers.walkers.viewAt(index: index) {
     entityId = walker.entityId
-    wasAirborne = walker.wasAirborne
+    air = walker.air
     wasDown = walker.wasDown
   }
   if not componentHas(this: world.controllers, entityId: entityId) {
@@ -359,7 +364,7 @@ func driveRemoteWalker(
     )
   }
   var drive: MoverDrive = remoteCopyDrive(at: at, pose: pose)
-  if pose.airborne and not wasAirborne {
+  if remoteAirStep(air: air, pose: pose) {
     drive.intent.jump = true
   }
   componentSet(this: physicsSystem.moverDrives, entityId: entityId, data: drive)
@@ -377,7 +382,7 @@ func driveRemoteWalker(
     )
   }
   if let walker: mod RemoteWalker = remoteWalkers.walkers.modAt(index: index) {
-    walker.wasAirborne = pose.airborne
+    walker.air = air
     walker.wasDown = pose.knockedDown
   }
 }

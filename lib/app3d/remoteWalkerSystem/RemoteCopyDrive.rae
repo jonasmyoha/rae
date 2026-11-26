@@ -1,5 +1,6 @@
 # How a remote walker's character follows that walker's pose, on its own so a test
-# without a window can run it (compiler/tests/cases/1343_walkers_on_one_spot).
+# without a window can run it (compiler/tests/cases/1343_walkers_on_one_spot,
+# 1686_remote_walker_ledge).
 import Math
 open Vec3
 open ecs/ComponentTable
@@ -16,6 +17,37 @@ const remoteArriveDistance: Float = 0.15
 
 # Faster than this (m/s), the remote walker runs
 const remoteRunSpeed: Float = 2.5
+
+# How far (m) a remote walker must rise over where it left the ground before its
+# character jumps too: a jump rises far past it within a few frames, a fall never
+const remoteJumpRise: Float = 0.15
+
+# A remote walker's time in the air, as its character follows it: whether its pose
+# was airborne, where it left the ground, and whether the character jumped since
+type RemoteAir {
+  wasAirborne: Bool = false
+  fromZ: Float = 0.0
+  jumped: Bool = false
+}
+
+# A remote walker's air this frame, from its pose: true when its character is to start
+# a jump now. Only a walker that rises remoteJumpRise over where it left the ground
+# jumped; one that walked off a ledge, or was put out of a vehicle, is airborne too but
+# sinks, and its character walks off after it and falls on this side's own physics.
+# (Jumping whenever the pose turned airborne made every fall a hop.) Once a time in
+# the air.
+func remoteAirStep(air: mod RemoteAir, pose: view WalkerPose) ret Bool {
+  if pose.airborne and not air.wasAirborne {
+    air.fromZ = pose.position.z
+    air.jumped = false
+  }
+  air.wasAirborne = pose.airborne
+  if pose.airborne and not air.jumped and pose.position.z - air.fromZ > remoteJumpRise {
+    air.jumped = true
+    ret true
+  }
+  ret false
+}
 
 # How a remote walker's character at `at` goes toward its pose: it stands within
 # remoteArriveDistance of it, else walks or runs to it

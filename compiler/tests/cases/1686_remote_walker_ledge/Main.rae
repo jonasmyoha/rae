@@ -1,0 +1,232 @@
+# A remote walker's character jumps only when its walker jumps, not when it falls.
+# One world is the sender's: its walker on a 1.5 m ledge walks off it, or jumps on it.
+# The other is a receiver's: the same ledge, and a copy that follows the sender's pose
+# as it was 150 ms ago through the real copy drive and its air rule
+# (app3d/remoteWalkerSystem/RemoteCopyDrive remoteAirStep). The old rule, a jump as
+# soon as the pose is airborne, is run too: it made a walk off a ledge a hop.
+# Real movers on a box floor and a box ledge. No network and no window.
+import Math
+import Vec3
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Transform
+open box3d/ecs/PhysicsTypes
+open box3d/ecs/Physics
+open box3d/ecs/PhysicsComponents
+open box3d/ecs/PhysicsSpawn
+open app3d/CharacterController
+open app3d/CharacterBodies
+open app3d/CharacterMovers
+open app3d/CharacterContact
+open app3d/walkerNetSystem/WalkerNetSystem
+open app3d/remoteWalkerSystem/RemoteCopyDrive
+
+const stepSeconds: Float = 1.0 / 60.0
+
+# Steps a pose takes to reach the receiver: 150 ms
+const poseDelaySteps: Int = 9
+
+# The ledge's top (m); it ends at x = 0
+const ledgeTop: Float = 1.5
+
+type Side {
+  physics: Physics
+  allocator: EntityAllocator
+  rigidBodies: ComponentTable(RigidBody)
+  colliders: ComponentTable(Collider)
+  transforms: ComponentTable(Transform3D)
+  characters: ComponentTable(CharacterBody)
+  controllers: ComponentTable(ThirdPersonController)
+  drives: ComponentTable(MoverDrive)
+  parked: ComponentTable(MoverParked)
+  limits: ComponentTable(MoverSpeedLimit)
+  steps: ComponentTable(MoverStep)
+  walkerEntityId: EntityId
+}
+
+func addBox(side: mod Side, center: view Vec3, half: view Vec3) {
+  let entityId: EntityId = allocEntity(this: side.allocator)
+  var bodyDef: BodyDef = defaultBodyDef(lengthUnitsPerMeter: 1.0)
+  bodyDef.bodyType = BodyType.staticBody
+  bodyDef.position = center
+  let unusedBodyId: BodyId = spawnRigidBody(
+    physics: side.physics
+    rigidBodies: side.rigidBodies
+    transforms: side.transforms
+    entityId: entityId
+    def: bodyDef
+  )
+  let unusedShapeId: ShapeId = addBoxCollider(
+    physics: side.physics
+    rigidBodies: side.rigidBodies
+    colliders: side.colliders
+    entityId: entityId
+    def: defaultShapeDef(lengthUnitsPerMeter: 1.0)
+    halfExtents: half
+    transform: transformIdentity()
+  )
+}
+
+# A floor, the ledge over x < 0, and one walker on the ledge at x = startX
+func createSide(startX: view Float) ret Side {
+  var side: Side = {
+    physics: createPhysics(def: defaultPhysicsWorldDef(), fixedStep: stepSeconds, subSteps: 4)
+    allocator: createEntityAllocator()
+    rigidBodies: ComponentTable.create(RigidBody)
+    colliders: ComponentTable.create(Collider)
+    transforms: ComponentTable.create(Transform3D)
+    characters: ComponentTable.create(CharacterBody)
+    controllers: ComponentTable.create(ThirdPersonController)
+    drives: ComponentTable.create(MoverDrive)
+    parked: ComponentTable.create(MoverParked)
+    limits: ComponentTable.create(MoverSpeedLimit)
+    steps: ComponentTable.create(MoverStep)
+    walkerEntityId: noEntity()
+  }
+  addBox(
+    side: side
+    center: Vec3.create(x: 0.0, y: 0.0, z: -0.5)
+    half: Vec3.create(x: 100.0, y: 100.0, z: 0.5)
+  )
+  addBox(
+    side: side
+    center: Vec3.create(x: -20.0, y: 0.0, z: ledgeTop * 0.5)
+    half: Vec3.create(x: 20.0, y: 20.0, z: ledgeTop * 0.5)
+  )
+  let entityId: EntityId = allocEntity(this: side.allocator)
+  addCharacterBody(
+    characters: side.characters
+    entityId: entityId
+    feet: Vec3.create(x: startX, y: 0.0, z: ledgeTop)
+  )
+  var controller: ThirdPersonController = createThirdPersonController()
+  controller.position = Vec3.create(x: startX, y: 0.0, z: ledgeTop)
+  componentSet(this: side.controllers, entityId: entityId, data: controller)
+  side.walkerEntityId = entityId
+  ret side
+}
+
+func stepSide(side: mod Side, drive: view MoverDrive) {
+  componentSet(this: side.drives, entityId: side.walkerEntityId, data: drive)
+  driveMovers(characters: side.characters, controllers: side.controllers, drives: side.drives)
+  moveMovers(
+    physics: side.physics
+    characters: side.characters
+    parked: side.parked
+    limits: side.limits
+    steps: side.steps
+  )
+  readMoverControllers(
+    characters: side.characters
+    controllers: side.controllers
+    parked: side.parked
+    groundZ: 0.0
+    fixedStep: stepSeconds
+  )
+}
+
+func walkerAt(side: view Side) ret Vec3 {
+  ret componentView(this: side.controllers, entityId: side.walkerEntityId).position
+}
+
+func walkerPose(side: view Side) ret WalkerPose {
+  let character: view CharacterBody = componentView(
+    this: side.characters
+    entityId: side.walkerEntityId
+  )
+  let velocity: Vec3 = moverVelocity(character: character)
+  var pose: WalkerPose = walkerPoseAt(position: walkerAt(side: side))
+  pose.speed = Math.sqrt(x: velocity.x * velocity.x + velocity.y * velocity.y)
+  pose.airborne = not character.grounded
+  ret pose
+}
+
+type Run {
+  # The sender's and the copy's highest feet (m)
+  senderHighest: Float
+  copyHighest: Float
+  # How far each went along x (m), and whether the copy landed on the floor
+  senderX: Float
+  copyX: Float
+  copyOnFloor: Bool
+  copyJumped: Bool
+}
+
+# The sender walks +x from x = -3 for 3 s (off the ledge at 0), jumping at 0.5 s when
+# `jumps`; the receiver's copy follows, with the old rule when `oldRule`
+func run(jumps: view Bool, oldRule: view Bool) ret Run {
+  var sender: Side = createSide(startX: -3.0)
+  var receiver: Side = createSide(startX: -3.0)
+  var poses: List(WalkerPose) = {}
+  var air: RemoteAir = {}
+  var wasAirborne: Bool = false
+  var result: Run = {
+    senderHighest: ledgeTop
+    copyHighest: ledgeTop
+    senderX: 0.0
+    copyX: 0.0
+    copyOnFloor: false
+    copyJumped: false
+  }
+  # Settle on the ledge first
+  loop var i: Int = 0, i < 30, ++i {
+    stepSide(side: sender, drive: createMoverDrive())
+    stepSide(side: receiver, drive: createMoverDrive())
+  }
+  loop var i: Int = 0, i < 180, ++i {
+    var drive: MoverDrive = createMoverDrive()
+    drive.intent.moveY = 1.0
+    drive.intent.walking = true
+    # Yaw -pi/2 faces +x
+    drive.yaw = -1.5707964
+    drive.intent.jump = jumps and i is 30
+    stepSide(side: sender, drive: drive)
+    poses.add(value: walkerPose(side: sender))
+    let pose: WalkerPose = poses.copyAtFallback(
+      index: Math.max(a: poses.length - 1 - poseDelaySteps, b: 0)
+      fallback: walkerPoseAt(position: Vec3.create(x: 0.0, y: 0.0, z: 0.0))
+    )
+    var copyDrive: MoverDrive = remoteCopyDrive(at: walkerAt(side: receiver), pose: pose)
+    if oldRule {
+      copyDrive.intent.jump = pose.airborne and not wasAirborne
+      wasAirborne = pose.airborne
+    } else {
+      copyDrive.intent.jump = remoteAirStep(air: air, pose: pose)
+    }
+    if copyDrive.intent.jump {
+      result.copyJumped = true
+    }
+    stepSide(side: receiver, drive: copyDrive)
+    result.senderHighest = Math.max(a: result.senderHighest, b: walkerAt(side: sender).z)
+    result.copyHighest = Math.max(a: result.copyHighest, b: walkerAt(side: receiver).z)
+  }
+  result.senderX = walkerAt(side: sender).x
+  result.copyX = walkerAt(side: receiver).x
+  result.copyOnFloor = Math.abs(value: walkerAt(side: receiver).z) < 0.05
+  ret result
+}
+
+func report(name: view String, result: view Run) {
+  let over: Float = result.copyHighest - result.senderHighest
+  log("{name}:")
+  log("  the sender went off the ledge: {result.senderX > 0.5}")
+  log("  the copy jumped: {result.copyJumped}")
+  log("  the copy rose at most 5 cm over the sender's highest: {over <= 0.05}")
+  log(
+    "  the copy is on the floor by the sender: {result.copyOnFloor and Math.abs(
+      value: result.copyX - result.senderX
+    ) < 1.0}"
+  )
+}
+
+func main() ret Int {
+  report(name: "a walk off the ledge", result: run(jumps: false, oldRule: false))
+  report(name: "a walk off the ledge, the old rule", result: run(jumps: false, oldRule: true))
+  let jumped: Run = run(jumps: true, oldRule: false)
+  report(name: "a jump on the ledge, then off it", result: jumped)
+  log(
+    "  the copy rose with the sender's jump: {jumped.copyHighest > ledgeTop + 0.3 and jumped.senderHighest > ledgeTop + 0.3}"
+  )
+  ret 0
+}
