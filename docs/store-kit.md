@@ -17,7 +17,7 @@ open storeKit/StoreKit
 let request: StoreRequest = requestProducts(ids: { "com.example.unlock" })
 # ... each frame: requestStatus(request: request) is RequestStatus.done, or in a tool:
 let status: RequestStatus = waitForRequest(request: request, timeoutMs: 10000)
-let result: ProductsResult = productsResult(request: request)
+let products: List(StoreProduct) = products, let error: String = error = productsResult(request: request)
 releaseRequest(request: request)
 ```
 
@@ -25,12 +25,12 @@ StoreKit's calls are asynchronous. Each is a `StoreRequest`: start it, poll it (
 frame loop; `waitForRequest` sleeps in 10 ms steps for a tool or a check), read its result, release
 it.
 
-| Start | Result | StoreKit 2 |
+| Start | Results | StoreKit 2 |
 |---|---|---|
-| `requestProducts(ids:)` | `ProductsResult { products, error }` | `Product.products(for:)` |
-| `requestPurchase(productId:)` | `PurchaseResult { outcome, transactions, error }` | `product.purchase()` |
-| `requestEntitlements()` | `EntitlementsResult { transactions, error }` | `Transaction.currentEntitlements` |
-| `requestFinish(transactionId:)` | `FinishResult { finished, error }` | `transaction.finish()` |
+| `requestProducts(ids:)` | `productsResult`: `products`, `error` | `Product.products(for:)` |
+| `requestPurchase(productId:)` | `purchaseResult`: `outcome`, `transactions`, `error` | `product.purchase()` |
+| `requestEntitlements()` | `entitlementsResult`: `transactions`, `error` | `Transaction.currentEntitlements` |
+| `requestFinish(transactionId:)` | `finishResult`: `finished`, `error` | `transaction.finish()` |
 | `listenForUpdates()`, then `nextUpdate()` each frame | `opt StoreTransaction` | `Transaction.updates` |
 
 - `PurchaseOutcome` is `purchased`, `pending` (Ask to Buy, a payment to confirm), `canceled` or

@@ -44,24 +44,25 @@ type StoreTransaction {
 
 enum PurchaseOutcome { purchased, pending, canceled, failed }
 
-type ProductsResult {
+# The glue's JSON answers, read into the several results of productsResult, purchaseResult,
+# entitlementsResult and finishResult
+type ProductsJson {
   products: List(StoreProduct)
   error: String
 }
 
-# A purchase's outcome; `transactions` holds the one transaction of a purchase that went through
-type PurchaseResult {
+type PurchaseJson {
   outcome: PurchaseOutcome
   transactions: List(StoreTransaction)
   error: String
 }
 
-type EntitlementsResult {
+type EntitlementsJson {
   transactions: List(StoreTransaction)
   error: String
 }
 
-type FinishResult {
+type FinishJson {
   finished: Bool
   error: String
 }
@@ -211,40 +212,46 @@ func releaseRequest(request: view StoreRequest) {
   }
 }
 
-func productsResult(request: view StoreRequest) ret ProductsResult {
+# The products a done request loaded, or its `error`
+func productsResult(request: view StoreRequest) ret products: List(StoreProduct), error: String {
   let json: String = requestJson(request: request)
   if json.length() is 0 {
-    ret ProductsResult { products: {}, error: "the request is not done" }
+    ret products: {}, error: "the request is not done"
   }
-  ret ProductsResult.fromJson(json: json)
+  let answer: ProductsJson = ProductsJson.fromJson(json: json)
+  ret products: answer.products, error: answer.error
 }
 
-func purchaseResult(request: view StoreRequest) ret PurchaseResult {
+# A purchase's outcome; `transactions` holds the one transaction of a purchase that went through
+func purchaseResult(
+  request: view StoreRequest
+) ret outcome: PurchaseOutcome, transactions: List(StoreTransaction), error: String {
   let json: String = requestJson(request: request)
   if json.length() is 0 {
-    ret PurchaseResult {
-      outcome: PurchaseOutcome.failed
-      transactions: {}
-      error: "the request is not done"
-    }
+    ret outcome: PurchaseOutcome.failed, transactions: {}, error: "the request is not done"
   }
-  ret PurchaseResult.fromJson(json: json)
+  let answer: PurchaseJson = PurchaseJson.fromJson(json: json)
+  ret outcome: answer.outcome, transactions: answer.transactions, error: answer.error
 }
 
-func entitlementsResult(request: view StoreRequest) ret EntitlementsResult {
+func entitlementsResult(
+  request: view StoreRequest
+) ret transactions: List(StoreTransaction), error: String {
   let json: String = requestJson(request: request)
   if json.length() is 0 {
-    ret EntitlementsResult { transactions: {}, error: "the request is not done" }
+    ret transactions: {}, error: "the request is not done"
   }
-  ret EntitlementsResult.fromJson(json: json)
+  let answer: EntitlementsJson = EntitlementsJson.fromJson(json: json)
+  ret transactions: answer.transactions, error: answer.error
 }
 
-func finishResult(request: view StoreRequest) ret FinishResult {
+func finishResult(request: view StoreRequest) ret finished: Bool, error: String {
   let json: String = requestJson(request: request)
   if json.length() is 0 {
-    ret FinishResult { finished: false, error: "the request is not done" }
+    ret finished: false, error: "the request is not done"
   }
-  ret FinishResult.fromJson(json: json)
+  let answer: FinishJson = FinishJson.fromJson(json: json)
+  ret finished: answer.finished, error: answer.error
 }
 
 # Start listening to the transactions StoreKit sends on its own (Transaction.updates: a purchase
