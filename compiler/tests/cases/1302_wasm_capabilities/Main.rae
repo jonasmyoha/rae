@@ -133,18 +133,19 @@ func withRequests(module: view List(UInt8), requests: view String) ret List(UInt
 }
 
 func call(host: mod Host, instance: mod WasmInstance, name: view String) ret String {
-  let result: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: name
-    args: {}
-    timeoutMs: 1000
-  )
-  if wasmFailed(error: result.error) {
-    ret "{result.error.kind}: {result.error.message}"
+  let resultValues: List(WasmValue) = values,
+    let resultError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: name
+      args: {}
+      timeoutMs: 1000
+    )
+  if wasmFailed(error: resultError) {
+    ret "{resultError.kind}: {resultError.message}"
   }
-  ret "{result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer}"
+  ret "{resultValues.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer}"
 }
 
 func instantiate(

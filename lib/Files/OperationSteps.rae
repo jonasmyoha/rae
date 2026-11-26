@@ -269,16 +269,17 @@ func recordUndo(
 }
 
 func trashItem(operation: mod FileOperation, item: view OperationItem) {
-  let answer: TrashAnswer = trashPath(path: item.source, rules: operation.rules)
-  if answer.error is not OperationError.none {
-    failItem(operation: operation, error: answer.error)
+  let answerError: OperationError = error,
+    let answerPath: String = path = trashPath(path: item.source, rules: operation.rules)
+  if answerError is not OperationError.none {
+    failItem(operation: operation, error: answerError)
     ret
   }
   recordUndo(
     operation: operation
     kind: UndoKind.trashed
     from: item.source
-    to: answer.path
+    to: answerPath
   )
   endDone(operation: operation)
 }
@@ -300,16 +301,17 @@ func trashTaken(
     failItem(operation: operation, error: OperationError.intoItself)
     ret false
   }
-  let answer: TrashAnswer = trashPath(path: target, rules: operation.rules)
-  if answer.error is not OperationError.none {
-    failItem(operation: operation, error: answer.error)
+  let answerError: OperationError = error,
+    let answerPath: String = path = trashPath(path: target, rules: operation.rules)
+  if answerError is not OperationError.none {
+    failItem(operation: operation, error: answerError)
     ret false
   }
   recordUndo(
     operation: operation
     kind: UndoKind.trashed
     from: target
-    to: answer.path
+    to: answerPath
   )
   ret true
 }

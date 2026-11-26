@@ -39,8 +39,8 @@ func wasmHostCall(
   ret wasmTrap(message: "no host function {call.module}.{call.name}")
 }
 
-func first(result: view WasmCallResult) ret WasmValue {
-  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0))
+func first(values: view List(WasmValue)) ret WasmValue {
+  ret values.copyAtFallback(index: 0, fallback: wasmI32(value: 0))
 }
 
 func stopAfter(handle: own Int, delayMs: own Int) ret Int {
@@ -90,69 +90,83 @@ func main() {
   log("instance: {instance.error.kind}, memory {wasmMemorySize(instance: instance)} bytes")
   var host: Host = { notes: List.create(String, cap: 4), twiceCalls: 0 }
 
-  log("add: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "add"
-    args: { wasmI64(value: 40), wasmI64(value: 2) }
-    timeoutMs: 1000
-  )).integer}")
-  log("triple: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "triple"
-    args: { wasmI32(value: 7) }
-    timeoutMs: 1000
-  )).integer}, host calls {host.twiceCalls}")
-  log("scale: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "scale"
-    args: { wasmF64(value: 1.5), wasmF32(value: 2.0) }
-    timeoutMs: 1000
-  )).real}")
-  let trapped: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "divide"
-    args: { wasmI32(value: 7), wasmI32(value: 0) }
-    timeoutMs: 1000
-  )
-  log("divide by zero: {trapped.error.kind}: {trapped.error.message}")
-  log("divide after it: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "divide"
-    args: { wasmI32(value: 7), wasmI32(value: 2) }
-    timeoutMs: 1000
-  )).integer}")
+  let call1Values: List(WasmValue) = values,
+    let call1Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "add"
+      args: { wasmI64(value: 40), wasmI64(value: 2) }
+      timeoutMs: 1000
+    )
+  log("add: {first(values: call1Values).integer}")
+  let call2Values: List(WasmValue) = values,
+    let call2Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "triple"
+      args: { wasmI32(value: 7) }
+      timeoutMs: 1000
+    )
+  log("triple: {first(values: call2Values).integer}, host calls {host.twiceCalls}")
+  let call3Values: List(WasmValue) = values,
+    let call3Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "scale"
+      args: { wasmF64(value: 1.5), wasmF32(value: 2.0) }
+      timeoutMs: 1000
+    )
+  log("scale: {first(values: call3Values).real}")
+  let trappedValues: List(WasmValue) = values,
+    let trappedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "divide"
+      args: { wasmI32(value: 7), wasmI32(value: 0) }
+      timeoutMs: 1000
+    )
+  log("divide by zero: {trappedError.kind}: {trappedError.message}")
+  let call4Values: List(WasmValue) = values,
+    let call4Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "divide"
+      args: { wasmI32(value: 7), wasmI32(value: 2) }
+      timeoutMs: 1000
+    )
+  log("divide after it: {first(values: call4Values).integer}")
 
   # text through memory, and a host function that reads it
-  let buffer: Int = first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "buffer"
-    args: {}
-    timeoutMs: 1000
-  )).integer
+  let call5Values: List(WasmValue) = values,
+    let call5Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "buffer"
+      args: {}
+      timeoutMs: 1000
+    )
+  let buffer: Int = first(values: call5Values).integer
   let text: List(UInt8) = bytesOfText(text: "hello, wasm")
   log("written: {wasmMemoryWrite(instance: instance, address: buffer, bytes: text)}")
-  let shouted: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "shout"
-    args: { wasmI32(value: text.length) }
-    timeoutMs: 1000
-  )
+  let shoutedValues: List(WasmValue) = values,
+    let shoutedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "shout"
+      args: { wasmI32(value: text.length) }
+      timeoutMs: 1000
+    )
   log(
-    "shout: {first(result: shouted).integer}, the host noted '{host.notes.copyAtDefault(index: 0)}'"
+    "shout: {first(values: shoutedValues).integer}, the host noted '{host.notes.copyAtDefault(
+      index: 0
+    )}'"
   )
   if let back: List(UInt8) = wasmMemoryRead(instance: instance, address: buffer, count: text.length) {
     log("read back: '{String.fromBytes(bytes: back, start: 0, count: back.length)}'")
@@ -166,70 +180,82 @@ func main() {
   )
 
   # the memory cap: 4 pages
-  log("grow by 1: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "grow"
-    args: { wasmI32(value: 1) }
-    timeoutMs: 1000
-  )).integer} (pages before)")
-  log("grow by 10: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "grow"
-    args: { wasmI32(value: 10) }
-    timeoutMs: 1000
-  )).integer}, memory {wasmMemorySize(instance: instance)} bytes")
+  let call6Values: List(WasmValue) = values,
+    let call6Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "grow"
+      args: { wasmI32(value: 1) }
+      timeoutMs: 1000
+    )
+  log("grow by 1: {first(values: call6Values).integer} (pages before)")
+  let call7Values: List(WasmValue) = values,
+    let call7Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "grow"
+      args: { wasmI32(value: 10) }
+      timeoutMs: 1000
+    )
+  log(
+    "grow by 10: {first(values: call7Values).integer}, memory {wasmMemorySize(instance: instance)} bytes"
+  )
 
   # calls that go wrong
-  let missing: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "nothing"
-    args: {}
-    timeoutMs: 1000
-  )
-  log("no such function: {missing.error.kind}")
-  let wrong: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "add"
-    args: { wasmI64(value: 1) }
-    timeoutMs: 1000
-  )
-  log("wrong arguments: {wrong.error.kind}")
-  let endless: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "spin"
-    args: { wasmI32(value: 0) }
-    timeoutMs: 200
-  )
-  log("an endless loop with a 200 ms limit: {endless.error.kind}")
+  let missingValues: List(WasmValue) = values,
+    let missingError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "nothing"
+      args: {}
+      timeoutMs: 1000
+    )
+  log("no such function: {missingError.kind}")
+  let wrongValues: List(WasmValue) = values,
+    let wrongError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "add"
+      args: { wasmI64(value: 1) }
+      timeoutMs: 1000
+    )
+  log("wrong arguments: {wrongError.kind}")
+  let endlessValues: List(WasmValue) = values,
+    let endlessError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "spin"
+      args: { wasmI32(value: 0) }
+      timeoutMs: 200
+    )
+  log("an endless loop with a 200 ms limit: {endlessError.kind}")
   let watchdog: Task(Int) = spawn stopAfter(handle: instance.handle, delayMs: 100)
-  let stopped: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "spin"
-    args: { wasmI32(value: 0) }
-    timeoutMs: 0
-  )
+  let stoppedValues: List(WasmValue) = values,
+    let stoppedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "spin"
+      args: { wasmI32(value: 0) }
+      timeoutMs: 0
+    )
   let joined: Int = watchdog.get()
-  log("stopped by a watchdog thread: {stopped.error.kind}: {stopped.error.message}")
-  log("add after that: {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "add"
-    args: { wasmI64(value: 1), wasmI64(value: 1) }
-    timeoutMs: 1000
-  )).integer}")
+  log("stopped by a watchdog thread: {stoppedError.kind}: {stoppedError.message}")
+  let call8Values: List(WasmValue) = values,
+    let call8Error: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "add"
+      args: { wasmI64(value: 1), wasmI64(value: 1) }
+      timeoutMs: 1000
+    )
+  log("add after that: {first(values: call8Values).integer}")
 
   wasmDestroy(instance: instance)
   wasmUnload(module: module)

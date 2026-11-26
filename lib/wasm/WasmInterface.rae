@@ -13,9 +13,10 @@
 #   ) {
 #     log(mismatch.message)   # the module was built from other types
 #   }
-#   let reply: WasmBytesResult = wasmCallEncoded(Shell, host: shell, instance: instance, name:
+#   let replyBytes: List(UInt8) = bytes, let replyError: WasmError = error = wasmCallEncoded(Shell,
+#   host: shell, instance: instance, name:
 #   "summarize", input: frame.toBinary(), timeoutMs: 200)
-#   let frameOut: opt AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes)
+#   let frameOut: opt AppFrameOut = AppFrameOut.fromBinary(bytes: replyBytes)
 import Json
 import String
 open wasm/Wasm
@@ -40,11 +41,6 @@ type WasmInterface {
   version: Int
   exports: List(WasmInterfaceExport)
   requests: List(String)
-}
-
-type WasmBytesResult {
-  bytes: List(UInt8)
-  error: WasmError
 }
 
 func wasmInterfaceValueAt(doc: view JsonDoc, value: view JsonValue) ret WasmInterfaceValue {
@@ -187,12 +183,12 @@ func wasmCheckExport(
   )
 }
 
-func wasmFirstInteger(result: view WasmCallResult) ret Int {
-  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
+func wasmFirstInteger(values: view List(WasmValue)) ret Int {
+  ret values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
 }
 
-func wasmBytesFailed(error: view WasmError) ret WasmBytesResult {
-  ret WasmBytesResult { bytes: List.create(UInt8, cap: 0), error: error }
+func wasmBytesFailed(error: view WasmError) ret bytes: List(UInt8), error: WasmError {
+  ret bytes: List.create(UInt8, cap: 0), error: error
 }
 
 # Call export `name` with one encoded value (docs/wasm-modules.md: the
@@ -207,19 +203,20 @@ func wasmCallEncoded(
   name: view String
   input: view List(UInt8)
   timeoutMs: view Int
-) ret WasmBytesResult {
-  let allocated: WasmCallResult = wasmCall(
-    H
-    host: host
-    instance: instance
-    name: "raeModuleAlloc"
-    args: { wasmI32(value: input.length) }
-    timeoutMs: timeoutMs
-  )
-  if wasmFailed(error: allocated.error) {
-    ret wasmBytesFailed(error: allocated.error)
+) ret bytes: List(UInt8), error: WasmError {
+  let allocatedValues: List(WasmValue) = values,
+    let allocatedError: WasmError = error = wasmCall(
+      H
+      host: host
+      instance: instance
+      name: "raeModuleAlloc"
+      args: { wasmI32(value: input.length) }
+      timeoutMs: timeoutMs
+    )
+  if wasmFailed(error: allocatedError) {
+    ret wasmBytesFailed(error: allocatedError)
   }
-  let address: Int = wasmFirstInteger(result: allocated)
+  let address: Int = wasmFirstInteger(values: allocatedValues)
   if wasmMemoryWrite(instance: instance, address: address, bytes: input) is false {
     ret wasmBytesFailed(
       error: WasmError {
@@ -228,26 +225,28 @@ func wasmCallEncoded(
       }
     )
   }
-  let called: WasmCallResult = wasmCall(
-    H
-    host: host
-    instance: instance
-    name: name
-    args: { wasmI32(value: address), wasmI32(value: input.length) }
-    timeoutMs: timeoutMs
-  )
-  let freedInput: WasmCallResult = wasmCall(
-    H
-    host: host
-    instance: instance
-    name: "raeModuleFree"
-    args: { wasmI32(value: address) }
-    timeoutMs: timeoutMs
-  )
-  if wasmFailed(error: called.error) {
-    ret wasmBytesFailed(error: called.error)
+  let calledValues: List(WasmValue) = values,
+    let calledError: WasmError = error = wasmCall(
+      H
+      host: host
+      instance: instance
+      name: name
+      args: { wasmI32(value: address), wasmI32(value: input.length) }
+      timeoutMs: timeoutMs
+    )
+  let freedInputValues: List(WasmValue) = values,
+    let freedInputError: WasmError = error = wasmCall(
+      H
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: address) }
+      timeoutMs: timeoutMs
+    )
+  if wasmFailed(error: calledError) {
+    ret wasmBytesFailed(error: calledError)
   }
-  let packed: Int = wasmFirstInteger(result: called)
+  let packed: Int = wasmFirstInteger(values: calledValues)
   let resultAddress: Int = (packed shr 32) bitand 4294967295
   let resultLength: Int = packed bitand 4294967295
   var bytes: List(UInt8) = List.create(UInt8, cap: 0)
@@ -267,16 +266,17 @@ func wasmCallEncoded(
     }
   }
   if resultAddress is not 0 {
-    let freedResult: WasmCallResult = wasmCall(
-      H
-      host: host
-      instance: instance
-      name: "raeModuleFree"
-      args: { wasmI32(value: resultAddress) }
-      timeoutMs: timeoutMs
-    )
+    let freedResultValues: List(WasmValue) = values,
+      let freedResultError: WasmError = error = wasmCall(
+        H
+        host: host
+        instance: instance
+        name: "raeModuleFree"
+        args: { wasmI32(value: resultAddress) }
+        timeoutMs: timeoutMs
+      )
   }
-  ret WasmBytesResult { bytes: bytes, error: error }
+  ret bytes: bytes, error: error
 }
 
 # ---- typed host imports (docs/wasm-interfaces.md §6) ----------------------

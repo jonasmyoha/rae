@@ -30,6 +30,13 @@ func inside(T: type, value: view T) ret Int {
   ret 1
 }
 
+# a type argument written in a generic function: in its instance it is the concrete type
+func explicitInside(T: type, value: view T) ret Int {
+  let taken: T = value, let fine: Bool = fine = makeBoth(T, value: value)
+  log("explicit {taken} {fine}")
+  ret 2
+}
+
 # a function with several results that waits, called by one that waits after it
 func slow(seed: view Int) ret value: Int, text: String {
   sleep(ms: 2)
@@ -84,6 +91,7 @@ func main() {
   let seven: Int = bytes, let sevenStatus: String = status = readAll(seed: 7)
   let passed: Note = value, let passedFine: Bool = fine = passedGeneric(value: note)
   log("{bytes} {status} {seven} {sevenStatus} {passed} {passedFine}")
+  log("{explicitInside(Note, value: note)} {explicitInside(value: 6)}")
   let task: Task(Int) = spawn waitsAfter(seed: 4)
   let other: Task(Int) = spawn waitsAfter(seed: 40)
   log("{task.get()} {other.get()}")

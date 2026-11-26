@@ -73,10 +73,6 @@ func wasmHostCall(
   ret wasmTrap(message: "no host function {call.module}.{call.name}")
 }
 
-func first(result: view WasmCallResult) ret Int {
-  ret result.values.copyAtFallback(index: 0, fallback: wasmI32(value: 0)).integer
-}
-
 # greet(name, times) through the module ABI
 func greet(
   host: mod Host
@@ -85,31 +81,36 @@ func greet(
   times: view Int
 ) ret String {
   let bytes: List(UInt8) = bytesOfText(text: name)
-  let address: Int = first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "raeModuleAlloc"
-    args: { wasmI32(value: bytes.length) }
-    timeoutMs: 1000
-  ))
+  let allocatedValues: List(WasmValue) = values,
+    let allocatedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleAlloc"
+      args: { wasmI32(value: bytes.length) }
+      timeoutMs: 1000
+    )
+  let address: Int = wasmFirstInteger(values: allocatedValues)
   let written: Bool = wasmMemoryWrite(instance: instance, address: address, bytes: bytes)
-  let packed: Int = first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "greet"
-    args: { wasmI32(value: address), wasmI32(value: bytes.length), wasmI64(value: times) }
-    timeoutMs: 1000
-  ))
-  let freedName: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "raeModuleFree"
-    args: { wasmI32(value: address) }
-    timeoutMs: 1000
-  )
+  let greetedValues: List(WasmValue) = values,
+    let greetedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "greet"
+      args: { wasmI32(value: address), wasmI32(value: bytes.length), wasmI64(value: times) }
+      timeoutMs: 1000
+    )
+  let packed: Int = wasmFirstInteger(values: greetedValues)
+  let freedNameValues: List(WasmValue) = values,
+    let freedNameError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: address) }
+      timeoutMs: 1000
+    )
   let resultAddress: Int = (packed shr 32) bitand 4294967295
   let resultLength: Int = packed bitand 4294967295
   var text: String = ""
@@ -121,14 +122,15 @@ func greet(
     text = String.fromBytes(bytes: answer, start: 0, count: resultLength)
   }
   if resultAddress is not 0 {
-    let freedAnswer: WasmCallResult = wasmCall(
-      Host
-      host: host
-      instance: instance
-      name: "raeModuleFree"
-      args: { wasmI32(value: resultAddress) }
-      timeoutMs: 1000
-    )
+    let freedAnswerValues: List(WasmValue) = values,
+      let freedAnswerError: WasmError = error = wasmCall(
+        Host
+        host: host
+        instance: instance
+        name: "raeModuleFree"
+        args: { wasmI32(value: resultAddress) }
+        timeoutMs: 1000
+      )
   }
   ret text
 }
@@ -175,19 +177,20 @@ func runFrames(host: mod Host, instance: mod WasmInstance, module: view WasmModu
   loop var i: Int = 0, i < 1000, ++i {
     let frame: AppFrameIn = frameNumber(index: i)
     let input: List(UInt8) = frame.toBinary()
-    let reply: WasmBytesResult = wasmCallEncoded(
-      Host
-      host: host
-      instance: instance
-      name: "summarize"
-      input: input
-      timeoutMs: 1000
-    )
-    if wasmFailed(error: reply.error) {
-      log("frame {i}: {reply.error.kind} {reply.error.message}")
+    let replyBytes: List(UInt8) = bytes,
+      let replyError: WasmError = error = wasmCallEncoded(
+        Host
+        host: host
+        instance: instance
+        name: "summarize"
+        input: input
+        timeoutMs: 1000
+      )
+    if wasmFailed(error: replyError) {
+      log("frame {i}: {replyError.kind} {replyError.message}")
       ret
     }
-    if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes) {
+    if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: replyBytes) {
       total = total + out.total
       decoded = decoded + 1
       lastNames = "{out.names}"
@@ -207,36 +210,39 @@ func useDescribe(
   factor: view Int
 ) ret String {
   let input: List(UInt8) = command.toBinary()
-  let allocated: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "raeModuleAlloc"
-    args: { wasmI32(value: input.length) }
-    timeoutMs: 1000
-  )
-  let address: Int = first(result: allocated)
+  let allocatedValues: List(WasmValue) = values,
+    let allocatedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleAlloc"
+      args: { wasmI32(value: input.length) }
+      timeoutMs: 1000
+    )
+  let address: Int = wasmFirstInteger(values: allocatedValues)
   let written: Bool = wasmMemoryWrite(instance: instance, address: address, bytes: input)
-  let called: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "useDescribe"
-    args: { wasmI32(value: address), wasmI32(value: input.length), wasmI64(value: factor) }
-    timeoutMs: 1000
-  )
-  let freed: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "raeModuleFree"
-    args: { wasmI32(value: address) }
-    timeoutMs: 1000
-  )
-  if wasmFailed(error: called.error) {
-    ret "{called.error.kind}: {called.error.message}"
+  let calledValues: List(WasmValue) = values,
+    let calledError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "useDescribe"
+      args: { wasmI32(value: address), wasmI32(value: input.length), wasmI64(value: factor) }
+      timeoutMs: 1000
+    )
+  let freedValues: List(WasmValue) = values,
+    let freedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: address) }
+      timeoutMs: 1000
+    )
+  if wasmFailed(error: calledError) {
+    ret "{calledError.kind}: {calledError.message}"
   }
-  let packed: Int = first(result: called)
+  let packed: Int = wasmFirstInteger(values: calledValues)
   let resultAddress: Int = (packed shr 32) bitand 4294967295
   let resultLength: Int = packed bitand 4294967295
   var text: String = "no answer"
@@ -253,14 +259,15 @@ func useDescribe(
       }
     }
   }
-  let freedResult: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "raeModuleFree"
-    args: { wasmI32(value: resultAddress) }
-    timeoutMs: 1000
-  )
+  let freedResultValues: List(WasmValue) = values,
+    let freedResultError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "raeModuleFree"
+      args: { wasmI32(value: resultAddress) }
+      timeoutMs: 1000
+    )
   ret text
 }
 
@@ -305,23 +312,26 @@ func main() {
   )
   log("with log, clock and game granted: {instance.error.kind}")
   var host: Host = { output: createWasiOutput(), describeCalls: 0 }
-  let initialized: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "_initialize"
-    args: {}
-    timeoutMs: 1000
-  )
-  log("_initialize: {initialized.error.kind}")
-  log("add(40, 2) = {first(result: wasmCall(
-    Host
-    host: host
-    instance: instance
-    name: "add"
-    args: { wasmI64(value: 40), wasmI64(value: 2) }
-    timeoutMs: 1000
-  ))}")
+  let initializedValues: List(WasmValue) = values,
+    let initializedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "_initialize"
+      args: {}
+      timeoutMs: 1000
+    )
+  log("_initialize: {initializedError.kind}")
+  let addedValues: List(WasmValue) = values,
+    let addedError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: instance
+      name: "add"
+      args: { wasmI64(value: 40), wasmI64(value: 2) }
+      timeoutMs: 1000
+    )
+  log("add(40, 2) = {wasmFirstInteger(values: addedValues)}")
   log("greet = {greet(
     host: host
     instance: instance
@@ -350,14 +360,15 @@ func main() {
     granted: { "log", "clock" }
     limits: wasmDefaultLimits()
   )
-  let initializedAgain: WasmCallResult = wasmCall(
-    Host
-    host: host
-    instance: ungranted
-    name: "_initialize"
-    args: {}
-    timeoutMs: 1000
-  )
+  let initializedAgainValues: List(WasmValue) = values,
+    let initializedAgainError: WasmError = error = wasmCall(
+      Host
+      host: host
+      instance: ungranted
+      name: "_initialize"
+      args: {}
+      timeoutMs: 1000
+    )
   let callsBefore: Int = host.describeCalls
   log("game not granted: {useDescribe(
     host: host

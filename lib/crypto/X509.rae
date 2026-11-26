@@ -396,73 +396,58 @@ func x509KnownExtension(oid: view String) ret Bool {
   ret oid is x509BasicConstraints or oid is "2.5.29.15" or oid is "2.5.29.37" or oid is "2.5.29.17" or oid is "2.5.29.14" or oid is "2.5.29.35"
 }
 
-type X509ChainResult {
-  ok: Bool
-  reason: String
-  # the parsed chain, leaf first (when every certificate parsed)
-  certificates: List(X509Certificate)
-}
-
 # Whether `chain` (DER certificates, leaf first, ending with the root) leads to `pinnedRoot` (DER),
-# each signed by the next and valid at `now` (seconds since 1970)
+# each signed by the next and valid at `now` (seconds since 1970): `ok`, the `reason` when not, and
+# the parsed chain, leaf first (when every certificate parsed)
 func x509VerifyChain(
   chain: view List(List(UInt8))
   pinnedRoot: view List(UInt8)
   now: view Int
-) ret X509ChainResult {
-  var result: X509ChainResult = { ok: false, reason: "", certificates: {} }
+) ret ok: Bool, reason: String, certificates: List(X509Certificate) {
+  var certificates: List(X509Certificate) = {}
   if chain.length < 2 {
-    result.reason = "the chain needs a leaf and the root"
-    ret result
+    ret ok: false, reason: "the chain needs a leaf and the root", certificates: certificates
   }
   loop var i: Int = 0, i < chain.length, ++i {
     if let certificate: X509Certificate = x509Parse(der: chain.copyAtDefault(index: i)) {
-      result.certificates.add(value: certificate)
+      certificates.add(value: certificate)
     } else {
-      result.reason = "certificate {i} does not parse"
-      ret result
+      ret ok: false, reason: "certificate {i} does not parse", certificates: certificates
     }
   }
   if not bytesEqual(a: chain.copyAtDefault(index: chain.length - 1), b: pinnedRoot) {
-    result.reason = "the chain does not end with the pinned root"
-    ret result
+    ret ok: false, reason: "the chain does not end with the pinned root", certificates: certificates
   }
-  loop var i: Int = 0, i < result.certificates.length, ++i {
-    let certificate: X509Certificate = result.certificates.copyAtDefault(index: i)
+  loop var i: Int = 0, i < certificates.length, ++i {
+    let certificate: X509Certificate = certificates.copyAtDefault(index: i)
     if now < certificate.notBefore or now > certificate.notAfter {
-      result.reason = "certificate {i} is not valid at this time"
-      ret result
+      ret ok: false, reason: "certificate {i} is not valid at this time", certificates: certificates
     }
     loop let extension: view X509Extension in certificate.extensions {
       if extension.critical and not x509KnownExtension(oid: extension.oid) {
-        result.reason = "certificate {i} has a critical extension {extension.oid} this does not know"
-        ret result
+        ret ok: false, reason: "certificate {i} has a critical extension {extension.oid} this does not know", certificates: certificates
       }
     }
     if i > 0 {
       if not certificate.hasBasicConstraints or not certificate.isCa {
-        result.reason = "certificate {i} signs others but is not a CA"
-        ret result
+        ret ok: false, reason: "certificate {i} signs others but is not a CA", certificates: certificates
       }
       # the CAs between it and the leaf
       if certificate.pathLength >= 0 and i - 1 > certificate.pathLength {
-        result.reason = "certificate {i} allows {certificate.pathLength} CAs below it, the chain has {i - 1}"
-        ret result
+        ret ok: false, reason: "certificate {i} allows {certificate.pathLength} CAs below it, the chain has {i - 1}", certificates: certificates
       }
     }
-    if i + 1 < result.certificates.length {
+    if i + 1 < certificates.length {
       let why: String = x509SignedBy(
         certificate: certificate
-        issuer: result.certificates.copyAtDefault(index: i + 1)
+        issuer: certificates.copyAtDefault(index: i + 1)
       )
       if why.length() > 0 {
-        result.reason = "certificate {i}: {why}"
-        ret result
+        ret ok: false, reason: "certificate {i}: {why}", certificates: certificates
       }
     }
   }
-  result.ok = true
-  ret result
+  ret ok: true, reason: "", certificates: certificates
 }
 
 # ---- making certificates (tests, and a server's own) --------------------------------------------

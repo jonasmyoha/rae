@@ -2347,6 +2347,9 @@ static bool sema_arg_is_type_name(SymbolTable* symbols, const AstExpr* v) {
     for (size_t i = 0; i < sizeof(prims)/sizeof(prims[0]); i++)
         if (str_eq_cstr(n, prims[i])) return true;
     Symbol* s = symbol_table_lookup(symbols, n);
+    /* in an instance of a generic function, its concrete type names are defined
+     * with their type and no declaration (`Host` for `H`) */
+    if (s && !s->decl && s->type && s->type->name.len && str_eq(s->type->name, n)) return true;
     return s && s->decl && (s->decl->kind == AST_DECL_TYPE || s->decl->kind == AST_DECL_ENUM);
 }
 

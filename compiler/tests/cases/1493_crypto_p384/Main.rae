@@ -126,11 +126,17 @@ func wycheproof() {
 }
 
 func chainResult(chain: view List(List(UInt8)), root: view List(UInt8), now: view Int) ret String {
-  let result: X509ChainResult = x509VerifyChain(chain: chain, pinnedRoot: root, now: now)
-  if result.ok {
+  let ok: Bool = ok,
+    let reason: String = reason,
+    let certificates: List(X509Certificate) = certificates = x509VerifyChain(
+      chain: chain
+      pinnedRoot: root
+      now: now
+    )
+  if ok {
     ret "verifies"
   }
-  ret "fails: {result.reason}"
+  ret "fails: {reason}"
 }
 
 func appleChain() {

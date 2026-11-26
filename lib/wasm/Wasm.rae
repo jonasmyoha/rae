@@ -333,11 +333,6 @@ func wasmTrap(message: view String) ret WasmHostAnswer {
   ret WasmHostAnswer { results: List.create(WasmValue, cap: 0), trap: true, message: "{message}" }
 }
 
-type WasmCallResult {
-  values: List(WasmValue)
-  error: WasmError
-}
-
 func wasmKindOf(code: view Int) ret WasmValueKind {
   if code is 1 {
     ret WasmValueKind.i64
@@ -661,11 +656,11 @@ func wasmInstantiate(
   }
 }
 
-func wasmCallFailed(kind: view WasmErrorKind, message: view String) ret WasmCallResult {
-  ret WasmCallResult {
-    values: List.create(WasmValue, cap: 0)
-    error: WasmError { kind: kind, message: "{message}" }
-  }
+func wasmCallFailed(
+  kind: view WasmErrorKind
+  message: view String
+) ret values: List(WasmValue), error: WasmError {
+  ret values: List.create(WasmValue, cap: 0), error: WasmError { kind: kind, message: "{message}" }
 }
 
 # The waiting host call, as a value
@@ -725,7 +720,7 @@ func wasmGiveHostAnswer(instance: view WasmInstance, answer: view WasmHostAnswer
 }
 
 # The finished call's results (non-generic: wasmCall only calls it)
-func wasmFinishedResult(instance: view WasmInstance) ret WasmCallResult {
+func wasmFinishedResult(instance: view WasmInstance) ret values: List(WasmValue), error: WasmError {
   var values: List(WasmValue) = List.create(WasmValue, cap: 2)
   when hasWasmEngine {
     unsafe {
@@ -741,7 +736,7 @@ func wasmFinishedResult(instance: view WasmInstance) ret WasmCallResult {
       }
     }
   }
-  ret WasmCallResult { values: own values, error: wasmOk() }
+  ret values: own values, error: wasmOk()
 }
 
 # The trapped call's error: `timedOut` when the watchdog stopped it
@@ -750,7 +745,7 @@ func wasmTrappedResult(
   name: view String
   stopped: view Bool
   timeoutMs: view Int
-) ret WasmCallResult {
+) ret values: List(WasmValue), error: WasmError {
   var length: Int = 0
   when hasWasmEngine {
     unsafe {
@@ -785,7 +780,7 @@ func wasmCall(
   name: view String
   args: view List(WasmValue)
   timeoutMs: view Int
-) ret WasmCallResult {
+) ret values: List(WasmValue), error: WasmError {
   if instance.handle is 0 {
     ret wasmCallFailed(
       kind: WasmErrorKind.instantiate
@@ -878,7 +873,7 @@ func wasmCall(
       }
     }
   }
-  ret WasmCallResult { values: List.create(WasmValue, cap: 0), error: wasmUnsupported() }
+  ret values: List.create(WasmValue, cap: 0), error: wasmUnsupported()
 }
 
 # rae.raeTakeAnswer(address): the pending typed answer written at `address`,
