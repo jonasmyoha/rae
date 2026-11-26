@@ -100,6 +100,25 @@ bool c_emit_ret_results(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   const AstFuncDecl* func = ctx->func_decl;
   if (!c_has_several_results(func)) return false;
   Arena* arena = ctx->compiler_ctx->ast_arena;
+  /* `ret socketRead(...)`, whose results are this function's own: the call's struct,
+   * field by field into this function's (each is a C type of its own) */
+  const AstReturnArg* only = stmt->as.ret_stmt.values;
+  if (only && !only->next && !only->has_label && only->value
+      && (only->value->kind == AST_EXPR_CALL || only->value->kind == AST_EXPR_METHOD_CALL)) {
+    int id = ctx->temp_counter++;
+    bool had_expected = ctx->has_expected_type;
+    ctx->has_expected_type = false;
+    fprintf(out, "    __auto_type __rae_passed%d = ", id);
+    emit_expr(ctx, only->value, out, PREC_LOWEST, false, false);
+    fprintf(out, ";\n");
+    ctx->has_expected_type = had_expected;
+    fprintf(out, "    %s __ret_val = {", c_results_type_name(ctx, func));
+    for (const AstReturnItem* result = func->returns; result; result = result->next)
+      fprintf(out, " .%.*s = __rae_passed%d.%.*s,", (int)result->name.len, result->name.data, id,
+              (int)result->name.len, result->name.data);
+    fprintf(out, " };\n");
+    return true;
+  }
   for (const AstReturnArg* given = stmt->as.ret_stmt.values; given; given = given->next) {
     const AstReturnItem* result = NULL;
     for (const AstReturnItem* r = func->returns; r && !result; r = r->next)

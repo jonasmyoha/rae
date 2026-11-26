@@ -1,7 +1,6 @@
 # Where several results are refused: a spawn, a call that is used as a value in any place, a `ret`
-# that
-# passes another function's results on, and a local of the wrong type for a generic function's
-# result.
+# that passes on results that are not the function's own, and a local of the wrong type for a
+# generic function's result.
 func divide(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
   ret quotient: a / b, remainder: a % b
 }
@@ -18,7 +17,19 @@ func maybe(a: view Int) ret value: opt Int, fine: Bool {
 func nativePair(a: view Int) unsafe extern("rae_native_pair") ret first: Int, second: Int
 
 func passedOn(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
-  ret divide(a: a, b: b)  # ERROR: taken apart first, then given by label
+  ret divide(a: a, b: b)
+}
+
+func otherLabels(a: view Int, b: view Int) ret whole: Int, remainder: Int {
+  ret divide(a: a, b: b)  # ERROR: no result 'whole' in divide
+}
+
+func otherTypes(a: view Int) ret value: Bool, fine: Bool {
+  ret makeBoth(value: a)  # ERROR: its value is an Int here
+}
+
+func withMore(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
+  ret divide(a: a, b: b), 3  # ERROR: nothing else
 }
 
 func main() {

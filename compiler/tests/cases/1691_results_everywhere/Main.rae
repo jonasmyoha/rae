@@ -44,6 +44,25 @@ func waitsAfter(seed: view Int) ret Int {
   ret value + text.length()
 }
 
+# a `ret` passes on another function's results when they are its own, label by label
+func read(seed: view Int) ret bytes: Int, status: String {
+  if seed < 0 {
+    ret bytes: 0, status: "closed {seed}"
+  }
+  ret bytes: seed * 2, status: "ok {seed}"
+}
+
+func readAll(seed: view Int) ret status: String, bytes: Int {
+  if seed is 7 {
+    ret status: "seven", bytes: 7
+  }
+  ret read(seed: seed)
+}
+
+func passedGeneric(T: type, value: view T) ret value: T, fine: Bool {
+  ret makeBoth(value: value)
+}
+
 func main() {
   let box: Box = { width: 3, height: 4 }
   let wide: Int = wide, let tall: Int = tall = box.split()
@@ -61,6 +80,10 @@ func main() {
   let first: String = first, let second: String = second, let same: Bool = same = pair.halves()
   log("{first} {second} {same}")
   log("{inside(value: 5)} {inside(value: "s {2}")} {inside(value: note)}")
+  let bytes: Int = bytes, let status: String = status = readAll(seed: 3)
+  let seven: Int = bytes, let sevenStatus: String = status = readAll(seed: 7)
+  let passed: Note = value, let passedFine: Bool = fine = passedGeneric(value: note)
+  log("{bytes} {status} {seven} {sevenStatus} {passed} {passedFine}")
   let task: Task(Int) = spawn waitsAfter(seed: 4)
   let other: Task(Int) = spawn waitsAfter(seed: 40)
   log("{task.get()} {other.get()}")

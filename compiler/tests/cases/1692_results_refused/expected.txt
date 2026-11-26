@@ -1,30 +1,36 @@
-tests/cases/1692_results_refused/Main.rae:18:1: 'nativePair' is extern: a C function has one result
-    18 | func nativePair(a: view Int) unsafe extern("rae_native_pair") ret first: Int, second: Int
+tests/cases/1692_results_refused/Main.rae:17:1: 'nativePair' is extern: a C function has one result
+    17 | func nativePair(a: view Int) unsafe extern("rae_native_pair") ret first: Int, second: Int
        | ^~~~
-tests/cases/1692_results_refused/Main.rae:21:13: a 'ret' does not pass on the results of 'divide': take them apart, then give each by its label (`ret quotient: ..., ...`)
-    21 |   ret divide(a: a, b: b)  # ERROR: taken apart first, then given by label
+tests/cases/1692_results_refused/Main.rae:24:13: a 'ret' passes on the results of 'divide' only when they are this function's own (whole, remainder), and it has no result 'whole': take them apart, then give each by its label
+    24 |   ret divide(a: a, b: b)  # ERROR: no result 'whole' in divide
        |             ^~~~
-tests/cases/1692_results_refused/Main.rae:25:37: 'divide' has several results and a Task has one: spawn a function that calls it and returns what is wanted of them
-    25 |   let task: Task(Int) = spawn divide(a: 7, b: 2)  # ERROR: a Task has one result
-       |                                     ^~~~
-tests/cases/1692_results_refused/Main.rae:26:27: 'makeBoth' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = makeBoth(...)`
-    26 |   let made: Int = makeBoth(value: 3)  # ERROR: a generic function's call is no value either
-       |                           ^~~~
-tests/cases/1692_results_refused/Main.rae:27:17: 'makeBoth' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = makeBoth(...)`
-    27 |   log("{makeBoth(value: "t")}")  # ERROR
-       |                 ^~~~
-tests/cases/1692_results_refused/Main.rae:28:15: 'divide' has several results (quotient, remainder), so its call is no value: take them apart, as in `let quotient: T = quotient, ... = divide(...)`
-    28 |   match divide(a: 7, b: 2) {
+tests/cases/1692_results_refused/Main.rae:28:15: a 'ret' passes on the results of 'makeBoth' only when they are this function's own (value, fine), and its result 'value' is 'Int', this function's is 'Bool': take them apart, then give each by its label
+    28 |   ret makeBoth(value: a)  # ERROR: its value is an Int here
        |               ^~~~
-tests/cases/1692_results_refused/Main.rae:34:28: 'maybe' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = maybe(...)`
-    34 |   if let found: Int = maybe(a: 3) {
+tests/cases/1692_results_refused/Main.rae:32:13: a 'ret' that passes on another function's results gives nothing else
+    32 |   ret divide(a: a, b: b), 3  # ERROR: nothing else
+       |             ^~~~
+tests/cases/1692_results_refused/Main.rae:36:37: 'divide' has several results and a Task has one: spawn a function that calls it and returns what is wanted of them
+    36 |   let task: Task(Int) = spawn divide(a: 7, b: 2)  # ERROR: a Task has one result
+       |                                     ^~~~
+tests/cases/1692_results_refused/Main.rae:37:27: 'makeBoth' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = makeBoth(...)`
+    37 |   let made: Int = makeBoth(value: 3)  # ERROR: a generic function's call is no value either
+       |                           ^~~~
+tests/cases/1692_results_refused/Main.rae:38:17: 'makeBoth' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = makeBoth(...)`
+    38 |   log("{makeBoth(value: "t")}")  # ERROR
+       |                 ^~~~
+tests/cases/1692_results_refused/Main.rae:39:15: 'divide' has several results (quotient, remainder), so its call is no value: take them apart, as in `let quotient: T = quotient, ... = divide(...)`
+    39 |   match divide(a: 7, b: 2) {
+       |               ^~~~
+tests/cases/1692_results_refused/Main.rae:45:28: 'maybe' has several results (value, fine), so its call is no value: take them apart, as in `let value: T = value, ... = maybe(...)`
+    45 |   if let found: Int = maybe(a: 3) {
        |                            ^~~~
-tests/cases/1692_results_refused/Main.rae:38:3: result 'value' is 'Int'; 'text' is written 'String'
-    38 |   let text: String = value, let fine: Bool = fine = makeBoth(value: 3)  # ERROR: the result is an Int here
+tests/cases/1692_results_refused/Main.rae:49:3: result 'value' is 'Int'; 'text' is written 'String'
+    49 |   let text: String = value, let fine: Bool = fine = makeBoth(value: 3)  # ERROR: the result is an Int here
        |   ^~~~
-tests/cases/1692_results_refused/Main.rae:39:28: 'makeBoth' has no result 'other'; its results are: value, fine
-    39 |   let number: Int = value, let extra: Bool = other = makeBoth(value: 3)  # ERROR: no such result, one not taken
+tests/cases/1692_results_refused/Main.rae:50:28: 'makeBoth' has no result 'other'; its results are: value, fine
+    50 |   let number: Int = value, let extra: Bool = other = makeBoth(value: 3)  # ERROR: no such result, one not taken
        |                            ^~~~
-tests/cases/1692_results_refused/Main.rae:39:3: result 'fine' of 'makeBoth' is not taken; every result goes to a local (value, fine)
-    39 |   let number: Int = value, let extra: Bool = other = makeBoth(value: 3)  # ERROR: no such result, one not taken
+tests/cases/1692_results_refused/Main.rae:50:3: result 'fine' of 'makeBoth' is not taken; every result goes to a local (value, fine)
+    50 |   let number: Int = value, let extra: Bool = other = makeBoth(value: 3)  # ERROR: no such result, one not taken
        |   ^~~~

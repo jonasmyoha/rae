@@ -706,10 +706,19 @@ func parse(text: view String) ret value: Int, error: opt String {
   called function, never a value in scope). `let` and `var` are chosen per local, and a `let` is
   frozen as any other. Every result goes to a local, and the written type must be the result's.
   `rae format` writes a local per line when the statement does not fit in 100 columns.
+- **A `ret` may pass on another function's results whole**, when they are its own: the same
+  labels, each of the same type (their order may differ). Nothing else is given in that `ret`.
+
+  ```rae
+  func readAll(socketId: view SocketId) ret bytes: Int, status: NetStatus {
+    ret socketRead(socketId: socketId, maxBytes: 4096)
+  }
+  ```
+
+  Results that differ are taken apart first, then given by label.
 - **Such a call is no value anywhere else**: not the right side of a plain `let`, not an argument,
-  not the subject of a `match` or an `if let`, not what a `ret` passes on (`ret f()` is an error:
-  take the results apart, then give each by its label), and not what a `spawn` starts (a Task has
-  one result).
+  not the subject of a `match` or an `if let`, and not what a `spawn` starts (a Task has one
+  result).
 - **Ownership is that of any result.** The caller owns what it binds. In a `ret`, a local of the
   function moves out (also written `own name`), a place is copied (a field, a parameter that is a
   `view`), and what a call or a text makes is given as it is. A local that two values of one `ret`

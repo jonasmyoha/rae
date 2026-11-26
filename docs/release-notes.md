@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.103, 2026-11-26: a `ret` passes on another function's results
+
+- `ret socketRead(...)` in a function with several results passes on that call's results whole, when they are the
+  function's own: the same labels, each of the same type (in any order). Results that differ are taken apart and
+  given by label, as before; the error says which label or type differs.
+- Cases 1691 and 1692; spec/rae.md 5.5.
+
 ## 0.4.102, 2026-11-26: several results in the spec, and their first uses
 
 - spec/rae.md 5.5 describes several results: declaring them, `ret`, taking the call apart, what is refused,

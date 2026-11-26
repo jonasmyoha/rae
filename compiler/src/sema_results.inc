@@ -131,11 +131,47 @@ static void sema_analyze_ret_results(CompilerContext* ctx, AstModule* module, Sy
             : arg->value->decl_link && arg->value->decl_link->kind == AST_DECL_FUNC ? arg->value->decl_link
             : arg->value->decl_link ? NULL : sema_generic_results_callee(ctx, module, symbols, arg->value);
         if (passed && passed->as.func_decl.returns && passed->as.func_decl.returns->next) {
-            snprintf(buf, sizeof buf,
-                     "a 'ret' does not pass on the results of '%.*s': take them apart, then give each by its label "
-                     "(`ret %.*s: ..., ...`)", (int)passed->as.func_decl.name.len, passed->as.func_decl.name.data,
-                     (int)results->name.len, results->name.data);
-            sema_results_error(module, line, column, buf);
+            /* `ret socketRead(...)`: passed on whole when its results are this function's
+             * own, label by label and type by type (spec/rae.md 5.5) */
+            if (arg->next || stmt->as.ret_stmt.values != arg) {
+                sema_results_error(module, line, column,
+                                   "a 'ret' that passes on another function's results gives nothing else");
+                return;
+            }
+            const char* differs = NULL;
+            char why[320];
+            size_t theirs = 0, ours = 0;
+            for (const AstReturnItem* r = passed->as.func_decl.returns; r; r = r->next) theirs++;
+            for (const AstReturnItem* r = results; r; r = r->next) ours++;
+            if (theirs != ours) differs = "it has another number of results";
+            bool generic = passed->as.func_decl.generic_params != NULL;
+            for (const AstReturnItem* r = results; r && !differs; r = r->next) {
+                const AstReturnItem* other = sema_result_named(passed->as.func_decl.returns, r->name);
+                if (!other) {
+                    snprintf(why, sizeof why, "it has no result '%.*s'", (int)r->name.len, r->name.data);
+                    differs = why;
+                    break;
+                }
+                TypeInfo* mine = sema_resolve_type_internal(ctx, module, symbols, r->type);
+                TypeInfo* given = generic ? sema_generic_result_type(ctx, module, symbols, passed, other, arg->value)
+                                          : sema_resolve_type_internal(ctx, module, symbols, other->type);
+                if (given && mine && given != mine) {
+                    char want[160], have[160];
+                    size_t want_pos = 0, have_pos = 0;
+                    sema_type_text(r->type, want, sizeof want, &want_pos);
+                    sema_type_text(generic ? sema_type_ref_of(ctx, given) : other->type, have, sizeof have, &have_pos);
+                    snprintf(why, sizeof why, "its result '%.*s' is '%s', this function's is '%s'",
+                             (int)r->name.len, r->name.data, have, want);
+                    differs = why;
+                }
+            }
+            if (differs) {
+                snprintf(buf, sizeof buf,
+                         "a 'ret' passes on the results of '%.*s' only when they are this function's own (%s), "
+                         "and %s: take them apart, then give each by its label",
+                         (int)passed->as.func_decl.name.len, passed->as.func_decl.name.data, labels, differs);
+                sema_results_error(module, line, column, buf);
+            }
             return;
         }
         if (!arg->has_label) {
