@@ -68,7 +68,7 @@ func rendererQueueSurfaceImagePixels(
     ret -1
   }
   images.madeNames.add(value: "{path}")
-  images.madePixels.add(value: pixels)
+  images.madePixels.add(value: surfaceBytesOf(pixels: pixels))
   images.paths.add(value: path)
   images.stale = true
   ret images.paths.length - 1
@@ -103,7 +103,7 @@ func rendererAddSurfaceImagePixels(
     ret -1
   }
   images.madeNames.add(value: "{path}")
-  images.madePixels.add(value: pixels)
+  images.madePixels.add(value: surfaceBytesOf(pixels: pixels))
   var paths: List(String) = images.paths
   paths.add(value: path)
   if let resources: mod GpuResources = renderer.gpuResources {

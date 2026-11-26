@@ -23,15 +23,16 @@ open webgpu/Context
 const surfaceImageMaxLayers: Int = 256
 
 # A layer named `made:<name>` in `paths` is a picture made in memory
-# (rendererAddSurfaceImagePixels): its linear RGBA pixels are kept in
-# madePixels, at the same index as its name in madeNames, so the array can
-# be rebuilt with it when another image is added.
+# (rendererAddSurfaceImagePixels): its pixels are kept in madePixels as the
+# texture's own bytes (sRGB RGBA8, straight alpha: surfaceBytesOf), 1 MB a
+# layer rather than its 4 MB of floats, at the same index as its name in
+# madeNames, so the array can be rebuilt with it when another image is added.
 const surfaceMadePrefix: String = "made:"
 
 type SurfaceImages {
   paths: List(String) = List.create(String, cap: 0)
   madeNames: List(String) = List.create(String, cap: 0)
-  madePixels: List(List(Float)) = List.create(List(Float), cap: 0)
+  madePixels: List(List(UInt8)) = List.create(List(UInt8), cap: 0)
   texture: TextureId = noTextureId()
   textureView: TextureViewId = noTextureViewId()
   sampler: SamplerId = noSamplerId()
@@ -111,8 +112,106 @@ func uploadSurfaceLevel(
   }
 }
 
-# Load bounded square RGBA PNG layers, generate box-filtered mips in linear light,
-# and use hardware sRGB decoding. Failure leaves the previous array intact.
+# A made picture as kept to rebuild the array with (SurfaceImages madePixels):
+# linear RGBA floats as the texture's own bytes, sRGB color and straight alpha
+func surfaceBytesOf(pixels: view List(Float)) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: pixels.length)
+  loop var pixel: Int = 0, pixel < pixels.length / 4, ++pixel {
+    loop var channel: Int = 0, channel < 3, ++channel {
+      bytes.add(value: surfaceEncoded(value: pixels.copyAtDefault(index: pixel * 4 + channel)))
+    }
+    bytes.add(
+      value: (Math.clamp(val: pixels.copyAtDefault(index: pixel * 4 + 3), low: 0.0, high: 1.0) * 255.0 + 0.5).toInt() as UInt8
+    )
+  }
+  ret own bytes
+}
+
+# The linear RGBA floats of kept bytes (surfaceBytesOf), for the mip levels
+func surfacePixelsOf(bytes: view List(UInt8)) ret List(Float) {
+  var linear: List(Float) = List.create(Float, cap: 256)
+  loop var value: Int = 0, value < 256, ++value {
+    linear.add(value: surfaceLinear(value: value.toFloat() / 255.0))
+  }
+  var pixels: List(Float) = List.create(Float, cap: bytes.length)
+  loop var pixel: Int = 0, pixel < bytes.length / 4, ++pixel {
+    loop var channel: Int = 0, channel < 3, ++channel {
+      pixels.add(
+        value: linear.copyAtDefault(index: bytes.copyAtDefault(index: pixel * 4 + channel) as Int)
+      )
+    }
+    pixels.add(value: (bytes.copyAtDefault(index: pixel * 4 + 3) as Int).toFloat() / 255.0)
+  }
+  ret own pixels
+}
+
+# A 512 x 512 PNG's pixels as linear RGBA floats; empty if it is not one
+func surfacePngPixels(path: view String, size: view Int) ret List(Float) {
+  var width: Int = 0
+  var height: Int = 0
+  let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
+  if width is not size or height is not size {
+    log("surface image must be a 512 x 512 PNG: {path}")
+    unsafe {
+      rae_ext_rae_buf_free(buf: pixels)
+    }
+    ret List.create(Float, cap: 0)
+  }
+  var linear: List(Float) = List.create(Float, cap: size * size * 4)
+  loop var pixel: Int = 0, pixel < size * size, ++pixel {
+    var packed: Int = 0
+    unsafe {
+      packed = rae_ext_rae_buf_get(Int, buf: pixels, index: pixel)
+    }
+    linear.add(value: surfaceLinear(value: ((packed / 65536) % 256).toFloat() / 255.0))
+    linear.add(value: surfaceLinear(value: ((packed / 256) % 256).toFloat() / 255.0))
+    linear.add(value: surfaceLinear(value: (packed % 256).toFloat() / 255.0))
+    linear.add(value: ((packed / 16777216) % 256).toFloat() / 255.0)
+  }
+  # loadPng's buffer is the caller's: 512 x 512 Ints, 2 MB per picture
+  unsafe {
+    rae_ext_rae_buf_free(buf: pixels)
+  }
+  ret own linear
+}
+
+# Layer `layer`'s pixels, decoded only now: of `paths` (a PNG, or a made
+# picture's kept bytes) or else of `layers`; empty when it cannot be had
+func surfaceLayerPixels(
+  images: view SurfaceImages
+  paths: view List(String)
+  layers: view List(List(Float))
+  layer: view Int
+  size: view Int
+) ret List(Float) {
+  if paths.length is 0 {
+    if let pixels: view List(Float) = layers.viewAt(index: layer) {
+      if pixels.length is size * size * 4 {
+        ret pixels
+      }
+    }
+    log("a surface image layer must have {size} x {size} RGBA pixels")
+    ret List.create(Float, cap: 0)
+  }
+  let path: String = paths.copyAtDefault(index: layer)
+  if not path.startsWith(prefix: surfaceMadePrefix) {
+    ret surfacePngPixels(path: path, size: size)
+  }
+  loop var made: Int = 0, made < images.madeNames.length, ++made {
+    if images.madeNames.copyAtDefault(index: made) is path {
+      if let bytes: view List(UInt8) = images.madePixels.viewAt(index: made) {
+        ret surfacePixelsOf(bytes: bytes)
+      }
+    }
+  }
+  log("surface image {path} was made in memory but its pixels are gone")
+  ret List.create(Float, cap: 0)
+}
+
+# Load bounded square RGBA PNG layers (and made pictures), generate box-filtered
+# mips in linear light, and use hardware sRGB decoding. Each layer is decoded,
+# uploaded and let go before the next, so a rebuild holds one layer's floats
+# at a time, not every layer's. Failure leaves the previous array intact.
 func setSurfaceImages(
   images: mod SurfaceImages
   resources: mod GpuResources
@@ -122,58 +221,12 @@ func setSurfaceImages(
     log("surface images support at most {surfaceImageMaxLayers} layers per renderer")
     ret false
   }
-  let size: Int = 512
-  var decoded: List(List(Float)) = List.create(List(Float), cap: paths.length)
-  loop let path: view String in paths {
-    if path.startsWith(prefix: surfaceMadePrefix) {
-      var found: Bool = false
-      loop var made: Int = 0, made < images.madeNames.length, ++made {
-        if images.madeNames.copyAtDefault(index: made) is path {
-          if let pixels: view List(Float) = images.madePixels.viewAt(index: made) {
-            decoded.add(value: pixels)
-            found = true
-          }
-        }
-      }
-      if not found {
-        log("surface image {path} was made in memory but its pixels are gone")
-        ret false
-      }
-      continue
-    }
-    var width: Int = 0
-    var height: Int = 0
-    let pixels: Buffer(Int) = Image.loadPng(path: path, width: width, height: height)
-    if width is not size or height is not size {
-      log("surface image must be a 512 x 512 PNG: {path}")
-      unsafe {
-        rae_ext_rae_buf_free(buf: pixels)
-      }
-      ret false
-    }
-    var linear: List(Float) = List.create(Float, cap: size * size * 4)
-    loop var pixel: Int = 0, pixel < size * size, ++pixel {
-      var packed: Int = 0
-      unsafe {
-        packed = rae_ext_rae_buf_get(Int, buf: pixels, index: pixel)
-      }
-      linear.add(value: surfaceLinear(value: ((packed / 65536) % 256).toFloat() / 255.0))
-      linear.add(value: surfaceLinear(value: ((packed / 256) % 256).toFloat() / 255.0))
-      linear.add(value: surfaceLinear(value: (packed % 256).toFloat() / 255.0))
-      linear.add(value: ((packed / 16777216) % 256).toFloat() / 255.0)
-    }
-    # loadPng's buffer is the caller's: 512 x 512 Ints, 2 MB per picture
-    unsafe {
-      rae_ext_rae_buf_free(buf: pixels)
-    }
-    decoded.add(value: own linear)
-  }
   ret uploadSurfaceImages(
     images: images
     resources: resources
     paths: paths
-    decoded: own decoded
-    size: size
+    layers: List.create(List(Float), cap: 0)
+    size: 512
   )
 }
 
@@ -191,29 +244,22 @@ func setSurfaceImagePixels(
     log("surface images support at most {surfaceImageMaxLayers} layers per renderer")
     ret false
   }
-  var decoded: List(List(Float)) = List.create(List(Float), cap: layers.length)
-  loop let layer: view List(Float) in layers {
-    if layer.length is not size * size * 4 {
-      log("a surface image layer must have {size} x {size} RGBA pixels")
-      ret false
-    }
-    decoded.add(value: layer)
-  }
   ret uploadSurfaceImages(
     images: images
     resources: resources
     paths: List.create(String, cap: 0)
-    decoded: own decoded
+    layers: layers
     size: size
   )
 }
 
-# The texture array, its mip levels, view and sampler for decoded layers
+# The texture array, its mip levels, view and sampler: of `paths` when it has
+# any, else of `layers`, else a single white texel
 func uploadSurfaceImages(
   images: mod SurfaceImages
   resources: mod GpuResources
   paths: view List(String)
-  decoded: own List(List(Float))
+  layers: view List(List(Float))
   size: view Int
 ) ret Bool {
   var imageSize: Int = size
@@ -223,23 +269,24 @@ func uploadSurfaceImages(
     side = side / 2
     levels = levels + 1
   }
-  if decoded.length is 0 {
+  var count: Int = paths.length
+  if count is 0 {
+    count = layers.length
+  }
+  let white: Bool = count is 0
+  if white {
     imageSize = 1
     levels = 1
-    let white: List(Float) = { 1.0, 1.0, 1.0, 1.0 }
-    decoded.add(value: white)
+    count = 1
   }
-  var candidate: SurfaceImages = {
-    paths: paths
-    madeNames: images.madeNames
-    madePixels: images.madePixels
-    generation: images.generation + 1
-  }
+  # Only the GPU objects: the kept pictures stay in `images` (a copy of them
+  # here would double them while the array is built)
+  var candidate: SurfaceImages = { generation: images.generation + 1 }
   if let texture: TextureId = createTextureArrayMipped(
     resources: resources
     width: imageSize
     height: imageSize
-    layers: decoded.length
+    layers: count
     format: WGPUTextureFormat_RGBA8UnormSrgb
     usage: WGPUTextureUsage_CopyDst + WGPUTextureUsage_TextureBinding
     mipLevels: levels
@@ -248,8 +295,21 @@ func uploadSurfaceImages(
   } else {
     ret false
   }
-  loop var layer: Int = 0, layer < decoded.length, ++layer {
-    var pixels: List(Float) = decoded.copyAtDefault(index: layer)
+  loop var layer: Int = 0, layer < count, ++layer {
+    var pixels: List(Float) = { 1.0, 1.0, 1.0, 1.0 }
+    if not white {
+      pixels = surfaceLayerPixels(
+        images: images
+        paths: paths
+        layers: layers
+        layer: layer
+        size: imageSize
+      )
+    }
+    if pixels.length is not imageSize * imageSize * 4 {
+      retireSurfaceImages(images: candidate, resources: resources)
+      ret false
+    }
     var side: Int = imageSize
     loop var level: Int = 0, level < levels, ++level {
       uploadSurfaceLevel(
@@ -273,7 +333,7 @@ func uploadSurfaceImages(
       baseMip: 0
       mipCount: levels
       baseLayer: 0
-      layerCount: decoded.length
+      layerCount: count
       dimension: WGPUTextureViewDimension_2DArray
     }
   ) {
@@ -292,8 +352,14 @@ func uploadSurfaceImages(
     retireSurfaceImages(images: candidate, resources: resources)
     ret false
   }
-  retireSurfaceImages(images: images, resources: resources)
-  images = own candidate
+  retireTextureView(resources: resources, id: images.textureView)
+  retireTexture(resources: resources, id: images.texture)
+  retireSampler(resources: resources, id: images.sampler)
+  images.texture = candidate.texture
+  images.textureView = candidate.textureView
+  images.sampler = candidate.sampler
+  images.generation = candidate.generation
+  images.paths = paths
   ret true
 }
 

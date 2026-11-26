@@ -1,0 +1,62 @@
+# A picture made in memory is kept as the texture's own bytes (SurfaceImages
+# surfaceBytesOf: sRGB color, straight alpha), a quarter of its floats, and
+# read back to linear floats (surfacePixelsOf) to make its mip levels when the
+# array is rebuilt. No GPU: only the kept bytes and what comes back of them.
+import Math
+open SurfaceImages
+open SurfaceImagePixels
+
+func main() ret Int {
+  let side: Int = 64
+  var pixels: List(Float) = List.create(Float, cap: side * side * 4)
+  loop var y: Int = 0, y < side, ++y {
+    loop var x: Int = 0, x < side, ++x {
+      # A gradient, a dark corner and a see-through half
+      pixels.add(value: x.toFloat() / (side - 1).toFloat())
+      pixels.add(value: y.toFloat() / (side - 1).toFloat() * 0.02)
+      pixels.add(value: 0.5)
+      var alpha: Float = 1.0
+      if x < side / 2 {
+        alpha = 0.0
+      }
+      pixels.add(value: alpha)
+    }
+  }
+  let bytes: List(UInt8) = surfaceBytesOf(pixels: pixels)
+  log("kept as one byte a channel: {bytes.length is pixels.length}")
+  let back: List(Float) = surfacePixelsOf(bytes: bytes)
+  var worstAlpha: Float = 0.0
+  loop var index: Int = 3, index < pixels.length, index += 4 {
+    worstAlpha = Math.max(
+      a: worstAlpha
+      b: Math.abs(value: back.copyAtDefault(index: index) - pixels.copyAtDefault(index: index))
+    )
+  }
+  log("read back: as many values {back.length is pixels.length}")
+  # The base level the GPU gets is these bytes, as it was the floats' encoding before
+  let again: List(UInt8) = surfaceBytesOf(pixels: back)
+  var same: Bool = again.length is bytes.length
+  loop var index: Int = 0, index < bytes.length, ++index {
+    if again.copyAtDefault(index: index) is not bytes.copyAtDefault(index: index) {
+      same = false
+    }
+  }
+  log("read back and kept again, the same bytes: {same}")
+  log("alpha exact: {worstAlpha is 0.0}")
+  # The mip levels made from the kept bytes as from the floats
+  let fromFloats: List(Float) = surfaceDownsample(pixels: pixels, side: side)
+  let fromBytes: List(Float) = surfaceDownsample(pixels: back, side: side)
+  var mipWorst: Float = 0.0
+  loop var index: Int = 0, index < fromFloats.length, ++index {
+    mipWorst = Math.max(
+      a: mipWorst
+      b: Math.abs(
+        value: fromFloats.copyAtDefault(index: index) - fromBytes.copyAtDefault(index: index)
+      )
+    )
+  }
+  log("a mip level from the bytes within 1/100 of one from the floats: {mipWorst < 0.01}")
+  # What a 512 x 512 layer keeps: its bytes, not its floats
+  log("a 512 x 512 layer keeps {512 * 512 * 4 / 1048576} MB, not {512 * 512 * 4 * 4 / 1048576} MB")
+  ret 0
+}
