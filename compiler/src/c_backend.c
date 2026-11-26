@@ -2600,6 +2600,7 @@ static void report_late_specializations(CompilerContext* ctx, size_t before, con
   }
 }
 
+static int g_instance_errors;
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
@@ -2614,6 +2615,9 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   }
   RAE_GROW1(g_emitted_spec_funcs, g_emitted_spec_func_count, g_emitted_spec_func_cap);
   g_emitted_spec_funcs[g_emitted_spec_func_count++] = mangled;
+  /* analyzed as a function is, for its errors (docs/generic-instances-design.md) */
+  if (!sema_check_backend_instance(ctx, f->generic_template ? &f->generic_template->as.func_decl : f, args))
+    g_instance_errors++;
   // A container drop whose elements are containers calls the ELEMENT
   // container's drop per element (Layer 5 below). That drop may be emitted
   // later or not be forward-declared yet (a `List(List(Point))` made with
@@ -3090,6 +3094,7 @@ bool c_spawn_on_pool(CFuncContext* ctx, const AstDecl* callee_decl) {
 bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const char* out_path) {
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
+  g_instance_errors = 0;
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
   // Before anything reads a name: identifiers spelled like C keywords get a
   // C-safe spelling, declaration and uses together (c_names.c).
@@ -5164,6 +5169,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   c_twins_free(ctx);
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
+  if (g_instance_errors > 0) return false;
   const char* late_mode = getenv("RAE_LATE_SPECIALIZATIONS");
   if (late_mode && strcmp(late_mode, "error") == 0 && g_late_specializations > 0) {
     fprintf(stderr, "error: specialization discovery missed %d specialization(s) (RAE_LATE_SPECIALIZATIONS=error)\n",

@@ -1,0 +1,21 @@
+# The instances the C backend finds are analyzed in full too, before their C is written: each error
+# is reported once and names its instance (docs/generic-instances-design.md section 2).
+func frozen(T: type, value: view T) ret Int {
+  let items: List(T) = [value]
+  items.add(value: value)  # ERROR: a let is frozen
+  ret items.length
+}
+
+func stored(T: type, value: view T) ret T {
+  let maybe: opt T = value
+  if let held: T = maybe {
+    # ERROR: a stored optional is narrowed as a view
+    ret held
+  }
+  ret value
+}
+
+func main() {
+  log("{frozen(value: 2)} {frozen(value: 3.5)}")
+  log("{stored(value: "s")}")
+}

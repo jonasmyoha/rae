@@ -525,6 +525,9 @@ typedef struct {
   // function, a parallelLoop body, a realtime function or a cExport function
   // not marked mainThread that reaches one.
   bool is_main_thread;
+  // An instance of a generic function analyzed where it was made (sema.c
+  // sema_analyze_instance): the loop over the module's declarations skips it
+  bool is_analyzed_instance;
   // `cExport("cName")`: C may call this Rae function by that name, from any
   // thread (docs/realtime-language-design.md §6.1). The backend writes a
   // non-static C function of that name that calls it; its parameters and

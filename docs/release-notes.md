@@ -4,6 +4,24 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.98, 2026-11-26: instances of generic functions are analyzed in full
+
+- Every instance of a generic function is analyzed like a plain function: every statement, moves, frozen `let`s,
+  parameter modes, main-loop rules. Before, only the first statement of the few instances sema made was. An error is
+  reported once per place and names the instance: `... (in frozen(T: Int))`, with where it was made when sema made
+  it. The same error at the same place is printed once, also outside generics.
+- What it found in `lib/`, fixed: a changed `let` in `StringMap.remove`, `IntMap.remove`, seven queries of
+  `ecs/Query`, `Tag.taggedEntities` and `QuickSort.quickSort`; parameters without a mode in `Atomic` (now `view T`)
+  and `SpscRing`; `SpscRing` now opens `Atomic`. In the examples 134 and 135, a changed `let`.
+- `match let` works in a generic function (it was an error of the C compiler), and `if let x: T = stored` of a stored
+  optional is the error it is in a plain function (it freed what it shared twice).
+- In an instance, the functions declared next to its type arguments are open (a game's hooks called from
+  lib/app3d's `runWalkerGame`), a field loop over a struct without fields has no pass, and a Bool converts to and from
+  a number with `as`.
+- A build takes about a fifth more CPU time for this (106: 5.5 s to 6.5 s); the later steps of the design take it
+  back.
+- Cases 1685, 1686; docs/generic-instances-design.md.
+
 ## 0.4.97, 2026-11-26: copies of generic functions are complete
 
 - An instance of a generic function, and each pass of a loop over fields, is a copy that shares no node with its

@@ -1,0 +1,17 @@
+# An instance of a generic function that sema makes is analyzed in full: an error in any of its
+# statements is reported once, with the instance it is in (docs/generic-instances-design.md section
+# 2).
+type Note {
+  text: String
+}
+
+func firstThenWrong(T: type, value: view T) ret Int {
+  log("first {value}")
+  let count: Int = "text"  # ERROR
+  ret count
+}
+
+func main() {
+  let note: Note = { text: "n" }
+  log("{firstThenWrong(value: 1)} {firstThenWrong(value: note)}")
+}

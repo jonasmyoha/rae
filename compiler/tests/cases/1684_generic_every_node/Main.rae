@@ -102,11 +102,15 @@ func maybe(T: type, value: view T, wanted: view Bool) ret opt T {
 }
 
 func narrowed(T: type, value: view T) ret Int {
-  if let found: T = maybe(value: value, wanted: true) {
-    log("got {found}")
-    ret 1
+  match let found: T = maybe(value: value, wanted: true) {
+    case none {
+      ret 0
+    }
+    default {
+      log("got {found}")
+      ret 1
+    }
   }
-  ret 0
 }
 
 func main() {

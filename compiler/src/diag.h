@@ -28,6 +28,10 @@ void diag_reset(void);
 /* #919: silence the printing (errors are still counted) — the format preflight
  * parses a file before the build does and must not report twice. */
 void diag_set_quiet(bool quiet);
+/* While an instance of a generic function is analyzed: each diagnostic ends with
+ * "(in <text>)", and one at a place that had the same message is not repeated. */
+void diag_push_context(const char* text);
+void diag_pop_context(void);
 
 // The same CWD-relative shortening diag_error/diag_report apply to a
 // location's file before printing it, exposed so a diagnostic MESSAGE that

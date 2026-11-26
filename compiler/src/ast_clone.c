@@ -167,6 +167,15 @@ AstExpr* ast_clone_expr(const AstCloner* cloner, const AstExpr* expr) {
   *copy = *expr;
   copy->resolved_type = NULL;
   copy->decl_link = NULL;
+  /* `T.default()` of an optional is none */
+  if (expr->kind == AST_EXPR_METHOD_CALL && !expr->as.method_call.args && expr->as.method_call.object
+      && expr->as.method_call.object->kind == AST_EXPR_IDENT && str_eq_cstr(expr->as.method_call.method_name, "default")) {
+    const AstTypeRef* arg = argument_of(cloner, expr->as.method_call.object->as.ident);
+    if (arg && arg->is_opt) {
+      copy->kind = AST_EXPR_NONE;
+      return copy;
+    }
+  }
   switch (expr->kind) {
     case AST_EXPR_IDENT: case AST_EXPR_INTEGER: case AST_EXPR_FLOAT: case AST_EXPR_STRING:
     case AST_EXPR_CHAR: case AST_EXPR_BOOL: case AST_EXPR_NONE:

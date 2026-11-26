@@ -1,3 +1,9 @@
+tests/cases/1621_own_argument_generic_rejected/Main.rae:16:26: use of moved value 'value': 'own value' moved it on a path reaching here; assign 'value' a new value before using it again, or leave out that 'own' to copy it (in inner(T: String))
+    16 |   let twin: T = duplicate(T, value: own value)  # ERROR: copy
+       |                          ^~~~
+tests/cases/1621_own_argument_generic_rejected/Main.rae:17:11: use of moved value 'values': 'own values' moved it on a path reaching here; assign 'values' a new value before using it again, or leave out that 'own' to copy it (in inner(T: String))
+    17 |   ret look(T, values: own values)  # ERROR
+       |           ^~~~
 tests/cases/1621_own_argument_generic_rejected/Main.rae:15:21: 'own values' moves, but parameter 'values' is 'mod': the callee borrows it and 'values' stays. Remove 'own', or declare the parameter 'own' to take it
     15 |   change(T, values: own values, value: own value)  # ERROR twice
        |                     ^~~~

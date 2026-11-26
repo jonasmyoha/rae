@@ -31,7 +31,7 @@
 # consumer's acquire load of `written` therefore sees the slot's contents.
 # Symmetrically the consumer reads the slot before it releases `read`, so the
 # producer never overwrites a slot that is still being read.
-import Atomic
+open Atomic
 
 # The compiler rejects a T that owns heap here, naming the field (c_call.c).
 func rae_ext_rae_require_plain(T: type) unsafe extern
@@ -49,7 +49,7 @@ type SpscRing(T: type) {
   capacity: Int
 }
 
-func createSpscRing(T: type, capacity: Int) ret SpscRing(T) {
+func createSpscRing(T: type, capacity: view Int) ret SpscRing(T) {
   unsafe {
     rae_ext_rae_require_plain(T)
     var size: Int = capacity
@@ -72,7 +72,7 @@ func createSpscRing(T: type, capacity: Int) ret SpscRing(T) {
 }
 
 # Producer only. Add `value`; answers false (and drops nothing) when full.
-func push(T: type, this: view SpscRing(T), value: T) realtime ret Bool {
+func push(T: type, this: view SpscRing(T), value: view T) realtime ret Bool {
   unsafe {
     let written: Int = rae_ext_rae_atomic_load_relaxed(cell: this.counters, index: writtenIndex)
     let read: Int = rae_ext_rae_atomic_load(cell: this.counters, index: readIndex)

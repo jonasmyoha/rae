@@ -1,18 +1,18 @@
-tests/cases/1610_generic_use_after_move/Main.rae:14:7: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it
+tests/cases/1610_generic_use_after_move/Main.rae:14:7: use of moved value 'value': 'own value' moved it on a path reaching here; assign 'value' a new value before using it again, or leave out that 'own' to copy it (in twice(T: String))
     14 |   keep(T, value: own value, list: list)  # ERROR: moved above
        |       ^~~~
-tests/cases/1610_generic_use_after_move/Main.rae:19:11: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it
+tests/cases/1610_generic_use_after_move/Main.rae:19:11: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it (in twiceInferred(T: String))
     19 |   list.add(value: own value)  # ERROR
        |           ^~~~
 tests/cases/1610_generic_use_after_move/Main.rae:25:7: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it
     25 |   keep(T, value: value, list: list)  # ERROR: a bare local moves too
        |       ^~~~
-tests/cases/1610_generic_use_after_move/Main.rae:33:11: use of moved value 'held': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'held' a new value before using it again, or pass a copy (`"{held}"`, or a `copy T` parameter) if the caller needs it
+tests/cases/1610_generic_use_after_move/Main.rae:33:11: use of moved value 'held': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'held' a new value before using it again, or pass a copy (`"{held}"`, or a `copy T` parameter) if the caller needs it (in local(T: String))
     33 |   list.add(value: own held)  # ERROR: moved on one path
        |           ^~~~
-tests/cases/1610_generic_use_after_move/Main.rae:38:13: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it
+tests/cases/1610_generic_use_after_move/Main.rae:38:13: use of moved value 'value': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'value' a new value before using it again, or pass a copy (`"{value}"`, or a `copy T` parameter) if the caller needs it (in inLoop(T: Note))
     38 |     list.add(value: own value)  # ERROR: the next pass moves it again
        |             ^~~~
-tests/cases/1610_generic_use_after_move/Main.rae:44:6: use of moved value 'values': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'values' a new value before using it again, or pass a copy (`"{values}"`, or a `copy T` parameter) if the caller needs it
+tests/cases/1610_generic_use_after_move/Main.rae:44:6: use of moved value 'values': it was passed to a parameter declared 'own' on a path reaching here, so the callee owns it now; assign 'values' a new value before using it again, or pass a copy (`"{values}"`, or a `copy T` parameter) if the caller needs it (in wholeList(T: Int))
     44 |   log("{values.length}")  # ERROR
        |      ^~~~

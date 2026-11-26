@@ -63,7 +63,7 @@ type Atomic(T: type) {
   cell: Buffer(Int)
 }
 
-func createAtomic(T: type, value: T) ret Atomic(T) {
+func createAtomic(T: type, value: view T) ret Atomic(T) {
   unsafe {
     let cell: Buffer(Int) = rae_ext_rae_buf_alloc(size: 1, elemSize: sizeof(Int))
     rae_ext_rae_atomic_store(cell: cell, index: 0, value: value as Int)
@@ -86,21 +86,21 @@ func loadRelaxed(T: type, this: view Atomic(T)) realtime ret T {
 }
 
 # Set the value, publishing everything this thread wrote before (release).
-func store(T: type, this: view Atomic(T), value: T) realtime {
+func store(T: type, this: view Atomic(T), value: view T) realtime {
   unsafe {
     rae_ext_rae_atomic_store(cell: this.cell, index: 0, value: value as Int)
   }
 }
 
 # Set the value, ordering nothing: for a counter or a statistic.
-func storeRelaxed(T: type, this: view Atomic(T), value: T) realtime {
+func storeRelaxed(T: type, this: view Atomic(T), value: view T) realtime {
   unsafe {
     rae_ext_rae_atomic_store_relaxed(cell: this.cell, index: 0, value: value as Int)
   }
 }
 
 # Set the value and answer the one it replaced.
-func exchange(T: type, this: view Atomic(T), value: T) realtime ret T {
+func exchange(T: type, this: view Atomic(T), value: view T) realtime ret T {
   unsafe {
     ret rae_ext_rae_atomic_exchange(cell: this.cell, index: 0, value: value as Int) as T
   }
@@ -110,8 +110,8 @@ func exchange(T: type, this: view Atomic(T), value: T) realtime ret T {
 func compareExchange(
   T: type
   this: view Atomic(T)
-  expected: T
-  desired: T
+  expected: view T
+  desired: view T
 ) realtime ret Bool {
   unsafe {
     let before: Int = rae_ext_rae_atomic_compare_exchange(
@@ -125,14 +125,14 @@ func compareExchange(
 }
 
 # Add `amount` and answer the value before the add. For Int and Int32.
-func fetchAdd(T: type, this: view Atomic(T), amount: T) realtime ret T {
+func fetchAdd(T: type, this: view Atomic(T), amount: view T) realtime ret T {
   unsafe {
     ret rae_ext_rae_atomic_fetch_add(cell: this.cell, index: 0, amount: amount as Int) as T
   }
 }
 
 # `fetchAdd` that orders nothing: for a counter or a statistic.
-func fetchAddRelaxed(T: type, this: view Atomic(T), amount: T) realtime ret T {
+func fetchAddRelaxed(T: type, this: view Atomic(T), amount: view T) realtime ret T {
   unsafe {
     ret rae_ext_rae_atomic_fetch_add_relaxed(cell: this.cell, index: 0, amount: amount as Int) as T
   }

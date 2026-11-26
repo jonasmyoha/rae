@@ -214,7 +214,18 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    marked (`is_written_out`), so sema knows `enumName(T, ...)` of a type that is no enum from a program's own mistake.
    `RAE_CHECK_CLONES=1` (on in the suite) compares each copy with its template.
 3. **Instances analyzed in full** in `specialize_decl`, the 13 places in `lib/` fixed, errors once and with the
-   instance's name, branches of other types left out.
+   instance's name, branches of other types left out. Done (0.4.98). Sema makes only a few hundred instances of a
+   program (in 106, 310, mostly `componentSet` and buffer externs); the backend makes the rest (3 943). So both are
+   analyzed: sema's where they are made, the backend's just before their C is written
+   (`sema_check_backend_instance`; `RAE_CHECK_INSTANCES=0` turns that off). Each is analyzed in a scope that sees the
+   module but not the locals of the call that made it, and in it the functions declared next to its type arguments
+   are open (a hook such as `walkerGameStart(game: mod BoxGame, ...)` of lib/app3d's `runWalkerGame`). A `match let`
+   of a template is rewritten before anything is cloned or emitted from it. A field loop over a struct without fields
+   has no pass in an instance, and there a Bool converts to and from a number with `as` (Atomic(Bool)). Besides the
+   13 places in `lib/`, the examples 134 and 135 changed a `let`. A destructuring `let a: x, let b: y = f()` fails in
+   plain functions too: it is a gap of its own. What sema finds inside an instance is not registered for the C (the
+   backend finds what it emits until steps 4 and 5). The cost, CPU time of `rae build --emit-c`: 106 5.5 s to 6.5 s,
+   121 7.9 s to 10.0 s, 136 15.7 s to 19.1 s (the analysis section 3 measured); steps 7 and 8 take back more.
 4. **Sema decides the instance of every call**; a registry and a worklist; a check in the suite that its instances are
    those `c_discovery.c` finds.
 5. **Emission from instances** behind `RAE_GENERIC_INSTANCES=1`, prototypes and helpers too; the 29 cases; the suite

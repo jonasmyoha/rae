@@ -182,15 +182,12 @@ static void graph_build(WaitGraph* graph, CompilerContext* ctx, const AstModule*
     const AstDecl* decl = decl_of_func(spec->decl);
     if (wait_graph_node(graph, decl, key, NULL, false) < 0) wait_graph_node(graph, decl, key, spec->concrete_args, true);
   }
+  /* An instance sema made is among the specializations above, with its key: its
+   * declaration is not a function of its own here (nor one only analyzed for
+   * its errors, sema_check_backend_instance) */
   for (const AstDecl* decl = merged->decls; decl; decl = decl->next) {
-    if (decl->kind == AST_DECL_FUNC && !decl->as.func_decl.generic_params) wait_graph_node(graph, decl, NULL, NULL, true);
-  }
-  if (ctx->type_registry) {
-    for (SpecializationEntry* spec = ctx->type_registry->specializations; spec; spec = spec->next) {
-      if (spec->specialized_decl && spec->specialized_decl->kind == AST_DECL_FUNC) {
-        wait_graph_node(graph, spec->specialized_decl, NULL, NULL, true);
-      }
-    }
+    if (decl->kind == AST_DECL_FUNC && !decl->as.func_decl.generic_params && !decl->as.func_decl.specialization_args)
+      wait_graph_node(graph, decl, NULL, NULL, true);
   }
   wait_graph_walk_all(graph);
   graph_solve(graph);

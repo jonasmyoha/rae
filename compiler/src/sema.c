@@ -62,6 +62,16 @@ static const AstExpr* s_void_ok_expr = NULL;
  * each loop body; there are no nested function bodies, so it returns to
  * 0 between top-level function analyses. */
 static int s_loop_depth = 0;
+/* Inside an instance of a generic function being analyzed (sema_analyze_instance).
+ * What it finds is not registered for the C: the backend finds what it emits
+ * (docs/generic-instances-design.md, steps 4 and 5). */
+static int s_instance_depth = 0;
+static void sema_register_generic_type(CompilerContext* ctx, const AstTypeRef* type) {
+    if (s_instance_depth == 0) register_generic_type(ctx, type);
+}
+static void sema_register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* args) {
+    if (s_instance_depth == 0) register_function_specialization(ctx, decl, args);
+}
 static int s_defer_depth = 0;  // inside a `defer { }`: no way out of it but its end
 
 /* #868/#877 unsafe boundary, unconditional for every source file (the staged
@@ -359,10 +369,14 @@ static void sema_package_boundary_words(const char* file, const AstDecl* d, char
 
 // Is callee `d` reachable by a BARE call from `file`? (same file | same package |
 // prelude | a package `open`ed here). The open-set. (docs/module-namespacing.md)
+static bool sema_instance_argument_module(const AstDecl* decl);
 static bool sema_decl_opened(const char* file, const AstDecl* d) {
     if (!d->origin_file) return true;
     if (!sema_package_reaches(file, d)) return false;
     if (file && strcmp(file, d->origin_file) == 0) return true;       // same file
+    // in an instance of a generic function, the file that declares its T
+    // (`walkerGameStart(game: mod BoxGame, ...)` of lib/app3d's runWalkerGame)
+    if (sema_instance_argument_module(d)) return true;
     // same package — and the same dependency: a dependency's folder inside the
     // project tree (`vendor/sdk`) is still its own package, reached only by
     // `import`/`open` (#64888955)
@@ -549,11 +563,17 @@ typedef struct SymbolTable {
      * program size. The per-name chains change exactly as the list does: a
      * define prepends, a scope pop removes from the front. */
     NameMap* byName;
+    /* The scope an instance of a generic function is analyzed in: the
+     * symbols of the scopes below it (the locals of the function whose call
+     * made it) are not seen, those of the module (depth 0) are */
+    int hidden_below;
 } SymbolTable;
 
 /* The symbols named `name`, in list order: for (s = first; s; s = s->sameNext) */
 static Symbol* symbol_table_first(SymbolTable* table, Str name) {
-    return name_map_get(table->byName, name);
+    Symbol* first = name_map_get(table->byName, name);
+    while (first && first->scope_depth > 0 && first->scope_depth < table->hidden_below) first = first->sameNext;
+    return first;
 }
 
 static void symbol_table_push_scope(SymbolTable* table) {
@@ -563,7 +583,7 @@ static void symbol_table_push_scope(SymbolTable* table) {
 static void symbol_table_pop_scope(SymbolTable* table) {
     while (table->head && table->head->scope_depth == table->current_depth) {
         Symbol* popped = table->head;
-        if (symbol_table_first(table, popped->name) == popped)
+        if (name_map_get(table->byName, popped->name) == popped)
             name_map_set(table->byName, popped->name, popped->sameNext);
         table->head = popped->next;
     }
@@ -592,7 +612,7 @@ static Symbol* symbol_table_define(SymbolTable* table, Arena* arena, Str name, A
     sym->next = table->head;
     table->head = sym;
     if (!table->byName) table->byName = name_map_create();
-    sym->sameNext = symbol_table_first(table, name);
+    sym->sameNext = name_map_get(table->byName, name);
     name_map_set(table->byName, name, sym);
     return sym;
 }
@@ -752,6 +772,8 @@ static bool sema_typeref_holds_task(SymbolTable* symbols, const AstTypeRef* type
     if (!type || depth > 6 || type->is_view || type->is_mod) return false;
     Str base = get_base_type_name(type);
     if (str_eq_cstr(base, "Task")) return true;
+    /* (a Buffer is a pointer: a copy of it copies no element) */
+    if (str_eq_cstr(base, "Buffer")) return false;
     for (const AstTypeRef* arg = type->generic_args; arg; arg = arg->next)
         if (sema_typeref_holds_task(symbols, arg, depth + 1)) return true;
     const AstDecl* td = symbols ? sema_user_struct_decl(symbols, base) : NULL;
@@ -1724,6 +1746,7 @@ static TypeInfo* sema_resolve_decl_type(CompilerContext* ctx, AstModule* module,
     return resolved;
 }
 static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstStmt* stmt);
+static void sema_rewrite_template_match_lets(CompilerContext* ctx, AstModule* module, AstBlock* block);
 static void sema_check_own_args(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstFuncDecl* fd, AstCallArg* args, bool skip_receiver);
 static bool sema_own_moves_local(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* operand);
 static void sema_analyze_match_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr);
@@ -1852,6 +1875,108 @@ static AstTypeRef* sema_written_args(CompilerContext* ctx, TypeInfo** args, size
     return head;
 }
 
+/* ---- an instance of a generic function, analyzed as a function is
+ * (docs/generic-instances-design.md section 2 points 3 to 5). Its own scope sees the
+ * module, not the locals of the call that made it; a `typeName` branch and a field
+ * loop of another type are left out before; an error names the instance. The C is
+ * still emitted from the template. */
+
+/* Instances the C backend found: analyzed for their errors only, neither emitted
+ * from nor put among the module's declarations */
+static bool s_checking_backend_instances;
+/* The files that declare the type arguments of the instances being analyzed: a
+ * generic function calls what is declared for its T where T is (`wasmHostCall`
+ * of a program's Host, from lib/wasm) */
+static const char* s_instance_type_files[64];
+static int s_instance_type_file_count;
+
+static bool sema_instance_argument_module(const AstDecl* decl) {
+    if (!decl) return false;
+    for (int i = 0; i < s_instance_type_file_count; i++)
+        if (decl->origin_file && s_instance_type_files[i] && strcmp(decl->origin_file, s_instance_type_files[i]) == 0)
+            return true;
+    return false;
+}
+
+static void sema_instance_name(char* into, size_t size, const AstDecl* generic_decl, const AstTypeRef* written,
+                               const char* made_in, size_t line) {
+    const AstFuncDecl* fd = &generic_decl->as.func_decl;
+    size_t pos = (size_t)snprintf(into, size, "%.*s(", (int)fd->name.len, fd->name.data);
+    const AstTypeRef* arg = written;
+    for (const AstIdentifierPart* p = fd->generic_params; p && arg && pos < size; p = p->next, arg = arg->next) {
+        Str spelled = get_base_type_name(arg);
+        pos += (size_t)snprintf(into + pos, size - pos, "%s%.*s: %s%.*s%s", p == fd->generic_params ? "" : ", ",
+                                (int)p->text.len, p->text.data, arg->is_opt ? "opt " : "",
+                                (int)spelled.len, spelled.data, arg->generic_args ? "(...)" : "");
+    }
+    if (pos < size) pos += (size_t)snprintf(into + pos, size - pos, ")");
+    if (made_in && line && pos < size)
+        snprintf(into + pos, size - pos, ", made at %s:%zu", diag_simplify_path(made_in), line);
+}
+
+static void sema_analyze_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                  AstDecl* generic_decl, AstDecl* spec, const AstTypeRef* args_tr,
+                                  const AstTypeRef* written, size_t line, size_t column) {
+    (void)column;
+    /* (a generic function that calls itself with a type made of T has no end) */
+    if (s_instance_depth >= 48) return;
+    AstFuncDecl* fd = &spec->as.func_decl;
+    AstBlock* folded = reflect_instantiate_body(ctx, module, fd->body, fd->params,
+                                                generic_decl->as.func_decl.generic_params, args_tr);
+    if (folded) fd->body = folded;
+    char* name = arena_alloc(ctx->ast_arena, 320);
+    sema_instance_name(name, 320, generic_decl, written, s_current_decl_origin, line);
+
+    const char* saved_origin = s_current_decl_origin;
+    int saved_unsafe_depth = s_unsafe_depth;
+    int saved_loop_depth = s_loop_depth;
+    int saved_scope_base = s_task_scope_base;
+    int saved_defer_depth = s_defer_depth;
+    int saved_hidden = symbols->hidden_below;
+    const AstParam* saved_params = s_current_params;
+    const AstIdentifierPart* saved_gparams = s_current_generic_params;
+    s_loop_depth = 0;
+    s_task_scope_base = s_task_scope_count;
+    s_defer_depth = 0;
+    s_instance_depth++;
+    symbol_table_push_scope(symbols);
+    symbols->hidden_below = symbols->current_depth;
+    if (generic_decl->origin_file) s_current_decl_origin = generic_decl->origin_file;
+    /* The concrete names too (an enum this file can name keeps its declaration:
+     * without it `Kind.large` is a field of nothing) */
+    const AstTypeRef* ga = args_tr;
+    for (const AstIdentifierPart* gp = generic_decl->as.func_decl.generic_params; gp && ga; gp = gp->next, ga = ga->next) {
+        TypeInfo* ti = ga->resolved_type;
+        bool own_enum = ti && ti->kind == TYPE_INT && ti->as.integer.enum_decl
+            && sema_package_reaches(s_current_decl_origin, ti->as.integer.enum_decl);
+        if (ti && ti->name.len > 0 && !str_eq(ti->name, gp->text) && !own_enum)
+            symbol_table_define(symbols, ctx->ast_arena, ti->name, NULL, ti, false);
+    }
+    int saved_type_files = s_instance_type_file_count;
+    for (const AstTypeRef* a = args_tr; a && s_instance_type_file_count < 64; a = a->next) {
+        const TypeInfo* ti = a->resolved_type;
+        const AstDecl* declared = !ti ? NULL
+            : (ti->kind == TYPE_STRUCT || ti->kind == TYPE_GENERIC_INST) ? ti->as.structure.decl
+            : ti->kind == TYPE_INT ? ti->as.integer.enum_decl : NULL;
+        if (declared) s_instance_type_files[s_instance_type_file_count++] = declared->origin_file;
+    }
+    diag_push_context(name);
+    sema_analyze_decl(ctx, module, symbols, spec);
+    diag_pop_context();
+    s_instance_type_file_count = saved_type_files;
+    fd->is_analyzed_instance = true;
+    symbol_table_pop_scope(symbols);
+    symbols->hidden_below = saved_hidden;
+    s_instance_depth--;
+    s_current_decl_origin = saved_origin;
+    s_unsafe_depth = saved_unsafe_depth;
+    s_loop_depth = saved_loop_depth;
+    s_task_scope_base = saved_scope_base;
+    s_defer_depth = saved_defer_depth;
+    s_current_params = saved_params;
+    s_current_generic_params = saved_gparams;
+}
+
 static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, size_t line, size_t column) {
     (void)line;
     (void)column;
@@ -1871,7 +1996,8 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         AstTypeRef* tr = NULL;
         if (args[i] && ((args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
                          && args[i]->as.structure.generic_count > 0)
-                        || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY || args[i]->kind == TYPE_OPT)) {
+                        || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY || args[i]->kind == TYPE_OPT
+                        || args[i]->kind == TYPE_BUFFER)) {
             // A generic instantiation argument (`decodeField` over a
             // `List(String)` field): spell the template name with its args,
             // not the mangled TypeInfo name `List_String`, so the
@@ -1919,65 +2045,15 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         spec->as.func_decl.body = ast_clone_block(&cloner, generic_decl->as.func_decl.body);
         ast_clone_check(&cloner, generic_decl->as.func_decl.body, spec->as.func_decl.body, generic_decl->as.func_decl.name);
 
-        // Re-analyze body with concrete types. #877: the specialized body is
-        // analyzed INSIDE the caller's analysis, so it must not inherit the
-        // caller's diagnostic origin, unsafe depth or loop depth — a generic
-        // instantiated from within an `unsafe { }` block would otherwise have
-        // its whole body treated as unsafe (obligations erased through
-        // generics), its bare calls resolved against the caller's opens, and
-        // stdlib-origin checks judged by the caller's file.
-        const char* saved_spec_origin = s_current_decl_origin;
-        int saved_spec_unsafe_depth = s_unsafe_depth;
-        int saved_spec_loop_depth = s_loop_depth;
-        int saved_spec_scope_base = s_task_scope_base;
-        int saved_spec_defer_depth = s_defer_depth;
-        if (generic_decl->origin_file) s_current_decl_origin = generic_decl->origin_file;
-        s_unsafe_depth = 0;
-        s_loop_depth = 0;
-        s_task_scope_base = s_task_scope_count;
-        s_defer_depth = 0;
-        if (spec->as.func_decl.body && symbols) {
-            symbol_table_push_scope(symbols);
-
-            // Add generic parameters to scope as their concrete types
-            const AstIdentifierPart* gp = generic_decl->as.func_decl.generic_params;
-            const AstTypeRef* ga = args_tr;
-            while (gp && ga) {
-                TypeInfo* ti = ga->resolved_type;
-                symbol_table_define(symbols, ctx->ast_arena, gp->text, NULL, ti, false);
-                // Also define the concrete name in case it's used directly
-                // (an enum this file can name keeps its declaration: without it
-                // `Kind.large` is a field of nothing)
-                bool own_enum = ti && ti->kind == TYPE_INT && ti->as.integer.enum_decl
-                    && sema_package_reaches(s_current_decl_origin, ti->as.integer.enum_decl);
-                if (ti && ti->name.len > 0 && !str_eq(ti->name, gp->text) && !own_enum) {
-                    symbol_table_define(symbols, ctx->ast_arena, ti->name, NULL, ti, false);
-                }
-                gp = gp->next; ga = ga->next;
-            }
-
-            // Add params to scope
-            for (AstParam* p = spec->as.func_decl.params; p; p = p->next) {
-                TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type);
-                symbol_table_define(symbols, ctx->ast_arena, p->name, NULL, pt, false);
-            }
-            TypeInfo* ret_type = NULL;
-            if (spec->as.func_decl.returns) ret_type = sema_resolve_type_internal(ctx, module, symbols, spec->as.func_decl.returns->type);
-            const AstParam* saved_params = s_current_params;
-            const AstIdentifierPart* saved_gparams = s_current_generic_params;
-            s_current_params = spec->as.func_decl.params;   // substituted: concrete
-            s_current_generic_params = NULL;
-            sema_analyze_stmt(ctx, module, symbols, spec->as.func_decl.body->first, ret_type);
-            s_current_params = saved_params;
-            s_current_generic_params = saved_gparams;
-            sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &spec->as.func_decl);
-            symbol_table_pop_scope(symbols);
+        /* Known before it is analyzed: a call of itself in its body finds it */
+        type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
+        if (!s_checking_backend_instances) {
+            if (module) { spec->next = module->decls; module->decls = spec; }
+            sema_register_function_specialization(ctx, &generic_decl->as.func_decl, args_tr);
         }
-        s_current_decl_origin = saved_spec_origin;
-        s_unsafe_depth = saved_spec_unsafe_depth;
-        s_loop_depth = saved_spec_loop_depth;
-        s_task_scope_base = saved_spec_scope_base;
-        s_defer_depth = saved_spec_defer_depth;
+        if (spec->as.func_decl.body && symbols)
+            sema_analyze_instance(ctx, module, symbols, generic_decl, spec, args_tr, cloner.args, line, column);
+        return spec;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
         spec->as.type_decl.specialization_args = args_tr;
         AstCloner cloner = {
@@ -2026,12 +2102,12 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         tr->parts->text = generic_decl->as.type_decl.name;
         tr->generic_args = args_tr;
         tr->resolved_type = spec->resolved_type;
-        register_generic_type(ctx, tr);
+        sema_register_generic_type(ctx, tr);
     }
     type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
     if (module) { spec->next = module->decls; module->decls = spec; }
     if (generic_decl->kind == AST_DECL_FUNC) {
-        register_function_specialization(ctx, &generic_decl->as.func_decl, args_tr);
+        sema_register_function_specialization(ctx, &generic_decl->as.func_decl, args_tr);
     }
     return spec;
 }
@@ -5068,6 +5144,8 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
         REFLECT_FAIL(value->line, value->column,
             "fields(...) requires a concrete struct value (a generic 'W' type is #773)");
     AstDecl* decl = vt->as.structure.decl;
+    /* (in an instance of a generic function, a struct without fields has no pass) */
+    if (decl && decl->kind == AST_DECL_TYPE && !decl->as.type_decl.fields && s_instance_depth > 0) return;
     if (!decl || decl->kind != AST_DECL_TYPE || !decl->as.type_decl.fields)
         REFLECT_FAIL(value->line, value->column, "fields(...) value has no struct fields");
 
@@ -6739,10 +6817,12 @@ static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module,
                                    SymbolTable* symbols, AstStmt* stmt) {
     AstStmt* bind = stmt->as.match_stmt.binding;
     AstExpr* subject = bind->as.let_stmt.value;
-    sema_analyze_expr(ctx, module, symbols, subject, true);
+    /* (a generic function's template: rewritten before it is analyzed, as
+     * written, so its instances and its C have the `if let`) */
+    if (symbols) sema_analyze_expr(ctx, module, symbols, subject, true);
 
     // The `let` IS the unwrap, so the subject must be an opt.
-    TypeInfo* st = subject->resolved_type;
+    TypeInfo* st = symbols ? subject->resolved_type : NULL;
     if (st && st->kind == TYPE_REF) st = st->as.ref.base;
     if (st && st->kind != TYPE_OPT && st->kind != TYPE_GENERIC_PARAM) {
         diag_error(sema_diag_file(module), (int)subject->line, (int)subject->column,
@@ -6835,6 +6915,35 @@ static bool sema_rewrite_match_let(CompilerContext* ctx, AstModule* module,
         stmt->as.if_stmt.condition = cond;
     }
     return true;
+}
+
+/* Every well-formed `match let` of a generic function's body becomes its `if let`
+ * (sema_rewrite_match_let); one with a wrong arm is left for its instances to report */
+static void sema_rewrite_template_match_lets(CompilerContext* ctx, AstModule* module, AstBlock* block) {
+    for (AstStmt* s = block ? block->first : NULL; s; s = s->next) {
+        switch (s->kind) {
+            case AST_STMT_MATCH: {
+                for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next)
+                    sema_rewrite_template_match_lets(ctx, module, c->block);
+                if (!s->as.match_stmt.binding) break;
+                int nones = 0, values = 0;
+                for (AstMatchCase* c = s->as.match_stmt.cases; c; c = c->next) {
+                    if (c->pattern && c->pattern->kind == AST_EXPR_NONE && !c->or_patterns) nones++;
+                    else values++;
+                }
+                if (nones == 1 && values > 0) sema_rewrite_match_let(ctx, module, NULL, s);
+                break;
+            }
+            case AST_STMT_IF:
+                sema_rewrite_template_match_lets(ctx, module, s->as.if_stmt.then_block);
+                sema_rewrite_template_match_lets(ctx, module, s->as.if_stmt.else_block);
+                break;
+            case AST_STMT_LOOP: sema_rewrite_template_match_lets(ctx, module, s->as.loop_stmt.body); break;
+            case AST_STMT_DEFER: sema_rewrite_template_match_lets(ctx, module, s->as.defer_stmt.block); break;
+            case AST_STMT_UNSAFE: sema_rewrite_template_match_lets(ctx, module, s->as.unsafe_stmt.block); break;
+            default: break;
+        }
+    }
 }
 
 static bool sema_typeref_is_enum(SymbolTable* symbols, const AstTypeRef* tr) {
@@ -7135,6 +7244,13 @@ AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     if (t->kind == TYPE_TASK) {
         tr->parts->text = str_from_cstr("Task");
         if (t->as.task.base) tr->generic_args = sema_type_ref_of(ctx, t->as.task.base);
+        return tr;
+    }
+    /* A Buffer has no name either: `Buffer(T)`, or `Ptr` for one of nothing */
+    if (t->kind == TYPE_BUFFER) {
+        bool raw = !t->as.buffer.base || t->as.buffer.base->kind == TYPE_VOID;
+        tr->parts->text = str_from_cstr(raw ? "Ptr" : "Buffer");
+        if (!raw) tr->generic_args = sema_type_ref_of(ctx, t->as.buffer.base);
         return tr;
     }
     /* `Array(T, cap: N)`: its element and its count, or the ref could not be
@@ -8588,6 +8704,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     if (sema_typeref_is_enum(symbols, expr->as.cast.target)
                         && sema_is_numeric_kind(src->kind)) ok = true;
                 }
+                /* In an instance of a generic function, a Bool is stored as the
+                 * number it is in C (Atomic(Bool)): its `value as Int` and
+                 * `bits as T` were written for every T */
+                if (!ok && s_instance_depth > 0
+                    && ((target->kind == TYPE_BOOL && sema_is_numeric_kind(src->kind))
+                        || (src->kind == TYPE_BOOL && sema_is_numeric_kind(target->kind)))) ok = true;
                 if (!ok) {
                     const char* cf = s_current_decl_origin ? s_current_decl_origin : NULL;
                     diag_error(cf, (int)expr->line, (int)expr->column,
@@ -9046,7 +9168,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                          * letting it fall through to a wall of C compiler
                          * errors from the generated file. */
                         for (AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) {
-                            if (ca->value && ca->value->kind == AST_EXPR_CALL
+                            if (ca->value && ca->value->kind == AST_EXPR_CALL && !ca->value->is_written_out
                                 && ca->value->as.call.callee
                                 && ca->value->as.call.callee->kind == AST_EXPR_IDENT
                                 && str_eq_cstr(ca->value->as.call.callee->as.ident, "Array")) {
@@ -10744,7 +10866,7 @@ static TypeInfo* sema_array_type_from_call(CompilerContext* ctx, AstModule* modu
     memset(reg, 0, sizeof(*reg));
     reg->resolved_type = arr;
     reg->line = expr->line; reg->column = expr->column;
-    register_generic_type(ctx, reg);
+    sema_register_generic_type(ctx, reg);
     return arr;
 }
 
@@ -11329,7 +11451,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         else if (str_eq_cstr(name, "Array")) {
             base = sema_resolve_array_type(ctx, module, symbols, type_ref, sema_resolve_type_internal);
             if (!base) base = type_get_void(ctx->type_registry);
-            else register_generic_type(ctx, type_ref);
+            else sema_register_generic_type(ctx, type_ref);
         }
         else if (str_eq_cstr(name, "Task")) {
             TypeInfo* arg = type_get_void(ctx->type_registry);
@@ -11384,7 +11506,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
                         args[ac++] = sema_resolve_type_internal(ctx, module, symbols, curr); curr = curr->next;
                     }
                     base = type_get_struct(ctx->type_registry, sym->decl, args, ac);
-                    register_generic_type(ctx, type_ref);
+                    sema_register_generic_type(ctx, type_ref);
                     if (!type_registry_find_specialization(ctx->type_registry, sym->decl, args, ac)) specialize_decl(ctx, module, symbols, sym->decl, args, ac, type_ref->line, type_ref->column);
                 } else base = sym->type;
             }
@@ -11398,7 +11520,7 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
          * backend collects those from the registered generic types, so a
          * plain local's type ref must register too (it used to be collected
          * only from struct fields, params and returns). */
-        register_generic_type(ctx, type_ref);
+        sema_register_generic_type(ctx, type_ref);
     }
     if (type_ref->is_view) base = type_get_ref(ctx->type_registry, base, false);
     else if (type_ref->is_mod) base = type_get_ref(ctx->type_registry, base, true);
@@ -11775,7 +11897,10 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         ctx->instantiation_stack = arena_alloc(ctx->ast_arena, sizeof(InstantiationStack));
         ctx->instantiation_stack->head = NULL;
     }
-    SymbolTable symbols = {0};
+    /* static: the C backend has the instances it found analyzed afterwards
+     * (sema_check_backend_instance), with the module's symbols */
+    static SymbolTable symbols;
+    symbols = (SymbolTable){0};
     s_lifecycle_symbols = &symbols;
  size_t processed_count = 0; PointerSet* processed = pointer_set_create();  /* grows: no cap (one of 8192, left from the array it replaced, made a program past 8192 declarations re-check the rest forever) */
     AstDecl* d = module->decls;
@@ -11845,6 +11970,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
         const char* saved_origin = s_current_decl_origin;
         if (template->origin_file) s_current_decl_origin = template->origin_file;
         sema_check_template_loop_context(module, template->as.func_decl.body, 0);
+        sema_rewrite_template_match_lets(ctx, module, template->as.func_decl.body);
         s_current_decl_origin = saved_origin;
     }
     if (module->had_error) { pointer_set_free(processed); return false; }
@@ -11864,6 +11990,8 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
             
             if (!is_template) {
                 pointer_set_add(processed, d); processed_count++;
+                /* (an instance analyzed where it was made) */
+                if (d->kind == AST_DECL_FUNC && d->as.func_decl.is_analyzed_instance) { d = d->next; continue; }
                 found_new = true;
                 progress_work(0.0, 1.0, processed_count, decl_total);
                 
@@ -12477,4 +12605,37 @@ static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, Type
     }
     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
     module->had_error = true;
+}
+
+/* An instance the C backend is about to emit from its template: analyzed as one
+ * sema made (sema_analyze_instance), once, for its errors. `generic` is the
+ * template; false when it made an error. */
+bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args) {
+    if (!generic || !generic->generic_params || !generic->body || generic->is_extern) return true;
+    AstModule* module = s_current_module;
+    SymbolTable* symbols = s_lifecycle_symbols;
+    if (!module || !symbols) return true;
+    static int wanted = -1;
+    if (wanted < 0) {
+        const char* value = getenv("RAE_CHECK_INSTANCES");
+        wanted = !value || strcmp(value, "0") != 0;
+    }
+    if (!wanted) return true;
+    AstDecl* generic_decl = (AstDecl*)((const char*)generic - offsetof(AstDecl, as.func_decl));
+    TypeInfo* types[16];
+    size_t count = 0;
+    for (const AstTypeRef* a = args; a && count < 16; a = a->next) {
+        AstTypeRef one = *a;
+        one.next = NULL;
+        types[count] = a->resolved_type ? a->resolved_type : sema_resolve_type_internal(ctx, module, symbols, &one);
+        if (!types[count] || types[count]->kind == TYPE_GENERIC_PARAM) return true;
+        count++;
+    }
+    if (type_registry_find_specialization(ctx->type_registry, generic_decl, types, count)) return true;
+    int errors = diag_error_count();
+    bool saved = s_checking_backend_instances;
+    s_checking_backend_instances = true;
+    specialize_decl(ctx, module, symbols, generic_decl, types, count, 0, 0);
+    s_checking_backend_instances = saved;
+    return diag_error_count() == errors;
 }
