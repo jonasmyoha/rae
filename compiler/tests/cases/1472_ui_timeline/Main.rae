@@ -158,29 +158,32 @@ func main() {
   }
   log("visible:{shown}")
   log("worker lane top {timelineLaneTop(timeline: timeline, state: state, index: worker).toInt()}")
-  let hit: TimelineHit = timelineHit(
-    timeline: timeline
-    state: state
-    box: box
-    x: 200.0
-    y: 30.0
-  )
-  let miss: TimelineHit = timelineHit(
-    timeline: timeline
-    state: state
-    box: box
-    x: 450.0
-    y: 30.0
-  )
-  let outside: TimelineHit = timelineHit(
-    timeline: timeline
-    state: state
-    box: box
-    x: 1200.0
-    y: 30.0
-  )
+  let hitLane: Int = lane,
+    let hitSpan: Int = span = timelineHit(
+      timeline: timeline
+      state: state
+      box: box
+      x: 200.0
+      y: 30.0
+    )
+  let missLane: Int = lane,
+    let missSpan: Int = span = timelineHit(
+      timeline: timeline
+      state: state
+      box: box
+      x: 450.0
+      y: 30.0
+    )
+  let outsideLane: Int = lane,
+    let outsideSpan: Int = span = timelineHit(
+      timeline: timeline
+      state: state
+      box: box
+      x: 1200.0
+      y: 30.0
+    )
   log(
-    "hit at (200, 30): lane {hit.lane} span {hit.span}; (450, 30): lane {miss.lane} span {miss.span}; outside: lane {outside.lane}"
+    "hit at (200, 30): lane {hitLane} span {hitSpan}; (450, 30): lane {missLane} span {missSpan}; outside: lane {outsideLane}"
   )
 
   # a click on "render" (x 700, row 1 of main) selects it and sends the action

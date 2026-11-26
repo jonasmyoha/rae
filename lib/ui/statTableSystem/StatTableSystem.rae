@@ -15,13 +15,6 @@ open ui/UiSystems
 open ui/InputSystem
 open ui/timelineSystem/TimelineSystem
 
-# What is under a point: a header (`column`, `row` -1), a row (`row` an index into the rows,
-# `column` the column), or nothing (both -1)
-type StatHit {
-  column: Int
-  row: Int
-}
-
 func createStatTableState() ret StatTableState {
   ret StatTableState { columns: {}, rows: {}, order: {} }
 }
@@ -173,25 +166,27 @@ func statColumnAt(state: view StatTableState, box: view TimelineBox, x: view Flo
   ret -1
 }
 
+# What is under a point: a header (`column`, `row` -1), a row (`row` an index into the rows,
+# `column` the column), or nothing (both -1)
 func statHit(
   table: view StatTable
   state: view StatTableState
   box: view TimelineBox
   x: view Float
   y: view Float
-) ret StatHit {
+) ret column: Int, row: Int {
   if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
-    ret StatHit { column: -1, row: -1 }
+    ret column: -1, row: -1
   }
   let column: Int = statColumnAt(state: state, box: box, x: x)
   if y < box.y + table.headerHeight {
-    ret StatHit { column: column, row: -1 }
+    ret column: column, row: -1
   }
   let position: Int = ((y - box.y - table.headerHeight + state.scroll) / table.rowHeight) as Int
   if position < 0 or position >= state.order.length {
-    ret StatHit { column: -1, row: -1 }
+    ret column: -1, row: -1
   }
-  ret StatHit { column: column, row: state.order.copyAtDefault(index: position) }
+  ret column: column, row: state.order.copyAtDefault(index: position)
 }
 
 # Once a frame after updateUiInput: every StatTable gets its state, the wheel over it scrolls three
@@ -223,22 +218,23 @@ func statTableSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view 
       }
       if state.pressed and input.pointer.released {
         state.pressed = false
-        let hit: StatHit = statHit(
-          table: table
-          state: state
-          box: box
-          x: input.pointer.x
-          y: input.pointer.y
-        )
-        if hit.row < 0 and hit.column >= 0 {
+        let hitColumn: Int = column,
+          let hitRow: Int = row = statHit(
+            table: table
+            state: state
+            box: box
+            x: input.pointer.x
+            y: input.pointer.y
+          )
+        if hitRow < 0 and hitColumn >= 0 {
           statSort(
             state: state
-            column: hit.column
-            descending: hit.column is state.sortColumn and not state.descending
+            column: hitColumn
+            descending: hitColumn is state.sortColumn and not state.descending
           )
           changed = true
-        } else if hit.row >= 0 {
-          state.selected = hit.row
+        } else if hitRow >= 0 {
+          state.selected = hitRow
           changed = true
           if table.actionId.length() > 0 {
             eventSend(

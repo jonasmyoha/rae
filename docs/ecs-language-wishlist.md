@@ -138,7 +138,7 @@ a feature that is not already listed here.
 
 ## Data modeling
 
-- **Lightweight tuples / multiple return.** Repeatedly hit "can't return `(cellX,
+- **Lightweight tuples / multiple return `(landed 0.4.99 to 0.4.102 as several labeled results, spec/rae.md 5.5)`.** Repeatedly hit "can't return `(cellX,
   cellY)` / `(transform, active)`" — had to thread a struct or split into two funcs.
   Cheap multi-return would simplify placement, spatial helpers, and query results.
 - **Data-carrying enums / tagged unions (sum types) — DECIDED: Rae will NOT have

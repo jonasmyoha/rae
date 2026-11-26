@@ -233,22 +233,24 @@ func main() {
   log(
     "points added {all}, an earlier one refused {not refused}; fps columns {fpsColumns >= 990 and fpsColumns <= 1001}, the spike's column high {spike}, under 20 ms {took < 20000000}; range {range.low} .. {range.high}"
   )
-  let nearLoad: LineHit = lineHit(
-    graph: graph
-    state: lines
-    box: box
-    x: 251.0
-    y: 100.0 + 200.0 - 200.0 * (50.0 - 10.0) / 90.0
-  )
-  let nearFps: LineHit = lineHit(
-    graph: graph
-    state: lines
-    box: box
-    x: 700.0
-    y: 295.0
-  )
+  let loadSeries: Int = series,
+    let loadPoint: Int = point = lineHit(
+      graph: graph
+      state: lines
+      box: box
+      x: 251.0
+      y: 100.0 + 200.0 - 200.0 * (50.0 - 10.0) / 90.0
+    )
+  let fpsSeries: Int = series,
+    let fpsPoint: Int = point = lineHit(
+      graph: graph
+      state: lines
+      box: box
+      x: 700.0
+      y: 295.0
+    )
   log(
-    "hit near load's second point: series {nearLoad.series} point {nearLoad.point}; near fps at 700: series {nearFps.series} point {nearFps.point}"
+    "hit near load's second point: series {loadSeries} point {loadPoint}; near fps at 700: series {fpsSeries} point {fpsPoint}"
   )
   click(rig: rig, x: 251.0, y: 100.0 + 200.0 - 200.0 * (50.0 - 10.0) / 90.0)
   let picked: view LineGraphState = componentView(
@@ -310,13 +312,17 @@ func main() {
   }
   let tableBox: TimelineBox = { x: 0.0, y: 500.0, w: 600.0, h: 200.0 }
   let shown: StatRowRange = statVisibleRows(table: table, state: tableState, box: tableBox)
-  log("rows shown: {shown.first} .. {shown.last}; header hit: column {statHit(
-    table: table
-    state: tableState
-    box: tableBox
-    x: 450.0
-    y: 510.0
-  ).column}")
+  let headerColumn: Int = column,
+    let headerRow: Int = row = statHit(
+      table: table
+      state: tableState
+      box: tableBox
+      x: 450.0
+      y: 510.0
+    )
+  log(
+    "rows shown: {shown.first} .. {shown.last}; header hit: column {headerColumn}, row {headerRow}"
+  )
   click(rig: rig, x: 450.0, y: 510.0)
   let ascending: view StatTableState = componentView(
     this: rig.world.statTableStates

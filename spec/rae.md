@@ -674,3 +674,53 @@ Three function names are reserved by shape (`docs/constructors-and-destructors.m
   and no `copy` cannot be copied at all; it moves with `own` and is borrowed
   with `view`/`mod`. `copy` is also the parameter-mode keyword; it is accepted
   as a name after `func` and after `.`.
+### 5.5 Several results
+
+A function can have several results. Each has a label:
+
+```rae
+func divide(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
+  ret quotient: a / b, remainder: a % b
+}
+
+func parse(text: view String) ret value: Int, error: opt String {
+  if text.length() is 0 {
+    ret value: 0, error: "nothing to parse"
+  }
+  ret value: text.length(), error: none
+}
+```
+
+- **Every `ret` gives every result, by its label**, in any order. A `ret` that gives only some of
+  them, one without labels, a label twice or an unknown label is an error. Each value is checked
+  against the type of its own result.
+- **The call is taken apart where it is made**, in one statement: each local with its type, `=` and
+  the label of the result it takes, then `=` and the call.
+
+  ```rae
+  let quotient: Int = quotient, var rest: Int = remainder = divide(a: 7, b: 2)
+  let value: Int = value, let error: opt String = error = parse(text: "four")
+  ```
+
+  A local may have the name of the label it takes (the word after the inner `=` is a label of the
+  called function, never a value in scope). `let` and `var` are chosen per local, and a `let` is
+  frozen as any other. Every result goes to a local, and the written type must be the result's.
+  `rae format` writes a local per line when the statement does not fit in 100 columns.
+- **Such a call is no value anywhere else**: not the right side of a plain `let`, not an argument,
+  not the subject of a `match` or an `if let`, not what a `ret` passes on (`ret f()` is an error:
+  take the results apart, then give each by its label), and not what a `spawn` starts (a Task has
+  one result).
+- **Ownership is that of any result.** The caller owns what it binds. In a `ret`, a local of the
+  function moves out (also written `own name`), a place is copied (a field, a parameter that is a
+  `view`), and what a call or a text makes is given as it is. A local that two values of one `ret`
+  name, or that a `defer` still uses, is copied.
+- The call may be a function's, a method's (`box.split()`), a generic function's (each instance
+  has its own results) or a module's function by the module's name. A result is a value, never a
+  `view` or a `mod`. An `extern` or `cExport` function has one result.
+- There are no tuples: results have labels, not positions, and several results are not a type. A
+  group of values that is stored, passed on or returned through several functions is a named
+  struct.
+- **A function with one result is compiled as it always was.** Several results are one C struct
+  returned by value: the same cost as returning a named struct (measured: 50 000 000 calls take
+  72 ms either way).
+

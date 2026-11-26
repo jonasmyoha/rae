@@ -39,12 +39,6 @@ type TimelineRect {
   depth: Int
 }
 
-# What is under a point: a lane (-1 none) and a span of it (-1 none)
-type TimelineHit {
-  lane: Int
-  span: Int
-}
-
 # ---- the data -------------------------------------------------------------------------------
 func createTimelineState() ret TimelineState {
   ret TimelineState { lanes: {}, names: {} }
@@ -257,17 +251,17 @@ func timelineLaneRects(
   }
 }
 
-# What is at (x, y): the lane under it, and the span of that lane (at the row under it) whose time
-# covers the point, a pixel either way counted in
+# What is at (x, y): the lane under it (-1 none), and the span of that lane (at the row under it)
+# whose time covers the point, a pixel either way counted in (-1 none)
 func timelineHit(
   timeline: view Timeline
   state: view TimelineState
   box: view TimelineBox
   x: view Float
   y: view Float
-) ret TimelineHit {
+) ret lane: Int, span: Int {
   if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
-    ret TimelineHit { lane: -1, span: -1 }
+    ret lane: -1, span: -1
   }
   let nsPerPixel: Float64 = timelineNsPerPixel(state: state, box: box)
   let time: Int = state.viewStart + (((x - box.x) as Float64) * nsPerPixel) as Int
@@ -293,12 +287,12 @@ func timelineHit(
           }
           i = i + 1
         }
-        ret TimelineHit { lane: laneIndex, span: found }
+        ret lane: laneIndex, span: found
       }
     }
     top = top + height + timeline.laneGap
   }
-  ret TimelineHit { lane: -1, span: -1 }
+  ret lane: -1, span: -1
 }
 
 # Zoom by `factor` (below 1 in, above 1 out) keeping the time at `share` of the width in place
@@ -424,15 +418,16 @@ func timelineSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view U
       if state.dragging and input.pointer.released {
         state.dragging = false
         if not state.dragMoved {
-          let hit: TimelineHit = timelineHit(
-            timeline: timeline
-            state: state
-            box: box
-            x: input.pointer.x
-            y: input.pointer.y
-          )
-          state.selectedLane = hit.lane
-          state.selectedSpan = hit.span
+          let hitLane: Int = lane,
+            let hitSpan: Int = span = timelineHit(
+              timeline: timeline
+              state: state
+              box: box
+              x: input.pointer.x
+              y: input.pointer.y
+            )
+          state.selectedLane = hitLane
+          state.selectedSpan = hitSpan
           changed = true
           if timeline.actionId.length() > 0 {
             eventSend(

@@ -354,6 +354,12 @@ or a `?` operator.
 
 ## Proposal E — tuples: RECOMMEND AGAINST (use named structs)
 
+**Decided 2026-11-26: no positional tuples, and labeled results.** A function may have several
+results, each with a label, and the call is taken apart by label where it is made
+(spec/rae.md 5.5, since 0.4.99). This is not a tuple: nothing is positional, and several results
+are not a type that can be stored or passed on. For a group of values that lives longer than one
+call, the recommendation below stands: a named struct.
+
 Rae deliberately does not treat multiline returns as tuples (`parser.c` note). The one
 real wart is untyped multi-returns worked around with a `List` (`meshBounds` returns
 `List(Float)` of 6 numbers — positional and easy to index wrong). But the fix for that

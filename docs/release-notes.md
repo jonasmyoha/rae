@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.102, 2026-11-26: several results in the spec, and their first uses
+
+- spec/rae.md 5.5 describes several results: declaring them, `ret`, taking the call apart, what is refused,
+  ownership, and that a function with one result is compiled as before.
+- First uses in `lib/ui`: `statHit` answers `column` and `row`, `lineHit` `series` and `point`, `timelineHit` `lane`
+  and `span`. The types `StatHit`, `LineHit` and `TimelineHit`, which only carried those two numbers out, are gone:
+  a caller writes `let hitLane: Int = lane, let hitSpan: Int = span = timelineHit(...)`.
+- Measured, release build: 3 000 000 calls of `timelineHit` take 26 ms before and after; 50 000 000 calls of a
+  function of two numbers take 72 ms as a struct and 72 ms as two results.
+
 ## 0.4.101, 2026-11-26: several results wherever a call can be
 
 - The call that is taken apart can be a method call (`let wide: Int = wide, let tall: Int = tall = box.split()`), a

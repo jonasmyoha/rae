@@ -30,11 +30,6 @@ type LineColumn {
   last: Float
 }
 
-type LineHit {
-  series: Int
-  point: Int
-}
-
 func createLineGraphState() ret LineGraphState {
   ret LineGraphState { series: {} }
 }
@@ -177,13 +172,14 @@ func lineHit(
   box: view TimelineBox
   x: view Float
   y: view Float
-) ret LineHit {
+) ret series: Int, point: Int {
   if x < box.x or x >= box.x + box.w or y < box.y or y >= box.y + box.h {
-    ret LineHit { series: -1, point: -1 }
+    ret series: -1, point: -1
   }
   let range: LineRange = lineRange(graph: graph, columns: lineColumns(state: state, box: box))
   let time: Int = state.viewStart + ((((x - box.x) / box.w) as Float64) * ((state.viewEnd - state.viewStart) as Float64)) as Int
-  var best: LineHit = { series: -1, point: -1 }
+  var bestSeries: Int = -1
+  var bestPoint: Int = -1
   var bestDistance: Float = 1000000000.0
   loop var s: Int = 0, s < state.series.length, ++s {
     if let series: view LineSeries = state.series.viewAt(index: s) {
@@ -207,12 +203,13 @@ func lineHit(
         }
         if distance < bestDistance {
           bestDistance = distance
-          best = { series: s, point: near }
+          bestSeries = s
+          bestPoint = near
         }
       }
     }
   }
-  ret best
+  ret series: bestSeries, point: bestPoint
 }
 
 # The view of the Timeline node named `link`, when there is one with a state
@@ -294,17 +291,18 @@ func lineGraphSystem(world: mod UiWorld, uiSystems: view UiSystems, input: view 
       if state.dragging and input.pointer.released {
         state.dragging = false
         if not state.dragMoved {
-          let hit: LineHit = lineHit(
-            graph: graph
-            state: state
-            box: box
-            x: input.pointer.x
-            y: input.pointer.y
-          )
-          state.selectedSeries = hit.series
-          state.selectedPoint = hit.point
+          let hitSeries: Int = series,
+            let hitPoint: Int = point = lineHit(
+              graph: graph
+              state: state
+              box: box
+              x: input.pointer.x
+              y: input.pointer.y
+            )
+          state.selectedSeries = hitSeries
+          state.selectedPoint = hitPoint
           changed = true
-          if hit.series >= 0 and graph.actionId.length() > 0 {
+          if hitSeries >= 0 and graph.actionId.length() > 0 {
             eventSend(
               this: world.uiActions
               value: UiAction { entityId: entityId, actionId: "{graph.actionId}" }
