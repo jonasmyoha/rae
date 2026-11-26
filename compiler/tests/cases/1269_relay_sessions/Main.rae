@@ -225,7 +225,11 @@ func main() ret Int {
   config.migrateHost = false
   var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
   log("relay: {relay.udpSocket.status}")
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: relay)
+    )
   var scene: Scene = {
     relay: own relay
     host: createHost(relayAddress: relayAddress)

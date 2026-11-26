@@ -234,13 +234,14 @@ func hostFrame(machine: mod Machine, nowMs: view Int) {
       if let seat: mod Seat = machine.seats.modAt(index: s) {
         loop connectionReceive(connection: hostPeer.connection, message: machine.message) is not MessageChannel.none {
           if seat.slotId < 0 {
-            let result: JoinResult = sessionTakeHelloFromPeer(
-              host: machine.session
-              message: machine.message
-              peerId: peerId
-              nowMs: nowMs
-            )
-            if result.kind is JoinKind.joined {
+            let resultKind: JoinKind = kind,
+              let resultSlotIndex: Int = slotIndex = sessionTakeHelloFromPeer(
+                host: machine.session
+                message: machine.message
+                peerId: peerId
+                nowMs: nowMs
+              )
+            if resultKind is JoinKind.joined {
               let entityId: EntityId = allocEntity(this: machine.world.entities)
               componentSet(
                 this: machine.world.transforms
@@ -255,21 +256,21 @@ func hostFrame(machine: mod Machine, nowMs: view Int) {
               )
               sessionSetEntity(
                 host: machine.session
-                slotIndex: result.slotIndex
+                slotIndex: resultSlotIndex
                 entityId: entityId
                 netId: netId
               )
             }
-            if result.kind is not JoinKind.refused {
-              if let slot: view PlayerSlot = machine.session.slots.viewAt(index: result.slotIndex) {
+            if resultKind is not JoinKind.refused {
+              if let slot: view PlayerSlot = machine.session.slots.viewAt(index: resultSlotIndex) {
                 seat.slotId = slot.slotId
                 seat.peer = createReplicaPeer(peerId: peerId, config: machine.replication.config)
                 seat.peer.focusNetId = slot.netId
               }
               sessionWriteWelcome(
                 host: machine.session
-                slotIndex: result.slotIndex
-                resumed: result.kind is JoinKind.resumed
+                slotIndex: resultSlotIndex
+                resumed: resultKind is JoinKind.resumed
                 out: machine.message
               )
               let queued: Bool = connectionSendReliable(
@@ -587,7 +588,11 @@ func main() ret Int {
   var config: ReplicationConfig = defaultReplicationConfig()
   config.interestRadius = 1000.0
   var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: relayConfig)
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: relay)
+    )
   var scene: Scene = { relay: own relay, machines: {}, startMs: nowMs() }
   scene.machines.add(value: createMachine(
     name: "host"

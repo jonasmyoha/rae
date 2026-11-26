@@ -1,0 +1,86 @@
+# The settings of WalkerNetSystem: offline, host or player, and from the environment
+open ecs/Entity
+open ecs/World
+open ecs/ComponentTable
+open ecs/Event
+open Vec3
+open Sys
+open String
+open net/Tcp
+open net/Udp
+open net/Connection
+open net/relay/RelayWire
+open net/relay/RelayClient
+open net/relay/RelayConnections
+open net/replication/ReplicaValues
+open net/replication/ReplicaSnapshot
+open net/replication/ReplicationHost
+open net/replication/ReplicationPlayer
+open net/replication/snapshotSystem/SnapshotSystem
+open net/replication/inputSystem/InputSystem
+open net/replication/receiveSystem/ReceiveSystem
+open net/replication/applySystem/ApplySystem
+open net/replication/interpolationSystem/InterpolationSystem
+open net/session/Session
+open app3d/walkerNetSystem/WalkerGameMessages
+
+# ----- settings -----------------------------------------------------------------
+enum WalkerNetMode { offline, host, join }
+
+type WalkerNetSettings {
+  mode: WalkerNetMode
+  relayHost: String
+  relayPort: Int
+  # join: the host's invite ("<relay token>-<session key>", lib/net/relay
+  # RelayWire; a bare 32-digit token joins with no session key)
+  token: String
+  # deviceDesktop / deviceMobile (lib/net/relay)
+  device: Int
+  # Leave the session this long after it started (0: stay)
+  seconds: Int = 0
+}
+
+func offlineWalkerNetSettings() ret WalkerNetSettings {
+  ret WalkerNetSettings {
+    mode: WalkerNetMode.offline
+    relayHost: "127.0.0.1"
+    relayPort: 7777
+    token: ""
+    device: deviceDesktop
+  }
+}
+
+# The settings from the environment: RAE_WALKER_NET=host or join,
+# RAE_WALKER_RELAY=host:port (127.0.0.1:7777), RAE_WALKER_TOKEN=<32 hex
+# digits> to join, RAE_WALKER_NET_SECONDS=<n> to leave after n seconds.
+# Unset: offline.
+func walkerNetSettingsFromEnvironment() ret WalkerNetSettings {
+  var settings: WalkerNetSettings = offlineWalkerNetSettings()
+  let mode: String = getEnv(name: "RAE_WALKER_NET").trim()
+  if mode is "host" {
+    settings.mode = WalkerNetMode.host
+  } else if mode is "join" {
+    settings.mode = WalkerNetMode.join
+  }
+  let relay: String = getEnv(name: "RAE_WALKER_RELAY").trim()
+  if relay.length() > 0 {
+    let parts: List(String) = relay.split(sep: ":")
+    if parts.length is 2 {
+      settings.relayHost = parts.copyAtFallback(index: 0, fallback: "127.0.0.1")
+      settings.relayPort = parts.copyAtFallback(index: 1, fallback: "7777").toInt()
+    }
+  }
+  settings.token = getEnv(name: "RAE_WALKER_TOKEN").trim()
+  settings.seconds = getEnv(name: "RAE_WALKER_NET_SECONDS").trim().toInt()
+  ret settings
+}
+
+func walkerNetModeName(settings: view WalkerNetSettings) ret String {
+  if settings.mode is WalkerNetMode.host {
+    ret "hosting"
+  }
+  if settings.mode is WalkerNetMode.join {
+    ret "joining"
+  }
+  ret "offline"
+}

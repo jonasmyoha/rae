@@ -170,8 +170,13 @@ func main() ret Int {
       ret 1
     }
     webSocketPort = relayWebSocketPort(server: relay)
+    let relayAddress: NetAddress = address,
+      let relayAddressStatus: NetStatus = status = resolveAddress(
+        host: "127.0.0.1"
+        port: relayPort(server: relay)
+      )
     var udpHost: RelayHost = createRelayHost(
-      relayAddress: resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+      relayAddress: relayAddress
       clientConfig: clientConfig()
       connectionConfig: defaultConnectionConfig()
     )

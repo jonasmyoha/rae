@@ -50,11 +50,6 @@ enum JoinKind {
   resumed
 }
 
-type JoinResult {
-  kind: JoinKind
-  slotIndex: Int
-}
-
 type SessionHost {
   slots: List(PlayerSlot)
   graceMs: Int
@@ -98,9 +93,9 @@ func sessionTakeHello(
   host: mod SessionHost
   message: view List(UInt8)
   nowMs: view Int
-) ret JoinResult {
+) ret kind: JoinKind, slotIndex: Int {
   if message.length < 1 + sessionTokenBytes or readU8(bytes: message, offset: 0) is not sessionMessageHello {
-    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+    ret kind: JoinKind.refused, slotIndex: -1
   }
   loop var i: Int = 0, i < host.slots.length, ++i {
     var matches: Bool = false
@@ -111,16 +106,16 @@ func sessionTakeHello(
       if let slot: mod PlayerSlot = host.slots.modAt(index: i) {
         slot.connected = true
       }
-      ret JoinResult { kind: JoinKind.resumed, slotIndex: i }
+      ret kind: JoinKind.resumed, slotIndex: i
     }
   }
   if host.slots.length >= host.maxPlayers {
-    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+    ret kind: JoinKind.refused, slotIndex: -1
   }
   var token: List(UInt8) = List.create(UInt8, cap: sessionTokenBytes)
   token.addDefaults(count: sessionTokenBytes)
   if not secureRandomFill(bytes: token, start: 0, count: sessionTokenBytes) {
-    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+    ret kind: JoinKind.refused, slotIndex: -1
   }
   host.slots.add(value: PlayerSlot {
     slotId: host.nextSlotId
@@ -131,7 +126,7 @@ func sessionTakeHello(
     netId: -1
   })
   host.nextSlotId = host.nextSlotId + 1
-  ret JoinResult { kind: JoinKind.joined, slotIndex: host.slots.length - 1 }
+  ret kind: JoinKind.joined, slotIndex: host.slots.length - 1
 }
 
 # The welcome for slot `slotIndex` into `out` (send it reliably)
@@ -266,9 +261,9 @@ func sessionTakeHelloFromPeer(
   message: view List(UInt8)
   peerId: view Int
   nowMs: view Int
-) ret JoinResult {
+) ret kind: JoinKind, slotIndex: Int {
   if message.length < 1 + sessionTokenBytes or readU8(bytes: message, offset: 0) is not sessionMessageHello {
-    ret JoinResult { kind: JoinKind.refused, slotIndex: -1 }
+    ret kind: JoinKind.refused, slotIndex: -1
   }
   let index: Int = sessionSlotIndex(host: host, slotId: peerId)
   if index >= 0 {
@@ -279,15 +274,20 @@ func sessionTakeHelloFromPeer(
         let filled: Bool = secureRandomFill(bytes: slot.token, start: 0, count: sessionTokenBytes)
       }
     }
-    ret JoinResult { kind: JoinKind.resumed, slotIndex: index }
+    ret kind: JoinKind.resumed, slotIndex: index
   }
-  let result: JoinResult = sessionTakeHello(host: host, message: message, nowMs: nowMs)
-  if result.kind is JoinKind.joined {
-    if let slot: mod PlayerSlot = host.slots.modAt(index: result.slotIndex) {
+  let resultKind: JoinKind = kind,
+    let resultSlotIndex: Int = slotIndex = sessionTakeHello(
+      host: host
+      message: message
+      nowMs: nowMs
+    )
+  if resultKind is JoinKind.joined {
+    if let slot: mod PlayerSlot = host.slots.modAt(index: resultSlotIndex) {
       slot.slotId = peerId
     }
   }
-  ret result
+  ret kind: resultKind, slotIndex: resultSlotIndex
 }
 
 # A slot for peer `peerId` that already has its entity (the new host after a

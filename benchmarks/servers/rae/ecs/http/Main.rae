@@ -85,15 +85,20 @@ func serve(index: copy Int, listenerHandle: copy Int) ret Int {
 func main() ret Int {
   let port: Int = envInt(name: "PORT", fallback: 8080)
   let workers: Int = envInt(name: "WORKERS", fallback: 1)
-  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 1024)
-  if listening.status is not NetStatus.ok {
-    log("cannot listen on {port}: {listening.status}")
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(
+      host: "127.0.0.1"
+      port: port
+      backlog: 1024
+    )
+  if listeningStatus is not NetStatus.ok {
+    log("cannot listen on {port}: {listeningStatus}")
     ret 1
   }
-  log("listening on {socketLocalPort(socketId: listening.socketId)} with {workers} workers")
+  log("listening on {socketLocalPort(socketId: listeningSocketId)} with {workers} workers")
   var tasks: List(Task(Int)) = {}
   loop var i: Int = 1, i < workers, ++i {
-    tasks.add(value: spawn serve(index: i, listenerHandle: listening.socketId.handle))
+    tasks.add(value: spawn serve(index: i, listenerHandle: listeningSocketId.handle))
   }
-  ret serve(index: 0, listenerHandle: listening.socketId.handle)
+  ret serve(index: 0, listenerHandle: listeningSocketId.handle)
 }

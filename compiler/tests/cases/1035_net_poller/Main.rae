@@ -4,15 +4,16 @@
 open net/Tcp
 open net/Poller
 
-func acceptWithin(listenerSocketId: view SocketId) ret SocketResult {
+func acceptWithin(listenerSocketId: view SocketId) ret socketId: SocketId, status: NetStatus {
   loop var attempt: Int = 0, attempt < 200, ++attempt {
-    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
-    if accepted.status is not NetStatus.wouldBlock {
-      ret accepted
+    let acceptedSocketId: SocketId = socketId,
+      let acceptedStatus: NetStatus = status = tcpAccept(listenerSocketId: listenerSocketId)
+    if acceptedStatus is not NetStatus.wouldBlock {
+      ret socketId: acceptedSocketId, status: acceptedStatus
     }
     sleep(ms: 5)
   }
-  ret SocketResult { socketId: noSocket(), status: NetStatus.wouldBlock }
+  ret socketId: noSocket(), status: NetStatus.wouldBlock
 }
 
 # Which of the two server sockets a wait reported, and how
@@ -31,25 +32,38 @@ func describe(ready: view List(Readiness), first: view SocketId, second: view So
 }
 
 func main() ret Int {
-  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
-  if let port: Int = socketLocalPort(socketId: listening.socketId) {
-    let clientOne: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
-    let serverOne: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
-    let clientTwo: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
-    let serverTwo: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
-    log("accepted both: {serverOne.status} {serverTwo.status}")
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  if let port: Int = socketLocalPort(socketId: listeningSocketId) {
+    let clientOneSocketId: SocketId = socketId,
+      let clientOneStatus: NetStatus = status = tcpConnect(
+        host: "127.0.0.1"
+        port: port
+        timeoutMs: 2000
+      )
+    let serverOneSocketId: SocketId = socketId,
+      let serverOneStatus: NetStatus = status = acceptWithin(listenerSocketId: listeningSocketId)
+    let clientTwoSocketId: SocketId = socketId,
+      let clientTwoStatus: NetStatus = status = tcpConnect(
+        host: "127.0.0.1"
+        port: port
+        timeoutMs: 2000
+      )
+    let serverTwoSocketId: SocketId = socketId,
+      let serverTwoStatus: NetStatus = status = acceptWithin(listenerSocketId: listeningSocketId)
+    log("accepted both: {serverOneStatus} {serverTwoStatus}")
 
     var poller: Poller = createPoller()
     log("poller: {poller.status}")
     log("watch first: {pollerWatch(
       poller: poller
-      socketId: serverOne.socketId
+      socketId: serverOneSocketId
       readable: true
       writable: false
     )}")
     log("watch second: {pollerWatch(
       poller: poller
-      socketId: serverTwo.socketId
+      socketId: serverTwoSocketId
       readable: true
       writable: false
     )}")
@@ -60,66 +74,75 @@ func main() ret Int {
     log(
       "before data: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
 
     # Data only on the first connection: only the first is ready
-    let sent: IoResult = socketWriteText(socketId: clientOne.socketId, text: "ping")
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = socketWriteText(
+        socketId: clientOneSocketId
+        text: "ping"
+      )
     log(
       "after data: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
     var bytes: List(UInt8) = List.create(UInt8, cap: 8)
-    let got: IoResult = socketRead(socketId: serverOne.socketId, bytes: bytes, maxBytes: 64)
-    log("read {got.bytes} bytes: {textFromBytes(bytes: bytes, start: 0, count: got.bytes)}")
+    let gotBytes: Int = bytes,
+      let gotStatus: NetStatus = status = socketRead(
+        socketId: serverOneSocketId
+        bytes: bytes
+        maxBytes: 64
+      )
+    log("read {gotBytes} bytes: {textFromBytes(bytes: bytes, start: 0, count: gotBytes)}")
     log(
       "drained: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
 
     # Writable interest: a fresh connection has room to send
     log("watch first for writing: {pollerWatch(
       poller: poller
-      socketId: serverOne.socketId
+      socketId: serverOneSocketId
       readable: false
       writable: true
     )}")
     log(
       "writable: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
     log("forget writing: {pollerForget(
       poller: poller
-      socketId: serverOne.socketId
+      socketId: serverOneSocketId
       readable: false
       writable: true
     )}")
     log(
       "after forget: {pollWait(poller: poller, ready: ready, timeoutMs: 20)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
 
     # The second peer closes: its socket is readable (end of stream) and closed
-    socketClose(socketId: clientTwo.socketId)
+    socketClose(socketId: clientTwoSocketId)
     log(
       "peer closed: {pollWait(poller: poller, ready: ready, timeoutMs: 2000)}, {describe(
         ready: ready
-        first: serverOne.socketId
-        second: serverTwo.socketId
+        first: serverOneSocketId
+        second: serverTwoSocketId
       )}"
     )
 
@@ -131,10 +154,10 @@ func main() ret Int {
 
     closePoller(poller: poller)
     log("closed poller: {pollWait(poller: poller, ready: ready, timeoutMs: 0)}")
-    socketClose(socketId: clientOne.socketId)
-    socketClose(socketId: serverOne.socketId)
-    socketClose(socketId: serverTwo.socketId)
-    socketClose(socketId: listening.socketId)
+    socketClose(socketId: clientOneSocketId)
+    socketClose(socketId: serverOneSocketId)
+    socketClose(socketId: serverTwoSocketId)
+    socketClose(socketId: listeningSocketId)
     ret 0
   }
   log("the listener has no port")

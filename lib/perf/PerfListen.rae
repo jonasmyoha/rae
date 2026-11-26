@@ -37,15 +37,16 @@ func emptyPerfTables() ret PerfFileTables {
 
 # A listener on `host`:`port` (port 0: any free one, then read `port`); none when it cannot
 func perfListen(host: view String, port: view Int) ret opt PerfListener {
-  let result: SocketResult = tcpListen(host: host, port: port, backlog: 8)
-  if result.status is not NetStatus.ok {
+  let resultSocketId: SocketId = socketId,
+    let resultStatus: NetStatus = status = tcpListen(host: host, port: port, backlog: 8)
+  if resultStatus is not NetStatus.ok {
     ret none
   }
   var bound: Int = port
-  if let local: Int = socketLocalPort(socketId: result.socketId) {
+  if let local: Int = socketLocalPort(socketId: resultSocketId) {
     bound = local
   }
-  ret PerfListener { socketId: result.socketId, port: bound, sources: {} }
+  ret PerfListener { socketId: resultSocketId, port: bound, sources: {} }
 }
 
 # Its whole messages into the source: the header, the tables, the blocks
@@ -98,13 +99,14 @@ func perfLiveSourceTrim(source: mod PerfLiveSource, seconds: view Int) {
 func perfListenStep(listener: mod PerfListener) ret Bool {
   var changed: Bool = false
   loop var i: Int = 0, i < 8, ++i {
-    let accepted: SocketResult = tcpAccept(listenerSocketId: listener.socketId)
-    if accepted.status is not NetStatus.ok {
+    let acceptedSocketId: SocketId = socketId,
+      let acceptedStatus: NetStatus = status = tcpAccept(listenerSocketId: listener.socketId)
+    if acceptedStatus is not NetStatus.ok {
       break
     }
     listener.sources.add(
       value: PerfLiveSource {
-        socketId: accepted.socketId
+        socketId: acceptedSocketId
         bytes: {}
         tables: emptyPerfTables()
         blocks: {}
@@ -117,18 +119,19 @@ func perfListenStep(listener: mod PerfListener) ret Bool {
       if source.connected {
         let before: Int = source.received
         loop var reads: Int = 0, reads < 64, ++reads {
-          let result: IoResult = socketRead(
-            socketId: source.socketId
-            bytes: source.bytes
-            maxBytes: 65536
-          )
-          if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+          let resultBytes: Int = bytes,
+            let resultStatus: NetStatus = status = socketRead(
+              socketId: source.socketId
+              bytes: source.bytes
+              maxBytes: 65536
+            )
+          if resultStatus is not NetStatus.ok and resultStatus is not NetStatus.wouldBlock {
             source.connected = false
             socketClose(socketId: source.socketId)
             changed = true
             break
           }
-          if result.status is not NetStatus.ok {
+          if resultStatus is not NetStatus.ok {
             break
           }
         }

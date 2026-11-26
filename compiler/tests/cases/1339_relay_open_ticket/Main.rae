@@ -97,7 +97,11 @@ func thePureFunctions() {
 
 # Open on `server` with `ticket`, until the relay answers
 func tryOpen(server: mod RelayServer, ticket: view List(UInt8)) {
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: server)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: server)
+    )
   var client: RelayClient = createRelayClient(
     relayAddress: relayAddress
     config: clientConfigWith(ticket: ticket)
@@ -181,7 +185,11 @@ func say(talker: mod Talker) {
 # A ticket good for 3 s opens a session. It stays open after that, players join
 # it with the token alone, and it survives losing its host.
 func aSessionOutlivesItsTicket(server: mod RelayServer) {
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: server)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: server)
+    )
   let ticket: List(UInt8) = ticketUnder(secretWords: secretText, validSeconds: 3)
   var echoer: Echoer = {
     relayHost: createRelayHost(

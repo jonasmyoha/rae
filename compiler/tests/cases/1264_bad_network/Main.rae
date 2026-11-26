@@ -192,17 +192,18 @@ func main() ret Int {
   let destination: NetAddress = udpLoopbackAddress(udpSocket: receiver, family: AddressFamily.ipv4)
   var bytes: List(UInt8) = List.create(UInt8, cap: 64)
   writeU32(bytes: bytes, value: 4242)
-  let held: IoResult = udpSendThrough(
-    network: fromEnvironment
-    udpSocket: sender
-    bytes: bytes
-    start: 0
-    count: bytes.length
-    destination: destination
-    nowMs: 1000
-  )
+  let heldBytes: Int = bytes,
+    let heldStatus: NetStatus = status = udpSendThrough(
+      network: fromEnvironment
+      udpSocket: sender
+      bytes: bytes
+      start: 0
+      count: bytes.length
+      destination: destination
+      nowMs: 1000
+    )
   log(
-    "held: {held.status}, flushed at 1020 ms: {badNetworkFlush(
+    "held: {heldStatus}, flushed at 1020 ms: {badNetworkFlush(
       network: fromEnvironment
       udpSocket: sender
       nowMs: 1020
@@ -217,15 +218,16 @@ func main() ret Int {
   log("received {datagram.status} {readU32(bytes: inbox, offset: 0)}")
   # Off: straight through
   var passThrough: BadNetwork = noBadNetwork()
-  let direct: IoResult = udpSendThrough(
-    network: passThrough
-    udpSocket: sender
-    bytes: bytes
-    start: 0
-    count: bytes.length
-    destination: destination
-    nowMs: 0
-  )
+  let directBytes: Int = bytes,
+    let directStatus: NetStatus = status = udpSendThrough(
+      network: passThrough
+      udpSocket: sender
+      bytes: bytes
+      start: 0
+      count: bytes.length
+      destination: destination
+      nowMs: 0
+    )
   log("off: sent at once {socketWaitReadable(socketId: receiver.socketId, timeoutMs: 2000)}")
   udpClose(udpSocket: sender)
   udpClose(udpSocket: receiver)

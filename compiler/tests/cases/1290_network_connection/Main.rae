@@ -60,13 +60,14 @@ func serve(listenerHandle: own Int, stop: own Channel(Int)) ret Int {
 }
 
 func main() ret Int {
-  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
   var port: Int = 0
-  if let localPort: Int = socketLocalPort(socketId: listening.socketId) {
+  if let localPort: Int = socketLocalPort(socketId: listeningSocketId) {
     port = localPort
   }
   let stop: Channel(Int) = createChannel(Int)
-  let serverTask: Task(Int) = spawn serve(listenerHandle: listening.socketId.handle, stop: stop)
+  let serverTask: Task(Int) = spawn serve(listenerHandle: listeningSocketId.handle, stop: stop)
 
   # a WebSocket client
   var socket: NetworkConnection = networkConnectWebSocket(url: "ws://127.0.0.1:{port}/ws")

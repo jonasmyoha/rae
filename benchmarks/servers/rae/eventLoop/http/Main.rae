@@ -97,19 +97,20 @@ func answer(connection: mod Connection, request: view HttpRequest, date: view St
 func serviceConnection(connection: mod Connection, date: view String) ret Int {
   var answered: Int = 0
   loop var chunk: Int = 0, chunk < 4, ++chunk {
-    let result: IoResult = socketReadBuffer(
-      socketId: connection.socketId
-      buffer: connection.input
-      maxBytes: 16384
-    )
-    if result.status is NetStatus.wouldBlock {
+    let resultBytes: Int = bytes,
+      let resultStatus: NetStatus = status = socketReadBuffer(
+        socketId: connection.socketId
+        buffer: connection.input
+        maxBytes: 16384
+      )
+    if resultStatus is NetStatus.wouldBlock {
       break
     }
-    if result.status is not NetStatus.ok {
+    if resultStatus is not NetStatus.ok {
       connection.closing = true
       break
     }
-    if result.bytes < 16384 {
+    if resultBytes < 16384 {
       break
     }
   }
@@ -142,14 +143,15 @@ func serviceConnection(connection: mod Connection, date: view String) ret Int {
 # Write until the output is empty or the socket takes no more
 func flush(connection: mod Connection) {
   loop byteBufferLength(buffer: connection.output) > 0 {
-    let result: IoResult = socketWriteBuffer(
-      socketId: connection.socketId
-      buffer: connection.output
-    )
-    if result.status is NetStatus.wouldBlock {
+    let resultBytes: Int = bytes,
+      let resultStatus: NetStatus = status = socketWriteBuffer(
+        socketId: connection.socketId
+        buffer: connection.output
+      )
+    if resultStatus is NetStatus.wouldBlock {
       ret
     }
-    if result.status is not NetStatus.ok {
+    if resultStatus is not NetStatus.ok {
       byteBufferClear(buffer: connection.output)
       connection.closing = true
       ret
@@ -181,22 +183,23 @@ func createWorker(index: view Int, listenerSocketId: view SocketId) ret Worker {
 }
 
 func acceptOne(worker: mod Worker) {
-  let accepted: SocketResult = tcpAccept(listenerSocketId: worker.listenerSocketId)
-  if accepted.status is not NetStatus.ok {
+  let acceptedSocketId: SocketId = socketId,
+    let acceptedStatus: NetStatus = status = tcpAccept(listenerSocketId: worker.listenerSocketId)
+  if acceptedStatus is not NetStatus.ok {
     ret
   }
   var slot: Int = worker.connections.length
   if worker.freeSlots.length > 0 {
     slot = worker.freeSlots.pop()
     if let connection: mod Connection = worker.connections.modAt(index: slot) {
-      connection.socketId = accepted.socketId
+      connection.socketId = acceptedSocketId
       connection.watchingWritable = false
       connection.closing = false
       connection.open = true
     }
   } else {
     worker.connections.add(value: Connection {
-      socketId: accepted.socketId
+      socketId: acceptedSocketId
       input: createByteBuffer(capacity: 4096)
       output: createByteBuffer(capacity: 4096)
       parse: createHttpParseState()
@@ -205,10 +208,10 @@ func acceptOne(worker: mod Worker) {
       open: true
     })
   }
-  set(this: worker.slots, k: accepted.socketId.handle, value: slot)
+  set(this: worker.slots, k: acceptedSocketId.handle, value: slot)
   let status: NetStatus = pollerWatch(
     poller: worker.poller
-    socketId: accepted.socketId
+    socketId: acceptedSocketId
     readable: true
     writable: false
   )
@@ -309,15 +312,20 @@ func serve(index: copy Int, listenerHandle: copy Int) ret Int {
 func main() ret Int {
   let port: Int = envInt(name: "PORT", fallback: 8080)
   let workers: Int = envInt(name: "WORKERS", fallback: 1)
-  let listening: SocketResult = tcpListen(host: "127.0.0.1", port: port, backlog: 1024)
-  if listening.status is not NetStatus.ok {
-    log("cannot listen on {port}: {listening.status}")
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(
+      host: "127.0.0.1"
+      port: port
+      backlog: 1024
+    )
+  if listeningStatus is not NetStatus.ok {
+    log("cannot listen on {port}: {listeningStatus}")
     ret 1
   }
-  log("listening on {socketLocalPort(socketId: listening.socketId)} with {workers} workers")
+  log("listening on {socketLocalPort(socketId: listeningSocketId)} with {workers} workers")
   var tasks: List(Task(Int)) = {}
   loop var i: Int = 1, i < workers, ++i {
-    tasks.add(value: spawn serve(index: i, listenerHandle: listening.socketId.handle))
+    tasks.add(value: spawn serve(index: i, listenerHandle: listeningSocketId.handle))
   }
-  ret serve(index: 0, listenerHandle: listening.socketId.handle)
+  ret serve(index: 0, listenerHandle: listeningSocketId.handle)
 }

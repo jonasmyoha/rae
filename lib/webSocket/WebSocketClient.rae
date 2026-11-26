@@ -89,12 +89,17 @@ func webSocketConnect(
     }
     ret client
   }
-  let connected: SocketResult = tcpConnect(host: host, port: port, timeoutMs: timeoutMs)
-  if connected.status is not NetStatus.ok {
+  let connectedSocketId: SocketId = socketId,
+    let connectedStatus: NetStatus = status = tcpConnect(
+      host: host
+      port: port
+      timeoutMs: timeoutMs
+    )
+  if connectedStatus is not NetStatus.ok {
     client.closeCode = -1
     ret client
   }
-  client.socketId = connected.socketId
+  client.socketId = connectedSocketId
   client.state = WebSocketClientState.handshaking
   appendText(
     buffer: client.output
@@ -166,8 +171,12 @@ func webSocketClientFlush(client: mod WebSocketClient) {
   if not socketIsValid(socketId: client.socketId) or byteBufferLength(buffer: client.output) is 0 {
     ret
   }
-  let written: IoResult = socketWriteBuffer(socketId: client.socketId, buffer: client.output)
-  if written.status is not NetStatus.ok and written.status is not NetStatus.wouldBlock {
+  let writtenBytes: Int = bytes,
+    let writtenStatus: NetStatus = status = socketWriteBuffer(
+      socketId: client.socketId
+      buffer: client.output
+    )
+  if writtenStatus is not NetStatus.ok and writtenStatus is not NetStatus.wouldBlock {
     client.closeCode = -2
     webSocketClientEnd(client: client)
   }
@@ -191,15 +200,16 @@ func webSocketClientUpdate(client: mod WebSocketClient) {
   }
   webSocketClientFlush(client: client)
   loop client.state is not WebSocketClientState.closed {
-    let read: IoResult = socketReadBuffer(
-      socketId: client.socketId
-      buffer: client.input
-      maxBytes: 16384
-    )
-    if read.status is NetStatus.wouldBlock {
+    let readBytes: Int = bytes,
+      let readStatus: NetStatus = status = socketReadBuffer(
+        socketId: client.socketId
+        buffer: client.input
+        maxBytes: 16384
+      )
+    if readStatus is NetStatus.wouldBlock {
       break
     }
-    if read.status is not NetStatus.ok or read.bytes is 0 {
+    if readStatus is not NetStatus.ok or readBytes is 0 {
       client.closeCode = -3
       webSocketClientEnd(client: client)
       ret

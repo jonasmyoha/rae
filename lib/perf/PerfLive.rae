@@ -48,12 +48,13 @@ type PerfLive {
 
 # A link to `host`:`port` (waits up to 100 ms for the connection, once); none when it cannot connect
 func perfLiveConnect(host: view String, port: view Int, startNs: view Int) ret opt PerfLive {
-  let result: SocketResult = tcpConnect(host: host, port: port, timeoutMs: 100)
-  if result.status is not NetStatus.ok {
+  let resultSocketId: SocketId = socketId,
+    let resultStatus: NetStatus = status = tcpConnect(host: host, port: port, timeoutMs: 100)
+  if resultStatus is not NetStatus.ok {
     ret none
   }
   ret PerfLive {
-    socketId: result.socketId
+    socketId: resultSocketId
     connected: true
     startNs: startNs
     pending: {}
@@ -170,15 +171,16 @@ func perfLiveFlush(live: mod PerfLive) {
   if not live.connected or live.sentTo >= live.pending.length {
     ret
   }
-  let result: IoResult = socketWrite(
-    socketId: live.socketId
-    bytes: live.pending
-    start: live.sentTo
-    count: live.pending.length - live.sentTo
-  )
-  if result.status is NetStatus.ok {
-    live.sentTo = live.sentTo + result.bytes
-  } else if result.status is not NetStatus.wouldBlock {
+  let resultBytes: Int = bytes,
+    let resultStatus: NetStatus = status = socketWrite(
+      socketId: live.socketId
+      bytes: live.pending
+      start: live.sentTo
+      count: live.pending.length - live.sentTo
+    )
+  if resultStatus is NetStatus.ok {
+    live.sentTo = live.sentTo + resultBytes
+  } else if resultStatus is not NetStatus.wouldBlock {
     perfLiveClose(live: live)
   }
 }

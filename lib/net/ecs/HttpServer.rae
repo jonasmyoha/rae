@@ -230,11 +230,12 @@ func httpServerListen(
   port: view Int
   backlog: view Int
 ) ret NetStatus {
-  let listening: SocketResult = tcpListen(host: host, port: port, backlog: backlog)
-  if listening.status is not NetStatus.ok {
-    ret listening.status
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(host: host, port: port, backlog: backlog)
+  if listeningStatus is not NetStatus.ok {
+    ret listeningStatus
   }
-  ret httpServerShareListener(server: server, listenerSocketId: listening.socketId)
+  ret httpServerShareListener(server: server, listenerSocketId: listeningSocketId)
 }
 
 # Accept connections from a listener made elsewhere (several workers' servers

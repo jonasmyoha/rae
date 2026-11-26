@@ -312,7 +312,7 @@ func relayClientRejoin(client: mod RelayClient, nowMs: view Int) {
   sendRequest(client: client, nowMs: nowMs)
 }
 
-func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
+func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret bytes: Int, status: NetStatus {
   client.lastSendMs = nowMs
   client.lastRelaySendMs = nowMs
   if let webSocket: mod WebSocketClient = client.webSocket {
@@ -322,9 +322,9 @@ func sendClientOutbox(client: mod RelayClient, nowMs: view Int) ret IoResult {
       start: 0
       count: client.outbox.length
     ) {
-      ret IoResult { bytes: client.outbox.length, status: NetStatus.ok }
+      ret bytes: client.outbox.length, status: NetStatus.ok
     }
-    ret IoResult { bytes: 0, status: NetStatus.wouldBlock }
+    ret bytes: 0, status: NetStatus.wouldBlock
   }
   ret udpSend(
     udpSocket: client.udpSocket
@@ -362,7 +362,8 @@ func sendRequest(client: mod RelayClient, nowMs: view Int) {
     )
   }
   client.lastRequestMs = nowMs
-  let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+  let sentBytes: Int = bytes,
+    let sentStatus: NetStatus = status = sendClientOutbox(client: client, nowMs: nowMs)
 }
 
 # Move the clock: retry an unanswered request, keep the relay's record of
@@ -390,7 +391,8 @@ func relayClientUpdate(client: mod RelayClient, nowMs: view Int) {
   # Keep-alives go to the relay even while the traffic is direct
   if nowMs - client.lastRelaySendMs >= client.config.keepAliveMs {
     relayWriteKind(packet: client.outbox, kind: relayKindKeepAlive)
-    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = sendClientOutbox(client: client, nowMs: nowMs)
   }
   updatePaths(client: client, nowMs: nowMs)
 }
@@ -436,7 +438,11 @@ func updatePaths(client: mod RelayClient, nowMs: view Int) {
 }
 
 # Send `client.outbox` to a peer straight (through `directNetwork`)
-func sendDirect(client: mod RelayClient, address: view NetAddress, nowMs: view Int) ret IoResult {
+func sendDirect(
+  client: mod RelayClient
+  address: view NetAddress
+  nowMs: view Int
+) ret bytes: Int, status: NetStatus {
   client.lastSendMs = nowMs
   client.directPacketsSent = client.directPacketsSent + 1
   ret udpSendThrough(
@@ -460,7 +466,8 @@ func sendPunch(
   relayWriteKind(packet: client.outbox, kind: kind)
   writeU64(bytes: client.outbox, value: secret)
   writeU32(bytes: client.outbox, value: client.peerId)
-  let sent: IoResult = sendDirect(client: client, address: address, nowMs: nowMs)
+  let sentBytes: Int = bytes,
+    let sentStatus: NetStatus = status = sendDirect(client: client, address: address, nowMs: nowMs)
 }
 
 # The index of the path to `peerId`, -1 for none
@@ -590,9 +597,9 @@ func relayClientSend(
   start: view Int
   count: view Int
   nowMs: view Int
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   if client.state is not RelayClientState.ready {
-    ret IoResult { bytes: 0, status: NetStatus.failed }
+    ret bytes: 0, status: NetStatus.failed
   }
   let pathIndex: Int = pathIndexOfPeer(client: client, peerId: peerId)
   if let path: view DirectPath = client.paths.viewAt(index: pathIndex) {
@@ -623,7 +630,8 @@ func relayClientSend(
 func relayClientLeave(client: mod RelayClient, nowMs: view Int) {
   if client.state is RelayClientState.ready {
     relayWriteKind(packet: client.outbox, kind: relayKindLeave)
-    let sent: IoResult = sendClientOutbox(client: client, nowMs: nowMs)
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = sendClientOutbox(client: client, nowMs: nowMs)
   }
   client.state = RelayClientState.closed
 }

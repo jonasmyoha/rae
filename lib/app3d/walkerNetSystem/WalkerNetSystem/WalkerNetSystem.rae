@@ -1,9 +1,8 @@
-# Walkers over the network (docs/replication.md, docs/walker-net.md): every
-# player's walker pose reaches every other player through lib/net/relay, as
-# replicated entities (lib/net/replication), with player slots
-# (lib/net/session). No window and no physics: the walker app gives it the
-# local walker's pose each frame and draws the remote ones it hands back,
-# and a headless bot (tools/walkerBot) makes up a pose of its own.
+# Walkers over the network (docs/replication.md, docs/walker-net.md): every player's walker pose
+# reaches every other player through lib/net/relay, as replicated entities (lib/net/replication),
+# with player slots (lib/net/session). No window and no physics: the walker app gives it the local
+# walker's pose each frame and draws the remote ones it hands back, and a headless bot
+# (tools/walkerBot) makes up a pose of its own.
 #
 # The pose is the player's word (each player moves its own walker; the host
 # relays it): a player sends its pose as its input, and the host sets that
@@ -71,67 +70,6 @@ const kindReplicated: Int = 0
 const kindPose: Int = 1
 
 const kindCheck: Int = 2
-
-# ----- settings -----------------------------------------------------------------
-enum WalkerNetMode { offline, host, join }
-
-type WalkerNetSettings {
-  mode: WalkerNetMode
-  relayHost: String
-  relayPort: Int
-  # join: the host's invite ("<relay token>-<session key>", lib/net/relay
-  # RelayWire; a bare 32-digit token joins with no session key)
-  token: String
-  # deviceDesktop / deviceMobile (lib/net/relay)
-  device: Int
-  # Leave the session this long after it started (0: stay)
-  seconds: Int = 0
-}
-
-func offlineWalkerNetSettings() ret WalkerNetSettings {
-  ret WalkerNetSettings {
-    mode: WalkerNetMode.offline
-    relayHost: "127.0.0.1"
-    relayPort: 7777
-    token: ""
-    device: deviceDesktop
-  }
-}
-
-# The settings from the environment: RAE_WALKER_NET=host or join,
-# RAE_WALKER_RELAY=host:port (127.0.0.1:7777), RAE_WALKER_TOKEN=<32 hex
-# digits> to join, RAE_WALKER_NET_SECONDS=<n> to leave after n seconds.
-# Unset: offline.
-func walkerNetSettingsFromEnvironment() ret WalkerNetSettings {
-  var settings: WalkerNetSettings = offlineWalkerNetSettings()
-  let mode: String = getEnv(name: "RAE_WALKER_NET").trim()
-  if mode is "host" {
-    settings.mode = WalkerNetMode.host
-  } else if mode is "join" {
-    settings.mode = WalkerNetMode.join
-  }
-  let relay: String = getEnv(name: "RAE_WALKER_RELAY").trim()
-  if relay.length() > 0 {
-    let parts: List(String) = relay.split(sep: ":")
-    if parts.length is 2 {
-      settings.relayHost = parts.copyAtFallback(index: 0, fallback: "127.0.0.1")
-      settings.relayPort = parts.copyAtFallback(index: 1, fallback: "7777").toInt()
-    }
-  }
-  settings.token = getEnv(name: "RAE_WALKER_TOKEN").trim()
-  settings.seconds = getEnv(name: "RAE_WALKER_NET_SECONDS").trim().toInt()
-  ret settings
-}
-
-func walkerNetModeName(settings: view WalkerNetSettings) ret String {
-  if settings.mode is WalkerNetMode.host {
-    ret "hosting"
-  }
-  if settings.mode is WalkerNetMode.join {
-    ret "joining"
-  }
-  ret "offline"
-}
 
 # ----- the resource -------------------------------------------------------------
 type WalkerSeat {
@@ -240,7 +178,11 @@ func createWalkerSession() ret SessionHost {
 
 func createWalkerNet(settings: view WalkerNetSettings) ret WalkerNet {
   let config: ReplicationConfig = walkerReplicationConfig()
-  let relayAddress: NetAddress = resolveAddress(host: settings.relayHost, port: settings.relayPort).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: settings.relayHost
+      port: settings.relayPort
+    )
   ret WalkerNet {
     settings: settings
     config: config
@@ -618,13 +560,14 @@ func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: v
             continue
           }
           if seat.slotId < 0 {
-            let result: JoinResult = sessionTakeHelloFromPeer(
-              host: net.session
-              message: net.message
-              peerId: peerId
-              nowMs: nowMs
-            )
-            if result.kind is JoinKind.joined {
+            let resultKind: JoinKind = kind,
+              let resultSlotIndex: Int = slotIndex = sessionTakeHelloFromPeer(
+                host: net.session
+                message: net.message
+                peerId: peerId
+                nowMs: nowMs
+              )
+            if resultKind is JoinKind.joined {
               let entityId: EntityId = allocEntity(this: net.world.entities)
               componentSet(
                 this: net.world.poses
@@ -639,21 +582,21 @@ func walkerNetHostFrame(net: mod WalkerNet, localPose: view WalkerPose, nowMs: v
               )
               sessionSetEntity(
                 host: net.session
-                slotIndex: result.slotIndex
+                slotIndex: resultSlotIndex
                 entityId: entityId
                 netId: netId
               )
             }
-            if result.kind is not JoinKind.refused {
-              if let slot: view PlayerSlot = net.session.slots.viewAt(index: result.slotIndex) {
+            if resultKind is not JoinKind.refused {
+              if let slot: view PlayerSlot = net.session.slots.viewAt(index: resultSlotIndex) {
                 seat.slotId = slot.slotId
                 seat.peer = createReplicaPeer(peerId: peerId, config: net.config)
                 seat.peer.focusNetId = slot.netId
               }
               sessionWriteWelcome(
                 host: net.session
-                slotIndex: result.slotIndex
-                resumed: result.kind is JoinKind.resumed
+                slotIndex: resultSlotIndex
+                resumed: resultKind is JoinKind.resumed
                 out: net.message
               )
               let queued: Bool = connectionSendReliable(

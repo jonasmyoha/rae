@@ -201,21 +201,32 @@ func report(label: view String, player: view Player) {
 
 # Plain HTTP on the WebSocket port: the relay serves only the upgrade
 func plainHttpAnswer(scene: mod Scene, port: view Int) ret String {
-  let connected: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 1000)
-  if connected.status is not NetStatus.ok {
+  let connectedSocketId: SocketId = socketId,
+    let connectedStatus: NetStatus = status = tcpConnect(
+      host: "127.0.0.1"
+      port: port
+      timeoutMs: 1000
+    )
+  if connectedStatus is not NetStatus.ok {
     ret "no connection"
   }
-  let written: IoResult = socketWriteText(
-    socketId: connected.socketId
-    text: "GET / HTTP/1.1\r\nHost: relay\r\n\r\n"
-  )
+  let writtenBytes: Int = bytes,
+    let writtenStatus: NetStatus = status = socketWriteText(
+      socketId: connectedSocketId
+      text: "GET / HTTP/1.1\r\nHost: relay\r\n\r\n"
+    )
   var answer: List(UInt8) = List.create(UInt8, cap: 512)
   let until: Int = since(scene: scene) + 2000
   loop since(scene: scene) < until and answer.length < 12 {
     relayStep(server: scene.relay, waitMs: 5)
-    let read: IoResult = socketRead(socketId: connected.socketId, bytes: answer, maxBytes: 512)
+    let readBytes: Int = bytes,
+      let readStatus: NetStatus = status = socketRead(
+        socketId: connectedSocketId
+        bytes: answer
+        maxBytes: 512
+      )
   }
-  socketClose(socketId: connected.socketId)
+  socketClose(socketId: connectedSocketId)
   if answer.length < 12 {
     ret "no answer"
   }
@@ -232,7 +243,11 @@ func main() ret Int {
     log("no WebSocket listener")
     ret 1
   }
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: relay)
+    )
   let webSocketPort: Int = relayWebSocketPort(server: relay)
   var scene: Scene = {
     relay: own relay

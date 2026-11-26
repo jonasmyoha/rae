@@ -166,14 +166,15 @@ func relayHostSend(host: mod RelayHost, nowMs: view Int) {
     if let peer: mod HostPeer = host.peers.modAt(index: i) {
       connectionUpdate(connection: peer.connection, nowMs: nowMs)
       loop connectionWritePacket(connection: peer.connection, packet: host.packet, nowMs: nowMs) {
-        let sent: IoResult = relayClientSend(
-          client: host.client
-          peerId: peer.peerId
-          bytes: host.packet
-          start: 0
-          count: host.packet.length
-          nowMs: nowMs
-        )
+        let sentBytes: Int = bytes,
+          let sentStatus: NetStatus = status = relayClientSend(
+            client: host.client
+            peerId: peer.peerId
+            bytes: host.packet
+            start: 0
+            count: host.packet.length
+            nowMs: nowMs
+          )
       }
       let state: ConnectionState = peer.connection.state
       gone = state is ConnectionState.disconnected or state is ConnectionState.timedOut or state is ConnectionState.failed
@@ -231,14 +232,15 @@ func relayPlayerSend(player: mod RelayPlayer, nowMs: view Int) {
     ret
   }
   loop connectionWritePacket(connection: player.connection, packet: player.packet, nowMs: nowMs) {
-    let sent: IoResult = relayClientSend(
-      client: player.client
-      peerId: hostPeerId
-      bytes: player.packet
-      start: 0
-      count: player.packet.length
-      nowMs: nowMs
-    )
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = relayClientSend(
+        client: player.client
+        peerId: hostPeerId
+        bytes: player.packet
+        start: 0
+        count: player.packet.length
+        nowMs: nowMs
+      )
   }
 }
 

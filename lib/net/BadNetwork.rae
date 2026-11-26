@@ -403,7 +403,7 @@ func udpSendThrough(
   count: view Int
   destination: view NetAddress
   nowMs: view Int
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   if not network.enabled {
     ret udpSend(
       udpSocket: udpSocket
@@ -421,7 +421,7 @@ func udpSendThrough(
     destination: destination
     nowMs: nowMs
   )
-  ret IoResult { bytes: count, status: NetStatus.ok }
+  ret bytes: count, status: NetStatus.ok
 }
 
 # Send every held datagram that is due (call once a frame): how many went out
@@ -432,13 +432,14 @@ func badNetworkFlush(network: mod BadNetwork, udpSocket: view UdpSocket, nowMs: 
     if slot < 0 {
       ret sent
     }
-    let result: IoResult = udpSend(
-      udpSocket: udpSocket
-      bytes: network.data
-      start: slot * network.maxPacketBytes
-      count: intAt(values: network.length, index: slot)
-      destination: network.destination.copyAtFallback(index: slot, fallback: noNetAddress())
-    )
+    let resultBytes: Int = bytes,
+      let resultStatus: NetStatus = status = udpSend(
+        udpSocket: udpSocket
+        bytes: network.data
+        start: slot * network.maxPacketBytes
+        count: intAt(values: network.length, index: slot)
+        destination: network.destination.copyAtFallback(index: slot, fallback: noNetAddress())
+      )
     network.length.set(index: slot, value: -1)
     network.stats.delivered = network.stats.delivered + 1
     sent = sent + 1

@@ -152,11 +152,12 @@ func acceptSystem(server: mod HttpServer) {
   }
   server.listenerReady = false
   loop var accepts: Int = 0, accepts < server.acceptsPerFrame, ++accepts {
-    let accepted: SocketResult = tcpAccept(listenerSocketId: server.listenerSocketId)
-    if accepted.status is not NetStatus.ok {
+    let acceptedSocketId: SocketId = socketId,
+      let acceptedStatus: NetStatus = status = tcpAccept(listenerSocketId: server.listenerSocketId)
+    if acceptedStatus is not NetStatus.ok {
       ret
     }
-    let entityId: EntityId = openConnection(server: server, socketId: accepted.socketId)
+    let entityId: EntityId = openConnection(server: server, socketId: acceptedSocketId)
   }
 }
 
@@ -167,27 +168,28 @@ func readInto(
   readBuffers: mod ComponentTable(ReadBuffer)
   entityId: view EntityId
   socketId: view SocketId
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   let readBuffer: mod ReadBuffer = componentMod(this: readBuffers, entityId: entityId)
   var total: Int = 0
   loop var chunk: Int = 0, chunk < 4, ++chunk {
-    let result: IoResult = socketReadBuffer(
-      socketId: socketId
-      buffer: readBuffer.buffer
-      maxBytes: readChunkBytes
-    )
-    if result.status is not NetStatus.ok {
-      if total > 0 and result.status is NetStatus.wouldBlock {
-        ret IoResult { bytes: total, status: NetStatus.ok }
+    let resultBytes: Int = bytes,
+      let resultStatus: NetStatus = status = socketReadBuffer(
+        socketId: socketId
+        buffer: readBuffer.buffer
+        maxBytes: readChunkBytes
+      )
+    if resultStatus is not NetStatus.ok {
+      if total > 0 and resultStatus is NetStatus.wouldBlock {
+        ret bytes: total, status: NetStatus.ok
       }
-      ret IoResult { bytes: total, status: result.status }
+      ret bytes: total, status: resultStatus
     }
-    total = total + result.bytes
-    if result.bytes < readChunkBytes {
-      ret IoResult { bytes: total, status: NetStatus.ok }
+    total = total + resultBytes
+    if resultBytes < readChunkBytes {
+      ret bytes: total, status: NetStatus.ok
     }
   }
-  ret IoResult { bytes: total, status: NetStatus.ok }
+  ret bytes: total, status: NetStatus.ok
 }
 
 func touchKeepAlive(
@@ -208,15 +210,16 @@ func readSystem(server: mod HttpServer) {
     let entityId: EntityId = componentEntityAt(this: server.readables, i: i)
     let socket: Socket = socketOf(sockets: server.sockets, entityId: entityId)
     if socketIsValid(socketId: socket.socketId) {
-      let result: IoResult = readInto(
-        readBuffers: server.readBuffers
-        entityId: entityId
-        socketId: socket.socketId
-      )
-      if result.bytes > 0 {
+      let resultBytes: Int = bytes,
+        let resultStatus: NetStatus = status = readInto(
+          readBuffers: server.readBuffers
+          entityId: entityId
+          socketId: socket.socketId
+        )
+      if resultBytes > 0 {
         touchKeepAlive(keepAlives: server.keepAlives, entityId: entityId, nowNs: server.frameNs)
       }
-      if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+      if resultStatus is not NetStatus.ok and resultStatus is not NetStatus.wouldBlock {
         addTag(table: server.closings, entityId: entityId)
       }
     }
@@ -417,20 +420,24 @@ func writeFrom(
   writeBuffers: mod ComponentTable(WriteBuffer)
   entityId: view EntityId
   socketId: view SocketId
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   let writeBuffer: mod WriteBuffer = componentMod(this: writeBuffers, entityId: entityId)
   var total: Int = 0
   loop byteBufferLength(buffer: writeBuffer.buffer) > 0 {
-    let result: IoResult = socketWriteBuffer(socketId: socketId, buffer: writeBuffer.buffer)
-    if result.status is not NetStatus.ok {
-      if result.status is not NetStatus.wouldBlock {
+    let resultBytes: Int = bytes,
+      let resultStatus: NetStatus = status = socketWriteBuffer(
+        socketId: socketId
+        buffer: writeBuffer.buffer
+      )
+    if resultStatus is not NetStatus.ok {
+      if resultStatus is not NetStatus.wouldBlock {
         byteBufferClear(buffer: writeBuffer.buffer)
       }
-      ret IoResult { bytes: total, status: result.status }
+      ret bytes: total, status: resultStatus
     }
-    total = total + result.bytes
+    total = total + resultBytes
   }
-  ret IoResult { bytes: total, status: NetStatus.ok }
+  ret bytes: total, status: NetStatus.ok
 }
 
 func unsentBytes(writeBuffers: view ComponentTable(WriteBuffer), entityId: view EntityId) ret Int {
@@ -467,12 +474,13 @@ func writeSystem(server: mod HttpServer) {
       entityId: entityId
     )
     if socketIsValid(socketId: socket.socketId) and not blocked {
-      let result: IoResult = writeFrom(
-        writeBuffers: server.writeBuffers
-        entityId: entityId
-        socketId: socket.socketId
-      )
-      if result.status is not NetStatus.ok and result.status is not NetStatus.wouldBlock {
+      let resultBytes: Int = bytes,
+        let resultStatus: NetStatus = status = writeFrom(
+          writeBuffers: server.writeBuffers
+          entityId: entityId
+          socketId: socket.socketId
+        )
+      if resultStatus is not NetStatus.ok and resultStatus is not NetStatus.wouldBlock {
         addTag(table: server.closings, entityId: entityId)
       } else if unsentBytes(writeBuffers: server.writeBuffers, entityId: entityId) is 0 {
         if socket.watchingWritable {

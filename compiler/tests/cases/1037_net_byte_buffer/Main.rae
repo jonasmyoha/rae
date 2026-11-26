@@ -4,15 +4,16 @@
 open net/ByteBuffer
 open net/Tcp
 
-func acceptWithin(listenerSocketId: view SocketId) ret SocketResult {
+func acceptWithin(listenerSocketId: view SocketId) ret socketId: SocketId, status: NetStatus {
   loop var attempt: Int = 0, attempt < 200, ++attempt {
-    let accepted: SocketResult = tcpAccept(listenerSocketId: listenerSocketId)
-    if accepted.status is not NetStatus.wouldBlock {
-      ret accepted
+    let acceptedSocketId: SocketId = socketId,
+      let acceptedStatus: NetStatus = status = tcpAccept(listenerSocketId: listenerSocketId)
+    if acceptedStatus is not NetStatus.wouldBlock {
+      ret socketId: acceptedSocketId, status: acceptedStatus
     }
     sleep(ms: 5)
   }
-  ret SocketResult { socketId: noSocket(), status: NetStatus.wouldBlock }
+  ret socketId: noSocket(), status: NetStatus.wouldBlock
 }
 
 func main() ret Int {
@@ -102,31 +103,43 @@ func main() ret Int {
     log("searches found: {found > 0}")
 
     # Through a socket: the client writes from a buffer, the server reads into one
-    let listening: SocketResult = tcpListen(host: "127.0.0.1", port: 0, backlog: 4)
-    if let port: Int = socketLocalPort(socketId: listening.socketId) {
-      let client: SocketResult = tcpConnect(host: "127.0.0.1", port: port, timeoutMs: 2000)
-      let server: SocketResult = acceptWithin(listenerSocketId: listening.socketId)
+    let listeningSocketId: SocketId = socketId,
+      let listeningStatus: NetStatus = status = tcpListen(host: "127.0.0.1", port: 0, backlog: 4)
+    if let port: Int = socketLocalPort(socketId: listeningSocketId) {
+      let clientSocketId: SocketId = socketId,
+        let clientStatus: NetStatus = status = tcpConnect(
+          host: "127.0.0.1"
+          port: port
+          timeoutMs: 2000
+        )
+      let serverSocketId: SocketId = socketId,
+        let serverStatus: NetStatus = status = acceptWithin(listenerSocketId: listeningSocketId)
       var outgoing: ByteBuffer = createByteBuffer(capacity: 16)
       appendText(buffer: outgoing, text: "hello over a buffer")
-      let written: IoResult = socketWriteBuffer(socketId: client.socketId, buffer: outgoing)
-      log("wrote {written.bytes} ({written.status}), left {byteBufferLength(buffer: outgoing)}")
+      let writtenBytes: Int = bytes,
+        let writtenStatus: NetStatus = status = socketWriteBuffer(
+          socketId: clientSocketId
+          buffer: outgoing
+        )
+      log("wrote {writtenBytes} ({writtenStatus}), left {byteBufferLength(buffer: outgoing)}")
       var incoming: ByteBuffer = createByteBuffer(capacity: 16)
-      let ready: Bool = socketWaitReadable(socketId: server.socketId, timeoutMs: 2000)
-      let got: IoResult = socketReadBuffer(
-        socketId: server.socketId
-        buffer: incoming
-        maxBytes: 64
-      )
+      let ready: Bool = socketWaitReadable(socketId: serverSocketId, timeoutMs: 2000)
+      let gotBytes: Int = bytes,
+        let gotStatus: NetStatus = status = socketReadBuffer(
+          socketId: serverSocketId
+          buffer: incoming
+          maxBytes: 64
+        )
       log(
-        "read {got.bytes} ({got.status}): [{byteBufferText(
+        "read {gotBytes} ({gotStatus}): [{byteBufferText(
           buffer: incoming
           start: 0
           count: byteBufferLength(buffer: incoming)
         )}]"
       )
-      socketClose(socketId: client.socketId)
-      socketClose(socketId: server.socketId)
-      socketClose(socketId: listening.socketId)
+      socketClose(socketId: clientSocketId)
+      socketClose(socketId: serverSocketId)
+      socketClose(socketId: listeningSocketId)
       ret 0
     } else {
       log("the listener has no port")

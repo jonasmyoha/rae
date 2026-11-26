@@ -392,14 +392,15 @@ func relaySendBytes(
     }
     ret false
   }
-  let sent: IoResult = udpSend(
-    udpSocket: server.udpSocket
-    bytes: bytes
-    start: start
-    count: count
-    destination: address
-  )
-  ret sent.status is NetStatus.ok
+  let sentBytes: Int = bytes,
+    let sentStatus: NetStatus = status = udpSend(
+      udpSocket: server.udpSocket
+      bytes: bytes
+      start: start
+      count: count
+      destination: address
+    )
+  ret sentStatus is NetStatus.ok
 }
 
 # Send `server.outbox` to `address` (best effort)

@@ -170,7 +170,11 @@ func report(
 func main() ret Int {
   var config: RelayConfig = defaultRelayConfig()
   var relay: RelayServer = createRelayServer(host: "127.0.0.1", port: 0, config: config)
-  let relayAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: relayPort(server: relay)).address
+  let relayAddress: NetAddress = address,
+    let relayAddressStatus: NetStatus = status = resolveAddress(
+      host: "127.0.0.1"
+      port: relayPort(server: relay)
+    )
   let startMs: Int = nowMs()
 
   # Both sides may go direct: the punches meet, the traffic skips the relay

@@ -37,18 +37,6 @@ enum NetStatus {
   failed
 }
 
-# A socket, or why there is none (`socketId` is `noSocket()` unless `ok`)
-type SocketResult {
-  socketId: SocketId
-  status: NetStatus
-}
-
-# How many bytes a read or write moved, and its status
-type IoResult {
-  bytes: Int
-  status: NetStatus
-}
-
 # How many addresses a name may resolve to that we try (IPv4 and IPv6, a few
 # interfaces)
 const maxAddressRecords: Int = 8
@@ -105,15 +93,15 @@ func netStatusFromCode(code: view Int) ret NetStatus {
   ret NetStatus.failed
 }
 
-func failedSocket(status: view NetStatus) ret SocketResult {
-  ret SocketResult { socketId: noSocket(), status: status }
+func failedSocket(status: view NetStatus) ret socketId: SocketId, status: NetStatus {
+  ret socketId: noSocket(), status: status
 }
 
-func ioResultFromCode(code: view Int) ret IoResult {
+func ioResultFromCode(code: view Int) ret bytes: Int, status: NetStatus {
   if code >= 0 {
-    ret IoResult { bytes: code, status: NetStatus.ok }
+    ret bytes: code, status: NetStatus.ok
   }
-  ret IoResult { bytes: 0, status: netStatusFromCode(code: code) }
+  ret bytes: 0, status: netStatusFromCode(code: code)
 }
 
 # Turn on non-blocking mode: answers 0 or the failing call's code
@@ -165,7 +153,11 @@ func closeHandle(handle: view Int) {
 # only) and `port` (0 picks a free port; `socketLocalPort` says which). Tries
 # each address the name resolves to: socket, reuse the address (a restarted
 # server can rebind at once), close-on-exec, bind, listen, non-blocking.
-func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketResult {
+func tcpListen(
+  host: view String
+  port: view Int
+  backlog: view Int
+) ret socketId: SocketId, status: NetStatus {
   if port < 0 or port > 65535 {
     ret failedSocket(status: NetStatus.invalidAddress)
   }
@@ -215,7 +207,7 @@ func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketR
         closeHandle(handle: handle)
         continue
       }
-      ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+      ret socketId: SocketId { handle: handle }, status: NetStatus.ok
     }
   }
   ret failedSocket(status: status)
@@ -224,7 +216,7 @@ func tcpListen(host: view String, port: view Int, backlog: view Int) ret SocketR
 # Accept one pending connection; `wouldBlock` when none is waiting. A peer
 # that gave up before it was accepted is not the listener's failure: that is
 # `wouldBlock` too, and the caller goes on.
-func tcpAccept(listenerSocketId: view SocketId) ret SocketResult {
+func tcpAccept(listenerSocketId: view SocketId) ret socketId: SocketId, status: NetStatus {
   unsafe {
     loop {
       let handle: Int = systemAccept(handle: listenerSocketId.handle)
@@ -234,7 +226,7 @@ func tcpAccept(listenerSocketId: view SocketId) ret SocketResult {
           ret failedSocket(status: NetStatus.failed)
         }
         prepareConnected(handle: handle)
-        ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+        ret socketId: SocketId { handle: handle }, status: NetStatus.ok
       }
       if isError(code: handle, which: errorInterrupted) {
         continue
@@ -253,7 +245,11 @@ func tcpAccept(listenerSocketId: view SocketId) ret SocketResult {
 # non-blocking connect, then a wait until the socket is writable, then its
 # pending error says whether it connected. The socket it answers is
 # non-blocking like every other.
-func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret SocketResult {
+func tcpConnect(
+  host: view String
+  port: view Int
+  timeoutMs: view Int
+) ret socketId: SocketId, status: NetStatus {
   if port < 0 or port > 65535 {
     ret failedSocket(status: NetStatus.invalidAddress)
   }
@@ -319,7 +315,7 @@ func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret Sock
         }
       }
       prepareConnected(handle: handle)
-      ret SocketResult { socketId: { handle: handle }, status: NetStatus.ok }
+      ret socketId: SocketId { handle: handle }, status: NetStatus.ok
     }
   }
   ret failedSocket(status: status)
@@ -327,9 +323,13 @@ func tcpConnect(host: view String, port: view Int, timeoutMs: view Int) ret Sock
 
 # Read up to `maxBytes` and APPEND them to `bytes` (growing it if needed).
 # `endOfStream` when the peer closed; `wouldBlock` when nothing is there yet.
-func socketRead(socketId: view SocketId, bytes: mod List(UInt8), maxBytes: view Int) ret IoResult {
+func socketRead(
+  socketId: view SocketId
+  bytes: mod List(UInt8)
+  maxBytes: view Int
+) ret bytes: Int, status: NetStatus {
   if maxBytes <= 0 {
-    ret IoResult { bytes: 0, status: NetStatus.failed }
+    ret bytes: 0, status: NetStatus.failed
   }
   loop bytes.cap - bytes.length < maxBytes {
     bytes.grow()
@@ -344,10 +344,10 @@ func socketRead(socketId: view SocketId, bytes: mod List(UInt8), maxBytes: view 
       )
       if code > 0 {
         bytes.length = bytes.length + code
-        ret IoResult { bytes: code, status: NetStatus.ok }
+        ret bytes: code, status: NetStatus.ok
       }
       if code is 0 {
-        ret IoResult { bytes: 0, status: NetStatus.endOfStream }
+        ret bytes: 0, status: NetStatus.endOfStream
       }
       if isError(code: code, which: errorInterrupted) {
         continue
@@ -355,7 +355,7 @@ func socketRead(socketId: view SocketId, bytes: mod List(UInt8), maxBytes: view 
       ret ioResultFromCode(code: code)
     }
   }
-  ret IoResult { bytes: 0, status: NetStatus.failed }
+  ret bytes: 0, status: NetStatus.failed
 }
 
 # Write `count` bytes of `bytes` from `start`. It may write fewer when the
@@ -365,12 +365,12 @@ func socketWrite(
   bytes: view List(UInt8)
   start: view Int
   count: view Int
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   if start < 0 or count < 0 or start + count > bytes.length {
-    ret IoResult { bytes: 0, status: NetStatus.failed }
+    ret bytes: 0, status: NetStatus.failed
   }
   if count is 0 {
-    ret IoResult { bytes: 0, status: NetStatus.ok }
+    ret bytes: 0, status: NetStatus.ok
   }
   unsafe {
     loop {
@@ -387,13 +387,13 @@ func socketWrite(
       ret ioResultFromCode(code: code)
     }
   }
-  ret IoResult { bytes: 0, status: NetStatus.failed }
+  ret bytes: 0, status: NetStatus.failed
 }
 
 # Write a String's bytes (small messages; bulk data goes through bytes)
-func socketWriteText(socketId: view SocketId, text: view String) ret IoResult {
+func socketWriteText(socketId: view SocketId, text: view String) ret bytes: Int, status: NetStatus {
   if text.length() is 0 {
-    ret IoResult { bytes: 0, status: NetStatus.ok }
+    ret bytes: 0, status: NetStatus.ok
   }
   unsafe {
     loop {
@@ -408,7 +408,7 @@ func socketWriteText(socketId: view SocketId, text: view String) ret IoResult {
       ret ioResultFromCode(code: code)
     }
   }
-  ret IoResult { bytes: 0, status: NetStatus.failed }
+  ret bytes: 0, status: NetStatus.failed
 }
 
 # Read up to `maxBytes` onto the end of `buffer` (room is made by compacting
@@ -417,9 +417,9 @@ func socketReadBuffer(
   socketId: view SocketId
   buffer: mod ByteBuffer
   maxBytes: view Int
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   if maxBytes <= 0 {
-    ret IoResult { bytes: 0, status: NetStatus.failed }
+    ret bytes: 0, status: NetStatus.failed
   }
   byteBufferReserve(buffer: buffer, count: maxBytes)
   ret socketRead(socketId: socketId, bytes: buffer.bytes, maxBytes: maxBytes)
@@ -427,17 +427,21 @@ func socketReadBuffer(
 
 # Write as much of `buffer`'s unread bytes as the socket takes, and consume
 # what went out (the rest stays for the next writable moment)
-func socketWriteBuffer(socketId: view SocketId, buffer: mod ByteBuffer) ret IoResult {
-  let result: IoResult = socketWrite(
-    socketId: socketId
-    bytes: buffer.bytes
-    start: buffer.start
-    count: byteBufferLength(buffer: buffer)
-  )
-  if result.status is NetStatus.ok {
-    consume(buffer: buffer, count: result.bytes)
+func socketWriteBuffer(
+  socketId: view SocketId
+  buffer: mod ByteBuffer
+) ret bytes: Int, status: NetStatus {
+  let resultBytes: Int = bytes,
+    let resultStatus: NetStatus = status = socketWrite(
+      socketId: socketId
+      bytes: buffer.bytes
+      start: buffer.start
+      count: byteBufferLength(buffer: buffer)
+    )
+  if resultStatus is NetStatus.ok {
+    consume(buffer: buffer, count: resultBytes)
   }
-  ret result
+  ret bytes: resultBytes, status: resultStatus
 }
 
 # Wait until the socket has data or its peer closed: true, or false after

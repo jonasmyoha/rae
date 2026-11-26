@@ -35,12 +35,6 @@ type NetAddress {
   scopeId: Int
 }
 
-# An address, or why there is none
-type AddressResult {
-  address: NetAddress
-  status: NetStatus
-}
-
 type UdpSocket {
   socketId: SocketId
   # Why there is no socket (`ok` when there is one)
@@ -121,9 +115,9 @@ func addressFromWords(words: view List(Int)) ret NetAddress {
 
 # The address `host`:`port` names ("127.0.0.1", "::1", a host name). The
 # first address the name resolves to; `invalidAddress` when there is none.
-func resolveAddress(host: view String, port: view Int) ret AddressResult {
+func resolveAddress(host: view String, port: view Int) ret address: NetAddress, status: NetStatus {
   if port < 0 or port > 65535 {
-    ret AddressResult { address: noNetAddress(), status: NetStatus.invalidAddress }
+    ret address: noNetAddress(), status: NetStatus.invalidAddress
   }
   var records: List(UInt8) = List.create(
     UInt8
@@ -140,17 +134,17 @@ func resolveAddress(host: view String, port: view Int) ret AddressResult {
       maxRecords: maxAddressRecords
     )
     if count < 0 {
-      ret AddressResult { address: noNetAddress(), status: netStatusFromCode(code: count) }
+      ret address: noNetAddress(), status: netStatusFromCode(code: count)
     }
     loop var index: Int = 0, index < count, ++index {
       let code: Int = systemRecordAddress(records: records.data, index: index, words: words.data)
       if code is 0 {
         words.length = wordCount
-        ret AddressResult { address: addressFromWords(words: words), status: NetStatus.ok }
+        ret address: addressFromWords(words: words), status: NetStatus.ok
       }
     }
   }
-  ret AddressResult { address: noNetAddress(), status: NetStatus.invalidAddress }
+  ret address: noNetAddress(), status: NetStatus.invalidAddress
 }
 
 func noUdpSocket(status: view NetStatus) ret UdpSocket {
@@ -218,12 +212,12 @@ func udpSend(
   start: view Int
   count: view Int
   destination: view NetAddress
-) ret IoResult {
+) ret bytes: Int, status: NetStatus {
   if start < 0 or count < 0 or start + count > bytes.length {
-    ret IoResult { bytes: 0, status: NetStatus.failed }
+    ret bytes: 0, status: NetStatus.failed
   }
   if not netAddressIsValid(address: destination) {
-    ret IoResult { bytes: 0, status: NetStatus.invalidAddress }
+    ret bytes: 0, status: NetStatus.invalidAddress
   }
   unsafe {
     loop {
@@ -245,7 +239,7 @@ func udpSend(
       ret ioResultFromCode(code: code)
     }
   }
-  ret IoResult { bytes: 0, status: NetStatus.failed }
+  ret bytes: 0, status: NetStatus.failed
 }
 
 # Receive one datagram into `bytes`, replacing its contents, with room for

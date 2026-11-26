@@ -244,39 +244,40 @@ func hostFrame(game: mod Game) {
     if let link: mod Link = game.links.modAt(index: l) {
       loop link.live and connectionReceive(connection: link.hostEnd, message: game.message) is not MessageChannel.none {
         if link.slotId < 0 {
-          let result: JoinResult = sessionTakeHello(
-            host: game.session
-            message: game.message
-            nowMs: game.nowMs
-          )
-          if result.kind is not JoinKind.refused {
-            welcome = result.slotIndex
-            if result.kind is JoinKind.joined {
+          let resultKind: JoinKind = kind,
+            let resultSlotIndex: Int = slotIndex = sessionTakeHello(
+              host: game.session
+              message: game.message
+              nowMs: game.nowMs
+            )
+          if resultKind is not JoinKind.refused {
+            welcome = resultSlotIndex
+            if resultKind is JoinKind.joined {
               let entityId: EntityId = allocEntity(this: game.world.entities)
               componentSet(
                 this: game.world.transforms
                 entityId: entityId
-                data: at(x: (result.slotIndex as Float) * 3.0, z: 0.0)
+                data: at(x: (resultSlotIndex as Float) * 3.0, z: 0.0)
               )
               let netId: Int = replicateEntity(
                 host: game.host
                 replicated: game.world.replicated
                 entityId: entityId
-                owner: result.slotIndex
+                owner: resultSlotIndex
               )
               sessionSetEntity(
                 host: game.session
-                slotIndex: result.slotIndex
+                slotIndex: resultSlotIndex
                 entityId: entityId
                 netId: netId
               )
             }
-            if let slot: view PlayerSlot = game.session.slots.viewAt(index: result.slotIndex) {
+            if let slot: view PlayerSlot = game.session.slots.viewAt(index: resultSlotIndex) {
               link.slotId = slot.slotId
               link.peer = createReplicaPeer(peerId: slot.slotId, config: game.config)
               link.peer.focusNetId = slot.netId
             }
-            if result.kind is JoinKind.resumed {
+            if resultKind is JoinKind.resumed {
               resumedSlot = link.slotId
             }
           }
