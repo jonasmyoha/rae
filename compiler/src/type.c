@@ -13,25 +13,46 @@ void type_registry_init(TypeRegistry* registry, Arena* arena) {
     registry->buckets = (TypeInfo**)arena_alloc(arena, sizeof(TypeInfo*) * registry->capacity);
     memset(registry->buckets, 0, sizeof(TypeInfo*) * registry->capacity);
     registry->specializations = NULL;
+    registry->specialization_buckets = NULL;
+    registry->specialization_bucket_count = 0;
+    registry->specialization_count = 0;
+    registry->specializations_for_backend = false;
+}
+
+static size_t specialization_hash(const AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
+    uint64_t hash = 14695981039346656037ULL ^ (uint64_t)(uintptr_t)generic_decl;
+    hash *= 1099511628211ULL;
+    for (size_t i = 0; i < arg_count; i++) {
+        hash ^= (uint64_t)(uintptr_t)args[i];
+        hash *= 1099511628211ULL;
+    }
+    return (size_t)(hash ^ (hash >> 29));
 }
 
 AstDecl* type_registry_find_specialization(TypeRegistry* r, AstDecl* generic_decl, TypeInfo** args, size_t arg_count) {
-    SpecializationEntry* curr = r->specializations;
-    while (curr) {
-        if (curr->generic_decl == generic_decl && curr->arg_count == arg_count) {
-            bool match = true;
-            for (size_t i = 0; i < arg_count; i++) {
-                if (curr->generic_args[i] != args[i]) { match = false; break; }
-            }
-            if (match) return curr->specialized_decl;
+    if (!r->specialization_buckets) return NULL;
+    size_t slot = specialization_hash(generic_decl, args, arg_count) & (r->specialization_bucket_count - 1);
+    for (SpecializationEntry* curr = r->specialization_buckets[slot]; curr; curr = curr->bucket_next) {
+        if (curr->generic_decl != generic_decl || curr->arg_count != arg_count) continue;
+        bool match = true;
+        for (size_t i = 0; i < arg_count; i++) {
+            if (curr->generic_args[i] != args[i]) { match = false; break; }
         }
-        curr = curr->next;
+        if (match) return curr->specialized_decl;
     }
     return NULL;
 }
 
+static void specialization_bucket_put(TypeRegistry* r, SpecializationEntry* entry) {
+    size_t slot = specialization_hash(entry->generic_decl, entry->generic_args, entry->arg_count)
+        & (r->specialization_bucket_count - 1);
+    entry->bucket_next = r->specialization_buckets[slot];
+    r->specialization_buckets[slot] = entry;
+}
+
 void type_registry_add_specialization(TypeRegistry* r, AstDecl* generic_decl, TypeInfo** args, size_t arg_count, AstDecl* specialized_decl) {
     SpecializationEntry* entry = arena_alloc(r->arena, sizeof(SpecializationEntry));
+    memset(entry, 0, sizeof *entry);
     entry->generic_decl = generic_decl;
     entry->arg_count = arg_count;
     if (arg_count > 0) {
@@ -41,8 +62,19 @@ void type_registry_add_specialization(TypeRegistry* r, AstDecl* generic_decl, Ty
         entry->generic_args = NULL;
     }
     entry->specialized_decl = specialized_decl;
+    entry->made_for_backend = r->specializations_for_backend;
     entry->next = r->specializations;
     r->specializations = entry;
+    /* grown at three quarters, so a lookup reads about one entry */
+    if (!r->specialization_buckets || (r->specialization_count + 1) * 4 > r->specialization_bucket_count * 3) {
+        size_t count = r->specialization_bucket_count ? r->specialization_bucket_count * 2 : 1024;
+        r->specialization_buckets = arena_alloc(r->arena, sizeof(SpecializationEntry*) * count);
+        memset(r->specialization_buckets, 0, sizeof(SpecializationEntry*) * count);
+        r->specialization_bucket_count = count;
+        for (SpecializationEntry* e = r->specializations->next; e; e = e->next) specialization_bucket_put(r, e);
+    }
+    specialization_bucket_put(r, entry);
+    r->specialization_count++;
 }
 
 // FNV-1a hash function for type structure

@@ -1,15 +1,15 @@
-tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:15:13: cannot drop 'value' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in borrowed(T: Handle))
+tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:15:13: cannot drop 'value' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in borrowed(T: Handle), made at tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:39)
     15 |   value.drop()  # ERROR for a Handle: the caller owns it
        |             ^~~~
-tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:19:7: cannot drop 'value' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in callForm(T: Handle))
+tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:19:7: cannot drop 'value' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in callForm(T: Handle), made at tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:40)
     19 |   drop(this: value)  # ERROR for a Handle
        |       ^~~~
-tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:25:13: cannot drop 'other' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in throughAlias(T: Handle))
+tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:25:13: cannot drop 'other' by hand: it does not own the value, and the owner drops it, so the destructor would run twice; assign it a new value to release the old one now (in throughAlias(T: Handle), made at tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:41)
     25 |   other.drop()  # ERROR for a Handle
        |             ^~~~
-tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:30:13: use of 'value' after 'value.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again (in twice(T: Handle))
+tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:30:13: use of 'value' after 'value.drop()': the value was released and consumed on a path reaching here; assign it a new value before using it again (in twice(T: Handle), made at tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:42)
     30 |   value.drop()  # ERROR for a Handle: dropped
        |             ^~~~
-tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:34:17: cannot drop the field 'value' by hand: its owner drops it, so the destructor would run twice; assign the field a new value to release the old one now (in field(T: Handle))
+tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:34:17: cannot drop the field 'value' by hand: its owner drops it, so the destructor would run twice; assign the field a new value to release the old one now (in field(T: Handle), made at tests/cases/1609_drop_by_hand_generic_rejected/Main.rae:44)
     34 |   box.value.drop()  # ERROR for a Handle: the box drops it
        |                 ^~~~

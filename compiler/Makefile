@@ -99,6 +99,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_backend.c \
        $(SRC_DIR)/c_call.c \
        $(SRC_DIR)/c_discovery.c \
+       $(SRC_DIR)/c_instance_check.c \
        $(SRC_DIR)/c_expr.c \
        $(SRC_DIR)/c_loop_versioning.c \
        $(SRC_DIR)/c_stmt.c \

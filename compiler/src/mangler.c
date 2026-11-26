@@ -660,6 +660,10 @@ const char* rae_mangle_function(CompilerContext* ctx, const AstFuncDecl* func) {
 const char* rae_mangle_specialized_function(CompilerContext* ctx, const AstFuncDecl* func, const AstTypeRef* concrete_args) {
     if (!func) return "unknown";
     if (!concrete_args) return rae_mangle_function(ctx, func);
+    /* An instance is named from its template, whose parameters still say `T`:
+     * its own say `view Int`, which names another C type than `view T` of Int */
+    if (func->generic_template && func->generic_template->kind == AST_DECL_FUNC)
+        func = &func->generic_template->as.func_decl;
 
     char buf[2048]; size_t pos = mangle_func_prefix(ctx, func, buf, sizeof(buf));
 

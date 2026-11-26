@@ -5175,6 +5175,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
   if (g_instance_errors > 0) return false;
+  if (c_instances_wanted()) c_check_instances(ctx);
   const char* late_mode = getenv("RAE_LATE_SPECIALIZATIONS");
   if (late_mode && strcmp(late_mode, "error") == 0 && g_late_specializations > 0) {
     fprintf(stderr, "error: specialization discovery missed %d specialization(s) (RAE_LATE_SPECIALIZATIONS=error)\n",

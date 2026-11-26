@@ -124,6 +124,10 @@ typedef struct SpecializationEntry {
     size_t arg_count;
     struct AstDecl* specialized_decl;
     struct SpecializationEntry* next;
+    struct SpecializationEntry* bucket_next;  /* the next of the same hash */
+    /* made for the backend's own instances (sema_check_backend_instance), not by
+     * sema's analysis of the program: what RAE_CHECK_INSTANCES=1 reports */
+    bool made_for_backend;
 } SpecializationEntry;
 
 typedef struct TypeRegistry {
@@ -131,6 +135,11 @@ typedef struct TypeRegistry {
     size_t capacity;
     size_t count;
     SpecializationEntry* specializations; // List of specialized declarations
+    /* the same, by a hash of the template and its interned type arguments */
+    SpecializationEntry** specialization_buckets;
+    size_t specialization_bucket_count;
+    size_t specialization_count;
+    bool specializations_for_backend;  /* sets made_for_backend on what is added */
     struct Arena* arena; // Allocator for TypeInfo structs
 } TypeRegistry;
 

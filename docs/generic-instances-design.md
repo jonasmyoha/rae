@@ -227,7 +227,22 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    backend finds what it emits until steps 4 and 5). The cost, CPU time of `rae build --emit-c`: 106 5.5 s to 6.5 s,
    121 7.9 s to 10.0 s, 136 15.7 s to 19.1 s (the analysis section 3 measured); steps 7 and 8 take back more.
 4. **Sema decides the instance of every call**; a registry and a worklist; a check in the suite that its instances are
-   those `c_discovery.c` finds.
+   those `c_discovery.c` finds. First part done (0.4.105): the registry is a hash of the template and the interned
+   types (`type.c`). After each call is analyzed, `sema_decide_instance` (`sema_instances.inc`) finds its template and
+   type arguments, written or inferred from every value whose type sema knows, and keeps the instance in the call's
+   `instance`. A new instance goes on a worklist and is analyzed after the function that made it, until no new one
+   comes. Calls nobody writes have their instances too: each concrete type whose template has a generic `drop` gets
+   that drop, and a list literal gets `createList` and `add`. A method's receiver must be its first parameter's
+   type (a map's `set` does not take V from the value alone), and a plain call whose first value is an Array finds
+   the Array method of that capacity. `RAE_CHECK_INSTANCES=1` prints what only the backend or only sema has
+   (`c_instance_check.c`); `RAE_SEMA_INSTANCES=0` turns sema's deciding off; `RAE_DEBUG_INSTANCES=1` names each
+   call it decides or cannot. Of the 1097 cases that build, 668 have the same instances both ways. `decl_link`
+   stays what the backend resolves: pointed at the instance, the backend writes the call from the instance's
+   parameters and the function from the template's, and they differ (`view T` of an Int is the Int, `view Int`
+   is a pointer); so it moves to the instance with step 5. An instance is named from its template
+   (`rae_mangle_specialized_function`). The rest is its own queue task: the instances only the backend still has,
+   the drops only sema has, the suite stage, the spawn wrappers (skipped for now), a concrete `resolved_type` on
+   each call, and `sema_value_type` as a read of it.
 5. **Emission from instances** behind `RAE_GENERIC_INSTANCES=1`, prototypes and helpers too; the 29 cases; the suite
    runs its cases both ways.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the

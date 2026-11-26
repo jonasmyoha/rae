@@ -1894,6 +1894,17 @@ static AstTypeRef* sema_written_args(CompilerContext* ctx, TypeInfo** args, size
 /* Instances the C backend found: analyzed for their errors only, neither emitted
  * from nor put among the module's declarations */
 static bool s_checking_backend_instances;
+static void sema_decide_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* call);
+static void sema_literal_instances(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, TypeInfo* type);
+static void sema_drain_instances(CompilerContext* ctx, AstModule* module, SymbolTable* symbols);
+static void sema_queue_instance(AstDecl* generic_decl, AstDecl* spec, const AstTypeRef* args,
+                                const AstTypeRef* written, size_t line, size_t column);
+static bool s_defer_instances;
+static void sema_note_rejected_template(const AstDecl* template_decl);
+/* analyzing the wrapper of a spawned generic (sema_spawn_generic_call): its types
+ * are written in C names, and sema decides no instance in it yet */
+static bool s_in_spawn_wrapper;
+
 /* The files that declare the type arguments of the instances being analyzed: a
  * generic function calls what is declared for its T where T is (`wasmHostCall`
  * of a program's Host, from lib/wasm) */
@@ -2033,6 +2044,11 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         while (p) {
             AstParam* np = arena_alloc(ctx->ast_arena, sizeof(AstParam));
             *np = *p; np->type = substitute_type_ref(ctx, generic_decl->as.func_decl.generic_params, args_tr, p->type); np->next = NULL;
+            /* at the template's place, so an error of the instance's parameter has one */
+            if (np->type && p->type && np->type != p->type && !np->type->line) {
+                np->type->line = p->type->line;
+                np->type->column = p->type->column;
+            }
             if (!head) head = np; else tail->next = np;
             tail = np; p = p->next;
         }
@@ -2057,11 +2073,16 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
 
         /* Known before it is analyzed: a call of itself in its body finds it */
         type_registry_add_specialization(ctx->type_registry, generic_decl, args, arg_count, spec);
-        if (!s_checking_backend_instances) {
+        /* one sema decided for a call (sema_instances.inc): analyzed after the
+         * function that made it; not emitted from until step 5 */
+        bool deferred = s_defer_instances;
+        if (!s_checking_backend_instances && !deferred) {
             if (module) { spec->next = module->decls; module->decls = spec; }
             sema_register_function_specialization(ctx, &generic_decl->as.func_decl, args_tr);
         }
-        if (spec->as.func_decl.body && symbols)
+        if (spec->as.func_decl.body && symbols && deferred)
+            sema_queue_instance(generic_decl, spec, args_tr, cloner.args, line, column);
+        else if (spec->as.func_decl.body && symbols)
             sema_analyze_instance(ctx, module, symbols, generic_decl, spec, args_tr, cloner.args, line, column);
         return spec;
     } else if (generic_decl->kind == AST_DECL_TYPE) {
@@ -2661,6 +2682,20 @@ static bool sema_same_param_types(CompilerContext* ctx, AstModule* module, Symbo
     }
     return !pa && !pb;
 }
+
+/* RAE_SEMA_INSTANCES=0 leaves a call whose type arguments only the backend
+ * infers to it, as before step 4 */
+static bool sema_infer_all_calls(void) {
+    static int wanted = -1;
+    if (wanted < 0) {
+        const char* value = getenv("RAE_SEMA_INSTANCES");
+        wanted = !value || strcmp(value, "0") != 0;
+    }
+    return wanted;
+}
+
+static TypeInfo* sema_value_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* value,
+                                 int depth);
 
 static AstDecl* resolve_function_overload(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, Str name, AstCallArg* args, AstTypeRef* explicit_generic_args, size_t line, size_t column) {
     size_t arg_count = 0;
@@ -3642,11 +3677,14 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                         continue;
                     }
                     bool has_mode = pt->is_view || pt->is_mod || pt->is_own || pt->is_copy;
-                    if (pt->is_copy && sema_typeref_holds_task(symbols, pt, 0)) {
+                    /* an instance's parameter has its type from a call, and the
+                     * call reports the copy (the argument against the parameter) */
+                    bool instance = decl->as.func_decl.specialization_args != NULL;
+                    if (pt->is_copy && !instance && sema_typeref_holds_task(symbols, pt, 0)) {
                         sema_report_task_copy(module, err_file, pt->line, pt->column, pt,
                                               "through a 'copy' parameter");
                     }
-                    if (pt->is_copy && !pt->is_opt && !pt->generic_args) {
+                    if (pt->is_copy && !instance && !pt->is_opt && !pt->generic_args) {
                         Str cbase = get_base_type_name(pt);
                         if (find_user_drop_for(ctx, cbase) && !find_user_copy_for(ctx, cbase)) {
                             sema_report_uncopyable(module, err_file, pt->line, pt->column, cbase,
@@ -3711,12 +3749,15 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 s_current_decl_origin = decl->origin_file;
                 s_current_params = decl->as.func_decl.params;
                 s_current_generic_params = decl->as.func_decl.generic_params;
+                bool saved_in_wrapper = s_in_spawn_wrapper;
+                s_in_spawn_wrapper = decl->as.func_decl.spawns != NULL;
                 const AstReturnItem* saved_results = s_current_results;
                 s_current_results = decl->as.func_decl.returns && decl->as.func_decl.returns->next
                     ? decl->as.func_decl.returns : NULL;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
                 s_current_results = saved_results;
+                s_in_spawn_wrapper = saved_in_wrapper;
                 sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
                 sema_check_main_loops(module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;
@@ -7549,6 +7590,8 @@ static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* 
         if (got && got == type) return;
     }
     if (!type) return;
+    if (value->kind == AST_EXPR_COLLECTION_LITERAL && !value->as.collection.type && s_lifecycle_ctx)
+        sema_literal_instances(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, type);
     if (value->kind == AST_EXPR_OBJECT && !value->as.object_literal.type) {
         sema_check_object_literal_fields(type, value->as.object_literal.fields, value->line, value->column, errFile);
     } else if (value->kind == AST_EXPR_COLLECTION_LITERAL && !value->as.collection.type) {
@@ -7826,8 +7869,10 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
     /* An untyped `{ ... }` list literal has no type of its own (so the checks
      * below return early); its integer elements must fit the destination's
      * element type. A typed one is checked at its own analysis. */
-    if (expr->kind == AST_EXPR_COLLECTION_LITERAL && !expr->as.collection.type)
+    if (expr->kind == AST_EXPR_COLLECTION_LITERAL && !expr->as.collection.type) {
         sema_check_untyped_collection(expr, expected);
+        sema_literal_instances(ctx, s_current_module, s_lifecycle_symbols, expected);
+    }
     /* #880: a pending `create(...)` takes its constructor from the expected type. */
     if (sema_is_pending_create(expr) && s_lifecycle_symbols && s_current_module) {
         if (!sema_resolve_create(ctx, s_current_module, s_lifecycle_symbols, expr, expected)) return;
@@ -8431,6 +8476,10 @@ static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbo
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
+    if (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL)
+        sema_decide_instance(ctx, module, symbols, expr);
+    else if (expr->kind == AST_EXPR_COLLECTION_LITERAL || expr->kind == AST_EXPR_LIST)
+        sema_literal_instances(ctx, module, symbols, expr->resolved_type);
     if (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) {
         const AstDecl* callee = expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC ? expr->decl_link
             : expr->decl_link ? NULL : sema_generic_results_callee(ctx, module, symbols, expr);
@@ -12045,13 +12094,16 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // Templates are marked as processed but not analyzed — except for
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
+                int errors_before = diag_error_count();
                 sema_check_template_names(module, &symbols, d);
+                if (diag_error_count() != errors_before) sema_note_rejected_template(d);
                 pointer_set_add(processed, d); processed_count++;
             }
             d = d->next;
         }
     }
     pointer_set_free(processed);
+    sema_drain_instances(ctx, module, &symbols);
     sema_warn_project_copies(ctx, module, &symbols);
     return !module->had_error;
 }
@@ -12434,10 +12486,27 @@ static TypeInfo* sema_value_type(CompilerContext* ctx, AstModule* module, Symbol
 
 /* What the generic `decl` answers for these values (`receiver`: of a method, its
  * first one), NULL when its type parameters do not show in them. */
+static AstTypeRef* sema_generic_types(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl,
+                                      TypeInfo* receiver, const AstCallArg* args, AstTypeRef* written, int depth);
+
 static TypeInfo* sema_generic_result(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl,
                                      TypeInfo* receiver, const AstCallArg* args, AstTypeRef* written, int depth) {
     const AstFuncDecl* fd = &decl->as.func_decl;
     if (!fd->generic_params || fd->specialization_args || !fd->returns || !fd->returns->type) return NULL;
+    AstTypeRef* types = sema_generic_types(ctx, module, symbols, decl, receiver, args, written, depth);
+    if (!types) return NULL;
+    AstTypeRef* result = substitute_type_ref(ctx, fd->generic_params, types, fd->returns->type);
+    TypeInfo* t = result ? sema_resolve_decl_type(ctx, module, symbols, decl, result) : NULL;
+    return sema_type_is_concrete(t, 0) ? t : NULL;
+}
+
+/* The type arguments of a call of the generic `decl` (`receiver`: of a method, its
+ * first value): those written, else inferred from the values; NULL when they do not
+ * give every one */
+static AstTypeRef* sema_generic_types(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl,
+                                      TypeInfo* receiver, const AstCallArg* args, AstTypeRef* written, int depth) {
+    const AstFuncDecl* fd = &decl->as.func_decl;
+    if (!fd->generic_params || fd->specialization_args) return NULL;
     AstTypeRef* types = written;
     const AstCallArg* values = args;
     for (; values && values->name.len == 0 && sema_arg_is_type_name(symbols, values->value); values = values->next) {
@@ -12478,9 +12547,7 @@ static TypeInfo* sema_generic_result(CompilerContext* ctx, AstModule* module, Sy
         if (have != want) return NULL;
     }
     sema_ref_resolve_from(types, s_current_decl_origin);
-    AstTypeRef* result = substitute_type_ref(ctx, fd->generic_params, types, fd->returns->type);
-    TypeInfo* t = result ? sema_resolve_decl_type(ctx, module, symbols, decl, result) : NULL;
-    return sema_type_is_concrete(t, 0) ? t : NULL;
+    return types;
 }
 
 /* The same for whichever function of that name the call means */
@@ -12672,8 +12739,14 @@ bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generi
     if (type_registry_find_specialization(ctx->type_registry, generic_decl, types, count)) return true;
     int errors = diag_error_count();
     bool saved = s_checking_backend_instances;
+    bool saved_for_backend = ctx->type_registry->specializations_for_backend;
     s_checking_backend_instances = true;
+    ctx->type_registry->specializations_for_backend = true;
     specialize_decl(ctx, module, symbols, generic_decl, types, count, 0, 0);
+    sema_drain_instances(ctx, module, symbols);
+    ctx->type_registry->specializations_for_backend = saved_for_backend;
     s_checking_backend_instances = saved;
     return diag_error_count() == errors;
 }
+
+#include "sema_instances.inc"

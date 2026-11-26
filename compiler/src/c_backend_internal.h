@@ -501,4 +501,8 @@ bool c_loop_version_emit(CFuncContext* ctx, const AstStmt* stmt, FILE* out,
                          void (*emit_for)(CFuncContext*, const AstStmt*, FILE*));
 const char* c_loop_version_fast_data(CFuncContext* ctx, const AstExpr* access);
 
+/* RAE_CHECK_INSTANCES=1: sema's instances against the backend's (c_instance_check.c) */
+bool c_instances_wanted(void);
+size_t c_check_instances(CompilerContext* ctx);
+
 #endif /* C_BACKEND_INTERNAL_H */

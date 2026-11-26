@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.105, 2026-11-26: sema decides the instances of generic calls (first part)
+
+- Sema finds the instance of each call of a generic function, in plain functions and in instances, from the
+  type arguments written or inferred from every value whose type it knows (`makeBoth(value: 3)` is `makeBoth` of
+  Int; before, only a struct or buffer argument was used). Each instance is made once, in a registry hashed by the
+  template and its types, and analyzed after the function that made it. Container drops and list literals have
+  their instances too. The backend still emits from the templates (docs/generic-instances-design.md, step 4).
+- Errors of such an instance say where it was made: `(in describe(T: Other), made at Main.rae:32)`. A generic
+  call is checked against its instance's parameters, as a plain call is: `own` handed to a `view`, `mod` or
+  `copy` parameter, and a local moved into `own T` and used again.
+- `RAE_CHECK_INSTANCES=1` prints the instances only the backend or only sema has; `RAE_SEMA_INSTANCES=0` turns
+  sema's deciding off.
+
 ## 0.4.104, 2026-11-26: lib/ and packages give several results instead of status pairs
 
 - Functions that returned a type only to pair a value with its status now return labeled results: lib/net

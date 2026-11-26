@@ -218,6 +218,10 @@ struct AstExpr {
   AstExprKind kind;
   TypeInfo* resolved_type; // The semantically analyzed type of this expression
   struct AstDecl* decl_link; // For identifiers/calls, points to the resolved declaration
+  // A call of a generic function: the instance sema decided for it, from its
+  // arguments (docs/generic-instances-design.md, step 4). The backend still
+  // finds its own through decl_link and c_discovery.c until step 5.
+  struct AstDecl* instance;
   bool is_builtin_sizeof;
   bool is_parenthesized; // wrapped in `( )` in source — suppresses the mixed-bitwise-operator parens requirement
   size_t line;
