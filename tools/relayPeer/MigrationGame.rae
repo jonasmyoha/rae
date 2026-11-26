@@ -235,13 +235,14 @@ func hostFrame(machine: mod Machine, nowMs: view Int) {
       if let seat: mod Seat = machine.seats.modAt(index: s) {
         loop connectionReceive(connection: hostPeer.connection, message: machine.message) is not MessageChannel.none {
           if seat.slotId < 0 {
-            let result: JoinResult = sessionTakeHelloFromPeer(
-              host: machine.session
-              message: machine.message
-              peerId: peerId
-              nowMs: nowMs
-            )
-            if result.kind is JoinKind.joined {
+            let joinKind: JoinKind = kind,
+              let joinSlotIndex: Int = slotIndex = sessionTakeHelloFromPeer(
+                host: machine.session
+                message: machine.message
+                peerId: peerId
+                nowMs: nowMs
+              )
+            if joinKind is JoinKind.joined {
               let entityId: EntityId = allocEntity(this: machine.world.entities)
               componentSet(
                 this: machine.world.transforms
@@ -256,21 +257,21 @@ func hostFrame(machine: mod Machine, nowMs: view Int) {
               )
               sessionSetEntity(
                 host: machine.session
-                slotIndex: result.slotIndex
+                slotIndex: joinSlotIndex
                 entityId: entityId
                 netId: netId
               )
             }
-            if result.kind is not JoinKind.refused {
-              if let slot: view PlayerSlot = machine.session.slots.viewAt(index: result.slotIndex) {
+            if joinKind is not JoinKind.refused {
+              if let slot: view PlayerSlot = machine.session.slots.viewAt(index: joinSlotIndex) {
                 seat.slotId = slot.slotId
                 seat.peer = createReplicaPeer(peerId: peerId, config: machine.replication.config)
                 seat.peer.focusNetId = slot.netId
               }
               sessionWriteWelcome(
                 host: machine.session
-                slotIndex: result.slotIndex
-                resumed: result.kind is JoinKind.resumed
+                slotIndex: joinSlotIndex
+                resumed: joinKind is JoinKind.resumed
                 out: machine.message
               )
               let queued: Bool = connectionSendReliable(

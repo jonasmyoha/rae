@@ -19,7 +19,7 @@ crash.
 | `crypto/P384` | `p384PublicKey(privateKey)`, `p384Sign(privateKey, hash)`, `p384Verify(publicKey, hash, signature)`, `es384Sign`, `es384Verify`, `p384VerifyDer` | private key 48, public key 97 (`04` x y) or 96, signature 96 (r s) or DER |
 | `crypto/Ecdsa` | the curve arithmetic under both (`ecCurve(...)`, `ecdsaVerify(curve, ...)`, `ecdsaSign(curve, ...)`, `ecdsaSignatureToDer`, `ecdsaSignatureFromDer(der, size)`) | |
 | `crypto/Sha512` | `sha512(bytes)`, `sha384(bytes)`, `hmacSha512(key, message)`, `hmacSha384(key, message)` | digest 64 / 48 |
-| `crypto/X509` | `x509Parse(der) -> opt X509Certificate`, `x509VerifyChain(chain, pinnedRoot, now) -> X509ChainResult`, `x509SignedBy`, `x509CommonName`, `x509MakeCertificate(...)` | chain leaf first, ending with the root |
+| `crypto/X509` | `x509Parse(der) -> opt X509Certificate`, `x509VerifyChain(chain, pinnedRoot, now) -> ok, reason, certificates`, `x509SignedBy`, `x509CommonName`, `x509MakeCertificate(...)` | chain leaf first, ending with the root |
 | `crypto/Der` | reading DER (`derRead`, `derChildren`, `derPositiveInteger`, `derOidText`, `derTimeSeconds`, ...) and writing it (`derEncode`, `derConstructed`, ...) | |
 | `crypto/CryptoBytes` | `hexOfBytes`, `bytesOfHex`, `bytesOfText`, `bytesEqual` (constant time), `copyBytes`, `zeroBytes` | |
 

@@ -215,8 +215,8 @@ The host, once per module:
 
 and per frame:
 
-    let reply: WasmBytesResult = wasmCallEncoded(Shell, host: shell, instance: instance, name: "sumuUpdate", input: frameIn.toBinary(), timeoutMs: 200)
-    let frameOut: opt AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes)
+    let replyBytes: List(UInt8) = bytes, let replyError: WasmError = error = wasmCallEncoded(Shell, host: shell, instance: instance, name: "sumuUpdate", input: frameIn.toBinary(), timeoutMs: 200)
+    let frameOut: opt AppFrameOut = AppFrameOut.fromBinary(bytes: replyBytes)
 
 `wasmCallEncoded` writes the bytes with `raeModuleAlloc`, calls the export,
 reads the result and frees both. It uses only one type parameter (the host

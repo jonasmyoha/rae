@@ -10,7 +10,7 @@ behind the same functions.
 ```rae
 var module: WasmModule = wasmLoad(bytes: bytes)                 # nothing runs
 var instance: WasmInstance = wasmInstantiate(module: module, exposed: wasiMinimalCapabilities(), granted: { "log", "clock" }, limits: limits)
-let result: WasmCallResult = wasmCall(MyHost, host: host, instance: instance, name: "add", args: { wasmI64(value: 40), wasmI64(value: 2) }, timeoutMs: 1000)
+let values: List(WasmValue) = values, let error: WasmError = error = wasmCall(MyHost, host: host, instance: instance, name: "add", args: { wasmI64(value: 40), wasmI64(value: 2) }, timeoutMs: 1000)
 wasmDestroy(instance: instance)
 wasmUnload(module: module)
 ```
@@ -86,8 +86,8 @@ if let mismatch: WasmError = wasmCheckExport(
 ) {
   log(mismatch.message)      # interfaceMismatch: both descriptions, which part differs
 }
-let reply: WasmBytesResult = wasmCallEncoded(Host, host: host, instance: instance, name: "summarize", input: frame.toBinary(), timeoutMs: 200)
-if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: reply.bytes) { ... }
+let replyBytes: List(UInt8) = bytes, let replyError: WasmError = error = wasmCallEncoded(Host, host: host, instance: instance, name: "summarize", input: frame.toBinary(), timeoutMs: 200)
+if let out: AppFrameOut = AppFrameOut.fromBinary(bytes: replyBytes) { ... }
 ```
 
 - `wasmLoad` reads the section from the module's bytes (in Rae: the sections

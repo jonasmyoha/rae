@@ -66,7 +66,9 @@ func clientConfigArgument() ret RelayClientConfig {
 
 func relayAddressArgument() ret NetAddress {
   let port: Int = argumentAfter(name: "--relay-port", fallback: "7777").toInt()
-  ret resolveAddress(host: "127.0.0.1", port: port).address
+  let address: NetAddress = address,
+    let status: NetStatus = status = resolveAddress(host: "127.0.0.1", port: port)
+  ret address
 }
 
 # Wait for the client's socket (at most `waitMs`)
@@ -278,14 +280,15 @@ func runBenchHost() ret Int {
         break
       }
       if incoming.kind is RelayIncomingKind.packet {
-        let sent: IoResult = relayClientSend(
-          client: client
-          peerId: incoming.peerId
-          bytes: client.inbox
-          start: incoming.start
-          count: incoming.count
-          nowMs: now
-        )
+        let sentBytes: Int = bytes,
+          let sentStatus: NetStatus = status = relayClientSend(
+            client: client
+            peerId: incoming.peerId
+            bytes: client.inbox
+            start: incoming.start
+            count: incoming.count
+            nowMs: now
+          )
       }
     }
     if not printedToken and relayClientIsReady(client: client) {
@@ -301,13 +304,14 @@ func runBenchHost() ret Int {
       if datagram.status is not NetStatus.ok {
         break
       }
-      let sent: IoResult = udpSend(
-        udpSocket: direct
-        bytes: bytes
-        start: 0
-        count: bytes.length
-        destination: datagram.peer
-      )
+      let sentBytes: Int = bytes,
+        let sentStatus: NetStatus = status = udpSend(
+          udpSocket: direct
+          bytes: bytes
+          start: 0
+          count: bytes.length
+          destination: datagram.peer
+        )
     }
   }
   ret 0
@@ -327,14 +331,15 @@ func timeRelayRoundTrips(client: mod RelayClient, rounds: view Int) ret Int {
   var times: List(Int) = List.create(Int, cap: rounds)
   loop var i: Int = 0, i < rounds, ++i {
     let begin: Int = nowNs()
-    let sent: IoResult = relayClientSend(
-      client: client
-      peerId: hostPeerId
-      bytes: payload
-      start: 0
-      count: payload.length
-      nowMs: nowMs()
-    )
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = relayClientSend(
+        client: client
+        peerId: hostPeerId
+        bytes: payload
+        start: 0
+        count: payload.length
+        nowMs: nowMs()
+      )
     var answered: Bool = false
     loop not answered and nowNs() - begin < 1000000000 {
       if relayClientReceive(client: client, nowMs: nowMs()).kind is RelayIncomingKind.packet {
@@ -357,13 +362,14 @@ func timeDirectRoundTrips(destination: view NetAddress, rounds: view Int) ret In
   var times: List(Int) = List.create(Int, cap: rounds)
   loop var i: Int = 0, i < rounds, ++i {
     let begin: Int = nowNs()
-    let sent: IoResult = udpSend(
-      udpSocket: socket
-      bytes: payload
-      start: 0
-      count: payload.length
-      destination: destination
-    )
+    let sentBytes: Int = bytes,
+      let sentStatus: NetStatus = status = udpSend(
+        udpSocket: socket
+        bytes: payload
+        start: 0
+        count: payload.length
+        destination: destination
+      )
     var answered: Bool = false
     loop not answered and nowNs() - begin < 1000000000 {
       if udpReceive(udpSocket: socket, bytes: answer, maxBytes: relayDatagramBytes).status is NetStatus.ok {
@@ -391,14 +397,15 @@ func relayThroughput(client: mod RelayClient, window: view Int, milliseconds: vi
   var lastAnswerMs: Int = begin
   loop nowMs() - begin < milliseconds {
     loop inFlight < window {
-      let sent: IoResult = relayClientSend(
-        client: client
-        peerId: hostPeerId
-        bytes: payload
-        start: 0
-        count: payload.length
-        nowMs: nowMs()
-      )
+      let sentBytes: Int = bytes,
+        let sentStatus: NetStatus = status = relayClientSend(
+          client: client
+          peerId: hostPeerId
+          bytes: payload
+          start: 0
+          count: payload.length
+          nowMs: nowMs()
+        )
       inFlight = inFlight + 1
     }
     if relayClientReceive(client: client, nowMs: nowMs()).kind is RelayIncomingKind.packet {
@@ -435,7 +442,8 @@ func runBenchPlayer() ret Int {
   }
   # Warm up both paths, then measure
   let warmRelay: Int = timeRelayRoundTrips(client: client, rounds: 200)
-  let directAddress: NetAddress = resolveAddress(host: "127.0.0.1", port: directPort).address
+  let directAddress: NetAddress = address,
+    let directStatus: NetStatus = status = resolveAddress(host: "127.0.0.1", port: directPort)
   let warmDirect: Int = timeDirectRoundTrips(destination: directAddress, rounds: 200)
   let relayMedian: Int = timeRelayRoundTrips(client: client, rounds: 2000)
   let directMedian: Int = timeDirectRoundTrips(destination: directAddress, rounds: 2000)
