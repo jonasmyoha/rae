@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.100, 2026-11-26: several results that own memory
+
+- The results of a function with several can be anything a single result can: a String, a List, a map, a struct
+  that holds them, an `opt T`, an Any, an Array. `func parse(text: view String) ret value: Int, error: opt String`
+  with `ret value: 0, error: "nothing to parse"` and `ret value: n, error: none` is the shape for errors.
+- The caller owns what it binds, and frees it where the local's scope ends. In a `ret`, a local of the function
+  moves out (also written `own name`), a place is copied (a parameter that is a view, a field), and what a call or
+  a text makes is given as it is. A local named by two values of one `ret`, or still used by a `defer`, is copied.
+- Case 1690 (leaks, and under AddressSanitizer); the type matrix has `one of several results` as a source (5 655
+  combinations).
+
 ## 0.4.99, 2026-11-26: several labeled results
 
 - A function can have several results, each with a label: `func divide(a: view Int, b: view Int) ret quotient: Int,

@@ -638,7 +638,7 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
             case AST_STMT_DESTRUCT:
                 ctx->has_expected_type = false;
                 discover_specializations_expr_impl(ctx, s->as.destruct_stmt.call);
-                c_register_destructured_locals(ctx, s);
+                c_register_destructured_locals(ctx, s, NULL);
                 break;
             case AST_STMT_LET:
                 /* A collection loop's binding (`loop let x: T in list`) is a
@@ -738,7 +738,25 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 ctx->local_count = scope;
                 break;
             }
-            case AST_STMT_RET: if (s->as.ret_stmt.values && s->as.ret_stmt.values->value) discover_specializations_expr_impl(ctx, s->as.ret_stmt.values->value); break;
+            case AST_STMT_RET:
+                if (c_has_several_results(ctx->func_decl)) {
+                    /* each value against the type of its own result */
+                    for (const AstReturnArg* given = s->as.ret_stmt.values; given; given = given->next) {
+                        if (!given->value) continue;
+                        ctx->has_expected_type = false;
+                        for (const AstReturnItem* r = ctx->func_decl->returns; r; r = r->next) {
+                            if (!given->has_label || !str_eq(given->label, r->name) || !r->type) continue;
+                            ctx->expected_type = *r->type;
+                            ctx->expected_type.next = NULL;
+                            ctx->has_expected_type = true;
+                        }
+                        discover_specializations_expr_impl(ctx, given->value);
+                        ctx->has_expected_type = false;
+                    }
+                    break;
+                }
+                if (s->as.ret_stmt.values && s->as.ret_stmt.values->value) discover_specializations_expr_impl(ctx, s->as.ret_stmt.values->value);
+                break;
             case AST_STMT_MATCH: {
                 if (s->as.match_stmt.subject) discover_specializations_expr_impl(ctx, s->as.match_stmt.subject);
                 for (const AstMatchCase* mc = s->as.match_stmt.cases; mc; mc = mc->next) {

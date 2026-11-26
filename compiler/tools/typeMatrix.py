@@ -51,7 +51,7 @@ TYPES = {
     "Any": ('"any {1}"', "5"),
 }
 
-# source: a statement before, and the expression. TYPE, V1, V2, MAKE, SPAWN are filled in.
+# source: a statement before, and the expression (`results`: one of a function's several results). TYPE, V1, V2, MAKE, SPAWN are filled in.
 SOURCES = {
     "local": ("", "one"),
     "own": ("let moved: TYPE = V1", "own moved"),
@@ -64,7 +64,10 @@ SOURCES = {
     "match": ("", "match flag { case true => MAKE, default => one }"),
     "task": ("let task: Task(TYPE) = spawn SPAWN", "task.get()"),
     "literal": ("", "V1"),
+    "results": ("let taken: TYPE = value, let fine: Bool = fine = makeBoth()", "taken"),
 }
+# sources only the plain program has: a generic function has one result for now
+PLAIN_ONLY = ("results",)
 
 # position: statements with SRC; OK(...) is the check
 POSITIONS = {
@@ -162,6 +165,10 @@ func make() ret TYPE {
   ret V1
 }
 
+func makeBoth() ret value: TYPE, fine: Bool {
+  ret value: V1, fine: true
+}
+
 func byView(value: view TYPE) ret Bool {
   ret value is V1
 }
@@ -220,6 +227,8 @@ class Program:
         self.functions = {}
         for source, (before, expression) in SOURCES.items():
             for position, lines in POSITIONS.items():
+                if self.generic and source in PLAIN_ONLY:
+                    continue
                 # what Rae refuses: a move in a defer, `own` where nothing takes it
                 if position == "defer" and source in ("own", "task"):
                     continue

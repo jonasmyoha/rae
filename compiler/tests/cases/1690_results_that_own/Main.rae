@@ -1,0 +1,147 @@
+# Several results that own memory: the caller owns what it binds, a `ret` moves a local out and
+# copies a place, and nothing is freed twice or left (spec/rae.md 5.5).
+open collections/StringMap
+
+type Note {
+  text: String
+  marks: List(Int)
+}
+
+type Shelf {
+  title: String
+  notes: List(Note)
+}
+
+func parse(text: view String) ret value: Int, error: opt String {
+  if text.length() is 0 {
+    ret value: 0, error: "nothing to parse in '{text}'"
+  }
+  ret value: text.length(), error: none
+}
+
+# a local moves out, a literal and a text made here are given, a parameter's place is copied
+func describe(
+  note: view Note
+  count: view Int
+) ret
+  label: String
+  copyOfText: String
+  marks: List(Int)
+  fine: Bool
+ {
+  let label: String = "{note.text} x{count}"
+  var marks: List(Int) = []
+  loop var i: Int = 0, i < count, ++i {
+    marks.add(value: i * i)
+  }
+  if count > 3 {
+    # an early way out: what was made is given, nothing is left
+    ret label: "too many", copyOfText: note.text, marks: marks, fine: false
+  }
+  ret label: label, copyOfText: note.text, marks: marks, fine: true
+}
+
+func split(shelf: own Shelf) ret
+  title: String
+  first: opt Note
+  rest: List(Note)
+  summary: Any
+ {
+  var rest: List(Note) = []
+  var first: opt Note = none
+  loop let note: view Note in shelf.notes {
+    if first is none {
+      first = note
+    } else {
+      rest.add(value: note)
+    }
+  }
+  ret title: own shelf.title, first: own first, rest: own rest, summary: "{rest.length} left"
+}
+
+func tables(seed: view Int) ret names: StringMap(Int), row: Array(String, cap: 2), count: Int {
+  var names: StringMap(Int) = {}
+  names.set(k: "seed {seed}", value: seed)
+  var row: Array(String, cap: 2) = Array(String, cap: 2)
+  row.set(index: 0, value: "row {seed}")
+  defer {
+    log("tables done {names.length}")
+  }
+  ret names: names, row: row, count: names.length
+}
+
+# one local given for several results: each gets its copy, and the local is freed
+func twice(seed: view Int) ret first: String, second: String, length: Int {
+  let text: String = "seed {seed}"
+  ret first: text, second: text, length: text.length()
+}
+
+# a local moved on one path only before the `ret`
+func mixed(seed: view Int, flag: view Bool) ret note: Note, label: String {
+  let note: Note = { text: "note {seed}", marks: { seed } }
+  var label: String = "label {seed}"
+  if flag {
+    let other: String = own label
+    ret note: note, label: "{other} moved"
+  }
+  ret note: note, label: label
+}
+
+# parameters this function owns move out
+func passOn(text: own String, extra: copy String) ret text: String, extra: String {
+  ret text: text, extra: extra
+}
+
+func noteOf(number: view Int) ret Note {
+  ret Note { text: "note {number}", marks: { number } }
+}
+
+func main() {
+  let value: Int = value, let error: opt String = error = parse(text: "four")
+  log("{value} {error}")
+  let empty: Int = value, let problem: opt String = error = parse(text: "")
+  if let message: view String = problem {
+    log("{empty} {message}")
+  }
+  let note: Note = noteOf(number: 7)
+  let label: String = label,
+    let copyOfText: String = copyOfText,
+    var marks: List(Int) = marks,
+    let fine: Bool = fine = describe(note: note, count: 3)
+  marks.add(value: 99)
+  log("{label} | {copyOfText} | {marks} {fine} | {note.text}")
+  loop var count: Int = 2, count < 6, count += 2 {
+    # locals of a loop's pass are freed each pass
+    let label: String = label,
+      let copyOfText: String = copyOfText,
+      let marks: List(Int) = marks,
+      let fine: Bool = fine = describe(note: noteOf(number: count), count: count)
+    log("{label} {copyOfText} {marks.length} {fine}")
+  }
+  let shelf: Shelf = {
+    title: "shelf {1}"
+    notes: { noteOf(number: 1), noteOf(number: 2), noteOf(number: 3) }
+  }
+  let title: String = title,
+    let first: opt Note = first,
+    let rest: List(Note) = rest,
+    let summary: Any = summary = split(shelf: own shelf)
+  log("{title} {first} {rest.length} {summary}")
+  let names: StringMap(Int) = names,
+    let row: Array(String, cap: 2) = row,
+    let count: Int = count = tables(seed: 5)
+  log("{names.length} {row} {count}")
+  let firstText: String = first,
+    let secondText: String = second,
+    let length: Int = length = twice(seed: 3)
+  log("{firstText} {secondText} {length}")
+  loop var i: Int = 0, i < 2, ++i {
+    let made: Note = note, let madeLabel: String = label = mixed(seed: i, flag: i is 0)
+    log("{made} {madeLabel}")
+  }
+  let text: String = text, let extra: String = extra = passOn(text: "t {1}", extra: "e {2}")
+  log("{text} {extra}")
+  # a local that is moved on after it was bound
+  let kept: List(Note) = own rest
+  log("{kept.length}")
+}

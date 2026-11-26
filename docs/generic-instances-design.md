@@ -182,13 +182,13 @@ combination is a function that checks its own value:
 
 - 15 types: Int, Float, Bool, UInt8, an enum, String, a struct with a List, one with a String, one of numbers,
   List(Int), List(String), a generic struct, a map, an Array of Strings, Any;
-- 11 sources: a local, `own`, a call, a generic call, a method, a field, an element, a map's values, a match, a task's
-  result, a literal;
+- 12 sources: a local, `own`, a call, a generic call, a method, a field, an element, a map's values, a match, a task's
+  result, a literal, one of a function's several results (in the plain program, until a generic function has them);
 - 17 positions: a `let`, a `var` set again, a field, a field set, a list literal, `add`, a map's `set`, an optional,
   arguments by view, own, copy and generic, text, `is`, `ret`, a defer, a spawn.
 
 180 combinations a program (what Rae refuses is left out). In the `plain` program the type is written; in the `generic`
-one every function has the type as `T`, the half this design is about. 5 400 in all. One build of each checks it all:
+one every function has the type as `T`, the half this design is about. 5 655 in all. One build of each checks it all:
 values (`WRONG <name>`), leaks (`RAE_MEM_STATS=1` at exit), memory errors (AddressSanitizer and UBSan).
 
 **Running time**: 9 s of wall time on ten cores for the 30 programs (8 s of emitting, 46 s of C compiler and 8 s of

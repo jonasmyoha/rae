@@ -61,16 +61,6 @@ static const AstReturnItem* sema_check_results(CompilerContext* ctx, AstModule* 
                      "result '%.*s' is a reference; each of several results is a value (a function that returns "
                      "a reference has that one result)", (int)r->name.len, r->name.data);
             sema_results_error(module, line, column, buf);
-        } else if (type_needs_cascade_drop(ctx, module, r->type, 0)) {
-            /* (results that own memory: step 2 of the feature) */
-            char text[160];
-            size_t pos = 0;
-            sema_type_text(r->type, text, sizeof text, &pos);
-            snprintf(buf, sizeof buf,
-                     "result '%.*s' is '%s', which owns memory: several results can be numbers, Bools, Chars, "
-                     "enums and structs of those for now; return one struct for the others",
-                     (int)r->name.len, r->name.data, text);
-            sema_results_error(module, line, column, buf);
         }
     }
     if (fd->is_extern || fd->c_export_symbol) {

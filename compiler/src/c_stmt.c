@@ -1584,6 +1584,14 @@ static void declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, 
   fprintf(out, "  int __rae_live_%.*s = 1;\n", (int)name.len, name.data);
 }
 
+int c_stmt_ident_refs(const AstStmt* stmt, Str name) {
+  return count_ident_refs_stmt(stmt, name);
+}
+
+void c_declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, FILE* out) {
+  declare_live_flag(ctx, name, rest, out);
+}
+
 /* The live flags of the parameters that own their value (`own`, `copy`) and
  * are moved, or dropped explicitly, on some paths of the body only: the same
  * flag a `let` gets, declared before the body. Without it the move was
@@ -2990,6 +2998,7 @@ bool emit_stmt(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     bool ok_ret = emit_stmt_body(ctx, stmt, out);
     if (ctx->twin) c_twin_after_stmt(ctx);
     if (is_ret) memcpy(ctx->local_moved, moved_before, ret_locals * sizeof(bool));
+    if (is_ret) ctx->local_count = ret_locals;  /* (the hidden locals of several results, c_results.c) */
     return ok_ret;
 }
 
@@ -4376,7 +4385,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && !c_local_is_slot_alias(ctx, local)
                     && (!parameter || local_type->is_own || local_type->is_copy);
             }
-            if (handed && !defer_uses && (!returns_any || returns_local_any || handed->kind == AST_EXPR_OWN))
+            /* (several results: each value is moved or copied as a `let` is, c_results.c) */
+            if (handed && !defer_uses && !c_has_several_results(ctx->func_decl)
+                && (!returns_any || returns_local_any || handed->kind == AST_EXPR_OWN))
                 mark_expr_moved_if_local(ctx, handed);
             if (defer_uses && ctx->generic_params && ctx->generic_args && ctx->func_decl && ctx->func_decl->returns) {
                 // sema does not know the type in a template (flow_check_handed_over)

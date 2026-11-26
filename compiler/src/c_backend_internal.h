@@ -449,7 +449,9 @@ bool c_has_several_results(const AstFuncDecl* func);
 const char* c_results_type_name(CompilerContext* ctx, const AstFuncDecl* func);
 void c_emit_results_types(CompilerContext* ctx, const AstModule* module, FILE* out);
 bool c_emit_ret_results(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
-void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt);
+void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+int c_stmt_ident_refs(const AstStmt* stmt, Str name);
+void c_declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, FILE* out);
 void c_emit_destructure(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 bool c_emit_any_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 /* c_discard.c */
