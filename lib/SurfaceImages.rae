@@ -17,8 +17,10 @@ open webgpu/Context
 # 512 RGBA8 with its mip levels). WebGPU guarantees 256 layers per array
 # (maxTextureArrayLayers); the shaders ask the array for its layer count.
 # Was 16 until example 143's forest filled it and the T02 trees' bark
-# picture was refused.
-const surfaceImageMaxLayers: Int = 64
+# picture was refused; then 64 until a game with a forest's 33 pictures and
+# a code picture on each of some 70 vehicles and pads asked for 104 and got
+# none (an array over the cap is refused whole). Now WebGPU's own guarantee.
+const surfaceImageMaxLayers: Int = 256
 
 # A layer named `made:<name>` in `paths` is a picture made in memory
 # (rendererAddSurfaceImagePixels): its linear RGBA pixels are kept in
