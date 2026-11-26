@@ -2121,78 +2121,73 @@ static void check_pascal_case(Parser* parser, const Token* token, const char* co
   if (token) naming_check(parser, token->lexeme, token, context, true);
 }
 
+/* After `let` / `var`: is this the destructuring of a call with several results,
+ * `let a: Int = first, var b: Int = second = pair()`? It is the one statement with
+ * a comma before a `let` or `var`. */
 static bool looks_like_destructure(Parser* parser) {
-  size_t i = parser->index;
-  if (i >= parser->count || !is_ident_like(parser->tokens[i].kind)) {
-    return false;
-  }
-  i++;
-  if (i >= parser->count || parser->tokens[i].kind != TOK_COLON) {
-    return false;
-  }
-  i++;
-  if (i >= parser->count || !is_ident_like(parser->tokens[i].kind)) {
-    return false;
-  }
-  i++;
-  while (i < parser->count) {
+  int depth = 0;
+  for (size_t i = parser->index; i < parser->count; i++) {
     TokenKind kind = parser->tokens[i].kind;
-    if (kind == TOK_COMMA) {
-      if (i + 1 < parser->count && parser->tokens[i + 1].kind == TOK_KW_LET) {
-        return true;
+    if (kind == TOK_LPAREN || kind == TOK_LBRACKET || kind == TOK_LBRACE) depth++;
+    else if (kind == TOK_RPAREN || kind == TOK_RBRACKET || kind == TOK_RBRACE) {
+      if (--depth < 0) return false;
+    } else if (depth == 0) {
+      if (kind == TOK_COMMA) {
+        return i + 1 < parser->count
+            && (parser->tokens[i + 1].kind == TOK_KW_LET || parser->tokens[i + 1].kind == TOK_KW_VAR);
       }
-      return false;
+      if (kind == TOK_KW_LET || kind == TOK_KW_VAR || kind == TOK_KW_CONST || kind == TOK_KW_RET || kind == TOK_KW_IF
+          || kind == TOK_KW_LOOP || kind == TOK_KW_FUNC || kind == TOK_EOF) return false;
     }
-    if (kind == TOK_ASSIGN || kind == TOK_ARROW || kind == TOK_EOF || kind == TOK_RBRACE) {
-      return false;
-    }
-    i++;
   }
   return false;
 }
 
-static bool expr_is_call_like(const AstExpr* expr) {
-  if (!expr) {
-    return false;
-  }
-  if (expr->kind == AST_EXPR_CALL) {
-    return true;
-  }
-  if (expr->kind == AST_EXPR_UNARY && expr->as.unary.op == AST_UNARY_SPAWN) {
-    return expr_is_call_like(expr->as.unary.operand);
-  }
-  return false;
-}
+#define DESTRUCTURE_FORM \
+  "a call with several results is taken apart as " \
+  "`let quotient: Int = quotient, let rest: Int = remainder = divide(a: 7, b: 2)`: each local with its type, " \
+  "`=` and the label of the result it takes, then `=` and the call"
 
-static AstStmt* parse_destructure_statement(Parser* parser, const Token* let_token) {
-  AstStmt* stmt = new_stmt(parser, AST_STMT_DESTRUCT, let_token);
+static AstStmt* parse_destructure_statement(Parser* parser, const Token* first_keyword) {
+  AstStmt* stmt = new_stmt(parser, AST_STMT_DESTRUCT, first_keyword);
   AstDestructureBinding* bindings = NULL;
-  size_t binding_count = 0;
+  const Token* keyword = first_keyword;
   for (;;) {
-    const Token* local = parser_consume_ident(parser, "expected local name in destructuring binding");
-    parser_consume(parser, TOK_COLON, "expected ':' after local name in destructuring binding");
-    const Token* label = parser_consume_ident(parser, "expected return label in destructuring binding");
+    const Token* local = parser_consume_ident(parser, "expected a local's name: " DESTRUCTURE_FORM);
+    check_camel_case(parser, local, "variable");
+    parser_consume(parser, TOK_COLON, "expected ':' and the local's type: " DESTRUCTURE_FORM);
     AstDestructureBinding* binding = parser_alloc(parser, sizeof(AstDestructureBinding));
     binding->local_name = parser_copy_str(parser, local->lexeme);
+    binding->is_var = keyword->kind == TOK_KW_VAR;
+    binding->line = keyword->line;
+    binding->column = keyword->column;
+    binding->type = parse_type_ref(parser);
+    /* The form before 0.4.99 had the label where the type is: `let sum: result, let err: error = f()` */
+    if (!parser_check(parser, TOK_ASSIGN) || !is_ident_like(parser_peek_at(parser, 1)->kind)
+        || (parser_peek_at(parser, 2)->kind != TOK_COMMA && parser_peek_at(parser, 2)->kind != TOK_ASSIGN)) {
+      parser_error(parser, parser_peek(parser), "each local is written with its type and the result it takes: " DESTRUCTURE_FORM);
+      /* one error for the statement: the rest of its line is not read */
+      while (!parser_check(parser, TOK_EOF) && parser_peek(parser)->line == first_keyword->line) parser_advance(parser);
+      stmt->as.destruct_stmt.bindings = bindings;
+      return stmt;
+    }
+    parser_consume(parser, TOK_ASSIGN, "expected '=' and the result's label: " DESTRUCTURE_FORM);
+    const Token* label = parser_consume_ident(parser, "expected the label of a result: " DESTRUCTURE_FORM);
     binding->return_label = parser_copy_str(parser, label->lexeme);
     bindings = append_destructure_binding(bindings, binding);
-    binding_count++;
-    if (parser_match(parser, TOK_COMMA)) {
-      parser_consume(parser, TOK_KW_LET, "expected 'let' before next destructuring binding");
-      continue;
+    if (!parser_match(parser, TOK_COMMA)) break;
+    if (!parser_match(parser, TOK_KW_LET) && !parser_match(parser, TOK_KW_VAR)) {
+      parser_error(parser, parser_peek(parser), "expected 'let' or 'var' before the next local: " DESTRUCTURE_FORM);
     }
-    break;
+    keyword = parser_previous(parser);
   }
-  if (binding_count < 2) {
-    parser_error(parser, let_token, "destructuring assignments require at least two bindings");
-  }
-  parser_consume(parser, TOK_ASSIGN, "destructuring assignments require '=' ");
-  AstExpr* rhs = parse_expression(parser);
-  if (!expr_is_call_like(rhs)) {
-    parser_error(parser, let_token, "destructuring assignments require a call expression on the right-hand side");
+  parser_consume(parser, TOK_ASSIGN, "expected '=' and the call: " DESTRUCTURE_FORM);
+  AstExpr* call = parse_expression(parser);
+  if (!call || call->kind != AST_EXPR_CALL) {
+    parser_error(parser, first_keyword, "only a call of a function has several results to take apart: " DESTRUCTURE_FORM);
   }
   stmt->as.destruct_stmt.bindings = bindings;
-  stmt->as.destruct_stmt.call = rhs;
+  stmt->as.destruct_stmt.call = call;
   return stmt;
 }
 
@@ -3061,6 +3056,7 @@ static AstStmt* parse_statement(Parser* parser) {
     return parse_binding_statement(parser, let_token, false, false, /*require_type=*/true);
   }
   if (parser_match(parser, TOK_KW_VAR)) {
+    if (looks_like_destructure(parser)) return parse_destructure_statement(parser, parser_previous(parser));
     return parse_binding_statement(parser, parser_previous(parser), true, false, /*require_type=*/true);
   }
   if (parser_match(parser, TOK_KW_CONST)) {

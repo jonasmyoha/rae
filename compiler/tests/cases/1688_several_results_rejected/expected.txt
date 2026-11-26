@@ -1,0 +1,81 @@
+tests/cases/1688_several_results_rejected/Main.rae:13:33: each of several results has a label: `ret quotient: Int, remainder: Int`; 'unlabeled' has one without
+    13 | func unlabeled(a: view Int) ret Int, rest: Int {
+       |                                 ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:18:46: two results of 'twins' are labeled 'part'; each result has a label of its own
+    18 | func twins(a: view Int) ret part: Int, part: Int {
+       |                                              ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:20:22: result 'part' is given twice
+    20 |   ret part: a, part: a
+       |                      ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:23:48: result 'text' is 'String', which owns memory: several results can be numbers, Bools, Chars, enums and structs of those for now; return one struct for the others
+    23 | func owning(a: view Int) ret count: Int, text: String {
+       |                                                ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:28:56: result 'cell' is a reference; each of several results is a value (a function that returns a reference has that one result)
+    28 | func referring(cell: view Cell) ret column: Int, cell: view Cell {
+       |                                                        ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:33:1: 'generic' is generic and has several results; a generic function has one result for now
+    33 | func generic(T: type, value: view T) ret first: T, second: Int {
+       | ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:44:5: this 'ret' does not give 'remainder': every 'ret' gives every result (quotient, remainder)
+    44 |     ret quotient: 0  # ERROR: not every result
+       |     ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:47:9: this function has several results (quotient, remainder): 'ret' gives each by its label, as in `ret quotient: value, ...`
+    47 |     ret a, a  # ERROR: without labels
+       |         ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:50:43: this function has no result 'other'; its results are: quotient, remainder
+    50 |     ret quotient: 1, remainder: 2, other: 3  # ERROR: no such result
+       |                                           ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:53:32: result 'quotient' is given twice
+    53 |     ret quotient: 1, quotient: 2, remainder: 0  # ERROR: twice
+       |                                ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:55:17: type mismatch: expected Int, got String
+    55 |   ret quotient: "text", remainder: a  # ERROR: not the result's type
+       |                 ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:67:26: 'divide' has several results (quotient, remainder), so its call is no value: take them apart, as in `let quotient: T = quotient, ... = divide(...)`
+    67 |   let whole: Int = divide(a: 7, b: 2)  # ERROR: no value
+       |                          ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:68:15: 'divide' has several results (quotient, remainder), so its call is no value: take them apart, as in `let quotient: T = quotient, ... = divide(...)`
+    68 |   log("{divide(a: 7, b: 2)}")  # ERROR: no value
+       |               ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:69:9: 'divide' has several results (quotient, remainder), so its call is no value: take them apart, as in `let quotient: T = quotient, ... = divide(...)`
+    69 |   divide(a: 7, b: 2)  # ERROR: results not taken
+       |         ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:70:33: 'divide' has no result 'other'; its results are: quotient, remainder
+    70 |   let quotient: Int = quotient, let extra: Int = other = divide(a: 7, b: 2)  # ERROR: no such result, one not taken
+       |                                 ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:70:3: result 'remainder' of 'divide' is not taken; every result goes to a local (quotient, remainder)
+    70 |   let quotient: Int = quotient, let extra: Int = other = divide(a: 7, b: 2)  # ERROR: no such result, one not taken
+       |   ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:71:30: result 'quotient' is taken twice; each result goes to one local
+    71 |   let first: Int = quotient, let second: Int = quotient = divide(a: 7, b: 2)  # ERROR: twice, one not taken
+       |                              ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:71:3: result 'remainder' of 'divide' is not taken; every result goes to a local (quotient, remainder)
+    71 |   let first: Int = quotient, let second: Int = quotient = divide(a: 7, b: 2)  # ERROR: twice, one not taken
+       |   ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:72:3: result 'quotient' is 'Int'; 'third' is written 'Float'
+    72 |   let third: Float = quotient, let fourth: Bool = remainder = divide(a: 7, b: 2)  # ERROR: two types
+       |   ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:72:32: result 'remainder' is 'Int'; 'fourth' is written 'Bool'
+    72 |   let third: Float = quotient, let fourth: Bool = remainder = divide(a: 7, b: 2)  # ERROR: two types
+       |                                ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:73:30: 'sixth' is written as a reference; a result is a value, and the local owns it
+    73 |   let fifth: Int = quotient, let sixth: view Int = remainder = divide(a: 7, b: 2)  # ERROR: a reference
+       |                              ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:74:3: 'single' has one result, not several to take apart; bind its call with a plain `let`
+    74 |   let seventh: Int = quotient, let eighth: Int = remainder = single(a: 7)  # ERROR: one result
+       |   ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:75:66: 'nothing' returns nothing, so its call has no value to use here; call it as a statement of its own
+    75 |   let ninth: Int = quotient, let tenth: Int = remainder = nothing(a: 7)  # ERROR: no result
+       |                                                                  ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:75:3: 'nothing' has no result to take apart
+    75 |   let ninth: Int = quotient, let tenth: Int = remainder = nothing(a: 7)  # ERROR: no result
+       |   ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:77:31: 'split' has several results (column, row), so its call is no value: take them apart, as in `let column: T = column, ... = split(...)`
+    77 |   let column: Int = cell.split()  # ERROR: a method call is no value either
+       |                               ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:80:10: cannot reassign immutable 'let' binding 'frozen'; declare it with 'var' to allow reassignment
+    80 |   frozen = 4  # ERROR: a let
+       |          ^~~~
+tests/cases/1688_several_results_rejected/Main.rae:81:3: 'frozen' is already bound on line 78 in the same scope; a second binding of the same name there is not allowed (a nested block may shadow it) — rename one of them
+    81 |   let frozen: Int = quotient, let again: Int = remainder = divide(a: 7, b: 2)  # ERROR: bound already
+       |   ^~~~

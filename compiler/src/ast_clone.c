@@ -296,6 +296,7 @@ static AstStmt* clone_stmt(const AstCloner* cloner, const AstStmt* stmt) {
       for (const AstDestructureBinding* b = stmt->as.destruct_stmt.bindings; b; b = b->next) {
         AstDestructureBinding* binding = NEW(cloner, AstDestructureBinding);
         *binding = *b;
+        binding->type = ast_clone_type_ref(cloner, b->type);
         binding->next = NULL;
         *tail = binding;
         tail = &binding->next;
@@ -542,8 +543,10 @@ static void check_stmt(CloneCheck* check, const AstStmt* stmt) {
       check_expr(check, stmt->as.let_stmt.value);
       break;
     case AST_STMT_DESTRUCT:
-      for (const AstDestructureBinding* b = stmt->as.destruct_stmt.bindings; b; b = b->next)
+      for (const AstDestructureBinding* b = stmt->as.destruct_stmt.bindings; b; b = b->next) {
         see(check, b, "binding", stmt->line);
+        check_type(check, b->type);
+      }
       check_expr(check, stmt->as.destruct_stmt.call);
       break;
     case AST_STMT_EXPR:

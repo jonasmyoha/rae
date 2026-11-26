@@ -221,21 +221,53 @@ static void pp_print_let_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
   pp_stmt_epilogue(pp, stmt->line, lines_before);
 }
 
-static void pp_print_destruct_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
-  size_t lines_before = pp_stmt_prologue(pp, stmt->line);
-  const AstDestructureBinding* binding = stmt->as.destruct_stmt.bindings;
-  bool first = true;
-  while (binding) {
-    if (!first) pp_write(pp, ", ");
-    pp_write(pp, "let ");
+/* `let a: T = first, let b: U = second = f(...)`: on one line when it fits, else a
+ * local per line, those after the first one step deeper */
+static void pp_destruct_bindings(PrettyPrinter* pp, const AstStmt* stmt, bool vertical) {
+  for (const AstDestructureBinding* binding = stmt->as.destruct_stmt.bindings; binding; binding = binding->next) {
+    pp_write(pp, binding->is_var ? "var " : "let ");
     pp_write_str(pp, binding->local_name);
     pp_write(pp, ": ");
+    pp_write_type(pp, binding->type);
+    pp_write(pp, " = ");
     pp_write_str(pp, binding->return_label);
-    first = false;
-    binding = binding->next;
+    if (!binding->next) break;
+    pp_write(pp, ",");
+    if (vertical) pp_newline(pp);
+    else pp_write(pp, " ");
   }
   pp_write(pp, " = ");
   pp_expr(pp, stmt->as.destruct_stmt.call);
+}
+
+static void pp_print_destruct_stmt(PrettyPrinter* pp, const AstStmt* stmt) {
+  size_t lines_before = pp_stmt_prologue(pp, stmt->line);
+  PrettyPrinter measure = pp_measure_begin(pp);
+  pp_destruct_bindings(&measure, stmt, false);
+  bool vertical = measure.forced_break || measure.current_col > PP_MAX_WIDTH;
+  if (vertical) {
+    /* the first local at the statement's own depth */
+    const AstDestructureBinding* first = stmt->as.destruct_stmt.bindings;
+    AstStmt rest = *stmt;
+    rest.as.destruct_stmt.bindings = first ? first->next : NULL;
+    if (first && first->next) {
+      pp_write(pp, first->is_var ? "var " : "let ");
+      pp_write_str(pp, first->local_name);
+      pp_write(pp, ": ");
+      pp_write_type(pp, first->type);
+      pp_write(pp, " = ");
+      pp_write_str(pp, first->return_label);
+      pp_write(pp, ",");
+      pp_newline(pp);
+      pp->indent += 1;
+      pp_destruct_bindings(pp, &rest, true);
+      pp->indent -= 1;
+    } else {
+      pp_destruct_bindings(pp, stmt, true);
+    }
+  } else {
+    pp_destruct_bindings(pp, stmt, false);
+  }
   pp_stmt_epilogue(pp, stmt->line, lines_before);
 }
 

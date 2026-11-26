@@ -444,6 +444,13 @@ typedef enum { ANY_BORROWED, ANY_OWNED, ANY_TAKEN } AnyMode;
 void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out);
 void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out);
 const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type);
+/* c_results.c */
+bool c_has_several_results(const AstFuncDecl* func);
+const char* c_results_type_name(CompilerContext* ctx, const AstFuncDecl* func);
+void c_emit_results_types(CompilerContext* ctx, const AstModule* module, FILE* out);
+bool c_emit_ret_results(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
+void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt);
+void c_emit_destructure(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 bool c_emit_any_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out);
 /* c_discard.c */
 bool c_method_makes_its_result(CFuncContext* ctx, const AstExpr* call);

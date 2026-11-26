@@ -635,6 +635,11 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
 static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt* stmt) {
     for (const AstStmt* s = stmt; s; s = s->next) {
         switch (s->kind) {
+            case AST_STMT_DESTRUCT:
+                ctx->has_expected_type = false;
+                discover_specializations_expr_impl(ctx, s->as.destruct_stmt.call);
+                c_register_destructured_locals(ctx, s);
+                break;
             case AST_STMT_LET:
                 /* A collection loop's binding (`loop let x: T in list`) is a
                  * `let` with its type and no value (the list is the loop's

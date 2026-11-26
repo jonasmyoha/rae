@@ -1,0 +1,86 @@
+# What is refused about several results: in the declaration, in a `ret`, where the call stands, and
+# in
+# the statement that takes the results apart (spec/rae.md 5.5).
+type Cell {
+  x: Int
+  y: Int
+}
+
+func divide(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
+  ret quotient: a / b, remainder: a % b
+}
+
+func unlabeled(a: view Int) ret Int, rest: Int {
+  # ERROR: a result without a label
+  ret rest: a
+}
+
+func twins(a: view Int) ret part: Int, part: Int {
+  # ERROR: one label twice
+  ret part: a, part: a
+}
+
+func owning(a: view Int) ret count: Int, text: String {
+  # ERROR: a result that owns memory (for now)
+  ret count: a, text: "t"
+}
+
+func referring(cell: view Cell) ret column: Int, cell: view Cell {
+  # ERROR: a result that is a reference
+  ret column: cell.x, cell: cell
+}
+
+func generic(T: type, value: view T) ret first: T, second: Int {
+  # ERROR: generic (for now)
+  ret first: value, second: 1
+}
+
+func split(this: view Cell) ret column: Int, row: Int {
+  ret column: this.x, row: this.y
+}
+
+func onlySome(a: view Int) ret quotient: Int, remainder: Int {
+  if a is 0 {
+    ret quotient: 0  # ERROR: not every result
+  }
+  if a is 1 {
+    ret a, a  # ERROR: without labels
+  }
+  if a is 2 {
+    ret quotient: 1, remainder: 2, other: 3  # ERROR: no such result
+  }
+  if a is 3 {
+    ret quotient: 1, quotient: 2, remainder: 0  # ERROR: twice
+  }
+  ret quotient: "text", remainder: a  # ERROR: not the result's type
+}
+
+func single(a: view Int) ret Int {
+  ret a
+}
+
+func nothing(a: view Int) {
+  log("{a}")
+}
+
+func main() {
+  let whole: Int = divide(a: 7, b: 2)  # ERROR: no value
+  log("{divide(a: 7, b: 2)}")  # ERROR: no value
+  divide(a: 7, b: 2)  # ERROR: results not taken
+  let quotient: Int = quotient, let extra: Int = other = divide(a: 7, b: 2)  # ERROR: no such result, one not taken
+  let first: Int = quotient, let second: Int = quotient = divide(a: 7, b: 2)  # ERROR: twice, one not taken
+  let third: Float = quotient, let fourth: Bool = remainder = divide(a: 7, b: 2)  # ERROR: two types
+  let fifth: Int = quotient, let sixth: view Int = remainder = divide(a: 7, b: 2)  # ERROR: a reference
+  let seventh: Int = quotient, let eighth: Int = remainder = single(a: 7)  # ERROR: one result
+  let ninth: Int = quotient, let tenth: Int = remainder = nothing(a: 7)  # ERROR: no result
+  let cell: Cell = { x: 1, y: 2 }
+  let column: Int = cell.split()  # ERROR: a method call is no value either
+  let frozen: Int = quotient, var free: Int = remainder = divide(a: 7, b: 2)
+  free = 3
+  frozen = 4  # ERROR: a let
+  let frozen: Int = quotient, let again: Int = remainder = divide(a: 7, b: 2)  # ERROR: bound already
+  log(
+    "{whole} {quotient} {extra} {first} {second} {third} {fourth} {fifth} {sixth} {seventh} {eighth}"
+  )
+  log("{ninth} {tenth} {frozen} {free} {again} {column}")
+}

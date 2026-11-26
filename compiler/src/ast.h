@@ -112,9 +112,15 @@ typedef struct AstObjectField {
   struct AstObjectField* next;
 } AstObjectField;
 
+/* One binding of `let quotient: Int = quotient, var rest: Int = remainder = divide(...)`:
+ * a local with its written type, and the label of the callee's result it takes */
 typedef struct AstDestructureBinding {
   Str local_name;
+  AstTypeRef* type;
+  bool is_var;
   Str return_label;
+  size_t line;
+  size_t column;
   struct AstDestructureBinding* next;
 } AstDestructureBinding;
 

@@ -3045,6 +3045,9 @@ static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     if (!stmt) return true;
     switch (stmt->kind) {
+        case AST_STMT_DESTRUCT:
+            c_emit_destructure(ctx, stmt, out);
+            break;
         case AST_STMT_EXPR: {
             // Stage 4: wrap with string-pool mark/flush. `rae_ext_rae_str_interp`
             // registers each interp result; flush at the end of this expression
@@ -4418,7 +4421,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
 
             fprintf(out, "  {\n");
 
-            if (has_value) {
+            if (has_value && c_emit_ret_results(ctx, stmt, out)) {
+                ret_type = NULL;  /* (not one value: nothing below is about the first result) */
+            } else if (has_value) {
                 const char* rt = c_return_type(ctx, ctx->func_decl);
                 fprintf(out, "    %s __ret_val = ", rt);
                 bool is_ref_return = ret_type && (ret_type->is_view || ret_type->is_mod);

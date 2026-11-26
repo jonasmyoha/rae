@@ -62,6 +62,11 @@ static const AstExpr* s_void_ok_expr = NULL;
  * each loop body; there are no nested function bodies, so it returns to
  * 0 between top-level function analyses. */
 static int s_loop_depth = 0;
+/* Several labeled results (sema_results.inc): those of the function being analyzed,
+ * NULL for one result or none; and the call a destructuring statement takes apart,
+ * the one place such a call may stand */
+static const AstReturnItem* s_current_results = NULL;
+static const AstExpr* s_destructured_call = NULL;
 /* Inside an instance of a generic function being analyzed (sema_analyze_instance).
  * What it finds is not registered for the C: the backend finds what it emits
  * (docs/generic-instances-design.md, steps 4 and 5). */
@@ -1504,6 +1509,10 @@ static void flow_stmt_inner(LifecycleFlow* flow, const AstStmt* s, DroppedSet* s
             flow_sweep_create(flow, s->as.destruct_stmt.call);
             flow_check_expr(flow, s->as.destruct_stmt.call, set, s->line, s->column);
             flow_move(flow, set, s->as.destruct_stmt.call);
+            for (const AstDestructureBinding* b = s->as.destruct_stmt.bindings; b; b = b->next) {
+                dropped_remove(set, b->local_name);
+                flow_declare(flow, b->local_name, b->type);
+            }
             break;
         case AST_STMT_ASSIGN: {
             flow_sweep_create(flow, s->as.assign_stmt.value);
@@ -3525,6 +3534,8 @@ static bool sema_call_returns_reference(const AstModule* module, const AstExpr* 
 
 // #815: every diagnostic raised while analyzing a decl — a function body, a
 // global let initializer, a type — names THAT decl's file (see sema_diag_file).
+#include "sema_results.inc"
+
 static void sema_analyze_decl(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl) {
     const char* saved_origin = s_current_decl_origin;
     bool saved_unsafe_checks = s_unsafe_checks_enabled;
@@ -3695,8 +3706,11 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 s_current_decl_origin = decl->origin_file;
                 s_current_params = decl->as.func_decl.params;
                 s_current_generic_params = decl->as.func_decl.generic_params;
+                const AstReturnItem* saved_results = s_current_results;
+                s_current_results = sema_check_results(ctx, module, symbols, decl);
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
+                s_current_results = saved_results;
                 sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
                 sema_check_main_loops(module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;
@@ -6090,11 +6104,18 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
             if (sym) { sym->decl_line = (int)stmt->line; sym->decl_column = (int)stmt->column; }
             break;
         }
+        case AST_STMT_DESTRUCT:
+            sema_analyze_destructure(ctx, module, symbols, stmt);
+            break;
         case AST_STMT_RET: {
             if (s_defer_depth > 0) {
                 diag_error(sema_diag_file(module), (int)stmt->line, (int)stmt->column,
                            "'ret' cannot leave a defer block: it runs when the block around it is left already");
                 module->had_error = true;
+            }
+            if (s_current_results) {
+                sema_analyze_ret_results(ctx, module, symbols, stmt);
+                break;
             }
             AstReturnArg* arg = stmt->as.ret_stmt.values;
             // Spec 2.3.1 for `ret`: a function returning a VALUE cannot return
@@ -8404,6 +8425,11 @@ static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbo
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
+    if ((expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) && expr->decl_link
+        && expr->decl_link->kind == AST_DECL_FUNC && sema_several_results_as_value(module, expr, expr->decl_link)) {
+        expr->resolved_type = NULL;
+        return;
+    }
     sema_check_task_copy_arguments(module, symbols, expr);
     sema_check_list_call(module, symbols, expr);
     sema_check_unnarrowed_opt(module, expr);
@@ -12008,6 +12034,7 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
                 sema_check_template_names(module, &symbols, d);
+                sema_check_generic_results(module, d);
                 pointer_set_add(processed, d); processed_count++;
             }
             d = d->next;

@@ -1139,6 +1139,7 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
 const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_alloc") || str_eq_cstr(func->name, "__buf_alloc") || str_eq_cstr(func->name, "rae_ext_rae_buf_resize") || str_eq_cstr(func->name, "__buf_resize") || str_eq_cstr(func->name, "rae_ext_rae_str_to_cstr") || str_eq_cstr(func->name, "toCStr")) return "void*";
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_free") || str_eq_cstr(func->name, "__buf_free") || str_eq_cstr(func->name, "rae_ext_rae_buf_copy") || str_eq_cstr(func->name, "__buf_copy")) return "void";
+  if (c_has_several_results(func) && ctx) return c_results_type_name(ctx->compiler_ctx, func);
   if (func->returns && func->returns->type) {
     // An optional REFERENCE return is a nullable pointer, not a box (spec 4.1);
     // only a non-reference optional needs RaeAny.
@@ -4868,6 +4869,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       }
   }
 
+  c_emit_results_types(ctx, module, out);
   // Prototypes for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];

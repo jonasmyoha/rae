@@ -1,0 +1,68 @@
+# A function with several labeled results: every `ret` gives each by its label, and the call is
+# taken
+# apart where it is made, each local with its type and the label it takes (spec/rae.md 5.5).
+enum Outcome { fine, divisionByZero }
+
+type Cell {
+  x: Int
+  y: Int
+}
+
+func divide(a: view Int, b: view Int) ret quotient: Int, remainder: Int, outcome: Outcome {
+  if b is 0 {
+    ret quotient: 0, remainder: 0, outcome: Outcome.divisionByZero
+  }
+  ret outcome: Outcome.fine, remainder: a % b, quotient: a / b
+}
+
+func cellOf(position: view Float, size: view Float) ret cell: Cell, inside: Bool, offset: Float {
+  let column: Int = (position / size) as Int
+  ret cell: Cell { x: column, y: column * 2 }, inside: column < 4, offset: position - (column as Float) * size
+}
+
+func letters(text: view String) ret first: Char, count: Int, wide: UInt8 {
+  ret first: 'r', count: text.length(), wide: 200
+}
+
+func loopSum(limit: view Int) ret sum: Int, steps: Int {
+  var total: Int = 0
+  loop var i: Int = 0, i < limit, ++i {
+    total += i
+    if total > 20 {
+      ret sum: total, steps: i
+    }
+  }
+  ret sum: total, steps: limit
+}
+
+func main() {
+  let quotient: Int = quotient,
+    var rest: Int = remainder,
+    let outcome: Outcome = outcome = divide(a: 17, b: 5)
+  rest += 100
+  log("{quotient} {rest} {outcome}")
+  let zero: Int = quotient,
+    let nothing: Int = remainder,
+    let failed: Outcome = outcome = divide(a: 1, b: 0)
+  log("{zero} {nothing} {failed is Outcome.divisionByZero}")
+  # the labels in another order, and a call with its own temporaries as arguments
+  let inside: Bool = inside,
+    let offset: Float = offset,
+    let cell: Cell = cell = cellOf(position: 7.5, size: 2.0)
+  log("{cell} {inside} {offset}")
+  let count: Int = count,
+    let first: Char = first,
+    let wide: UInt8 = wide = letters(text: "rae {quotient}")
+  log("{first} {count} {wide}")
+  loop var limit: Int = 3, limit < 12, limit += 4 {
+    let sum: Int = sum, let steps: Int = steps = loopSum(limit: limit)
+    log("{limit}: {sum} in {steps}")
+  }
+  if quotient is 3 {
+    # a nested block may use the names again
+    let quotient: Int = quotient,
+      let rest: Int = remainder,
+      let outcome: Outcome = outcome = divide(a: 9, b: 4)
+    log("{quotient} {rest} {outcome}")
+  }
+}

@@ -277,6 +277,7 @@ static void walk_stmt(Pass* p, AstStmt* s) {
             walk_expr(p, s->as.let_stmt.value);
             break;
         case AST_STMT_DESTRUCT:
+            for (AstDestructureBinding* b = s->as.destruct_stmt.bindings; b; b = b->next) walk_type(p, b->type);
             walk_expr(p, s->as.destruct_stmt.call);
             break;
         case AST_STMT_EXPR:

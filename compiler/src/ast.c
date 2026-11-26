@@ -440,8 +440,10 @@ static void dump_destructure_stmt(const AstStmt* stmt, FILE* out, int indent) {
   const AstDestructureBinding* binding = stmt->as.destruct_stmt.bindings;
   while (binding) {
     print_indent(out, indent + 1);
-    fputs("binding ", out);
+    fputs(binding->is_var ? "var " : "let ", out);
     print_str(out, binding->local_name);
+    fputs(": ", out);
+    dump_type_ref(binding->type, out);
     fputs(" <- ", out);
     print_str(out, binding->return_label);
     fputc('\n', out);

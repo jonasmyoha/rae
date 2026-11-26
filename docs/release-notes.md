@@ -4,6 +4,23 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.99, 2026-11-26: several labeled results
+
+- A function can have several results, each with a label: `func divide(a: view Int, b: view Int) ret quotient: Int,
+  remainder: Int`. Every `ret` gives each of them by its label (`ret quotient: a / b, remainder: a % b`); one that
+  gives only some is an error.
+- The call is taken apart where it is made, each local with its type and the label of the result it takes:
+  `let quotient: Int = quotient, var rest: Int = remainder = divide(a: 7, b: 2)`. A local may have its label's name.
+  Every result goes to a local, and such a call is no value anywhere else. `rae format` puts a local per line when
+  the statement does not fit.
+- For now the results are numbers, Bools, Chars, enums and structs of those, in a plain function; results that own
+  memory (a String, a List), generic functions and method calls are the next steps. Each is an error that says so.
+- The form was only parsed before: sema checked every value against the first result's type, and the locals of
+  `let sum: result, let err: error = f()` did not exist afterwards. That untyped form is an error that shows the
+  new one.
+- A function with one result is compiled as before: in C, several results are one struct returned by value.
+- Cases 1687, 1688, 1689; 104, 105, 202, 813 updated.
+
 ## 0.4.98, 2026-11-26: instances of generic functions are analyzed in full
 
 - Every instance of a generic function is analyzed like a plain function: every statement, moves, frozen `let`s,

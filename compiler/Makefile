@@ -115,6 +115,7 @@ SRCS = $(SRC_DIR)/main.c \
        $(SRC_DIR)/c_task_result.c \
        $(SRC_DIR)/c_discard.c \
        $(SRC_DIR)/c_any.c \
+       $(SRC_DIR)/c_results.c \
        $(SRC_DIR)/c_array_helpers.c \
        $(SRC_DIR)/ownership.c \
        $(SRC_DIR)/raepack.c \

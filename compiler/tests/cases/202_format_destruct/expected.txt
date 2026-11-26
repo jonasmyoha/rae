@@ -1,11 +1,11 @@
 func divide(a: Int, b: Int) ret result: Int, error: opt Error {
   if b is 0 {
-    ret error: "division by zero"
+    ret result: 0, error: "division by zero"
   }
-  ret result: a / b
+  ret result: a / b, error: none
 }
 
 func useDivide(a: Int, b: Int) ret result: Int {
-  let sum: result, let err: error = divide(a: a, b: b)
+  let sum: Int = result, let err: opt Error = error = divide(a: a, b: b)
   ret sum
 }
