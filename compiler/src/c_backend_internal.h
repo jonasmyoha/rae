@@ -446,7 +446,9 @@ void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out);
 const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type);
 /* c_results.c */
 bool c_has_several_results(const AstFuncDecl* func);
-const char* c_results_type_name(CompilerContext* ctx, const AstFuncDecl* func);
+const char* c_results_type_name(CFuncContext* ctx, const AstFuncDecl* func);
+void c_results_reset(void);
+void c_emit_results_type(CFuncContext* ctx, const AstFuncDecl* func, FILE* out);
 void c_emit_results_types(CompilerContext* ctx, const AstModule* module, FILE* out);
 bool c_emit_ret_results(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt, FILE* out);

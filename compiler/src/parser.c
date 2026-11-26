@@ -2183,7 +2183,7 @@ static AstStmt* parse_destructure_statement(Parser* parser, const Token* first_k
   }
   parser_consume(parser, TOK_ASSIGN, "expected '=' and the call: " DESTRUCTURE_FORM);
   AstExpr* call = parse_expression(parser);
-  if (!call || call->kind != AST_EXPR_CALL) {
+  if (!call || (call->kind != AST_EXPR_CALL && call->kind != AST_EXPR_METHOD_CALL)) {
     parser_error(parser, first_keyword, "only a call of a function has several results to take apart: " DESTRUCTURE_FORM);
   }
   stmt->as.destruct_stmt.bindings = bindings;

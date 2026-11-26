@@ -1,0 +1,41 @@
+# Where several results are refused: a spawn, a call that is used as a value in any place, a `ret`
+# that
+# passes another function's results on, and a local of the wrong type for a generic function's
+# result.
+func divide(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
+  ret quotient: a / b, remainder: a % b
+}
+
+func makeBoth(T: type, value: view T) ret value: T, fine: Bool {
+  ret value: value, fine: true
+}
+
+func maybe(a: view Int) ret value: opt Int, fine: Bool {
+  ret value: a, fine: true
+}
+
+# ERROR: a C function has one result
+func nativePair(a: view Int) unsafe extern("rae_native_pair") ret first: Int, second: Int
+
+func passedOn(a: view Int, b: view Int) ret quotient: Int, remainder: Int {
+  ret divide(a: a, b: b)  # ERROR: taken apart first, then given by label
+}
+
+func main() {
+  let task: Task(Int) = spawn divide(a: 7, b: 2)  # ERROR: a Task has one result
+  let made: Int = makeBoth(value: 3)  # ERROR: a generic function's call is no value either
+  log("{makeBoth(value: "t")}")  # ERROR
+  match divide(a: 7, b: 2) {
+    default {
+      # ERROR: no subject
+      log("x")
+    }
+  }
+  if let found: Int = maybe(a: 3) {
+    # ERROR: no optional to narrow
+    log("{found}")
+  }
+  let text: String = value, let fine: Bool = fine = makeBoth(value: 3)  # ERROR: the result is an Int here
+  let number: Int = value, let extra: Bool = other = makeBoth(value: 3)  # ERROR: no such result, one not taken
+  log("{task.get()} {made} {text} {fine} {number} {extra}")
+}

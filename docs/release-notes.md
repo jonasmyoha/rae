@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.101, 2026-11-26: several results wherever a call can be
+
+- The call that is taken apart can be a method call (`let wide: Int = wide, let tall: Int = tall = box.split()`), a
+  call of a generic function or method (`func makeBoth(T: type, value: view T) ret value: T, fine: Bool`; each
+  instance has its own results), a module's function by the module's name, and a call inside `unsafe`. A function
+  with several results may wait: it runs as a resumable task like any other.
+- Refused, each with its own error: `spawn` of such a function (a Task has one result), `extern` and `cExport`
+  functions with several results, such a call as the subject of a `match` or an `if let` or as any other value, and
+  `ret f()` that passes another function's results on (take them apart, then give each by its label).
+- A local written `T` that is an Any in an instance and is moved into an `own` parameter was copied and never freed
+  (found by the type matrix).
+- Cases 1691, 1692, 1693; the type matrix has the source in its generic programs too (5 910 combinations).
+
 ## 0.4.100, 2026-11-26: several results that own memory
 
 - The results of a function with several can be anything a single result can: a String, a List, a map, a struct

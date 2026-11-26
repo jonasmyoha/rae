@@ -1139,7 +1139,7 @@ bool emit_param_list(CFuncContext* ctx, const AstParam* params, FILE* out, bool 
 const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_alloc") || str_eq_cstr(func->name, "__buf_alloc") || str_eq_cstr(func->name, "rae_ext_rae_buf_resize") || str_eq_cstr(func->name, "__buf_resize") || str_eq_cstr(func->name, "rae_ext_rae_str_to_cstr") || str_eq_cstr(func->name, "toCStr")) return "void*";
   if (str_eq_cstr(func->name, "rae_ext_rae_buf_free") || str_eq_cstr(func->name, "__buf_free") || str_eq_cstr(func->name, "rae_ext_rae_buf_copy") || str_eq_cstr(func->name, "__buf_copy")) return "void";
-  if (c_has_several_results(func) && ctx) return c_results_type_name(ctx->compiler_ctx, func);
+  if (c_has_several_results(func) && ctx) return c_results_type_name(ctx, func);
   if (func->returns && func->returns->type) {
     // An optional REFERENCE return is a nullable pointer, not a box (spec 4.1);
     // only a non-reference optional needs RaeAny.
@@ -2578,6 +2578,7 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
     if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
       gp = f->generic_template->as.func_decl.generic_params;
     CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+    c_emit_results_type(&tctx, f, out);
     fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
     emit_param_list(&tctx, f->params, out, false);
     fprintf(out, ")%s;\n", c_effect_attribute(f));
@@ -3096,6 +3097,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   if (!module) return false;
   g_emitted_spec_func_count = 0; // Reset dedup for this compilation
   g_instance_errors = 0;
+  c_results_reset();
   ctx->all_decl_count = 0; collect_decls_from_module(ctx, module); ctx->current_module = (AstModule*)module;
   // Before anything reads a name: identifiers spelled like C keywords get a
   // C-safe spelling, declaration and uses together (c_names.c).
@@ -4923,6 +4925,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstIdentifierPart* gp = f->generic_params;
       if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
       CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+      c_emit_results_type(&tctx, f, out);
       fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(f));
   }
   

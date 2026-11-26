@@ -67,6 +67,7 @@ static int s_loop_depth = 0;
  * the one place such a call may stand */
 static const AstReturnItem* s_current_results = NULL;
 static const AstExpr* s_destructured_call = NULL;
+static const AstExpr* s_spawned_call = NULL;  /* the call a `spawn` starts */
 /* Inside an instance of a generic function being analyzed (sema_analyze_instance).
  * What it finds is not registered for the C: the backend finds what it emits
  * (docs/generic-instances-design.md, steps 4 and 5). */
@@ -3699,6 +3700,7 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 }
                 param = param->next;
             }
+            sema_check_results(ctx, module, symbols, decl);
             if (decl->as.func_decl.body) {
                 const char* saved_origin = s_current_decl_origin;
                 const AstParam* saved_params = s_current_params;
@@ -3707,7 +3709,8 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 s_current_params = decl->as.func_decl.params;
                 s_current_generic_params = decl->as.func_decl.generic_params;
                 const AstReturnItem* saved_results = s_current_results;
-                s_current_results = sema_check_results(ctx, module, symbols, decl);
+                s_current_results = decl->as.func_decl.returns && decl->as.func_decl.returns->next
+                    ? decl->as.func_decl.returns : NULL;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
                 s_current_results = saved_results;
@@ -8425,10 +8428,13 @@ static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbo
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
-    if ((expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) && expr->decl_link
-        && expr->decl_link->kind == AST_DECL_FUNC && sema_several_results_as_value(module, expr, expr->decl_link)) {
-        expr->resolved_type = NULL;
-        return;
+    if (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) {
+        const AstDecl* callee = expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC ? expr->decl_link
+            : expr->decl_link ? NULL : sema_generic_results_callee(ctx, module, symbols, expr);
+        if (callee && sema_several_results_as_value(module, expr, callee)) {
+            expr->resolved_type = NULL;
+            return;
+        }
     }
     sema_check_task_copy_arguments(module, symbols, expr);
     sema_check_list_call(module, symbols, expr);
@@ -8748,9 +8754,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
         case AST_EXPR_UNARY:
             {
                 const AstExpr* saved_void_ok = s_void_ok_expr;
+                const AstExpr* saved_spawned = s_spawned_call;
                 if (expr->as.unary.op == AST_UNARY_SPAWN) s_void_ok_expr = expr->as.unary.operand;
+                if (expr->as.unary.op == AST_UNARY_SPAWN) s_spawned_call = expr->as.unary.operand;
                 sema_analyze_expr(ctx, module, symbols, expr->as.unary.operand, true);
                 s_void_ok_expr = saved_void_ok;
+                s_spawned_call = saved_spawned;
             }
             if (expr->as.unary.op == AST_UNARY_NOT) expr->resolved_type = type_get_bool(ctx->type_registry);
             else if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) {
@@ -12034,7 +12043,6 @@ bool sema_analyze_module(CompilerContext* ctx, AstModule* module) {
                 // the #877 by-name unsafe-obligation scan of their bodies.
                 sema_scan_unsafe_template(module, d);
                 sema_check_template_names(module, &symbols, d);
-                sema_check_generic_results(module, d);
                 pointer_set_add(processed, d); processed_count++;
             }
             d = d->next;

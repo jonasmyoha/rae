@@ -1972,7 +1972,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     const AstExpr* given = a->value;
                     while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
                     int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
-                    const AstTypeRef* given_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
+                    /* (as it is in this instance: a local written `T`) */
+                    const AstTypeRef* given_type = local >= 0 ? c_concrete_type_ref(ctx, ctx->local_type_refs[local]) : NULL;
                     any_mode = (p->type->is_own && local >= 0 && !c_local_is_slot_alias(ctx, local) && given_type
                                   && !given_type->is_view && !given_type->is_mod
                                   && (a->moves_local || c_is_any(given_type))) ? ANY_TAKEN : ANY_OWNED;

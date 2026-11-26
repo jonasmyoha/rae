@@ -1,0 +1,67 @@
+# Several results wherever a call can be: a method, a generic function, a module's function by its
+# module's name, inside `unsafe`, and a function that waits (spec/rae.md 5.5).
+type Note {
+  text: String
+}
+
+type Pair(T: type) {
+  first: T
+  second: T
+}
+
+func split(this: view Box) ret wide: Int, tall: Int {
+  ret wide: this.width, tall: this.height
+}
+
+func makeBoth(T: type, value: view T) ret value: T, fine: Bool {
+  ret value: value, fine: true
+}
+
+func halves(T: type, this: view Pair(T)) ret first: T, second: T, same: Bool {
+  ret first: this.first, second: this.second, same: this.first is this.second
+}
+
+# in a generic function: its instances are analyzed in full, each with its own results
+func inside(T: type, value: view T) ret Int {
+  let taken: T = value, let fine: Bool = fine = makeBoth(value: value)
+  let pair: Pair(T) = { first: taken, second: value }
+  let first: T = first, let second: T = second, let same: Bool = same = pair.halves()
+  log("{first} {second} {same} {fine}")
+  ret 1
+}
+
+# a function with several results that waits, called by one that waits after it
+func slow(seed: view Int) ret value: Int, text: String {
+  sleep(ms: 2)
+  let text: String = "slow {seed}"
+  sleep(ms: 2)
+  ret value: seed * 2, text: text
+}
+
+func waitsAfter(seed: view Int) ret Int {
+  let value: Int = value, let text: String = text = slow(seed: seed)
+  sleep(ms: 2)
+  ret value + text.length()
+}
+
+func main() {
+  let box: Box = { width: 3, height: 4 }
+  let wide: Int = wide, let tall: Int = tall = box.split()
+  let area: Int = area, let label: String = label = Shapes.measure(box: box)
+  log("{wide} {tall} {area} {label}")
+  unsafe {
+    let width: Int = wide, let height: Int = tall = split(this: box)
+    log("{width} {height}")
+  }
+  let number: Int = value, let fine: Bool = fine = makeBoth(value: 3)
+  let text: String = value, let alsoFine: Bool = fine = makeBoth(value: "t {1}")
+  let note: Note = value, let third: Bool = fine = makeBoth(Note, value: Note { text: "n" })
+  log("{number} {fine} {text} {alsoFine} {note} {third}")
+  let pair: Pair(String) = { first: "a {1}", second: "b" }
+  let first: String = first, let second: String = second, let same: Bool = same = pair.halves()
+  log("{first} {second} {same}")
+  log("{inside(value: 5)} {inside(value: "s {2}")} {inside(value: note)}")
+  let task: Task(Int) = spawn waitsAfter(seed: 4)
+  let other: Task(Int) = spawn waitsAfter(seed: 40)
+  log("{task.get()} {other.get()}")
+}

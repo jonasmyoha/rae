@@ -7,6 +7,7 @@
  * A `ret` fills it, and a destructuring statement reads each field into its local.
  * A function with one result is not touched by any of this. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "c_backend_internal.h"
@@ -17,29 +18,59 @@ bool c_has_several_results(const AstFuncDecl* func) {
   return func && func->returns && func->returns->next;
 }
 
-const char* c_results_type_name(CompilerContext* ctx, const AstFuncDecl* func) {
-  const char* mangled = rae_mangle_function(ctx, func);
+/* The struct's name: the function's C name and `_results`. In an instance of a
+ * generic function (`ctx` has its type arguments) it is that instance's. */
+const char* c_results_type_name(CFuncContext* ctx, const AstFuncDecl* func) {
+  CompilerContext* compiler = ctx->compiler_ctx;
+  const AstFuncDecl* generic = func->generic_template && func->generic_template->kind == AST_DECL_FUNC
+      ? &func->generic_template->as.func_decl : func;
+  const char* mangled = ctx->generic_args && (generic->generic_params || func->specialization_args)
+      ? rae_mangle_specialized_function(compiler, generic, ctx->generic_args)
+      : rae_mangle_function(compiler, func);
   size_t length = strlen(mangled) + sizeof "_results";
-  char* name = arena_alloc(ctx->ast_arena, length);
+  char* name = arena_alloc(compiler->ast_arena, length);
   snprintf(name, length, "%s_results", mangled);
   return name;
 }
 
-/* One typedef per plain function with several results, before the prototypes */
+/* The names of the structs written so far, of this compilation */
+static const char** g_written;
+static size_t g_written_count, g_written_cap;
+
+void c_results_reset(void) {
+  g_written_count = 0;
+}
+
+/* The struct of `func`'s results, once, before its prototype. `ctx` is the
+ * function's own (an instance's type arguments in it). */
+void c_emit_results_type(CFuncContext* ctx, const AstFuncDecl* func, FILE* out) {
+  if (!c_has_several_results(func) || func->is_extern) return;
+  const char* name = c_results_type_name(ctx, func);
+  for (size_t i = 0; i < g_written_count; i++)
+    if (strcmp(g_written[i], name) == 0) return;
+  if (g_written_count == g_written_cap) {
+    g_written_cap = g_written_cap ? g_written_cap * 2 : 16;
+    g_written = realloc(g_written, g_written_cap * sizeof *g_written);
+  }
+  g_written[g_written_count++] = name;
+  fprintf(out, "typedef struct {");
+  for (const AstReturnItem* result = func->returns; result; result = result->next) {
+    fprintf(out, " ");
+    emit_type_ref_as_c_type(ctx, result->type, out, false);
+    fprintf(out, " %.*s;", (int)result->name.len, result->name.data);
+  }
+  fprintf(out, " } %s;\n", name);
+}
+
+/* One per plain function with several results, before the prototypes */
 void c_emit_results_types(CompilerContext* ctx, const AstModule* module, FILE* out) {
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
     const AstDecl* decl = ctx->all_decls[i];
     if (decl->kind != AST_DECL_FUNC) continue;
     const AstFuncDecl* func = &decl->as.func_decl;
-    if (!c_has_several_results(func) || func->generic_params || func->specialization_args || func->is_extern) continue;
+    if (func->generic_params || func->specialization_args) continue;
     CFuncContext fctx = { .compiler_ctx = ctx, .module = module, .func_decl = func };
-    fprintf(out, "typedef struct {");
-    for (const AstReturnItem* result = func->returns; result; result = result->next) {
-      fprintf(out, " ");
-      emit_type_ref_as_c_type(&fctx, result->type, out, false);
-      fprintf(out, " %.*s;", (int)result->name.len, result->name.data);
-    }
-    fprintf(out, " } %s;\n", c_results_type_name(ctx, func));
+    c_emit_results_type(&fctx, func, out);
   }
 }
 
@@ -96,7 +127,7 @@ bool c_emit_ret_results(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
     int local = local_index_by_name(ctx, hidden->as.let_stmt.name);
     if (local >= 0) ctx->local_moved[local] = true;
   }
-  fprintf(out, "    %s __ret_val = {", c_results_type_name(ctx->compiler_ctx, func));
+  fprintf(out, "    %s __ret_val = {", c_results_type_name(ctx, func));
   for (const AstReturnItem* result = func->returns; result; result = result->next)
     fprintf(out, " .%.*s = __rae_result_%.*s,", (int)result->name.len, result->name.data,
             (int)result->name.len, result->name.data);
@@ -130,17 +161,17 @@ void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt, FILE
  * the call once, into the struct, then each local from its field */
 void c_emit_destructure(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
   const AstExpr* call = stmt->as.destruct_stmt.call;
-  const AstFuncDecl* callee = call && call->decl_link && call->decl_link->kind == AST_DECL_FUNC
-      ? &call->decl_link->as.func_decl : NULL;
-  if (!c_has_several_results(callee)) return;  /* (sema reported it) */
+  if (!call) return;
+  /* (the struct's type is the call's own: of a generic function it is the
+   * instance's, which only the call's emission names) */
   int id = ctx->temp_counter++;
-  fprintf(out, "  %s __rae_results%d;\n", c_results_type_name(ctx->compiler_ctx, callee), id);
   bool had_expected = ctx->has_expected_type;
   ctx->has_expected_type = false;
-  if (ctx->stmt_may_pool) fprintf(out, "  { int __rae_spm = rae_string_pool_mark(); __rae_results%d = ", id);
-  else fprintf(out, "  __rae_results%d = ", id);
+  if (ctx->stmt_may_pool) fprintf(out, "  int __rae_spm_results%d = rae_string_pool_mark();\n", id);
+  fprintf(out, "  __auto_type __rae_results%d = ", id);
   emit_expr(ctx, call, out, PREC_LOWEST, false, false);
-  fprintf(out, ctx->stmt_may_pool ? "; rae_string_pool_flush(__rae_spm); }\n" : ";\n");
+  fprintf(out, ";\n");
+  if (ctx->stmt_may_pool) fprintf(out, "  rae_string_pool_flush(__rae_spm_results%d);\n", id);
   ctx->has_expected_type = had_expected;
   for (const AstDestructureBinding* b = stmt->as.destruct_stmt.bindings; b; b = b->next) {
     fprintf(out, "  ");

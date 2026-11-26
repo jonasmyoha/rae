@@ -64,10 +64,8 @@ SOURCES = {
     "match": ("", "match flag { case true => MAKE, default => one }"),
     "task": ("let task: Task(TYPE) = spawn SPAWN", "task.get()"),
     "literal": ("", "V1"),
-    "results": ("let taken: TYPE = value, let fine: Bool = fine = makeBoth()", "taken"),
+    "results": ("let taken: TYPE = value, let fine: Bool = fine = BOTH", "taken"),
 }
-# sources only the plain program has: a generic function has one result for now
-PLAIN_ONLY = ("results",)
 
 # position: statements with SRC; OK(...) is the check
 POSITIONS = {
@@ -193,6 +191,11 @@ func copied(T: type, value: view T) ret T {
   ret held
 }
 
+func copiedBoth(T: type, value: view T) ret value: T, fine: Bool {
+  let held: T = value
+  ret value: held, fine: true
+}
+
 func handBack(T: type, value: own T) ret T {
   ret value
 }
@@ -227,8 +230,6 @@ class Program:
         self.functions = {}
         for source, (before, expression) in SOURCES.items():
             for position, lines in POSITIONS.items():
-                if self.generic and source in PLAIN_ONLY:
-                    continue
                 # what Rae refuses: a move in a defer, `own` where nothing takes it
                 if position == "defer" and source in ("own", "task"):
                     continue
@@ -239,11 +240,11 @@ class Program:
 
     def fill(self, text):
         if self.generic:
-            words = {"MAKE": "copied(value: first)", "SPAWN": "handBack(value: copied(value: first))",
+            words = {"BOTH": "copiedBoth(value: first)", "MAKE": "copied(value: first)", "SPAWN": "handBack(value: copied(value: first))",
                      "SRCTASKOTHER": "SRC, other: copied(value: first)", "SRCOTHER": "SRC, other: first",
                      "TYPE": "T", "V1": "first", "V2": "second"}
         else:
-            words = {"MAKE": "make()", "SPAWN": "make()", "SRCTASKOTHER": "SRC", "SRCOTHER": "SRC",
+            words = {"BOTH": "makeBoth()", "MAKE": "make()", "SPAWN": "make()", "SRCTASKOTHER": "SRC", "SRCOTHER": "SRC",
                      "TYPE": self.type_name, "V1": self.value1, "V2": self.value2}
         for word, replacement in words.items():
             text = text.replace(word, replacement)

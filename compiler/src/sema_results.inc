@@ -71,14 +71,44 @@ static const AstReturnItem* sema_check_results(CompilerContext* ctx, AstModule* 
     return fd->returns;
 }
 
-/* A generic function has one result for now: its instances' results are a later step */
-static void sema_check_generic_results(AstModule* module, const AstDecl* decl) {
-    if (decl->kind != AST_DECL_FUNC || !decl->as.func_decl.returns || !decl->as.func_decl.returns->next) return;
-    char buf[320];
-    snprintf(buf, sizeof buf, "'%.*s' is generic and has several results; a generic function has one result for now",
-             (int)decl->as.func_decl.name.len, decl->as.func_decl.name.data);
-    diag_error(decl->origin_file ? decl->origin_file : sema_diag_file(module), (int)decl->line, (int)decl->column, buf);
-    if (module) module->had_error = true;
+static TypeInfo* sema_generic_result(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl,
+                                     TypeInfo* receiver, const AstCallArg* args, AstTypeRef* written, int depth);
+static TypeInfo* sema_value_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* value,
+                                 int depth);
+
+/* A call of a generic function is left to the backend (no decl_link): what `result`
+ * of the generic `decl` is for this call's values, NULL when they do not say */
+static TypeInfo* sema_generic_result_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                          const AstDecl* decl, const AstReturnItem* result, const AstExpr* call) {
+    AstDecl one = *decl;
+    AstReturnItem only = *result;
+    only.next = NULL;
+    one.as.func_decl.returns = &only;
+    if (call->kind == AST_EXPR_CALL)
+        return sema_generic_result(ctx, module, symbols, &one, NULL, call->as.call.args, call->as.call.generic_args, 0);
+    TypeInfo* receiver = sema_value_type(ctx, module, symbols, call->as.method_call.object, 0);
+    while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+    if (!receiver) return NULL;
+    return sema_generic_result(ctx, module, symbols, &one, receiver, call->as.method_call.args,
+                               call->as.method_call.generic_args, 0);
+}
+
+/* The generic function with several results that such a call means, NULL for none */
+static const AstDecl* sema_generic_results_callee(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                                  const AstExpr* call) {
+    Str name = {0};
+    if (call->kind == AST_EXPR_CALL && call->as.call.callee && call->as.call.callee->kind == AST_EXPR_IDENT)
+        name = call->as.call.callee->as.ident;
+    else if (call->kind == AST_EXPR_METHOD_CALL) name = call->as.method_call.method_name;
+    if (!name.len) return NULL;
+    for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
+        const AstDecl* d = curr->decl;
+        if (!d || d->kind != AST_DECL_FUNC || !d->as.func_decl.generic_params || d->as.func_decl.specialization_args
+            || !d->as.func_decl.returns || !d->as.func_decl.returns->next) continue;
+        if (!sema_package_reaches(s_current_decl_origin, d)) continue;
+        if (sema_generic_result_type(ctx, module, symbols, d, d->as.func_decl.returns, call)) return d;
+    }
+    return NULL;
 }
 
 /* `ret quotient: a / b, remainder: a % b` in a function with several results */
@@ -88,9 +118,26 @@ static void sema_analyze_ret_results(CompilerContext* ctx, AstModule* module, Sy
     char buf[640];
     sema_result_labels(results, labels, sizeof labels);
     for (AstReturnArg* arg = stmt->as.ret_stmt.values; arg; arg = arg->next) {
+        /* `ret divide(a: a, b: b)`: the results of another function are not passed on */
+        bool passes_on = !arg->has_label && arg->value
+            && (arg->value->kind == AST_EXPR_CALL || arg->value->kind == AST_EXPR_METHOD_CALL);
+        const AstExpr* saved_call = s_destructured_call;
+        if (passes_on) s_destructured_call = arg->value;
         if (arg->value) sema_analyze_expr(ctx, module, symbols, arg->value, true);
+        s_destructured_call = saved_call;
         size_t line = arg->value ? arg->value->line : stmt->line;
         size_t column = arg->value ? arg->value->column : stmt->column;
+        const AstDecl* passed = !passes_on ? NULL
+            : arg->value->decl_link && arg->value->decl_link->kind == AST_DECL_FUNC ? arg->value->decl_link
+            : arg->value->decl_link ? NULL : sema_generic_results_callee(ctx, module, symbols, arg->value);
+        if (passed && passed->as.func_decl.returns && passed->as.func_decl.returns->next) {
+            snprintf(buf, sizeof buf,
+                     "a 'ret' does not pass on the results of '%.*s': take them apart, then give each by its label "
+                     "(`ret %.*s: ..., ...`)", (int)passed->as.func_decl.name.len, passed->as.func_decl.name.data,
+                     (int)results->name.len, results->name.data);
+            sema_results_error(module, line, column, buf);
+            return;
+        }
         if (!arg->has_label) {
             snprintf(buf, sizeof buf, "this function has several results (%s): 'ret' gives each by its label, "
                      "as in `ret %.*s: value, ...`", labels, (int)results->name.len, results->name.data);
@@ -147,6 +194,14 @@ static void sema_analyze_ret_results(CompilerContext* ctx, AstModule* module, Sy
 static bool sema_several_results_as_value(AstModule* module, const AstExpr* call, const AstDecl* callee) {
     const AstFuncDecl* fd = &callee->as.func_decl;
     if (!fd->returns || !fd->returns->next || call == s_destructured_call) return false;
+    if (call == s_spawned_call) {
+        char spawned[400];
+        snprintf(spawned, sizeof spawned,
+                 "'%.*s' has several results and a Task has one: spawn a function that calls it and returns "
+                 "what is wanted of them", (int)fd->name.len, fd->name.data);
+        sema_results_error(module, call->line, call->column, spawned);
+        return true;
+    }
     char labels[256];
     char buf[640];
     sema_result_labels(fd->returns, labels, sizeof labels);
@@ -167,8 +222,13 @@ static void sema_analyze_destructure(CompilerContext* ctx, AstModule* module, Sy
     s_destructured_call = call;
     if (call) sema_analyze_expr(ctx, module, symbols, call, true);
     s_destructured_call = saved;
-    const AstDecl* callee = call && call->kind == AST_EXPR_CALL && call->decl_link
-        && call->decl_link->kind == AST_DECL_FUNC ? call->decl_link : NULL;
+    const AstDecl* callee = call && call->decl_link && call->decl_link->kind == AST_DECL_FUNC ? call->decl_link : NULL;
+    /* a generic function's call is the backend's to bind: its results by its values */
+    bool generic = false;
+    if (!callee && call) {
+        callee = sema_generic_results_callee(ctx, module, symbols, call);
+        generic = callee != NULL;
+    }
     const AstReturnItem* results = callee ? callee->as.func_decl.returns : NULL;
     if (callee && (!results || !results->next)) {
         snprintf(buf, sizeof buf, "'%.*s' has %s",
@@ -179,8 +239,7 @@ static void sema_analyze_destructure(CompilerContext* ctx, AstModule* module, Sy
         results = NULL;
     } else if (!callee && module && !module->had_error) {
         sema_results_error(module, stmt->line, stmt->column,
-                           "cannot tell which function this call is; the results of a plain function's call can "
-                           "be taken apart (not yet those of a generic function or a method)");
+                           "cannot tell which function with several results this call is");
     }
     char labels[256];
     sema_result_labels(results, labels, sizeof labels);
@@ -207,12 +266,13 @@ static void sema_analyze_destructure(CompilerContext* ctx, AstModule* module, Sy
             break;
         }
         if (result && result->type && declared && !b->type->is_view && !b->type->is_mod) {
-            TypeInfo* given = sema_resolve_type_internal(ctx, module, symbols, result->type);
-            if (given != declared) {
+            TypeInfo* given = generic ? sema_generic_result_type(ctx, module, symbols, callee, result, call)
+                                      : sema_resolve_type_internal(ctx, module, symbols, result->type);
+            if (given && given != declared) {
                 char want[160], have[160];
                 size_t want_pos = 0, have_pos = 0;
                 sema_type_text(b->type, want, sizeof want, &want_pos);
-                sema_type_text(result->type, have, sizeof have, &have_pos);
+                sema_type_text(generic ? sema_type_ref_of(ctx, given) : result->type, have, sizeof have, &have_pos);
                 snprintf(buf, sizeof buf, "result '%.*s' is '%s'; '%.*s' is written '%s'",
                          (int)b->return_label.len, b->return_label.data, have,
                          (int)b->local_name.len, b->local_name.data, want);
