@@ -322,12 +322,8 @@ static void sema_type_from_instance(CompilerContext* ctx, AstModule* module, Sym
     if (spec->as.func_decl.is_extern || !spec->as.func_decl.body) return;
     const AstReturnItem* result = spec->as.func_decl.returns;
     if (!result || !result->type || result->next) return;  /* none, or several: no value */
-    /* an optional result is left without one: a generic call's `opt` is used
-     * unchecked in lib/ and cases today (`lanes.modAt(index: i).marks`), which
-     * the unnarrowed-optional rule refuses for a plain call (queued) */
-    if (result->type->is_opt) return;
     TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, result->type);
-    if (sema_type_is_concrete(type, 0) && type->kind != TYPE_OPT) call->resolved_type = type;
+    if (sema_type_is_concrete(type, 0)) call->resolved_type = type;
 }
 
 static void sema_decide_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* call) {

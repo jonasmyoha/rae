@@ -95,8 +95,8 @@ func timelineAddSpan(
 }
 
 func timelineAddMark(state: mod TimelineState, lane: view Int, time: view Int) {
-  if lane >= 0 and lane < state.lanes.length {
-    state.lanes.modAt(index: lane).marks.add(value: time)
+  if let target: mod TimelineLane = state.lanes.modAt(index: lane) {
+    target.marks.add(value: time)
   }
 }
 

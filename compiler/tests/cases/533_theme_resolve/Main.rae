@@ -27,7 +27,7 @@ func main() {
     if let alignVal: Int = theme.textAligns.copyAt(index: mi) {
       align = alignVal
     }
-    let size: Int = theme.textSizes.copyAt(index: mi).toInt()
+    let size: Int = theme.textSizes.copyAtDefault(index: mi).toInt()
     if let font: String = theme.textFonts.copyAt(index: mi) {
       if let slot: String = theme.textColorSlots.copyAt(index: mi) {
         if let shadow: String = theme.textShadowNames.copyAt(index: mi) {
@@ -43,18 +43,18 @@ func main() {
     if let shadowAVal: Int = theme.shadowA.copyAt(index: si) {
       sa = shadowAVal
     }
-    let sox: Int = theme.shadowOffX.copyAt(index: si).toInt()
-    let ssoft: Int = theme.shadowSoft.copyAt(index: si).toInt()
+    let sox: Int = theme.shadowOffX.copyAtDefault(index: si).toInt()
+    let ssoft: Int = theme.shadowSoft.copyAtDefault(index: si).toInt()
     log("softer a={sa} offX={sox} soft={ssoft}")
   }
 
   # cycle + unknown-parent styles still resolve (truncated), not hang.
   if let ca: Int = themeTextStyleIndex(theme: theme, styleId: "cycleA") {
-    let caSize: Int = theme.textSizes.copyAt(index: ca).toInt()
+    let caSize: Int = theme.textSizes.copyAtDefault(index: ca).toInt()
     log("cycleA size={caSize}")
   }
   if let oi: Int = themeTextStyleIndex(theme: theme, styleId: "orphan") {
-    let oSize: Int = theme.textSizes.copyAt(index: oi).toInt()
+    let oSize: Int = theme.textSizes.copyAtDefault(index: oi).toInt()
     log("orphan size={oSize}")
   }
 

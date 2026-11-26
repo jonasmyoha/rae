@@ -1433,9 +1433,20 @@ static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInf
     AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
     memset(tr, 0, sizeof(*tr));
     if (ti->kind == TYPE_REF) {
-        tr->is_view = !ti->as.ref.is_mod;
-        tr->is_mod = ti->as.ref.is_mod;
+        bool is_mod = ti->as.ref.is_mod;
         ti = ti->as.ref.base;
+        /* an optional reference (`opt view T`, what viewAt answers): its payload by
+         * name, with both marks, or its text formatted the pointer as the value */
+        if (ti && ti->kind == TYPE_OPT && ti->as.opt.base && ti->as.opt.base->kind != TYPE_VOID
+            && ti->as.opt.base->kind != TYPE_GENERIC_PARAM) {
+            AstTypeRef* named = sema_type_ref_of(ctx->compiler_ctx, ti->as.opt.base);
+            named->is_opt = true;
+            named->is_view = !is_mod;
+            named->is_mod = is_mod;
+            return named;
+        }
+        tr->is_view = !is_mod;
+        tr->is_mod = is_mod;
         if (ti && ti->kind == TYPE_OPT) { tr->is_opt = true; }
         tr->resolved_type = (TypeInfo*)ti;
         return tr;

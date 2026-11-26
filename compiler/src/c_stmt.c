@@ -1916,6 +1916,14 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 src_opt_struct = true; opt_name_tr = &synth_opt_tr;
             }
         }
+        /* A call whose type sema gave (a generic call has its instance's result) is
+         * held as what it answers: `if let one: Int = kinds.copyAt(index: 0)` of a
+         * List(Kind) answers an `opt Kind`, read as the Int it is */
+        if (!ctx->generic_params && src && src->resolved_type && src->resolved_type->kind == TYPE_OPT
+            && src_tr && src_tr->is_opt && !(src_tr->is_view || src_tr->is_mod) && rae_opt_is_struct_rep(ctx, src_tr)
+            && !c_is_any(src_tr)) {
+            src_opt_struct = true; opt_name_tr = src_tr;
+        }
         bool bind_is_any = c_is_any(&synth_opt_tr);  /* (in this specialization) an Any is its own `none` */
         if (!src_opt_struct && !bind_is_any && src_tr && src_tr->is_opt
             && !(src_tr->is_view || src_tr->is_mod)

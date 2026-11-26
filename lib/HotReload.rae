@@ -321,11 +321,11 @@ func parseBuildStatus(raw: view String) pub ret BuildStatus {
   if lines.length is 0 {
     ret emptyBuildStatus()
   }
-  let kind: String = lines.copyAt(index: 0).trim()
+  let kind: String = lines.copyAtDefault(index: 0).trim()
   let okFlag: Bool = kind is "ok"
   var msg: String = ""
   if lines.length > 1 {
-    msg = lines.copyAt(index: 1).trim()
+    msg = lines.copyAtDefault(index: 1).trim()
   }
   ret BuildStatus { present: true, ok: okFlag, message: msg }
 }

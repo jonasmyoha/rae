@@ -537,7 +537,7 @@ func debugMedianInterval(times: view List(Float64)) ret Float {
   }
   var intervals: List(Float) = List.create(Float, cap: times.length - 1)
   loop var i: Int = 1, i < times.length, ++i {
-    let interval: Float = (times.copyAt(index: i) - times.copyAt(index: i - 1)) as Float
+    let interval: Float = (times.copyAtDefault(index: i) - times.copyAtDefault(index: i - 1)) as Float
     # Insertion keeps the list sorted (a window holds a few hundred at most)
     var at: Int = intervals.length
     loop at > 0 and intervals.copyAtFallback(index: at - 1, fallback: 0.0) > interval {

@@ -59,11 +59,15 @@ func flameAddNode(
   state.nodes.add(value: FlameNode { parent: parent, nameId: nameId, total: total, depth: depth })
   let previous: Int = state.nodes.copyAtDefault(index: parent).lastChild
   if previous < 0 {
-    state.nodes.modAt(index: parent).firstChild = index
-  } else {
-    state.nodes.modAt(index: previous).nextSibling = index
+    if let parentNode: mod FlameNode = state.nodes.modAt(index: parent) {
+      parentNode.firstChild = index
+    }
+  } else if let previousNode: mod FlameNode = state.nodes.modAt(index: previous) {
+    previousNode.nextSibling = index
   }
-  state.nodes.modAt(index: parent).lastChild = index
+  if let parentNode: mod FlameNode = state.nodes.modAt(index: parent) {
+    parentNode.lastChild = index
+  }
   ret index
 }
 
@@ -83,7 +87,9 @@ func flameChildNamed(state: view FlameGraphState, parent: view Int, nameId: view
 # A sample: `value` added to the root and to every node along `path` (outermost first), the nodes
 # made the first time a path reaches them; how call stacks become a flame graph
 func flameAddSample(state: mod FlameGraphState, path: view List(String), value: view Int) {
-  state.nodes.modAt(index: 0).total = state.nodes.copyAtDefault(index: 0).total + value
+  if let root: mod FlameNode = state.nodes.modAt(index: 0) {
+    root.total = root.total + value
+  }
   var at: Int = 0
   loop let name: view String in path {
     let nameId: Int = flameName(state: state, name: name)
@@ -96,7 +102,9 @@ func flameAddSample(state: mod FlameGraphState, path: view List(String), value: 
         total: 0
       )
     }
-    state.nodes.modAt(index: child).total = state.nodes.copyAtDefault(index: child).total + value
+    if let childNode: mod FlameNode = state.nodes.modAt(index: child) {
+      childNode.total = childNode.total + value
+    }
     at = child
   }
 }

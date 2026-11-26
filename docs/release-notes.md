@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.108, 2026-11-27: an optional result of a generic call is checked like any other
+
+- A generic call that returns an optional (`list.modAt(index: i)`, `list.copyAt(index: i)`) now has that type, so
+  using it unchecked is the same error as for a plain function: `this value is optional ... check it before
+  using the field`, or `optional not unwrapped`. Before, the C took the value without looking.
+- Fixed where lib/ did that: ui/timelineSystem, ui/flameGraphSystem (an `if let` of the `mod` element),
+  ui/WindowGeometry, HotReload, SkyHosek, app3d/UiShell and ui/DebugOverlay (`copyAtDefault`, the index being
+  checked already), and example 144.
+- Sema reads a call's type from its instance and no longer works it out a second time.
+- The C backend writes an optional reference it gets as a type (`opt view T`) with its payload's name: the text of
+  `{list.viewAt(index: 1)}` printed the pointer as a number once the call had its type. And `if let one: Int =
+  kinds.copyAt(index: 0)` of a List of an enum holds what the call answers (`opt Kind`), read as the Int it is.
+
 ## 0.4.107, 2026-11-26: generic instances spelled as Rae types
 
 - An instance of a generic function names its type arguments as Rae types (`UInt8`), not by their C names

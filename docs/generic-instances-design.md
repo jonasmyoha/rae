@@ -253,15 +253,11 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    made in type-name order, so the C is the same on every run. Third part (0.4.107): an instance's type arguments are spelled as
    Rae types (`UInt8`, not the TypeInfo's C name `uint8_t`), so sema decides inside spawn wrappers and spawned
    calls too, and the backend also emits the instances sema decided that discovery did not find (no "sema only" is
-   left); where both have one, the backend's spelling stays (its C of a `view` of an enum is `const`). A generic call has its
-   instance's result as its type, except an optional result: lib/ and some cases use one unchecked
-   (`lanes.modAt(index: i).marks`, lib/ui/timelineSystem, flameGraphSystem, WindowGeometry, HotReload, SkyHosek,
-   app3d/UiShell; cases 533, 602, 1224), which the unnarrowed-optional rule refuses in a plain call. That, and
-   `sema_value_type` as a plain read, is its own queue task. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which fails on a difference. Left for
-   their own task: the spawn wrappers (sema decides nothing in a wrapper or a spawned call), and a concrete
-   `resolved_type` on each generic call: tried, it lets sema's checks see lib code they could not before
-   (`state.lanes.modAt(index: lane).marks` in lib/ui/timelineSystem uses an optional unchecked), and the
-   instance's written result spells a number type by its C name (`uint8_t`).
+   left); where both have one, the backend's spelling stays (its C of a `view` of an enum is `const`).
+   A generic call has its instance's result as its type, an optional one too since 0.4.108 (the places in lib/ that
+   used one unchecked were fixed: the rule for a plain call holds for a generic one), and `sema_value_type` reads a
+   call's type instead of working it out again. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which
+   fails on a difference.
 5. **Emission from instances** behind `RAE_GENERIC_INSTANCES=1`, prototypes and helpers too; the 29 cases; the suite
    runs its cases both ways.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the

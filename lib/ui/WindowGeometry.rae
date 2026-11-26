@@ -133,10 +133,10 @@ func restoreWindowGeometry(windowGeometry: mod WindowGeometry) ret Bool {
     if parts.length < 4 {
       ret false
     }
-    let x: Int = parts.copyAt(index: 0).trim().toInt()
-    let y: Int = parts.copyAt(index: 1).trim().toInt()
-    let w: Int = parts.copyAt(index: 2).trim().toInt()
-    let h: Int = parts.copyAt(index: 3).trim().toInt()
+    let x: Int = parts.copyAtDefault(index: 0).trim().toInt()
+    let y: Int = parts.copyAtDefault(index: 1).trim().toInt()
+    let w: Int = parts.copyAtDefault(index: 2).trim().toInt()
+    let h: Int = parts.copyAtDefault(index: 3).trim().toInt()
     # A zero or negative size is a corrupt or truncated line. Changing nothing is
     # the right answer: a bad file must not be able to strand the window at 0x0 or
     # off-screen, where the user cannot get at it to fix it.
@@ -166,8 +166,8 @@ func restoreWindowPosition(windowGeometry: mod WindowGeometry) ret Bool {
     if parts.length < 4 {
       ret false
     }
-    let x: Int = parts.copyAt(index: 0).trim().toInt()
-    let y: Int = parts.copyAt(index: 1).trim().toInt()
+    let x: Int = parts.copyAtDefault(index: 0).trim().toInt()
+    let y: Int = parts.copyAtDefault(index: 1).trim().toInt()
     Gpu2d.setWindowPosition(x: x, y: y)
     windowGeometry.lastX = x
     windowGeometry.lastY = y

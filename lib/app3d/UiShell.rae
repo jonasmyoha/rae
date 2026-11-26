@@ -144,12 +144,12 @@ func themeSlotOr(
   slot: view String
   fallback: view RgbaColor
 ) ret RgbaColor {
-  if let idx: Int = themePaletteIndex(theme: theme, slot: slot) {
+  if let paletteIndex: Int = themePaletteIndex(theme: theme, slot: slot) {
     ret RgbaColor {
-      r: theme.palR.copyAt(index: idx)
-      g: theme.palG.copyAt(index: idx)
-      b: theme.palB.copyAt(index: idx)
-      a: theme.palA.copyAt(index: idx)
+      r: theme.palR.copyAtDefault(index: paletteIndex)
+      g: theme.palG.copyAtDefault(index: paletteIndex)
+      b: theme.palB.copyAtDefault(index: paletteIndex)
+      a: theme.palA.copyAtDefault(index: paletteIndex)
     }
   }
   ret RgbaColor { r: fallback.r, g: fallback.g, b: fallback.b, a: fallback.a }

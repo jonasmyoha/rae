@@ -581,7 +581,9 @@ func walkRoute() ret List(RouteLeg) {
 func routeLegAt(route: view List(RouteLeg), seconds: view Float) ret Int {
   var start: Float = 0.0
   loop var i: Int = 0, i < route.length, ++i {
-    start = start + route.viewAt(index: i).seconds
+    if let leg: view RouteLeg = route.viewAt(index: i) {
+      start = start + leg.seconds
+    }
     if seconds < start {
       ret i
     }
