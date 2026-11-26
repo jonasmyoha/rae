@@ -2,13 +2,27 @@
 // draw), a Rae asset since #908 (was the C constant G2D_IMG_WGSL). Output is
 // premultiplied. uImg = rect, tint (straight, premultiplied here),
 // params (radius, rotation about the quad center in radians, tile flag, premultiplied source),
-// uv (origin + size), clip rect (design units), clip (radius, enabled) —
+// uv (origin + size), clip (origin in design units, size in its node's units), clip (radius,
+// enabled), and the clip's frame (uImg[6], Gpu2dCanvasClip) —
 // the last two are the rounded clip the box pass has always had (#1003),
 // written per draw from the clip active when the image was queued; the clip's
 // vec4 ends with the color change (hue turn in radians, brightness less 1;
 // 0, 0 none: Gpu2dCanvasImage canvasSetImageColor).
 @group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;
-@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 6>;
+@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 7>;
+// The clip in its node's own frame (Gpu2dCanvasClip): the design offset from its origin
+// taken into the frame by the 2x2, then the rounded box there, so a turned or scaled
+// node's corners stay round and the smoothing (fwidth in that frame) is about a pixel
+fn clipShapeDistance(posD: vec2<f32>, origin: vec2<f32>, size: vec2<f32>, frame: vec4<f32>, radius: f32) -> f32 {
+  let offset = posD - origin;
+  let local = vec2<f32>(frame.x * offset.x + frame.y * offset.y, frame.z * offset.x + frame.w * offset.y);
+  return sdRoundBoxClip(local - size * 0.5, size * 0.5, radius);
+}
+fn sdRoundBoxClip(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let rr = min(r, min(b.x, b.y));
+  let q = abs(p) - b + vec2<f32>(rr, rr);
+  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;
+}
 @group(0) @binding(2) var tex: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
 struct VsOut {
@@ -82,10 +96,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let aa = max(fwidth(d), 0.0001);
   var cov = 1.0 - smoothstep(-aa, aa, d);
   if (uImg[5].y > 0.5) {  // rounded clip coverage (#1003)
-    let cc = uImg[4].xy + uImg[4].zw * 0.5;
-    let ch = uImg[4].zw * 0.5;
-    let cr = uImg[5].x;
-    let cd = sdRoundBox(in.posD - cc, ch, cr);
+    let cd = clipShapeDistance(in.posD, uImg[4].xy, uImg[4].zw, uImg[6], uImg[5].x);
     let caa = max(fwidth(cd), 0.0001);
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
   }

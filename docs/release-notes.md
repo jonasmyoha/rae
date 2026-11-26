@@ -4,6 +4,18 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.109, 2026-11-27: a turned or scaled clip keeps its rounded corners
+
+- A node with `Overflow: Clip` and a `CornerRadius` clips its children to its rounded box in its own frame, however
+  its TransformFx turns and scales it (`Gpu2d.pushClipFrame`, Gpu2dCanvasClip `canvasPushClipFrame`). The box,
+  text and image shaders evaluate the rounded box there, so a turned card's corners are round, its radius scales
+  with it, and the edge's smoothing stays about a pixel. Before, a turned clip was the axis-aligned box round the
+  card, rounded only while upright or upside down, and the radius was the full size at every scale.
+- A plain rect clip inside a turned one keeps the turned shape; two upright clips intersect as before. The clip
+  uniform is 48 bytes (its frame's 2x2 added), and an image's uniform 28 floats.
+- Case 1695 and the hardware check checks/gpu2dTurnedClip (turned 0, 0.2, 1.0, 3.14 at scale 1, 0.7, 0.5 and
+  flipped: no pixel outside the rounded box, every corner tip empty, for boxes and text).
+
 ## 0.4.108, 2026-11-27: an optional result of a generic call is checked like any other
 
 - A generic call that returns an optional (`list.modAt(index: i)`, `list.copyAt(index: i)`) now has that type, so

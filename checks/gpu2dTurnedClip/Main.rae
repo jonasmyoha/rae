@@ -1,0 +1,328 @@
+# Hardware check for a clip in its node's own frame (Gpu2dCanvasClip canvasPushClipFrame): a
+# 100 x 150 node with radius 16 at (300, 200), turned and scaled about that origin, clips a box that
+# fills the slot and a large word drawn across it. Read back from a 640 x 640 slot (a design unit
+# is a pixel): no inked pixel lies more than about a pixel outside the node's rounded box in its
+# own frame (the box and the text both clip along the turned edge and round the corners), every
+# pixel well inside it is filled, and each corner's tip is empty. Poses: turned 0, 0.2, 1.0 and
+# 3.14 at scale 1, 0.7 and 0.5, and flipped (-0.5 x 1). Exit code 0 = passed.
+import Gpu2d
+import Gpu2dText
+import SdfText
+import Math
+import Sys
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+open Gpu2dCanvas
+open Gpu2dCanvasCache
+
+const slotSize: Int = 640
+
+const checkWaitTries: Int = 1000
+
+type Pose {
+  rotation: Float
+  scaleX: Float
+  scaleY: Float
+}
+
+func poses() ret List(Pose) {
+  ret List(Pose) {
+    Pose { rotation: 0.0, scaleX: 1.0, scaleY: 1.0 }
+    Pose { rotation: 0.2, scaleX: 0.7, scaleY: 0.7 }
+    Pose { rotation: 1.0, scaleX: 1.0, scaleY: 1.0 }
+    Pose { rotation: 3.14, scaleX: 0.5, scaleY: 0.5 }
+    Pose { rotation: 0.2, scaleX: -0.5, scaleY: 1.0 }
+  }
+}
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
+# A pixel box: the first and last row and column whose alpha is at least half
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  if let value: UInt8 = bytes.copyAt(index: index) {
+    ret value as Int
+  }
+  ret -1
+}
+
+func readTexture(
+  resources: mod GpuResources
+  texture: view TextureId
+  rowBytes: view Int
+  height: view Int
+) ret opt List(UInt8) {
+  let size: Int = rowBytes * height
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: size
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if not recordCopyTextureToBuffer(
+        recording: recording
+        resources: resources
+        texture: texture
+        buffer: buffer
+        bytesPerRow: rowBytes
+      ) {
+        log("FAIL: texture copy refused")
+        ret none
+      }
+      if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+        var status: Int = 0
+        loop var tries: Int = 0, status is 0 and tries < checkWaitTries, ++tries {
+          status = pollSubmission(resources: resources, id: submission)
+          if status is 0 {
+            checkWaitForGpu()
+          }
+        }
+        retireSubmission(resources: resources, id: submission)
+        if let read: ReadbackId = startReadback(
+          resources: resources
+          buffer: buffer
+          offset: 0
+          size: size
+        ) {
+          var done: Int = 0
+          loop var tries: Int = 0, done is 0 and tries < checkWaitTries, ++tries {
+            done = pollReadback(resources: resources, id: read)
+            if done is 0 {
+              checkWaitForGpu()
+            }
+          }
+          var bytes: List(UInt8) = List.create(UInt8, cap: size)
+          loop var i: Int = 0, i < size, ++i {
+            bytes.add(value: 0)
+          }
+          let copied: Bool = copyReadback(resources: resources, id: read, destination: bytes)
+          retireReadback(resources: resources, id: read)
+          let retired: Bool = retireBuffer(resources: resources, id: buffer)
+          if copied {
+            ret bytes
+          }
+        }
+      }
+    }
+  }
+  log("FAIL: readback")
+  ret none
+}
+
+# The node's rounded-box distance at a pixel's middle, in design units (a pixel), by the shaders'
+# math
+func shapeDistance(pose: view Pose, pixelX: view Int, pixelY: view Int) ret Float {
+  let offsetX: Float = pixelX.toFloat() + 0.5 - 300.0
+  let offsetY: Float = pixelY.toFloat() + 0.5 - 200.0
+  let cosR: Float = Math.cos(x: pose.rotation)
+  let sinR: Float = Math.sin(x: pose.rotation)
+  let localX: Float = (cosR * offsetX + sinR * offsetY) / pose.scaleX - 50.0
+  let localY: Float = (-sinR * offsetX + cosR * offsetY) / pose.scaleY - 75.0
+  let qx: Float = Math.abs(value: localX) - 50.0 + 16.0
+  let qy: Float = Math.abs(value: localY) - 75.0 + 16.0
+  let outsideX: Float = Math.max(a: qx, b: 0.0)
+  let outsideY: Float = Math.max(a: qy, b: 0.0)
+  let local: Float = Math.min(a: Math.max(a: qx, b: qy), b: 0.0) + Math.sqrt(
+    x: outsideX * outsideX + outsideY * outsideY
+  ) - 16.0
+  # in pixels: the smaller scale is the most a local unit can shrink to
+  ret local * Math.min(a: Math.abs(value: pose.scaleX), b: Math.abs(value: pose.scaleY))
+}
+
+func pixelX(pose: view Pose, localX: view Float, localY: view Float) ret Int {
+  ret (300.0 + Math.cos(x: pose.rotation) * localX * pose.scaleX - Math.sin(x: pose.rotation) * localY * pose.scaleY).toInt()
+}
+
+func pixelY(pose: view Pose, localX: view Float, localY: view Float) ret Int {
+  ret (200.0 + Math.sin(x: pose.rotation) * localX * pose.scaleX + Math.cos(x: pose.rotation) * localY * pose.scaleY).toInt()
+}
+
+func checkPose(
+  canvas: mod Gpu2dCanvas
+  pose: view Pose
+  slot: view Int
+  name: view String
+) ret Bool {
+  let rowBytes: Int = slotSize * 4
+  if let resources: mod GpuResources = canvas.gpuResources {
+    if let bytes: List(UInt8) = readTexture(
+      resources: resources
+      texture: canvasCacheTexture(canvas: canvas, slot: slot)
+      rowBytes: rowBytes
+      height: slotSize
+    ) {
+      var outside: Int = 0
+      var missing: Int = 0
+      var inked: Int = 0
+      loop var y: Int = 0, y < slotSize, ++y {
+        loop var x: Int = 0, x < slotSize, ++x {
+          let alpha: Int = byteAt(bytes: bytes, index: y * rowBytes + x * 4 + 3)
+          let distance: Float = shapeDistance(pose: pose, pixelX: x, pixelY: y)
+          if alpha >= 128 {
+            inked = inked + 1
+            if distance > 1.0 {
+              outside = outside + 1
+            }
+          } else if distance < -1.5 and name is "box" {
+            missing = missing + 1
+          }
+        }
+      }
+      var tips: Int = 0
+      loop let corner: Int in List(Int) { 0, 1, 2, 3 } {
+        let cornerX: Float = 100.0 * ((corner % 2) as Float)
+        let cornerY: Float = 150.0 * ((corner / 2) as Float)
+        let towardX: Float = 1.0 - 2.0 * ((corner % 2) as Float)
+        let towardY: Float = 1.0 - 2.0 * ((corner / 2) as Float)
+        let tipX: Int = pixelX(
+          pose: pose
+          localX: cornerX + 2.0 * towardX
+          localY: cornerY + 2.0 * towardY
+        )
+        let tipY: Int = pixelY(
+          pose: pose
+          localX: cornerX + 2.0 * towardX
+          localY: cornerY + 2.0 * towardY
+        )
+        if byteAt(bytes: bytes, index: tipY * rowBytes + tipX * 4 + 3) < 128 {
+          tips = tips + 1
+        }
+      }
+      log(
+        "{name} turned {pose.rotation}, scale {pose.scaleX}x{pose.scaleY}: {inked} pixels inked, {outside} outside the rounded box, {missing} inside it empty, {tips} of 4 corner tips empty"
+      )
+      if name is "box" {
+        ret inked > 0 and outside is 0 and missing is 0 and tips is 4
+      }
+      ret inked > 0 and outside is 0
+    }
+  }
+  ret false
+}
+
+func drawPose(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  pose: view Pose
+  key: view Int
+  text: view Bool
+) ret Int {
+  let slot: Int = canvasCacheBegin(
+    canvas: canvas
+    key: key
+    width: slotSize
+    height: slotSize
+  )
+  Gpu2d.pushClipFrame(
+    canvas: canvas
+    originX: 300.0
+    originY: 200.0
+    width: 100.0
+    height: 150.0
+    rotation: pose.rotation
+    scaleX: pose.scaleX
+    scaleY: pose.scaleY
+    radius: 16.0
+  )
+  if text {
+    let pen: Float = Gpu2dText.drawText(
+      canvas: canvas
+      font: font
+      text: "WWWWWWWW"
+      x: 0.0
+      y: 320.0
+      sizePx: 200.0
+      color: 0xFFFFFFFF
+    )
+  } else {
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 0.0
+      y: 0.0
+      w: slotSize.toFloat()
+      h: slotSize.toFloat()
+      color: 0xFFFF0000
+    )
+  }
+  Gpu2d.popClipRect(canvas: canvas)
+  canvasCacheEnd(canvas: canvas)
+  ret slot
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 800, height: 600, title: "2D turned clip check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  let font: SdfFont = SdfText.loadSdfFontJson(
+    jsonPath: Sys.stdlibPath(path: "lib/assets/walker/Roboto-Regular.mtsdf.json")
+  )
+  let all: List(Pose) = poses()
+  var boxSlots: List(Int) = {}
+  var textSlots: List(Int) = {}
+  var frames: Int = 0
+  # a few frames, so a drawable is there; the last one is the one read back
+  loop not Gpu2d.pollClose() and frames < 3 {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    boxSlots.clear()
+    textSlots.clear()
+    loop var i: Int = 0, i < all.length, ++i {
+      let pose: Pose = all.copyAtDefault(index: i)
+      boxSlots.add(value: drawPose(
+        canvas: canvas
+        font: font
+        pose: pose
+        key: 10 + i
+        text: false
+      ))
+      textSlots.add(value: drawPose(
+        canvas: canvas
+        font: font
+        pose: pose
+        key: 30 + i
+        text: true
+      ))
+    }
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  var passed: Bool = true
+  loop var i: Int = 0, i < all.length, ++i {
+    let pose: Pose = all.copyAtDefault(index: i)
+    if not checkPose(
+      canvas: canvas
+      pose: pose
+      slot: boxSlots.copyAtDefault(index: i)
+      name: "box"
+    ) {
+      passed = false
+    }
+    if not checkPose(
+      canvas: canvas
+      pose: pose
+      slot: textSlots.copyAtDefault(index: i)
+      name: "text"
+    ) {
+      passed = false
+    }
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if not passed {
+    log("FAIL: a turned or scaled clip let something past its rounded box")
+    ret 1
+  }
+  log("TURNED CLIP OK: boxes and text clip to the rounded box in the node's frame in every pose")
+  ret 0
+}

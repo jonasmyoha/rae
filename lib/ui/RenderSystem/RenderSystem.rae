@@ -594,33 +594,23 @@ func paintSubtreeG(
             this: uiSystems.transform2d.worldTransforms
             entityId: entityId
           )
-          # the box round the card as drawn: turned past a quarter turn, its own unturned box
-          # from its turned origin would miss it, and nothing would be drawn
-          let clipRect: WorldRect = turnedWorldRectOf(
-            wt: cwt
-            cr: componentView(this: uiSystems.layout.computedRects, entityId: entityId)
+          # the node's rounded box in its own frame: a turned or scaled card keeps round
+          # corners, its radius scaling with it (Gpu2dCanvasClip canvasPushClipFrame)
+          let clipBox: view ComputedRect = componentView(
+            this: uiSystems.layout.computedRects
+            entityId: entityId
           )
-          let crad: Float = g2dRadius(world: world, entityId: entityId, fallback: 0.0)
-          # rounded only while the turn keeps the box upright (or upside down); turned
-          # otherwise the box round it has no corners of the card's
-          if crad > 0.0 and turnKeepsAxes(rotation: cwt.rotation) {
-            Gpu2d.pushClipRoundedRect(
-              canvas: canvas
-              x: clipRect.x
-              y: clipRect.y
-              w: clipRect.w
-              h: clipRect.h
-              radius: crad * Math.abs(value: cwt.scale.x)
-            )
-          } else {
-            Gpu2d.pushClipRect(
-              canvas: canvas
-              x: clipRect.x
-              y: clipRect.y
-              w: clipRect.w
-              h: clipRect.h
-            )
-          }
+          Gpu2d.pushClipFrame(
+            canvas: canvas
+            originX: cwt.position.x
+            originY: cwt.position.y
+            width: clipBox.size.x
+            height: clipBox.size.y
+            rotation: cwt.rotation
+            scaleX: cwt.scale.x
+            scaleY: cwt.scale.y
+            radius: g2dRadius(world: world, entityId: entityId, fallback: 0.0)
+          )
           clipped = true
         }
       }

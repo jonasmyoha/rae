@@ -3,6 +3,12 @@
 # "no clip" sentinel, a push intersecting its parent so nested clips compose,
 # the per-run scissor over the design->physical transform (g2dScissor) and
 # the rounded-clip uniform (clipUniformFor) the box pass binds per run.
+#
+# A clip has its node's own frame (canvasPushClipFrame): a turned or scaled
+# node clips to its rounded box there, the shaders evaluating sdRoundBox in
+# that frame, so its corners stay round in every pose, its radius scales with
+# it and the edge's smoothing (fwidth there) stays about one pixel. The
+# scissor is the axis-aligned box round it.
 import String
 import Math
 open webgpu/Webgpu
@@ -26,6 +32,7 @@ func clipReset(canvas: mod Gpu2dCanvas) {
   canvas.clipW.clear()
   canvas.clipH.clear()
   canvas.clipRadius.clear()
+  canvas.clipFrames.clear()
   canvas.clipFull.clear()
   canvas.clipStack.clear()
   canvas.clipX.add(value: 0.0)
@@ -33,8 +40,68 @@ func clipReset(canvas: mod Gpu2dCanvas) {
   canvas.clipW.add(value: 0.0)
   canvas.clipH.add(value: 0.0)
   canvas.clipRadius.add(value: 0.0)
+  addClipFrame(
+    canvas: canvas
+    originX: 0.0
+    originY: 0.0
+    width: 0.0
+    height: 0.0
+    matrix: Mat2 { m00: 1.0, m01: 0.0, m10: 0.0, m11: 1.0 }
+  )
   canvas.clipFull.add(value: true)
   canvas.currentClip = 0
+}
+
+# Takes a design-unit offset from a clip's origin into its node's frame
+type Mat2 {
+  m00: Float
+  m01: Float
+  m10: Float
+  m11: Float
+}
+
+func addClipFrame(
+  canvas: mod Gpu2dCanvas
+  originX: view Float
+  originY: view Float
+  width: view Float
+  height: view Float
+  matrix: view Mat2
+) {
+  canvas.clipFrames.add(value: originX)
+  canvas.clipFrames.add(value: originY)
+  canvas.clipFrames.add(value: width)
+  canvas.clipFrames.add(value: height)
+  canvas.clipFrames.add(value: matrix.m00)
+  canvas.clipFrames.add(value: matrix.m01)
+  canvas.clipFrames.add(value: matrix.m10)
+  canvas.clipFrames.add(value: matrix.m11)
+}
+
+# Float `part` (0..7) of clip `clip`'s frame
+func clipFrameAt(canvas: view Gpu2dCanvas, clip: view Int, part: view Int) ret Float {
+  ret clipFloatAt(list: canvas.clipFrames, index: clip * 8 + part)
+}
+
+# Whether clip `clip` is its own axis-aligned box at unit scale (the frame of a plain rect)
+func clipFrameIsPlain(canvas: view Gpu2dCanvas, clip: view Int) ret Bool {
+  ret Math.abs(value: clipFrameAt(canvas: canvas, clip: clip, part: 4) - 1.0) < 0.0001 and Math.abs(
+    value: clipFrameAt(canvas: canvas, clip: clip, part: 5)
+  ) < 0.0001 and Math.abs(value: clipFrameAt(canvas: canvas, clip: clip, part: 6)) < 0.0001 and Math.abs(
+    value: clipFrameAt(canvas: canvas, clip: clip, part: 7) - 1.0
+  ) < 0.0001
+}
+
+# Whether clip `clip` needs the shaders' rounded-box test: rounded, or in a turned or scaled frame
+# (a plain rect is the scissor alone)
+func clipNeedsShape(canvas: view Gpu2dCanvas, clip: view Int) ret Bool {
+  if clipIsFull(canvas: canvas, clip: clip) {
+    ret false
+  }
+  ret clipFloatAt(list: canvas.clipRadius, index: clip) > 0.0 or not clipFrameIsPlain(
+    canvas: canvas
+    clip: clip
+  )
 }
 
 func clipFloatAt(list: view List(Float), index: copy Int) ret Float {
@@ -62,42 +129,128 @@ func canvasPushClip(
   h: copy Float
   radius: copy Float
 ) {
+  canvasPushClipFrame(
+    canvas: canvas
+    originX: x
+    originY: y
+    width: w
+    height: h
+    rotation: 0.0
+    scaleX: 1.0
+    scaleY: 1.0
+    radius: radius
+  )
+}
+
+# A clip to the rounded box of a node `width` x `height` in its own units, whose world transform
+# puts
+# its origin at (originX, originY), turned by `rotation` and scaled by (scaleX, scaleY): a point p
+# of
+# its frame is at origin + R(rotation) (scale * p). `radius` is in the node's own units.
+func canvasPushClipFrame(
+  canvas: mod Gpu2dCanvas
+  originX: copy Float
+  originY: copy Float
+  width: copy Float
+  height: copy Float
+  rotation: copy Float
+  scaleX: copy Float
+  scaleY: copy Float
+  radius: copy Float
+) {
   let parent: Int = canvas.currentClip
   # The stage (Gpu2dCanvas Transform.rae): a clip is kept in the window's
   # points, like every queued draw
+  var stageScale: Float = 1.0
   if canvasHasStage(canvas: canvas) {
-    x = stageX(canvas: canvas, x: x)
-    y = stageY(canvas: canvas, y: y)
-    w = stageLength(canvas: canvas, length: w)
-    h = stageLength(canvas: canvas, length: h)
-    radius = stageLength(canvas: canvas, length: radius)
+    originX = stageX(canvas: canvas, x: originX)
+    originY = stageY(canvas: canvas, y: originY)
+    stageScale = stageLength(canvas: canvas, length: 1.0)
   }
-  var childX: Float = x
-  var childY: Float = y
-  var childW: Float = w
-  var childH: Float = h
+  let cosR: Float = Math.cos(x: rotation)
+  let sinR: Float = Math.sin(x: rotation)
+  let worldScaleX: Float = scaleX * stageScale
+  let worldScaleY: Float = scaleY * stageScale
+  # the box round it: its corners (w, 0), (0, h) and (w, h) turned and scaled about the origin
+  let ax: Float = width * worldScaleX * cosR
+  let ay: Float = width * worldScaleX * sinR
+  let bx: Float = -height * worldScaleY * sinR
+  let by: Float = height * worldScaleY * cosR
+  let left: Float = Math.min(a: Math.min(a: 0.0, b: ax), b: Math.min(a: bx, b: ax + bx))
+  let right: Float = Math.max(a: Math.max(a: 0.0, b: ax), b: Math.max(a: bx, b: ax + bx))
+  let top: Float = Math.min(a: Math.min(a: 0.0, b: ay), b: Math.min(a: by, b: ay + by))
+  let bottom: Float = Math.max(a: Math.max(a: 0.0, b: ay), b: Math.max(a: by, b: ay + by))
+  var childX: Float = originX + left
+  var childY: Float = originY + top
+  var childW: Float = right - left
+  var childH: Float = bottom - top
+  # the inverse of R(rotation) * scale: a design offset from the origin into the node's frame
+  var frameOriginX: Float = originX
+  var frameOriginY: Float = originY
+  var frameWidth: Float = width
+  var frameHeight: Float = height
+  var matrix: Mat2 = { m00: 1.0, m01: 0.0, m10: 0.0, m11: 1.0 }
+  if Math.abs(value: worldScaleX) > 0.000001 and Math.abs(value: worldScaleY) > 0.000001 {
+    matrix = Mat2 {
+      m00: cosR / worldScaleX
+      m01: sinR / worldScaleX
+      m10: -sinR / worldScaleY
+      m11: cosR / worldScaleY
+    }
+  }
   var childRadius: Float = radius
+  let plain: Bool = Math.abs(value: matrix.m00 - 1.0) < 0.0001 and Math.abs(value: matrix.m01) < 0.0001 and Math.abs(
+    value: matrix.m10
+  ) < 0.0001 and Math.abs(value: matrix.m11 - 1.0) < 0.0001
   if not clipIsFull(canvas: canvas, clip: parent) {
     let parentX: Float = clipFloatAt(list: canvas.clipX, index: parent)
     let parentY: Float = clipFloatAt(list: canvas.clipY, index: parent)
     let parentW: Float = clipFloatAt(list: canvas.clipW, index: parent)
     let parentH: Float = clipFloatAt(list: canvas.clipH, index: parent)
     let parentRadius: Float = clipFloatAt(list: canvas.clipRadius, index: parent)
-    let x0: Float = Math.max(a: parentX, b: x)
-    let y0: Float = Math.max(a: parentY, b: y)
-    let x1: Float = Math.min(a: parentX + parentW, b: x + w)
-    let y1: Float = Math.min(a: parentY + parentH, b: y + h)
+    let x0: Float = Math.max(a: parentX, b: childX)
+    let y0: Float = Math.max(a: parentY, b: childY)
+    let x1: Float = Math.min(a: parentX + parentW, b: childX + childW)
+    let y1: Float = Math.min(a: parentY + parentH, b: childY + childH)
     childX = x0
     childY = y0
     childW = Math.max(a: 0.0, b: x1 - x0)
     childH = Math.max(a: 0.0, b: y1 - y0)
-    childRadius = Math.max(a: radius, b: parentRadius)
+    if plain and clipFrameIsPlain(canvas: canvas, clip: parent) {
+      # both upright at unit scale: the intersection, the larger radius winning (as before)
+      frameOriginX = childX
+      frameOriginY = childY
+      frameWidth = childW
+      frameHeight = childH
+      childRadius = Math.max(a: radius, b: parentRadius)
+    } else if plain and radius <= 0.0 {
+      # a plain rect in a turned or rounded parent: the parent's shape, inside the scissor
+      frameOriginX = clipFrameAt(canvas: canvas, clip: parent, part: 0)
+      frameOriginY = clipFrameAt(canvas: canvas, clip: parent, part: 1)
+      frameWidth = clipFrameAt(canvas: canvas, clip: parent, part: 2)
+      frameHeight = clipFrameAt(canvas: canvas, clip: parent, part: 3)
+      matrix = Mat2 {
+        m00: clipFrameAt(canvas: canvas, clip: parent, part: 4)
+        m01: clipFrameAt(canvas: canvas, clip: parent, part: 5)
+        m10: clipFrameAt(canvas: canvas, clip: parent, part: 6)
+        m11: clipFrameAt(canvas: canvas, clip: parent, part: 7)
+      }
+      childRadius = parentRadius
+    }
   }
   canvas.clipX.add(value: childX)
   canvas.clipY.add(value: childY)
   canvas.clipW.add(value: childW)
   canvas.clipH.add(value: childH)
   canvas.clipRadius.add(value: childRadius)
+  addClipFrame(
+    canvas: canvas
+    originX: frameOriginX
+    originY: frameOriginY
+    width: frameWidth
+    height: frameHeight
+    matrix: matrix
+  )
   canvas.clipFull.add(value: false)
   canvas.clipStack.add(value: parent)
   canvas.currentClip = canvas.clipFull.length - 1
@@ -176,9 +329,11 @@ func g2dScissor(canvas: view Gpu2dCanvas, clip: copy Int) {
   }
 }
 
-# This run's clip uniform (a persistent per-run-slot pool of 32-byte uniforms):
-# [x,y,w,h] design units + [radius, enabled, 0, 0]. `enabled` only for a ROUNDED
-# clip — a rectangular clip is the scissor alone, so its SDF stays off.
+# This run's clip uniform (a persistent per-run-slot pool of 48-byte uniforms):
+# [originX, originY, width, height] (the origin in design units, the size in the
+# node's own) + [radius, enabled, 0, 0] + [m00, m01, m10, m11] (a design offset
+# from the origin into the node's frame). `enabled` only for a clip with a shape
+# (clipNeedsShape) — a plain rect is the scissor alone, so its SDF stays off.
 func clipUniformFor(
   canvas: mod Gpu2dCanvas
   resources: mod GpuResources
@@ -196,7 +351,7 @@ func clipUniformFor(
   if not isValidBuffer(resources: resources, id: uniform) {
     if let made: BufferId = createBuffer(
       resources: resources
-      size: 32
+      size: 48
       usage: WGPUBufferUsage_Uniform + WGPUBufferUsage_CopyDst
     ) {
       uniform = made
@@ -204,23 +359,9 @@ func clipUniformFor(
     }
   }
   canvas.clipScratch.clear()
-  let rounded: Bool = not clipIsFull(canvas: canvas, clip: clip) and clipFloatAt(
-    list: canvas.clipRadius
-    index: clip
-  ) > 0.0
-  if rounded {
-    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipX, index: clip))
-    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipY, index: clip))
-    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipW, index: clip))
-    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipH, index: clip))
-    canvas.clipScratch.add(value: clipFloatAt(list: canvas.clipRadius, index: clip))
-    canvas.clipScratch.add(value: 1.0)
-    canvas.clipScratch.add(value: 0.0)
-    canvas.clipScratch.add(value: 0.0)
-  } else {
-    loop var k: Int = 0, k < 8, ++k {
-      canvas.clipScratch.add(value: 0.0)
-    }
+  loop var part: Int = 0, part < 12, ++part {
+    let value: Float = clipShapeFloat(canvas: canvas, clip: clip, part: part)
+    canvas.clipScratch.add(value: value)
   }
   unsafe {
     let written: Bool = writeBufferFromPtr(
@@ -228,8 +369,29 @@ func clipUniformFor(
       id: uniform
       offset: 0
       data: canvas.clipScratch.data
-      size: 32
+      size: 48
     )
   }
   ret uniform
+}
+
+# Float `part` (0..11) of a clip as the shaders read it (the layout above); all 0 for a clip
+# without a shape
+func clipShapeFloat(canvas: view Gpu2dCanvas, clip: view Int, part: view Int) ret Float {
+  if not clipNeedsShape(canvas: canvas, clip: clip) {
+    ret 0.0
+  }
+  if part < 4 {
+    ret clipFrameAt(canvas: canvas, clip: clip, part: part)
+  }
+  if part is 4 {
+    ret clipFloatAt(list: canvas.clipRadius, index: clip)
+  }
+  if part is 5 {
+    ret 1.0
+  }
+  if part < 8 {
+    ret 0.0
+  }
+  ret clipFrameAt(canvas: canvas, clip: clip, part: part - 4)
 }

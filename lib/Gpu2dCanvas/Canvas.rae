@@ -182,13 +182,16 @@ type Gpu2dCanvas {
   xform: List(Float)  # its 8 floats (physW, physH, scaleX, scaleY, offX, offY, 0, 0)
   clipUniforms: List(BufferId)  # per-run 32-byte clip uniforms, slot = run index in the frame
   clipCursor: Int
-  clipScratch: List(Float)  # one clip uniform's 8 floats, staged for the upload
+  clipScratch: List(Float)  # one clip uniform's 12 floats, staged for the upload
   # --- clip stack (#915: was C's g_g2d_clips) — design units; [0] = the full sentinel ---
   clipX: List(Float)
   clipY: List(Float)
   clipW: List(Float)
   clipH: List(Float)
   clipRadius: List(Float)
+  # each clip's own frame, 8 floats: its origin (design units), its size and the 2x2 that takes
+  # a design-unit offset from the origin into its frame; the rounded box is evaluated there
+  clipFrames: List(Float)
   clipFull: List(Bool)
   clipStack: List(Int)
   currentClip: Int
@@ -253,7 +256,7 @@ type Gpu2dCanvas {
 const canvasManagerCapacity: Int = 16384
 
 # rect, tint, params, uv, clip rect, clip params (#1003) — see gpu2d_image.wgsl.
-const imageUniformFloats: Int = 24
+const imageUniformFloats: Int = 28
 
 # One box primitive = 6 x vec4 (std430): rect, radius, fill, border, params, grad.
 const boxPrimFloats: Int = 24
@@ -279,12 +282,13 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       xform: List.create(Float, cap: 8)
       clipUniforms: List.create(BufferId, cap: 64)
       clipCursor: 0
-      clipScratch: List.create(Float, cap: 8)
+      clipScratch: List.create(Float, cap: 12)
       clipX: List.create(Float, cap: 32)
       clipY: List.create(Float, cap: 32)
       clipW: List.create(Float, cap: 32)
       clipH: List.create(Float, cap: 32)
       clipRadius: List.create(Float, cap: 32)
+      clipFrames: List.create(Float, cap: 256)
       clipFull: List.create(Bool, cap: 32)
       clipStack: List.create(Int, cap: 32)
       currentClip: 0

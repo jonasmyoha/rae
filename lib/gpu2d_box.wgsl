@@ -27,8 +27,23 @@ struct Prim {
 // maps design-unit coords -> physical px: px = design*scale + offset.
 @group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;
 @group(0) @binding(1) var<storage, read> prims: array<Prim>;
-// #118 rounded clip: uClip[0]=(x,y,w,h) design units, uClip[1]=(radius,enabled,..)
-@group(0) @binding(2) var<uniform> uClip: array<vec4<f32>, 2>;
+// #118 rounded clip, in its node's frame: uClip[0]=(origin design units, size in the
+// node's units), uClip[1]=(radius in the node's units, enabled,..), uClip[2]=the 2x2
+// from a design offset into the node's frame (Gpu2dCanvasClip clipUniformFor)
+@group(0) @binding(2) var<uniform> uClip: array<vec4<f32>, 3>;
+// The clip in its node's own frame (Gpu2dCanvasClip): the design offset from its origin
+// taken into the frame by the 2x2, then the rounded box there, so a turned or scaled
+// node's corners stay round and the smoothing (fwidth in that frame) is about a pixel
+fn clipShapeDistance(posD: vec2<f32>, origin: vec2<f32>, size: vec2<f32>, frame: vec4<f32>, radius: f32) -> f32 {
+  let offset = posD - origin;
+  let local = vec2<f32>(frame.x * offset.x + frame.y * offset.y, frame.z * offset.x + frame.w * offset.y);
+  return sdRoundBoxClip(local - size * 0.5, size * 0.5, radius);
+}
+fn sdRoundBoxClip(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let rr = min(r, min(b.x, b.y));
+  let q = abs(p) - b + vec2<f32>(rr, rr);
+  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;
+}
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) local: vec2<f32>,
@@ -136,10 +151,7 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
   let aa = max(fwidth(d), 0.0001);
   var cov = 1.0 - smoothstep(-aa, aa, d);
   if (uClip[1].y > 0.5) {  // #118: rounded clip coverage
-    let cc = uClip[0].xy + uClip[0].zw * 0.5;
-    let ch = uClip[0].zw * 0.5;
-    let cr = uClip[1].x;
-    let cd = sdRoundBox(in.posD - cc, ch, vec4<f32>(cr, cr, cr, cr));
+    let cd = clipShapeDistance(in.posD, uClip[0].xy, uClip[0].zw, uClip[2], uClip[1].x);
     let caa = max(fwidth(cd), 0.0001);
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
   }

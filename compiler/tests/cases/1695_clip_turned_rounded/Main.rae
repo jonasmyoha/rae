@@ -1,0 +1,218 @@
+# A clip in its node's own frame (Gpu2dCanvasClip canvasPushClipFrame): a 100 x 150 node with radius
+# 16, turned and scaled about its origin, clips to its rounded box in every pose. The clip test the
+# shaders make (gpu2d_box/text/image.wgsl clipShapeDistance, from the uniform's 12 floats,
+# clipShapeFloat) is made here on the CPU at points of the node's own frame: its middle and its
+# edge are inside, a corner's tip is outside (the corner is round, not square), the radius scales
+# with the node, and one design unit across the edge is 1/scale of the node's units, which the
+# shaders' fwidth in that frame turns into a smoothing about one pixel wide everywhere. A
+# plain rect clip inside a turned one keeps the turned shape.
+import Math
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+
+func part(canvas: view Gpu2dCanvas, number: view Int) ret Float {
+  ret clipShapeFloat(canvas: canvas, clip: canvas.currentClip, part: number)
+}
+
+# The shaders' sdRoundBoxClip
+func roundBoxDistance(
+  x: view Float
+  y: view Float
+  halfX: view Float
+  halfY: view Float
+  radius: view Float
+) ret Float {
+  let corner: Float = Math.min(a: radius, b: Math.min(a: halfX, b: halfY))
+  let qx: Float = Math.abs(value: x) - halfX + corner
+  let qy: Float = Math.abs(value: y) - halfY + corner
+  let outsideX: Float = Math.max(a: qx, b: 0.0)
+  let outsideY: Float = Math.max(a: qy, b: 0.0)
+  ret Math.min(a: Math.max(a: qx, b: qy), b: 0.0) + Math.sqrt(
+    x: outsideX * outsideX + outsideY * outsideY
+  ) - corner
+}
+
+# The shaders' clipShapeDistance at a design-unit point, from the clip's uniform floats
+func clipDistance(canvas: view Gpu2dCanvas, pointX: view Float, pointY: view Float) ret Float {
+  let offsetX: Float = pointX - part(canvas: canvas, number: 0)
+  let offsetY: Float = pointY - part(canvas: canvas, number: 1)
+  let localX: Float = part(canvas: canvas, number: 8) * offsetX + part(canvas: canvas, number: 9) * offsetY
+  let localY: Float = part(canvas: canvas, number: 10) * offsetX + part(canvas: canvas, number: 11) * offsetY
+  let halfX: Float = part(canvas: canvas, number: 2) * 0.5
+  let halfY: Float = part(canvas: canvas, number: 3) * 0.5
+  ret roundBoxDistance(
+    x: localX - halfX
+    y: localY - halfY
+    halfX: halfX
+    halfY: halfY
+    radius: part(canvas: canvas, number: 4)
+  )
+}
+
+type Pose {
+  rotation: Float
+  scaleX: Float
+  scaleY: Float
+}
+
+# A point of the node's frame, in design units
+func designX(pose: view Pose, localX: view Float, localY: view Float) ret Float {
+  ret 300.0 + Math.cos(x: pose.rotation) * localX * pose.scaleX - Math.sin(x: pose.rotation) * localY * pose.scaleY
+}
+
+func designY(pose: view Pose, localX: view Float, localY: view Float) ret Float {
+  ret 200.0 + Math.sin(x: pose.rotation) * localX * pose.scaleX + Math.cos(x: pose.rotation) * localY * pose.scaleY
+}
+
+func inside(
+  canvas: view Gpu2dCanvas
+  pose: view Pose
+  localX: view Float
+  localY: view Float
+) ret Bool {
+  ret clipDistance(
+    canvas: canvas
+    pointX: designX(pose: pose, localX: localX, localY: localY)
+    pointY: designY(pose: pose, localX: localX, localY: localY)
+  ) < 0.0
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+func check(pose: view Pose) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  clipReset(canvas: canvas)
+  canvasPushClipFrame(
+    canvas: canvas
+    originX: 300.0
+    originY: 200.0
+    width: 100.0
+    height: 150.0
+    rotation: pose.rotation
+    scaleX: pose.scaleX
+    scaleY: pose.scaleY
+    radius: 16.0
+  )
+  # the four corners: the tip (2, 2) from each is outside a round corner, (6, 6) inside it
+  var tips: Int = 0
+  var nearTips: Int = 0
+  loop let corner: Int in List(Int) { 0, 1, 2, 3 } {
+    let cornerX: Float = 100.0 * ((corner % 2) as Float)
+    let cornerY: Float = 150.0 * ((corner / 2) as Float)
+    let towardX: Float = 1.0 - 2.0 * ((corner % 2) as Float)
+    let towardY: Float = 1.0 - 2.0 * ((corner / 2) as Float)
+    if not inside(
+      canvas: canvas
+      pose: pose
+      localX: cornerX + 2.0 * towardX
+      localY: cornerY + 2.0 * towardY
+    ) {
+      tips = tips + 1
+    }
+    if inside(
+      canvas: canvas
+      pose: pose
+      localX: cornerX + 6.0 * towardX
+      localY: cornerY + 6.0 * towardY
+    ) {
+      nearTips = nearTips + 1
+    }
+  }
+  # the edge's smoothing: the distance one design unit across the top edge, out along its normal
+  let normalX: Float = Math.sin(x: pose.rotation)
+  let normalY: Float = -Math.cos(x: pose.rotation)
+  let edgeX: Float = designX(pose: pose, localX: 50.0, localY: 0.0)
+  let edgeY: Float = designY(pose: pose, localX: 50.0, localY: 0.0)
+  let across: Float = clipDistance(canvas: canvas, pointX: edgeX + normalX, pointY: edgeY + normalY) - clipDistance(
+    canvas: canvas
+    pointX: edgeX
+    pointY: edgeY
+  )
+  log("turned {pose.rotation}, scale {pose.scaleX}x{pose.scaleY}: middle in {inside(
+    canvas: canvas
+    pose: pose
+    localX: 50.0
+    localY: 75.0
+  )}, edge in {inside(
+    canvas: canvas
+    pose: pose
+    localX: 50.0
+    localY: 0.5
+  )}, past the edge out {not inside(
+    canvas: canvas
+    pose: pose
+    localX: 50.0
+    localY: -0.5
+  )}, round corners {tips} of 4 (in near them {nearTips}), radius as drawn {rounded(
+    value: 16.0 * Math.abs(value: pose.scaleY)
+  )}, edge {rounded(value: Math.abs(value: across))} of its units a design unit (1/scale {rounded(
+    value: 1.0 / Math.abs(value: pose.scaleY)
+  )}), shape on {part(canvas: canvas, number: 5) > 0.5}")
+}
+
+func nested() {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  clipReset(canvas: canvas)
+  let pose: Pose = { rotation: 0.2, scaleX: 0.7, scaleY: 0.7 }
+  canvasPushClipFrame(
+    canvas: canvas
+    originX: 300.0
+    originY: 200.0
+    width: 100.0
+    height: 150.0
+    rotation: pose.rotation
+    scaleX: pose.scaleX
+    scaleY: pose.scaleY
+    radius: 16.0
+  )
+  # a plain rect over the whole window inside it (a text's own clip): the turned card's shape stays
+  canvasPushClip(
+    canvas: canvas
+    x: 0.0
+    y: 0.0
+    w: 800.0
+    h: 800.0
+    radius: 0.0
+  )
+  log("a plain rect in the turned card: corner tip out {not inside(
+    canvas: canvas
+    pose: pose
+    localX: 2.0
+    localY: 2.0
+  )}, middle in {inside(
+    canvas: canvas
+    pose: pose
+    localX: 50.0
+    localY: 75.0
+  )}, out past the turned edge {not inside(
+    canvas: canvas
+    pose: pose
+    localX: 50.0
+    localY: -1.0
+  )}")
+  canvasPopClip(canvas: canvas)
+  canvasPopClip(canvas: canvas)
+  # an upright plain rect is the scissor alone
+  canvasPushClip(
+    canvas: canvas
+    x: 10.0
+    y: 10.0
+    w: 50.0
+    h: 50.0
+    radius: 0.0
+  )
+  log("an upright rect: shape on {part(canvas: canvas, number: 5) > 0.5}")
+}
+
+func main() {
+  loop let rotation: Float in List(Float) { 0.0, 0.2, 1.0, 3.14 } {
+    loop let scale: Float in List(Float) { 1.0, 0.7 } {
+      check(pose: Pose { rotation: rotation, scaleX: scale, scaleY: scale })
+    }
+  }
+  check(pose: Pose { rotation: 0.2, scaleX: -0.5, scaleY: 1.0 })
+  check(pose: Pose { rotation: 0.0, scaleX: 0.5, scaleY: 1.0 })
+  nested()
+}

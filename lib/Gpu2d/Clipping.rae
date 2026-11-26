@@ -57,6 +57,34 @@ func pushClipRoundedRect(
   )
 }
 
+# A clip to a node's rounded box in its own frame: the node is `width` x `height` in its own
+# units, its world transform puts its origin at (originX, originY), turned by `rotation` and
+# scaled by (scaleX, scaleY), and `radius` is in its own units. A turned or scaled card keeps
+# round corners, its radius scaling with it; the scissor is the box round it.
+func pushClipFrame(
+  canvas: mod Gpu2dCanvas
+  originX: copy Float
+  originY: copy Float
+  width: copy Float
+  height: copy Float
+  rotation: copy Float
+  scaleX: copy Float
+  scaleY: copy Float
+  radius: copy Float
+) {
+  canvasPushClipFrame(
+    canvas: canvas
+    originX: originX
+    originY: originY
+    width: width
+    height: height
+    rotation: rotation
+    scaleX: scaleX
+    scaleY: scaleY
+    radius: radius
+  )
+}
+
 func popClipRect(canvas: mod Gpu2dCanvas) {
   canvasPopClip(canvas: canvas)
 }

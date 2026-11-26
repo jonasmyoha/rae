@@ -455,26 +455,20 @@ func queueImageEx(
   canvas.imageCommands.add(value: u1 - u0)
   canvas.imageCommands.add(value: v1 - v0)
   let clip: Int = canvas.currentClip
-  let rounded: Bool = not clipIsFull(canvas: canvas, clip: clip) and clipFloatAt(
-    list: canvas.clipRadius
-    index: clip
-  ) > 0.0
-  if rounded {
-    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipX, index: clip))
-    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipY, index: clip))
-    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipW, index: clip))
-    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipH, index: clip))
-    canvas.imageCommands.add(value: clipFloatAt(list: canvas.clipRadius, index: clip))
-    canvas.imageCommands.add(value: 1.0)
-  } else {
-    loop var k: Int = 0, k < 6, ++k {
-      canvas.imageCommands.add(value: 0.0)
-    }
+  # the clip's origin and size, radius and enabled (uImg[4], uImg[5].xy); its frame goes last
+  loop var part: Int = 0, part < 6, ++part {
+    let value: Float = clipShapeFloat(canvas: canvas, clip: clip, part: part)
+    canvas.imageCommands.add(value: value)
   }
   # the color change (canvasSetImageColor): the hue turn in radians and the brightness less 1, so
   # an image queued with none is 0, 0 as before
   canvas.imageCommands.add(value: canvas.imageHueRadians)
   canvas.imageCommands.add(value: canvas.imageBrightness - 1.0)
+  # uImg[6]: the clip's frame (a design offset from its origin into the node's)
+  loop var part: Int = 8, part < 12, ++part {
+    let value: Float = clipShapeFloat(canvas: canvas, clip: clip, part: part)
+    canvas.imageCommands.add(value: value)
+  }
   canvas.imageCommandHandles.add(value: handle)
   canvas.imageCommandClips.add(value: clip)
 }

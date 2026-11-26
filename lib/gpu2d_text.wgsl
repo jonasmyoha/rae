@@ -18,7 +18,7 @@ struct Glyph {
 @group(0) @binding(1) var<storage, read> glyphs: array<Glyph>;
 @group(0) @binding(2) var atlasTex: texture_2d<f32>;
 @group(0) @binding(3) var atlasSamp: sampler;
-@group(0) @binding(4) var<uniform> uClip: array<vec4<f32>, 2>;
+@group(0) @binding(4) var<uniform> uClip: array<vec4<f32>, 3>;
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) uv: vec2<f32>,
@@ -57,11 +57,22 @@ fn sdRoundBox(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let q = abs(p) - b + vec2<f32>(r, r);
   return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - r;
 }
+// The clip in its node's own frame (Gpu2dCanvasClip): the design offset from its origin
+// taken into the frame by the 2x2, then the rounded box there, so a turned or scaled
+// node's corners stay round and the smoothing (fwidth in that frame) is about a pixel
+fn clipShapeDistance(posD: vec2<f32>, origin: vec2<f32>, size: vec2<f32>, frame: vec4<f32>, radius: f32) -> f32 {
+  let offset = posD - origin;
+  let local = vec2<f32>(frame.x * offset.x + frame.y * offset.y, frame.z * offset.x + frame.w * offset.y);
+  return sdRoundBoxClip(local - size * 0.5, size * 0.5, radius);
+}
+fn sdRoundBoxClip(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let rr = min(r, min(b.x, b.y));
+  let q = abs(p) - b + vec2<f32>(rr, rr);
+  return min(max(q.x, q.y), 0.0) + length(max(q, vec2<f32>(0.0, 0.0))) - rr;
+}
 fn clipCoverage(posD: vec2<f32>) -> f32 {
   if (uClip[1].y < 0.5) { return 1.0; }
-  let cc = uClip[0].xy + uClip[0].zw * 0.5;
-  let ch = uClip[0].zw * 0.5;
-  let cd = sdRoundBox(posD - cc, ch, uClip[1].x);
+  let cd = clipShapeDistance(posD, uClip[0].xy, uClip[0].zw, uClip[2], uClip[1].x);
   let caa = max(fwidth(cd), 0.0001);
   return 1.0 - smoothstep(-caa, caa, cd);
 }
