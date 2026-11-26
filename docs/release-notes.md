@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.104, 2026-11-26: lib/ and packages give several results instead of status pairs
+
+- Functions that returned a type only to pair a value with its status now return labeled results: lib/net
+  (`IoResult`, `SocketResult`, `AddressResult`, `JoinResult`: `bytes, status`, `socketId, status`, `address,
+  status`, `kind, slotIndex`), lib/wasm (`WasmCallResult`, `WasmBytesResult`: `values, error`, `bytes, error`),
+  the Files trash steps (`TrashAnswer`), `x509VerifyChain` (`ok, reason, certificates`), qr 1.4.0's `decodeGrid`
+  (`GridOutcome`) and storeKit 0.1.3's request results (`ProductsResult`, `PurchaseResult`, `EntitlementsResult`,
+  `FinishResult`). Those types are gone; a caller writes `let read: Int = bytes, let status: NetStatus = status =
+  socketRead(...)`. Wrappers pass a call's results on with `ret f(...)`.
+- Kept as types: the key pairs (`Ed25519KeyPair`, `P256KeyPair`), the Box3D port's results, and types that are
+  stored or passed on (`WasmHostAnswer`, `LocationAnswer`, `HitFound`, `FeaturePair`).
+- Compiler: a generic function that takes apart another generic function's results with a type argument written
+  (`makeBoth(T, value: value)`) is accepted in its instances; it failed with "cannot tell which function". Case 1691.
+
 ## 0.4.103, 2026-11-26: a `ret` passes on another function's results
 
 - `ret socketRead(...)` in a function with several results passes on that call's results whole, when they are the
