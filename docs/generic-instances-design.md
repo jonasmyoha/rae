@@ -250,7 +250,14 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    types by their C name (`uint64_t`), so one C function was registered twice with two parameter types; that
    spelling is fixed with step 5. An instance only the backend has is a difference only where the C calls it:
    discovery registers some that nothing calls (`add` of `Stack(UInt8)`), which step 7 removes. The drops are
-   made in type-name order, so the C is the same on every run. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which fails on a difference. Left for
+   made in type-name order, so the C is the same on every run. Third part (0.4.107): an instance's type arguments are spelled as
+   Rae types (`UInt8`, not the TypeInfo's C name `uint8_t`), so sema decides inside spawn wrappers and spawned
+   calls too, and the backend also emits the instances sema decided that discovery did not find (no "sema only" is
+   left); where both have one, the backend's spelling stays (its C of a `view` of an enum is `const`). A generic call has its
+   instance's result as its type, except an optional result: lib/ and some cases use one unchecked
+   (`lanes.modAt(index: i).marks`, lib/ui/timelineSystem, flameGraphSystem, WindowGeometry, HotReload, SkyHosek,
+   app3d/UiShell; cases 533, 602, 1224), which the unnarrowed-optional rule refuses in a plain call. That, and
+   `sema_value_type` as a plain read, is its own queue task. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which fails on a difference. Left for
    their own task: the spawn wrappers (sema decides nothing in a wrapper or a spawned call), and a concrete
    `resolved_type` on each generic call: tried, it lets sema's checks see lib code they could not before
    (`state.lanes.modAt(index: lane).marks` in lib/ui/timelineSystem uses an optional unchecked), and the

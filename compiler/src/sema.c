@@ -1901,9 +1901,6 @@ static void sema_queue_instance(AstDecl* generic_decl, AstDecl* spec, const AstT
                                 const AstTypeRef* written, size_t line, size_t column);
 static bool s_defer_instances;
 static void sema_note_rejected_template(const AstDecl* template_decl);
-/* analyzing the wrapper of a spawned generic (sema_spawn_generic_call): its types
- * are written in C names, and sema decides no instance in it yet */
-static bool s_in_spawn_wrapper;
 
 /* The files that declare the type arguments of the instances being analyzed: a
  * generic function calls what is declared for its T where T is (`wasmHostCall`
@@ -2018,7 +2015,9 @@ static AstDecl* specialize_decl(CompilerContext* ctx, AstModule* module, SymbolT
         if (args[i] && ((args[i]->kind == TYPE_STRUCT && args[i]->as.structure.decl
                          && args[i]->as.structure.generic_count > 0)
                         || args[i]->kind == TYPE_TASK || args[i]->kind == TYPE_ARRAY || args[i]->kind == TYPE_OPT
-                        || args[i]->kind == TYPE_BUFFER)) {
+                        || args[i]->kind == TYPE_BUFFER
+                        /* a fixed-width integer's TypeInfo is named as in C (`uint8_t`) */
+                        || (args[i]->kind == TYPE_INT && !args[i]->as.integer.enum_decl))) {
             // A generic instantiation argument (`decodeField` over a
             // `List(String)` field): spell the template name with its args,
             // not the mangled TypeInfo name `List_String`, so the
@@ -3755,15 +3754,12 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
                 s_current_decl_origin = decl->origin_file;
                 s_current_params = decl->as.func_decl.params;
                 s_current_generic_params = decl->as.func_decl.generic_params;
-                bool saved_in_wrapper = s_in_spawn_wrapper;
-                s_in_spawn_wrapper = decl->as.func_decl.spawns != NULL;
                 const AstReturnItem* saved_results = s_current_results;
                 s_current_results = decl->as.func_decl.returns && decl->as.func_decl.returns->next
                     ? decl->as.func_decl.returns : NULL;
                 AstStmt* stmt = decl->as.func_decl.body->first;
                 while (stmt) { sema_analyze_stmt(ctx, module, symbols, stmt, current_return_type); stmt = stmt->next; }
                 s_current_results = saved_results;
-                s_in_spawn_wrapper = saved_in_wrapper;
                 sema_lifecycle_post_pass(ctx, module, sema_diag_file(module), &decl->as.func_decl);
                 sema_check_main_loops(module, sema_diag_file(module), &decl->as.func_decl);
                 s_current_decl_origin = saved_origin;

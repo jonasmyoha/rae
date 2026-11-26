@@ -503,6 +503,7 @@ const char* c_loop_version_fast_data(CFuncContext* ctx, const AstExpr* access);
 
 /* RAE_CHECK_INSTANCES=1: sema's instances against the backend's (c_instance_check.c) */
 bool c_instances_wanted(void);
+size_t c_register_sema_instances(CompilerContext* ctx);
 size_t c_check_instances(CompilerContext* ctx, const char* c_path);
 bool c_instances_strict(void);
 

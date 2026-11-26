@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.107, 2026-11-26: generic instances spelled as Rae types
+
+- An instance of a generic function names its type arguments as Rae types (`UInt8`), not by their C names
+  (`uint8_t`). So a generic call inside a spawned generic function gets its instance, and the type of a generic
+  call that returns a value (not an optional) is known to sema's checks.
+- The C backend also emits the instances sema decided that its own search did not find; one nothing calls is an
+  unused static function.
+- `lib/core/JsonScan.rae` drops four `as UInt8` casts the compiler now sees are redundant.
+
 ## 0.4.106, 2026-11-26: sema has every instance of a generic function
 
 - Sema now decides every instance the C calls: in all test cases and in examples 106, 121 and 136 it has the same

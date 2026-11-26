@@ -315,8 +315,23 @@ static AstDecl* sema_call_template(CompilerContext* ctx, AstModule* module, Symb
     return found;
 }
 
+/* The call's type is its instance's result, where analysis left it without one */
+static void sema_type_from_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* call,
+                                    AstDecl* spec) {
+    if (!spec || spec->kind != AST_DECL_FUNC || sema_type_is_concrete(call->resolved_type, 0)) return;
+    if (spec->as.func_decl.is_extern || !spec->as.func_decl.body) return;
+    const AstReturnItem* result = spec->as.func_decl.returns;
+    if (!result || !result->type || result->next) return;  /* none, or several: no value */
+    /* an optional result is left without one: a generic call's `opt` is used
+     * unchecked in lib/ and cases today (`lanes.modAt(index: i).marks`), which
+     * the unnarrowed-optional rule refuses for a plain call (queued) */
+    if (result->type->is_opt) return;
+    TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, result->type);
+    if (sema_type_is_concrete(type, 0) && type->kind != TYPE_OPT) call->resolved_type = type;
+}
+
 static void sema_decide_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* call) {
-    if (!sema_infer_all_calls() || call->instance || s_in_spawn_wrapper || call == s_spawned_call) return;
+    if (!sema_infer_all_calls() || call->instance) return;
     AstDecl* linked = call->decl_link;
     if (linked && linked->kind == AST_DECL_FUNC && linked->as.func_decl.specialization_args) {
         call->instance = linked;
@@ -352,6 +367,7 @@ static void sema_decide_instance(CompilerContext* ctx, AstModule* module, Symbol
         s_defer_instances = saved;
     }
     call->instance = spec;
+    sema_type_from_instance(ctx, module, symbols, call, spec);
     /* the argument rules a resolved call gets (`own` to a view parameter, a
      * local moved into `own T`), by the instance's parameters */
     if (spec && !call->decl_link && spec->kind == AST_DECL_FUNC) {

@@ -904,12 +904,17 @@ void collect_type_refs_module(CompilerContext* ctx) {
      * takes to reach the fixpoint is not known up front. */
     double lo = g_discovery_lo, hi = g_discovery_hi;
     double walk_lo = lo, walk_hi = lo + (hi - lo) * 0.5;
+    bool again = false;
     do {
         last_generic_count = ctx->generic_type_count; last_func_count = ctx->specialized_func_count;
         g_discovery_lo = walk_lo; g_discovery_hi = walk_hi;
         discover_specializations_module(ctx, ctx->current_module);
         walk_lo = walk_hi; walk_hi = walk_hi + (hi - walk_hi) * 0.5;
-    } while (ctx->generic_type_count > last_generic_count || ctx->specialized_func_count > last_func_count);
+        /* when discovery has found all it finds, the instances only sema has
+         * (c_instance_check.c), and a walk of their bodies */
+        again = ctx->generic_type_count > last_generic_count || ctx->specialized_func_count > last_func_count;
+        if (!again) again = c_register_sema_instances(ctx) > 0;
+    } while (again);
     g_discovery_lo = lo; g_discovery_hi = hi;
     progress_work(lo, hi, 1, 1);
 }

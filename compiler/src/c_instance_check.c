@@ -34,6 +34,37 @@ static size_t sorted_unique(const char** names, size_t count) {
   return kept;
 }
 
+/* Every instance sema decided is emitted (docs/generic-instances-design.md,
+ * step 4): sema's set is the one step 5 emits from, and one no code reaches is an
+ * unused static function (the drop of a type only declared). Called after
+ * discovery, for those it did not find: where both have one, the backend's
+ * spelling of its types stays (the C of a `view` of an enum differs). The number
+ * it added. RAE_SEMA_INSTANCES=0 leaves them out. */
+size_t c_register_sema_instances(CompilerContext* ctx) {
+  const char* value = getenv("RAE_SEMA_INSTANCES");
+  if (value && strcmp(value, "0") == 0) return 0;
+  size_t known_count = ctx->specialized_func_count;
+  const char** known = malloc(sizeof(char*) * (known_count + 1));
+  for (size_t i = 0; i < known_count; i++)
+    known[i] = rae_mangle_specialized_function(ctx, ctx->specialized_funcs[i].decl,
+                                               ctx->specialized_funcs[i].concrete_args);
+  known_count = sorted_unique(known, known_count);
+  size_t added = 0;
+  for (SpecializationEntry* e = ctx->type_registry ? ctx->type_registry->specializations : NULL; e; e = e->next) {
+    if (e->made_for_backend || !e->generic_decl || e->generic_decl->kind != AST_DECL_FUNC) continue;
+    const AstFuncDecl* f = &e->generic_decl->as.func_decl;
+    const AstDecl* spec = e->specialized_decl;
+    if (!has_body(f) || !spec || spec->kind != AST_DECL_FUNC || !spec->as.func_decl.specialization_args) continue;
+    const char* name = rae_mangle_specialized_function(ctx, f, spec->as.func_decl.specialization_args);
+    if (bsearch(&name, known, known_count, sizeof *known, compare_names)) continue;
+    size_t before = ctx->specialized_func_count;
+    register_function_specialization(ctx, f, spec->as.func_decl.specialization_args);
+    added += ctx->specialized_func_count - before;
+  }
+  free(known);
+  return added;
+}
+
 bool c_instances_wanted(void) {
   const char* value = getenv("RAE_CHECK_INSTANCES");
   return value && (strcmp(value, "1") == 0 || strcmp(value, "error") == 0);
