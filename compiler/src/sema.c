@@ -2353,8 +2353,10 @@ static bool sema_arg_is_type_name(SymbolTable* symbols, const AstExpr* v) {
         const AstExpr* callee = v->as.call.callee;
         if (!callee || callee->kind != AST_EXPR_IDENT) return false;
         Symbol* cs = symbol_table_lookup(symbols, callee->as.ident);
-        bool callee_is_type = cs && cs->decl
-            && (cs->decl->kind == AST_DECL_TYPE || cs->decl->kind == AST_DECL_ENUM);
+        /* `Task(Int)` names a type with no declaration (a type written out in an instance) */
+        bool callee_is_type = (cs && cs->decl
+            && (cs->decl->kind == AST_DECL_TYPE || cs->decl->kind == AST_DECL_ENUM))
+            || (!cs && str_eq_cstr(callee->as.ident, "Task"));
         if (!callee_is_type) return false;
         for (const AstCallArg* a = v->as.call.args; a; a = a->next)
             if (a->name.len != 0 || !sema_arg_is_type_name(symbols, a->value)) return false;
@@ -3605,8 +3607,12 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             }
             AstTypeField* field = decl->as.type_decl.fields;
             while (field) {
-                if (field->type) sema_resolve_type_internal(ctx, module, symbols, field->type);
+                TypeInfo* field_type = field->type ? sema_resolve_type_internal(ctx, module, symbols, field->type) : NULL;
                 if (field->default_value) sema_analyze_expr(ctx, module, symbols, field->default_value, true);
+                /* `flows: List(PerfFlow) = {}`: built where the struct is */
+                if (field->default_value && field->type && field->default_value->kind == AST_EXPR_COLLECTION_LITERAL
+                    && !field->default_value->as.collection.type && !decl->as.type_decl.generic_params)
+                    sema_literal_instances(ctx, module, symbols, field_type);
                 field = field->next;
             }
             symbol_table_pop_scope(symbols);
@@ -12503,21 +12509,31 @@ static TypeInfo* sema_generic_result(CompilerContext* ctx, AstModule* module, Sy
 /* The type arguments of a call of the generic `decl` (`receiver`: of a method, its
  * first value): those written, else inferred from the values; NULL when they do not
  * give every one */
+/* A type argument: unnamed, or named as its type parameter (`T: T`) */
+static bool sema_is_type_argument(const AstFuncDecl* fd, SymbolTable* symbols, const AstCallArg* arg) {
+    if (!sema_arg_is_type_name(symbols, arg->value)) return false;
+    if (arg->name.len == 0) return true;
+    for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next)
+        if (str_eq(gp->text, arg->name)) return true;
+    return false;
+}
+
 static AstTypeRef* sema_generic_types(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstDecl* decl,
                                       TypeInfo* receiver, const AstCallArg* args, AstTypeRef* written, int depth) {
     const AstFuncDecl* fd = &decl->as.func_decl;
     if (!fd->generic_params || fd->specialization_args) return NULL;
     AstTypeRef* types = written;
     const AstCallArg* values = args;
-    for (; values && values->name.len == 0 && sema_arg_is_type_name(symbols, values->value); values = values->next) {
-        /* `listOf(Int, ...)`: a plain name (another type shows in the values) */
-        if (values->value->kind != AST_EXPR_IDENT) continue;
-        AstTypeRef* one = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
-        memset(one, 0, sizeof *one);
-        one->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
-        memset(one->parts, 0, sizeof *one->parts);
-        one->parts->text = values->value->as.ident;
+    for (; values && sema_is_type_argument(fd, symbols, values); values = values->next) {
+        /* `listOf(Int, ...)`, `create(List(Int), cap: 4)`, `sort(T: T, ...)`: each written type, in order */
+        if (written) continue;
+        AstTypeRef* one = sema_type_ref_of_expr(ctx, values->value);
         if (!types) types = one;
+        else {
+            AstTypeRef* last = types;
+            while (last->next) last = last->next;
+            last->next = one;
+        }
     }
     size_t want = 0, have = 0, count = receiver ? 1 : 0, params = 0;
     for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) want++;
@@ -12569,6 +12585,24 @@ static TypeInfo* sema_named_generic_result(CompilerContext* ctx, AstModule* modu
     return found;
 }
 
+/* A generic call's result worked out from its arguments, for a call whose own
+ * analysis has not set it yet */
+static TypeInfo* sema_value_type_of_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                         const AstExpr* value, int depth) {
+    if (value->kind == AST_EXPR_CALL) {
+        if (!value->as.call.callee || value->as.call.callee->kind != AST_EXPR_IDENT) return NULL;
+        return sema_named_generic_result(ctx, module, symbols, value->as.call.callee->as.ident, value->decl_link,
+                                         NULL, value->as.call.args, value->as.call.generic_args, depth);
+    }
+    TypeInfo* receiver = sema_value_type(ctx, module, symbols, value->as.method_call.object, depth + 1);
+    while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
+    if (!receiver) return NULL;
+    if (receiver->kind == TYPE_TASK && str_eq_cstr(value->as.method_call.method_name, "get"))
+        return receiver->as.task.base;
+    return sema_named_generic_result(ctx, module, symbols, value->as.method_call.method_name, NULL, receiver,
+                                     value->as.method_call.args, value->as.method_call.generic_args, depth);
+}
+
 /* The type of a value, also where the analysis leaves it to the backend: a call of
  * a generic function or method, and what is read of one. NULL when not known. */
 static TypeInfo* sema_value_type(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* value,
@@ -12582,18 +12616,10 @@ static TypeInfo* sema_value_type(CompilerContext* ctx, AstModule* module, Symbol
             if (value->as.unary.op != AST_UNARY_VIEW && value->as.unary.op != AST_UNARY_MOD) return NULL;
             return sema_value_type(ctx, module, symbols, value->as.unary.operand, depth + 1);
         case AST_EXPR_CALL:
-            if (!value->as.call.callee || value->as.call.callee->kind != AST_EXPR_IDENT) return NULL;
-            return sema_named_generic_result(ctx, module, symbols, value->as.call.callee->as.ident, value->decl_link,
-                                             NULL, value->as.call.args, value->as.call.generic_args, depth);
-        case AST_EXPR_METHOD_CALL: {
-            TypeInfo* receiver = sema_value_type(ctx, module, symbols, value->as.method_call.object, depth + 1);
-            while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
-            if (!receiver) return NULL;
-            if (receiver->kind == TYPE_TASK && str_eq_cstr(value->as.method_call.method_name, "get"))
-                return receiver->as.task.base;
-            return sema_named_generic_result(ctx, module, symbols, value->as.method_call.method_name, NULL, receiver,
-                                             value->as.method_call.args, value->as.method_call.generic_args, depth);
-        }
+        case AST_EXPR_METHOD_CALL:
+            /* (a generic call analyzed has its instance's result, read above; this is
+             * for one asked about before its own analysis ends) */
+            return sema_value_type_of_call(ctx, module, symbols, value, depth);
         case AST_EXPR_MEMBER: {
             if (value->as.member.object->kind == AST_EXPR_IDENT) {
                 /* `Kind.large` */

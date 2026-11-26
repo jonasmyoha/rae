@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.106, 2026-11-26: sema has every instance of a generic function
+
+- Sema now decides every instance the C calls: in all test cases and in examples 106, 121 and 136 it has the same
+  instances as the backend's own search. It reads type arguments written as a call (`List(Int)`), by name
+  (`T: T`) or as the qualifier (`Float.createList(cap: 4)`, `Query.query2(...)`), chooses among templates as the
+  resolver does, and gives field defaults their list instances.
+- The suite builds the cases with `RAE_CHECK_INSTANCES=error`: an instance the C calls that sema did not decide
+  fails the build.
+
 ## 0.4.105, 2026-11-26: sema decides the instances of generic calls (first part)
 
 - Sema finds the instance of each call of a generic function, in plain functions and in instances, from the

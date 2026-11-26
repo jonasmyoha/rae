@@ -95,6 +95,37 @@ static bool sema_container_instance(CompilerContext* ctx, AstModule* module, Sym
     return true;
 }
 
+static void sema_literal_instances(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, TypeInfo* type);
+
+/* A concrete generic struct (StringMap(Box)) is built with its fields' defaults:
+ * a `{ }` list field (`values: List(T) = {}`) needs createList and add of its
+ * type there. The number of instances it queued. */
+static size_t sema_default_literal_instances(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                             TypeInfo* type) {
+    AstDecl* template_decl = type->as.structure.decl;
+    AstDecl* spec = type_registry_find_specialization(ctx->type_registry, template_decl,
+                                                      type->as.structure.generic_args,
+                                                      type->as.structure.generic_count);
+    if (!spec || spec->kind != AST_DECL_TYPE) return 0;
+    size_t before = s_instance_work_count;
+    for (AstTypeField* field = spec->as.type_decl.fields; field; field = field->next) {
+        if (!field->type || !field->default_value || field->default_value->kind != AST_EXPR_COLLECTION_LITERAL
+            || field->default_value->as.collection.type) continue;
+        sema_literal_instances(ctx, module, symbols, sema_resolve_type_internal(ctx, module, symbols, field->type));
+    }
+    return s_instance_work_count - before;
+}
+
+static int sema_compare_type_names(const void* a, const void* b) {
+    const TypeInfo* left = *(const TypeInfo* const*)a;
+    const TypeInfo* right = *(const TypeInfo* const*)b;
+    size_t shorter = left->name.len < right->name.len ? left->name.len : right->name.len;
+    int order = memcmp(left->name.data, right->name.data, shorter);
+    if (order) return order;
+    if (left->name.len != right->name.len) return left->name.len < right->name.len ? -1 : 1;
+    return (int)left->kind - (int)right->kind;
+}
+
 /* A value of a container type is dropped where its owner ends, a call nobody
  * writes: each concrete instantiation of a template with a generic `drop`
  * (List(Note), ComponentTable(Position), ...) gets that drop's instance.
@@ -113,9 +144,13 @@ static size_t sema_queue_drops(CompilerContext* ctx, AstModule* module, SymbolTa
             found[found_count++] = t;
         }
     }
+    /* the registry's buckets follow addresses: in name order, so the C is the same every run */
+    qsort(found, found_count, sizeof *found, sema_compare_type_names);
     size_t queued = 0;
-    for (size_t i = 0; i < found_count; i++)
+    for (size_t i = 0; i < found_count; i++) {
         if (sema_container_instance(ctx, module, symbols, "drop", found[i])) queued++;
+        queued += sema_default_literal_instances(ctx, module, symbols, found[i]);
+    }
     free(found);
     return queued;
 }
@@ -199,14 +234,28 @@ static AstDecl* sema_array_template(CompilerContext* ctx, AstModule* module, Sym
     return NULL;
 }
 
+/* Each named value argument is one of the candidate's parameters: overloads
+ * that differ only in their names (`pair(first:, second:)`, `pair(left:, right:)`) */
+static bool sema_argument_names_fit(const AstDecl* d, SymbolTable* symbols, const AstCallArg* args) {
+    const AstFuncDecl* fd = &d->as.func_decl;
+    for (const AstCallArg* a = args; a; a = a->next) {
+        if (!a->name.len || sema_is_type_argument(fd, symbols, a)) continue;
+        bool found = false;
+        for (const AstParam* p = fd->params; p && !found; p = p->next) found = str_eq(p->name, a->name);
+        if (!found) return false;
+    }
+    return true;
+}
+
 /* The template a call means and its type arguments, NULL when they are not known
  * or more than one template fits */
 static AstDecl* sema_call_template(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, const AstExpr* call,
-                                   AstTypeRef** types_out) {
+                                   AstTypeRef** types_out, bool* qualified_out) {
     Str name = {0};
     TypeInfo* receiver = NULL;
     const AstCallArg* args = NULL;
     AstTypeRef* written = NULL;
+    bool qualified = false;
     if (call->kind == AST_EXPR_CALL) {
         if (!call->as.call.callee || call->as.call.callee->kind != AST_EXPR_IDENT) return NULL;
         name = call->as.call.callee->as.ident;
@@ -218,8 +267,15 @@ static AstDecl* sema_call_template(CompilerContext* ctx, AstModule* module, Symb
         written = call->as.method_call.generic_args;
         receiver = sema_value_type(ctx, module, symbols, call->as.method_call.object, 0);
         while (receiver && receiver->kind == TYPE_REF) receiver = receiver->as.ref.base;
-        if (!receiver) return NULL;
+        /* `Query.query2(...)`: a module's name, no value; a plain call of its function */
+        qualified = !receiver && call->as.method_call.object->kind == AST_EXPR_IDENT
+            && !symbol_table_lookup(symbols, call->as.method_call.object->as.ident);
+        if (!receiver && !qualified) return NULL;
+        /* `Float.createList(cap: 4)`: the type is the first type argument */
+        if (qualified && !written && sema_arg_is_type_name(symbols, call->as.method_call.object))
+            written = sema_type_ref_of_expr(ctx, call->as.method_call.object);
     }
+    *qualified_out = qualified;
     AstDecl* linked = call->decl_link;
     if (linked && linked->kind == AST_DECL_FUNC && linked->as.func_decl.generic_params
         && !linked->as.func_decl.specialization_args) {
@@ -229,20 +285,31 @@ static AstDecl* sema_call_template(CompilerContext* ctx, AstModule* module, Symb
     if (linked) return NULL;
     AstDecl* found = NULL;
     AstTypeRef* found_types = NULL;
+    bool ambiguous = false;
+    int found_rank = -1;
     for (Symbol* curr = symbol_table_first(symbols, name); curr; curr = curr->sameNext) {
         AstDecl* d = curr->decl;
         if (!d || d->kind != AST_DECL_FUNC || !d->as.func_decl.generic_params || d->as.func_decl.specialization_args)
             continue;
         if (d == found || !sema_package_reaches(s_current_decl_origin, d)) continue;
-        if (!receiver && !sema_decl_opened(s_current_decl_origin, d)) continue;
+        if (!receiver && !qualified && !sema_decl_opened(s_current_decl_origin, d)) continue;
         if (receiver && !sema_receiver_fits(d, receiver)) continue;
         if (!receiver && !sema_first_value_fits(ctx, module, symbols, d, args)) continue;
+        if (!sema_argument_names_fit(d, symbols, args)) continue;
         AstTypeRef* types = sema_generic_types(ctx, module, symbols, d, receiver, args, written, 0);
         if (!types) continue;
-        if (found) return NULL;  /* two fit: not this function's to decide */
+        /* several fit: a method call means one with `this` (sema_yields_to_method),
+         * then the program's own wins (resolve_function_overload) */
+        const AstParam* first = d->as.func_decl.params;
+        int rank = (receiver && first && str_eq_cstr(first->name, "this") ? 2 : 0) + (sema_decl_is_own(d) ? 1 : 0);
+        if (found && rank == found_rank) { ambiguous = true; continue; }
+        if (found && rank < found_rank) continue;
         found = d;
         found_types = types;
+        found_rank = rank;
+        ambiguous = false;
     }
+    if (ambiguous) return NULL;  /* not this function's to decide */
     if (!found && !receiver) found = sema_array_template(ctx, module, symbols, name, args, written, &found_types);
     *types_out = found_types;
     return found;
@@ -256,8 +323,10 @@ static void sema_decide_instance(CompilerContext* ctx, AstModule* module, Symbol
         return;
     }
     AstTypeRef* types = NULL;
-    AstDecl* generic_decl = sema_call_template(ctx, module, symbols, call, &types);
-    if (getenv("RAE_DEBUG_INSTANCES") && !generic_decl && call->kind == AST_EXPR_CALL && call->as.call.callee
+    bool qualified = false;
+    AstDecl* generic_decl = sema_call_template(ctx, module, symbols, call, &types, &qualified);
+    if (getenv("RAE_DEBUG_INSTANCES") && !generic_decl && !call->decl_link && call->kind == AST_EXPR_CALL
+        && call->as.call.callee
         && call->as.call.callee->kind == AST_EXPR_IDENT)
         fprintf(stderr, "[undecided] %.*s at %zu:%zu linked %p\n", (int)call->as.call.callee->as.ident.len,
                 call->as.call.callee->as.ident.data, call->line, call->column, (void*)call->decl_link);
@@ -287,11 +356,12 @@ static void sema_decide_instance(CompilerContext* ctx, AstModule* module, Symbol
      * local moved into `own T`), by the instance's parameters */
     if (spec && !call->decl_link && spec->kind == AST_DECL_FUNC) {
         AstCallArg* values = call->kind == AST_EXPR_CALL ? call->as.call.args : call->as.method_call.args;
-        while (values && values->name.len == 0 && sema_arg_is_type_name(symbols, values->value)) values = values->next;
-        sema_check_own_args(ctx, module, symbols, &spec->as.func_decl, values, call->kind == AST_EXPR_METHOD_CALL);
+        while (values && sema_is_type_argument(&generic_decl->as.func_decl, symbols, values)) values = values->next;
+        bool has_receiver = call->kind == AST_EXPR_METHOD_CALL && !qualified;
+        sema_check_own_args(ctx, module, symbols, &spec->as.func_decl, values, has_receiver);
         const AstParam* receiver = spec->as.func_decl.params;
         char message[400];
-        if (call->kind == AST_EXPR_METHOD_CALL && receiver
+        if (has_receiver && receiver
             && sema_own_argument_error(&spec->as.func_decl, receiver, call->as.method_call.object, message,
                                        sizeof message)) {
             diag_error(sema_diag_file(module), (int)call->as.method_call.object->line,

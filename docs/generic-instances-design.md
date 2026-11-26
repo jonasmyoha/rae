@@ -240,9 +240,21 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    stays what the backend resolves: pointed at the instance, the backend writes the call from the instance's
    parameters and the function from the template's, and they differ (`view T` of an Int is the Int, `view Int`
    is a pointer); so it moves to the instance with step 5. An instance is named from its template
-   (`rae_mangle_specialized_function`). The rest is its own queue task: the instances only the backend still has,
-   the drops only sema has, the suite stage, the spawn wrappers (skipped for now), a concrete `resolved_type` on
-   each call, and `sema_value_type` as a read of it.
+   (`rae_mangle_specialized_function`). Second part (0.4.106): every case and the examples 106, 121 and 136 have
+   the same instances both ways (106: 3 948). Sema also reads a type argument written as a call (`List(Int)`,
+   `Task(Int)`), by its parameter's name (`T: T`), or as the qualifier (`Float.createList(cap: 4)`, `Query.query2`);
+   it ranks templates that fit as the resolver does (one with `this` for a method call, then the program's own, and
+   the argument names), and gives a generic struct's list-field defaults and every field default their literal
+   instances. Instances only sema has are counted, not differences: sema decides some the C never needs (the
+   drop of a type that is only declared, `List(SpatialRect)`). Emitting them was tried: sema spells some number
+   types by their C name (`uint64_t`), so one C function was registered twice with two parameter types; that
+   spelling is fixed with step 5. An instance only the backend has is a difference only where the C calls it:
+   discovery registers some that nothing calls (`add` of `Stack(UInt8)`), which step 7 removes. The drops are
+   made in type-name order, so the C is the same on every run. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which fails on a difference. Left for
+   their own task: the spawn wrappers (sema decides nothing in a wrapper or a spawned call), and a concrete
+   `resolved_type` on each generic call: tried, it lets sema's checks see lib code they could not before
+   (`state.lanes.modAt(index: lane).marks` in lib/ui/timelineSystem uses an optional unchecked), and the
+   instance's written result spells a number type by its C name (`uint8_t`).
 5. **Emission from instances** behind `RAE_GENERIC_INSTANCES=1`, prototypes and helpers too; the 29 cases; the suite
    runs its cases both ways.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the

@@ -214,6 +214,9 @@ for TARGET in "${TARGETS[@]}"; do
     export RAE_LATE_SPECIALIZATIONS="${RAE_LATE_SPECIALIZATIONS:-error}"
     # An instance of a generic function shares no node with its template (src/ast_clone.c)
     export RAE_CHECK_CLONES="${RAE_CHECK_CLONES:-1}"
+    # Sema decided every instance of a generic function the C calls (docs/generic-instances-design.md,
+    # step 4): one only the backend found, or only sema, fails the build (src/c_instance_check.c)
+    export RAE_CHECK_INSTANCES="${RAE_CHECK_INSTANCES:-error}"
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then
