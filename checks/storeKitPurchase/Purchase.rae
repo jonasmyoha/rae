@@ -73,13 +73,15 @@ func jwsNamesProduct(jws: view String, productId: view String) ret Bool {
 func buy(productId: view String) ret opt StoreTransaction {
   let request: StoreRequest = requestPurchase(productId: productId)
   let status: RequestStatus = waitForRequest(request: request, timeoutMs: waitMs)
-  let result: PurchaseResult = purchaseResult(request: request)
+  let outcome: PurchaseOutcome = outcome,
+    let transactions: List(StoreTransaction) = transactions,
+    let error: String = error = purchaseResult(request: request)
   releaseRequest(request: request)
-  if status is not RequestStatus.done or result.outcome is not PurchaseOutcome.purchased {
-    log("FAIL: buying {productId}: {status}, {result.outcome}, [{result.error}]")
+  if status is not RequestStatus.done or outcome is not PurchaseOutcome.purchased {
+    log("FAIL: buying {productId}: {status}, {outcome}, [{error}]")
     ret none
   }
-  if let transaction: StoreTransaction = result.transactions.copyAt(index: 0) {
+  if let transaction: StoreTransaction = transactions.copyAt(index: 0) {
     log(
       "bought {transaction.productId}: transaction {transaction.id}, verified {transaction.verified}, at {transaction.purchaseDateMs}, JWS ending {transaction.jws.sub(
         start: transaction.jws.length() - 12
@@ -95,10 +97,10 @@ func buy(productId: view String) ret opt StoreTransaction {
 func finish(transactionId: view Int) ret Bool {
   let request: StoreRequest = requestFinish(transactionId: transactionId)
   let status: RequestStatus = waitForRequest(request: request, timeoutMs: waitMs)
-  let result: FinishResult = finishResult(request: request)
+  let finished: Bool = finished, let error: String = error = finishResult(request: request)
   releaseRequest(request: request)
-  if status is not RequestStatus.done or not result.finished {
-    log("FAIL: finishing transaction {transactionId}: {status} [{result.error}]")
+  if status is not RequestStatus.done or not finished {
+    log("FAIL: finishing transaction {transactionId}: {status} [{error}]")
     ret false
   }
   ret true
@@ -112,13 +114,14 @@ func main() ret Int {
   let ids: List(String) = { unlockId, coinsId }
   let products: StoreRequest = requestProducts(ids: ids)
   let productsStatus: RequestStatus = waitForRequest(request: products, timeoutMs: waitMs)
-  let loaded: ProductsResult = productsResult(request: products)
+  let loadedProducts: List(StoreProduct) = products,
+    let productsError: String = error = productsResult(request: products)
   releaseRequest(request: products)
-  loop let product: view StoreProduct in loaded.products {
+  loop let product: view StoreProduct in loadedProducts {
     log("product {product.id}: {product.displayName}, {product.displayPrice} ({product.kind})")
   }
-  if productsStatus is not RequestStatus.done or loaded.products.length is not 2 {
-    log("FAIL: products: {productsStatus}, {loaded.products.length} loaded [{loaded.error}]")
+  if productsStatus is not RequestStatus.done or loadedProducts.length is not 2 {
+    log("FAIL: products: {productsStatus}, {loadedProducts.length} loaded [{productsError}]")
     ret 1
   }
   # the non-consumable: purchased, its JWS names it, it is an entitlement, then finished
@@ -129,16 +132,19 @@ func main() ret Int {
     log("the JWS of {unlockId} has three base64url parts and names it")
     let entitlements: StoreRequest = requestEntitlements()
     let entitlementsStatus: RequestStatus = waitForRequest(request: entitlements, timeoutMs: waitMs)
-    let held: EntitlementsResult = entitlementsResult(request: entitlements)
+    let heldTransactions: List(StoreTransaction) = transactions,
+      let heldError: String = error = entitlementsResult(request: entitlements)
     releaseRequest(request: entitlements)
     var entitled: Bool = false
-    loop let transaction: view StoreTransaction in held.transactions {
+    loop let transaction: view StoreTransaction in heldTransactions {
       if transaction.productId is unlockId {
         entitled = true
       }
     }
     if entitlementsStatus is not RequestStatus.done or not entitled {
-      log("FAIL: {unlockId} is not among the {held.transactions.length} current entitlements")
+      log(
+        "FAIL: {unlockId} is not among the {heldTransactions.length} current entitlements [{heldError}]"
+      )
       ret 1
     }
     log("{unlockId} is a current entitlement")

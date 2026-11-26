@@ -23,34 +23,36 @@ func main() ret Int {
     log("FAIL: the products request did not finish ({productsStatus})")
     ret 1
   }
-  let loaded: ProductsResult = productsResult(request: products)
+  let loadedProducts: List(StoreProduct) = products,
+    let productsError: String = error = productsResult(request: products)
   releaseRequest(request: products)
   if requestStatus(request: products) is not RequestStatus.unknown {
     log("FAIL: a released request is still there")
     ret 1
   }
-  log("products: {loaded.products.length}, error [{loaded.error}]")
-  loop let product: view StoreProduct in loaded.products {
+  log("products: {loadedProducts.length}, error [{productsError}]")
+  loop let product: view StoreProduct in loadedProducts {
     log("  {product.id}: {product.displayName} {product.displayPrice} ({product.kind})")
   }
   let entitlements: StoreRequest = requestEntitlements()
   let entitlementsStatus: RequestStatus = waitForRequest(request: entitlements, timeoutMs: 20000)
-  let held: EntitlementsResult = entitlementsResult(request: entitlements)
+  let heldTransactions: List(StoreTransaction) = transactions,
+    let heldError: String = error = entitlementsResult(request: entitlements)
   releaseRequest(request: entitlements)
   if entitlementsStatus is not RequestStatus.done {
-    log("FAIL: the entitlements request did not finish ({entitlementsStatus})")
+    log("FAIL: the entitlements request did not finish ({entitlementsStatus}) [{heldError}]")
     ret 1
   }
-  log("entitlements: {held.transactions.length}")
+  log("entitlements: {heldTransactions.length}")
   let finish: StoreRequest = requestFinish(transactionId: 1)
   let finishStatus: RequestStatus = waitForRequest(request: finish, timeoutMs: 20000)
-  let finished: FinishResult = finishResult(request: finish)
+  let finished: Bool = finished, let finishError: String = error = finishResult(request: finish)
   releaseRequest(request: finish)
-  if finishStatus is not RequestStatus.done or finished.finished {
-    log("FAIL: finishing an unknown transaction ({finishStatus}, finished {finished.finished})")
+  if finishStatus is not RequestStatus.done or finished {
+    log("FAIL: finishing an unknown transaction ({finishStatus}, finished {finished})")
     ret 1
   }
-  log("finish of an unknown transaction: [{finished.error}]")
+  log("finish of an unknown transaction: [{finishError}]")
   if not listenForUpdates() {
     log("FAIL: the updates listener did not start")
     ret 1
