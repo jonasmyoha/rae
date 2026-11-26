@@ -37,14 +37,6 @@ type QrReadResult {
   bottomLeft: QrPoint
 }
 
-# One decode attempt's outcome: the result, or the version the code's
-# version information named when it differs from the one tried
-type GridOutcome {
-  ok: Bool
-  version: Int
-  result: QrReadResult
-}
-
 func emptyResult() ret QrReadResult {
   ret QrReadResult {
     text: ""
@@ -60,8 +52,32 @@ func emptyResult() ret QrReadResult {
   }
 }
 
-func failedGrid(version: view Int) ret GridOutcome {
-  ret GridOutcome { ok: false, version: version, result: emptyResult() }
+func failedGrid(version: view Int) ret ok: Bool, version: Int, result: QrReadResult {
+  ret ok: false, version: version, result: emptyResult()
+}
+
+# decodeGrid, and when that fails at this size, the transposed grid: the code
+# seen from behind
+func decodeEitherSide(
+  grid: view List(Bool)
+  size: view Int
+  field: view GaloisField
+) ret ok: Bool, version: Int, result: QrReadResult {
+  let ok: Bool = ok,
+    let version: Int = version,
+    let result: QrReadResult = result = decodeGrid(grid: grid, size: size, field: field)
+  if ok or version is not (size - 17) / 4 {
+    ret ok: ok, version: version, result: result
+  }
+  let mirroredOk: Bool = ok,
+    let mirroredVersion: Int = version,
+    var mirrored: QrReadResult = result = decodeGrid(
+      grid: transposed(grid: grid, size: size)
+      size: size
+      field: field
+    )
+  mirrored.mirrored = true
+  ret ok: mirroredOk, version: mirroredVersion, result: mirrored
 }
 
 func qrRead(image: view GrayImage) ret opt QrReadResult {
@@ -168,22 +184,18 @@ func decodeWith(
       useAlignment: useAlignment
     ) {
       let grid: List(Bool) = sampleGrid(image: image, homography: homography, size: size)
-      var outcome: GridOutcome = decodeGrid(grid: grid, size: size, field: field)
-      if not outcome.ok and outcome.version is (size - 17) / 4 {
-        # Seen from behind: the transposed grid
-        outcome = decodeGrid(grid: transposed(grid: grid, size: size), size: size, field: field)
-        outcome.result.mirrored = true
-      }
-      if outcome.ok {
-        var result: QrReadResult = outcome.result
+      let ok: Bool = ok,
+        let version: Int = version,
+        var result: QrReadResult = result = decodeEitherSide(grid: grid, size: size, field: field)
+      if ok {
         result.topLeft = patternPoint(pattern: triple.topLeft)
         result.topRight = patternPoint(pattern: triple.topRight)
         result.bottomLeft = patternPoint(pattern: triple.bottomLeft)
         ret result
       }
       # The version information named another size: sample again at it
-      if outcome.version is not (size - 17) / 4 and outcome.version >= 7 {
-        size = outcome.version * 4 + 17
+      if version is not (size - 17) / 4 and version >= 7 {
+        size = version * 4 + 17
       } else {
         ret none
       }
@@ -324,8 +336,13 @@ func levelFromBits(bits: view Int) ret QrErrorCorrection {
   ret QrErrorCorrection.high
 }
 
-# Decode a sampled grid of `size` modules a side
-func decodeGrid(grid: view List(Bool), size: view Int, field: view GaloisField) ret GridOutcome {
+# Decode a sampled grid of `size` modules a side: the result, or the version the code's version
+# information named when it differs from the one tried
+func decodeGrid(
+  grid: view List(Bool)
+  size: view Int
+  field: view GaloisField
+) ret ok: Bool, version: Int, result: QrReadResult {
   var version: Int = (size - 17) / 4
   # The format information, both copies, the nearest valid code
   var first: Int = 0
@@ -552,21 +569,17 @@ func decodeGrid(grid: view List(Bool), size: view Int, field: view GaloisField) 
   if not decodeSegments(data: data, version: version, out: bytes) {
     ret failedGrid(version: version)
   }
-  ret GridOutcome {
-    ok: true
+  ret ok: true, version: version, result: QrReadResult {
+    text: fromBytes(bytes: bytes, start: 0, count: bytes.length)
+    bytes: bytes
     version: version
-    result: QrReadResult {
-      text: fromBytes(bytes: bytes, start: 0, count: bytes.length)
-      bytes: bytes
-      version: version
-      level: level
-      mask: mask
-      corrected: corrected
-      mirrored: false
-      topLeft: qrPoint(x: 0.0, y: 0.0)
-      topRight: qrPoint(x: 0.0, y: 0.0)
-      bottomLeft: qrPoint(x: 0.0, y: 0.0)
-    }
+    level: level
+    mask: mask
+    corrected: corrected
+    mirrored: false
+    topLeft: qrPoint(x: 0.0, y: 0.0)
+    topRight: qrPoint(x: 0.0, y: 0.0)
+    bottomLeft: qrPoint(x: 0.0, y: 0.0)
   }
 }
 
