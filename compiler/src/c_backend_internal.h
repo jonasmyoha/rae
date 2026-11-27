@@ -46,8 +46,6 @@ typedef struct {
   const AstModule* module;
   const AstFuncDecl* func_decl;
   const AstParam* params;
-  const AstIdentifierPart* generic_params;
-  const AstTypeRef* generic_args;
   const char* return_type_name;
   Str locals[256];
   Str local_types[256];
@@ -413,7 +411,6 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
 const AstFuncDecl* find_drop_overload_for(CFuncContext* ctx, Str container_base);
 // Move tracking helpers (Stage 3 of docs/ownership-model.md).
 void mark_local_moved_by_name(CFuncContext* ctx, Str name);
-void c_record_moved_local(CFuncContext* ctx, const AstExpr* value);
 void c_forget_rejected_moves(CFuncContext* ctx);
 bool rest_moves_name_conditionally(const AstStmt* rest, Str name);
 void declare_param_live_flags(CFuncContext* ctx, const AstBlock* body, FILE* out);

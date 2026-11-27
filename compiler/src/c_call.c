@@ -42,7 +42,7 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
     else if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC) {
         gp = fd->generic_template->as.func_decl.generic_params;
         ga = fd->specialization_args;
-    } else { gp = ctx->generic_params; ga = ctx->generic_args; }
+    }
     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, gp, ga, ret_tr);
 
     // Struct-rep opt returns are `struct rae_opt_<T>`; consuming the result as
@@ -164,8 +164,6 @@ static void emit_optional_address(CFuncContext* ctx, const AstTypeRef* opt_type,
         source = source->as.unary.operand;
     const AstTypeRef* type = infer_expr_type_ref(ctx, source);
     bool reference = c_type_parameter_is_optional(ctx, type);
-    if (type && ctx->generic_params && ctx->generic_args)
-        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
     bool optional = type && type->is_opt && (reference || !(type->is_view || type->is_mod));
     bool saved_unbox = ctx->suppress_opt_unbox;
     if (optional && c_is_place(ctx, source)) {
@@ -215,8 +213,6 @@ static int c_call_name_score(const AstExpr* call, const AstFuncDecl* fd) {
 static void c_call_argument_bases(CFuncContext* ctx, const AstExpr* call, CCallChoice* choice) {
     for (const AstCallArg* a = call->as.call.args; a && choice->arg_count < C_CALL_CHOICE_ARGS; a = a->next) {
         const AstTypeRef* type = a->value ? infer_expr_type_ref(ctx, c_without_own(a->value)) : NULL;
-        if (type && ctx->generic_params && ctx->generic_args)
-            type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
         choice->arg_bases[choice->arg_count++] = type ? get_base_type_name(type) : (Str){0};
     }
 }
@@ -408,82 +404,6 @@ static bool c_args_bind_type_params(CFuncContext* ctx, const AstFuncDecl* tmpl, 
     return count && infer_generic_args_multi(ctx->compiler_ctx, tmpl, patterns, concretes, count);
 }
 
-/* Sema checks a generic body once, for the template, where an argument of
- * a generic parameter's type (`value: view T`) matches every overload, so it
- * links the FIRST one. Inside each specialization, pick again from the
- * concrete types: the non-generic overload of the same name, arity and
- * labels whose parameters take those types. Without this every
- * instantiation silently called the first overload (`encode(value: health)`
- * ran the Position version). When none takes the concrete type,
- * `*no_overload` is set (the caller reports it) and `fd` is kept. */
-static const AstFuncDecl* respecialize_overload(CFuncContext* ctx, const AstExpr* expr,
-                                                const AstFuncDecl* fd, bool* no_overload,
-                                                Str* generic_arg_type) {
-    if (!ctx->generic_params || !ctx->generic_args || fd->generic_params) return fd;
-    /* a generic function: its instance is the one for what the arguments are here */
-    if (fd->specialization_args) {
-        const AstFuncDecl* tmpl = fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC
-            ? &fd->generic_template->as.func_decl : NULL;
-        return tmpl && !expr->as.call.generic_args && c_args_bind_type_params(ctx, tmpl, expr->as.call.args) ? tmpl : fd;
-    }
-    if (expr->as.call.callee->kind != AST_EXPR_IDENT) return fd;
-    /* Which arguments have a generic parameter's type, and what it is here */
-    enum { max_args = 16 };
-    Str concrete[max_args];
-    bool generic[max_args];
-    size_t arg_count = 0;
-    bool any_generic = false;
-    for (const AstCallArg* a = expr->as.call.args; a; a = a->next) {
-        if (arg_count >= max_args) return fd;
-        generic[arg_count] = false;
-        concrete[arg_count] = (Str){0};
-        /* Sema typed the argument in the template: a generic parameter's
-         * type there. The written type in this specialization may already
-         * be the concrete one, so substitute either way. */
-        const TypeInfo* sema_type = a->value ? a->value->resolved_type : NULL;
-        while (sema_type && sema_type->kind == TYPE_REF) sema_type = sema_type->as.ref.base;
-        const AstTypeRef* raw = a->value ? infer_expr_type_ref(ctx, a->value) : NULL;
-        if (raw) {
-            Str raw_base = get_base_type_name(raw);
-            if (sema_type && sema_type->kind == TYPE_GENERIC_PARAM) generic[arg_count] = true;
-            for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next) {
-                if (str_eq(raw_base, gp->text)) { generic[arg_count] = true; break; }
-            }
-            if (generic[arg_count]) {
-                const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, raw);
-                concrete[arg_count] = sub ? get_base_type_name(sub) : (Str){0};
-                if (concrete[arg_count].len == 0) generic[arg_count] = false;
-                else any_generic = true;
-            }
-        }
-        arg_count++;
-    }
-    if (!any_generic) return fd;
-    Str name = expr->as.call.callee->as.ident;
-    size_t named_count = 0;
-    const size_t* named = decl_index_functions(ctx->compiler_ctx, name, &named_count);
-    for (size_t k = 0; k < named_count; k++) {
-        const AstFuncDecl* candidate = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
-        if (candidate->generic_params || candidate->specialization_args) continue;
-        size_t param_count = 0;
-        for (const AstParam* p = candidate->params; p; p = p->next) param_count++;
-        if (param_count != arg_count) continue;
-        bool fits = true;
-        size_t i = 0;
-        const AstCallArg* a = expr->as.call.args;
-        for (const AstParam* p = candidate->params; p && a && fits; p = p->next, a = a->next, i++) {
-            if (a->name.len && !str_eq(a->name, p->name)) fits = false;
-            else if (generic[i] && !str_eq(get_base_type_name(p->type), concrete[i])) fits = false;
-        }
-        if (fits) return candidate;
-    }
-    *no_overload = true;
-    for (size_t i = 0; i < arg_count; i++) {
-        if (generic[i]) { *generic_arg_type = concrete[i]; break; }
-    }
-    return fd;
-}
-
 /* ---- exclusive access for `mod` arguments: a measuring mode ----------------
  * docs/realtime-language-design.md §4.6 / §9 R8. Rae lets one place be passed
  * to a call as `mod` together with itself, a part of it or a whole containing
@@ -616,33 +536,6 @@ static void report_own_argument(CFuncContext* ctx, const AstFuncDecl* fd, const 
   diag_error(c_source_file(ctx), (int)value->line, (int)value->column, message);
 }
 
-/* In a specialization: `value` (a bare local, or `own x`) moves a local that
- * owns its value. Recorded for the use-after-move check of the body, which
- * sema has not analyzed for these type arguments; the same rule as its
- * sema_own_moves_local (an alias or a borrow is not moved). */
-void c_record_moved_local(CFuncContext* ctx, const AstExpr* value) {
-  if (!ctx->generic_params || !value) return;
-  const AstExpr* moved = value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
-  if (!moved || moved->kind != AST_EXPR_IDENT) return;
-  int local = local_index_by_name(ctx, moved->as.ident);
-  if (local < 0 || c_local_is_slot_alias(ctx, local)) return;
-  const AstTypeRef* type = ctx->local_type_refs[local];
-  if (!type || type->is_view || type->is_mod) return;
-  bool is_param = ctx->func_first_let_idx != (size_t)-1 && (size_t)local < ctx->func_first_let_idx;
-  if (is_param && !type->is_own && !type->is_copy) return;
-  if (ctx->generic_args)
-    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
-  if (type->is_view || type->is_mod) return;
-  if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)
-      && !str_eq_cstr(get_base_type_name(type), "Task")) return;
-  if (ctx->moved_value_count == ctx->moved_value_cap) {
-    ctx->moved_value_cap = ctx->moved_value_cap ? ctx->moved_value_cap * 2 : 16;
-    ctx->moved_values = realloc(ctx->moved_values, ctx->moved_value_cap * sizeof *ctx->moved_values);
-    if (!ctx->moved_values) { fprintf(stderr, "c backend: out of memory\n"); abort(); }
-  }
-  ctx->moved_values[ctx->moved_value_count++] = value;
-}
-
 bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     bool discard = ctx->discard_result;
     ctx->discard_result = false;
@@ -710,10 +603,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         AstTypeRef value_tr;
         if (tr) {
             const AstTypeRef* sub = tr;
-            if (ctx->generic_params && ctx->generic_args) {
-                const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-                if (s2) sub = s2;
-            }
             value_tr = *sub; value_tr.next = NULL;
             // view/mod are how the value ARRIVED, not what it is.
             value_tr.is_view = false; value_tr.is_mod = false;
@@ -822,8 +711,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
      * the specialization binds T; it emits nothing. */
     if (str_eq_cstr(name, "rae_ext_rae_require_plain")) {
         const AstTypeRef* tr = expr->as.call.generic_args;
-        if (tr && ctx->generic_params && ctx->generic_args)
-            tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
         char where[512];
         if (tr && type_heap_part(ctx->compiler_ctx, ctx->module, tr, where, sizeof where, 0)) {
             Str base = get_base_type_name(tr);
@@ -867,7 +754,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         {
             const AstTypeRef* buf_tr = infer_expr_type_ref(ctx, arg->value);
             if (buf_tr) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, buf_tr);
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, buf_tr);
                 Str base = get_base_type_name(sub);
                 if (str_eq_cstr(base, "Buffer") && sub->generic_args) {
                     elem_tr = sub->generic_args;
@@ -879,23 +766,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             TypeInfo* bt = arg->value->resolved_type;
             while (bt->kind == TYPE_REF) bt = bt->as.ref.base;
             if (bt->kind == TYPE_BUFFER) elem_t = bt->as.buffer.base;
-        }
-        if (elem_t && elem_t->kind == TYPE_GENERIC_PARAM && ctx->generic_params && ctx->generic_args) {
-            const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* concrete = ctx->generic_args;
-            while (gp && concrete) {
-                if (str_eq(gp->text, elem_t->as.generic_param.param_name)) {
-                    elem_t = concrete->resolved_type
-                        ? concrete->resolved_type
-                        : sema_resolve_type(ctx->compiler_ctx, (AstTypeRef*)concrete);
-                    break;
-                }
-                gp = gp->next; concrete = concrete->next;
-            }
-        }
-        if (!elem_tr && !elem_t && ctx->generic_args) {
-            elem_t = ctx->generic_args->resolved_type
-                ? ctx->generic_args->resolved_type
-                : sema_resolve_type(ctx->compiler_ctx, (AstTypeRef*)ctx->generic_args);
         }
         fprintf(out, "(*("); EMIT_ELEM_TYPE();
         fprintf(out, "*)( (char*)("); emit_expr(ctx, arg->value, out, PREC_LOWEST, false, false);
@@ -912,7 +782,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         {
             const AstTypeRef* buf_tr = infer_expr_type_ref(ctx, arg->value);
             if (buf_tr) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, buf_tr);
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, buf_tr);
                 Str base = get_base_type_name(sub);
                 if (str_eq_cstr(base, "Buffer") && sub->generic_args) {
                     elem_tr = sub->generic_args;
@@ -923,23 +793,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             TypeInfo* bt = arg->value->resolved_type;
             while (bt->kind == TYPE_REF) bt = bt->as.ref.base;
             if (bt->kind == TYPE_BUFFER) elem_t = bt->as.buffer.base;
-        }
-        if (elem_t && elem_t->kind == TYPE_GENERIC_PARAM && ctx->generic_params && ctx->generic_args) {
-            const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* concrete = ctx->generic_args;
-            while (gp && concrete) {
-                if (str_eq(gp->text, elem_t->as.generic_param.param_name)) {
-                    elem_t = concrete->resolved_type
-                        ? concrete->resolved_type
-                        : sema_resolve_type(ctx->compiler_ctx, (AstTypeRef*)concrete);
-                    break;
-                }
-                gp = gp->next; concrete = concrete->next;
-            }
-        }
-        if (!elem_tr && !elem_t && ctx->generic_args) {
-            elem_t = ctx->generic_args->resolved_type
-                ? ctx->generic_args->resolved_type
-                : sema_resolve_type(ctx->compiler_ctx, (AstTypeRef*)ctx->generic_args);
         }
         // Pre-drop on slot was attempted to close the applyOverride
         // leak (replace-mode buf_set in componentSet leaves the old
@@ -965,9 +818,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         if (val_expr && val_expr->kind == AST_EXPR_IDENT) {
             const AstTypeRef* vtr = infer_expr_type_ref(ctx, val_expr);
             // #969: a bare-`T` local is the instantiation's concrete type.
-            if (vtr && ctx->generic_params && ctx->generic_args)
-                vtr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                          ctx->generic_args, (AstTypeRef*)vtr);
             if (vtr && !(vtr->is_view || vtr->is_mod)
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, vtr, 0)) {
                 // Moved on this path only: the flag is the record of it
@@ -1031,7 +881,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         {
             const AstTypeRef* buf_tr = infer_expr_type_ref(ctx, arg->value);
             if (buf_tr) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)buf_tr);
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)buf_tr);
                 Str base = get_base_type_name(sub);
                 if (str_eq_cstr(base, "Buffer") && sub->generic_args) {
                     elem_tr = sub->generic_args;
@@ -1181,19 +1031,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     const AstFuncDecl* fd = NULL;
     if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
         fd = &expr->decl_link->as.func_decl;
-        bool no_overload = false;
-        Str generic_arg_type = {0};
-        fd = respecialize_overload(ctx, expr, fd, &no_overload, &generic_arg_type);
-        if (no_overload) {
-            char message[512];
-            snprintf(message, sizeof message,
-                "no overload of '%.*s' takes a '%.*s' here: this generic function is "
-                "instantiated with that type, and the call was checked only against the "
-                "first overload; add an overload for it",
-                (int)fd->name.len, fd->name.data,
-                (int)generic_arg_type.len, generic_arg_type.data);
-            diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column, message);
-        }
     } else if (expr->as.call.callee->kind == AST_EXPR_IDENT) {
         Str callee_name = expr->as.call.callee->as.ident;
         uint16_t call_arg_count = 0;
@@ -1205,8 +1042,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         const AstTypeRef* recv_tr_for_cap = NULL;
         if (expr->as.call.args) {
             const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
-            if (recv_tr && ctx->generic_params && ctx->generic_args)
-                recv_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
             if (recv_tr) receiver_base = get_base_type_name(recv_tr);
             recv_tr_for_cap = recv_tr;
         }
@@ -1236,8 +1071,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         size_t typed_arg_count = 0;
         for (const AstCallArg* ca = expr->as.call.args; ca && typed_arg_count < max_typed_args; ca = ca->next) {
             const AstTypeRef* atr = ca->value ? infer_expr_type_ref(ctx, ca->value) : NULL;
-            if (atr && ctx->generic_params && ctx->generic_args)
-                atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
             Str base = atr ? get_base_type_name(atr) : (Str){0};
             if (str_eq_cstr(base, "Any")) base = (Str){0};
             arg_bases[typed_arg_count++] = base;
@@ -1387,8 +1220,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             const AstExpr* arg_val = expr->as.call.args->value; if (arg_val->kind == AST_EXPR_BOX) arg_val = arg_val->as.unary.operand;
             const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, arg_val);
             const char* newline = str_eq_cstr(fd->name, "log") ? "1" : "0";
-            const AstTypeRef* concrete_tr = (arg_tr && ctx->generic_params && ctx->generic_args)
-                ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr) : arg_tr;
+            const AstTypeRef* concrete_tr = arg_tr;
             Str arg_base = get_base_type_name(concrete_tr);
             // (An `opt T` is represented as an Any box, so its resolved type
             // says Any; the written type is what tells it apart.)
@@ -1474,8 +1306,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 const AstCallArg* a = expr->as.call.args;
                 while (p && a && np < 32) {
                     const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
-                    if (arg_tr && ctx->generic_params && ctx->generic_args)
-                        arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                     patterns[np] = p->type; concretes[np] = arg_tr; np++;
                     p = p->next; a = a->next;
                 }
@@ -1491,7 +1321,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         } else if (expr->as.call.generic_args) {
             AstTypeRef* last = NULL;
             for (const AstTypeRef* arg = expr->as.call.generic_args; arg; arg = arg->next) {
-                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg);
+                AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, arg);
                 if (!concrete) concrete = sub; else last->next = sub;
                 last = sub;
             }
@@ -1509,8 +1339,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             const AstCallArg* a = expr->as.call.args;
             while (p && a && np < 32) {
                 const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
-                if (arg_tr && ctx->generic_params && ctx->generic_args)
-                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                 patterns[np] = p->type; concretes[np] = arg_tr; np++;
                 p = p->next; a = a->next;
             }
@@ -1528,15 +1356,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             //    so a field literally typed `List(T)` still resolves its `T`.
             if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
                 AstTypeRef* from_expected = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
-                if (from_expected && ctx->generic_params && ctx->generic_args) {
-                    AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
-                    for (AstTypeRef* tr = from_expected; tr; tr = tr->next) {
-                        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-                        AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef)); *node = *sub; node->next = NULL;
-                        if (!head) head = node; else tail->next = node; tail = node;
-                    }
-                    concrete = head;
-                } else if (from_expected) {
+                if (from_expected) {
                     concrete = from_expected;
                 }
             }
@@ -1545,16 +1365,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             //    (the common "everyone calls it T" case) or for type-arg-only
             //    calls with no value arg to infer from; hence a fallback, not the
             //    primary path (it silently mis-binds when names differ).
-            if (!concrete && ctx->generic_params && ctx->generic_args) {
-                AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
-                for (const AstIdentifierPart* gp = fd->generic_params; gp; gp = gp->next) {
-                    AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = gp->text; tmp.parts = &part;
-                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
-                    AstTypeRef* node = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef)); *node = *sub; node->next = NULL;
-                    if (!head) head = node; else tail->next = node; tail = node;
-                }
-                concrete = head;
-            }
         }
         if (concrete) {
             const AstFuncDecl* gen_fd = fd->generic_template ? &fd->generic_template->as.func_decl : fd;
@@ -1810,7 +1620,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             bool param_consumes = !(fd->is_extern) || p->type->is_own;
             /* `value: Any` borrows */
             if (c_is_any(p->type) && !p->type->is_own && !p->type->is_copy) param_consumes = false;
-            if (p && p->type && p->type->is_own) c_record_moved_local(ctx, a->value);
             else report_own_argument(ctx, fd, p, a->value);
             bool close_live_flag = false;
             if (param_consumes
@@ -1822,9 +1631,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 // concrete type of this instantiation — substitute so a
                 // heap-owning T moves (its scope-exit drop is now emitted
                 // for the concrete type, see emit_implicit_drops_for_body).
-                if (arg_tr && ctx->generic_params && ctx->generic_args)
-                    arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                 ctx->generic_args, (AstTypeRef*)arg_tr);
                 if (arg_tr && !(arg_tr->is_view || arg_tr->is_mod)
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, arg_tr, 0)) {
                     int li = local_index_by_name(ctx, a->value->as.ident);
@@ -2429,8 +2235,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                         fd->specialization_args, p->type);
                 }
                 const char* tn_dc = rae_mangle_type_specialized(
-                    ctx->compiler_ctx, ctx->generic_params,
-                    ctx->generic_args, p_type_for_dc);
+                    ctx->compiler_ctx, NULL, NULL, p_type_for_dc);
                 int tmp_id = ctx->temp_counter++;
                 // #961: a `mod`/`view` ALIAS of an aggregate (`let f: mod
                 // List(T) => comp.bindings`, or a field-loop binding) is

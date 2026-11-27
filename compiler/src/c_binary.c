@@ -325,10 +325,6 @@ const AstTypeRef* c_binary_call_type(CFuncContext* ctx, const AstExpr* expr, boo
     return NULL;
   }
   if (!type) return NULL;
-  if (ctx->generic_params && ctx->generic_args) {
-    const AstTypeRef* substituted = substitute_type_ref(cc, ctx->generic_params, ctx->generic_args, type);
-    if (substituted) type = substituted;
-  }
   AstTypeRef* plain = arena_alloc(cc->ast_arena, sizeof(AstTypeRef));
   *plain = *type;
   plain->is_view = false;

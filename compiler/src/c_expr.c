@@ -103,11 +103,6 @@ static void emit_c_source_location(CFuncContext* ctx, const AstExpr* expr,
 // error — the reason a String `equals` helper existed).
 static Str eff_base_name(CFuncContext* ctx, const AstExpr* e) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
-    if (tr && ctx && ctx->generic_params && ctx->generic_args) {
-        AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                              ctx->generic_args, tr);
-        if (sub) tr = sub;
-    }
     return get_base_type_name(tr);
 }
 
@@ -186,28 +181,6 @@ static void emit_to_string_value(CFuncContext* ctx, const AstExpr* operand,
 
 void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* tr = infer_expr_type_ref(ctx, operand);
-    // In a generic body the operand's type may be the parameter `T`: the
-    // instantiation being emitted knows the concrete type, so substitute it
-    // first — then the rules below dispatch per instantiation (an enum to its
-    // member name, a struct / List to its generated toString) instead of
-    // falling into the String arm of the _Generic macro.
-    AstTypeRef substituted_local;
-    if (tr && ctx->generic_params && ctx->generic_args) {
-        const AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-        if (substituted) {
-            // T = opt X through a `view T` parameter: the instantiation passes
-            // the struct-rep opt by value, so format it as the value it is.
-            // Only when the `opt` came from T: an `opt view T` written as such
-            // (a narrowed `if let x: view T =>` binding) is a reference.
-            substituted_local = *substituted;
-            if (!tr->is_opt && substituted_local.is_opt
-                && (substituted_local.is_view || substituted_local.is_mod)
-                && rae_opt_is_struct_rep(ctx, &substituted_local)) {
-                substituted_local.is_view = false; substituted_local.is_mod = false;
-            }
-            tr = &substituted_local;
-        }
-    }
     Str base = get_base_type_name(tr);
     /* An optional REFERENCE (`opt view T`: a parameter, a loop row, and what an
      * `if let x: view T` binding is registered as) is a nullable pointer, in a
@@ -350,19 +323,11 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     const AstTypeRef* generic_sub = NULL;
     if (tr && !tr->is_opt && (tr->generic_args || c_is_array_type(tr)) && !str_eq_cstr(base, "List")) {
         generic_sub = tr;
-        if (ctx->generic_params && ctx->generic_args) {
-            const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-            if (s2) generic_sub = s2;
-        }
         AstTypeRef plain = *generic_sub; plain.is_view = false; plain.is_mod = false;
         if (!c_has_generic_value_helpers(ctx->compiler_ctx, &plain)) generic_sub = NULL;
     }
     if (tr && !tr->is_opt && ((str_eq_cstr(base, "List") && tr->generic_args) || generic_sub)) {
         const AstTypeRef* sub = tr;
-        if (ctx->generic_params && ctx->generic_args) {
-            const AstTypeRef* s2 = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
-            if (s2) sub = s2;
-        }
         AstTypeRef sub_plain = *sub; sub_plain.is_view = false; sub_plain.is_mod = false;
         sub = &sub_plain;
         const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)sub);
@@ -489,15 +454,10 @@ const AstTypeRef* c_list_plain_element(CFuncContext* ctx, const AstTypeRef* list
   if (!list_type || list_type->is_opt || !str_eq_cstr(get_base_type_name(list_type), "List")
       || !list_type->generic_args || list_type->generic_args->next) return NULL;
   const AstTypeRef* element = list_type->generic_args;
-  if (ctx->generic_params && ctx->generic_args)
-    element = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                  (AstTypeRef*)element);
   if (!element || element->is_opt || element->is_view || element->is_mod) return NULL;
   Str element_base = get_base_type_name(element);
   if (element_base.len == 0 || str_eq_cstr(element_base, "Any") || str_eq_cstr(element_base, "RaeAny")
       || str_eq_cstr(element_base, "String")) return NULL;
-  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
-    if (str_eq(gp->text, element_base)) return NULL;  // still abstract
   if (type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, element, 0)) return NULL;
   return element;
 }
@@ -659,12 +619,6 @@ static IsOperandKind is_operand_kind(CFuncContext* ctx, const AstExpr* source, A
     *known = declared != NULL;
     if (!declared) return IS_OPERAND_PLAIN;
     *type = *declared;
-    if (ctx->generic_params && ctx->generic_args) {
-        const AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                                         (AstTypeRef*)declared);
-        if (concrete) *type = *concrete;
-        if (!declared->is_opt && type->is_opt) { type->is_view = false; type->is_mod = false; }
-    }
     type->next = NULL;
     if (!type->is_opt) return IS_OPERAND_PLAIN;
     if (type->is_view || type->is_mod) return IS_OPERAND_REFERENCE;
@@ -810,8 +764,7 @@ static void emit_match_arm(CFuncContext* ctx, const AstTypeRef* type, const AstE
         return;
     }
     if (place && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)type, 0)) {
-        emit_deep_copy_value(ctx, rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                                              ctx->generic_args, (AstTypeRef*)type),
+        emit_deep_copy_value(ctx, rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)type),
                              value, (int)ctx->temp_counter++, out);
         return;
     }
@@ -837,8 +790,6 @@ static void emit_match_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     bool string_subject = str_eq_cstr(subject_base, "String") || str_eq_cstr(subject_base, "rae_String");
     const AstTypeRef* type = infer_expr_type_ref(ctx, expr);
     if (!type && ctx->has_expected_type) type = &ctx->expected_type;
-    if (type && ctx->generic_params && ctx->generic_args)
-        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
     bool once = subject->kind != AST_EXPR_IDENT && subject->kind != AST_EXPR_INTEGER && subject->kind != AST_EXPR_STRING
         && subject->kind != AST_EXPR_BOOL && subject->kind != AST_EXPR_CHAR;
     int id = once ? (int)ctx->temp_counter++ : 0;
@@ -971,17 +922,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // bound to a concrete primitive (e.g. T=Int in a List(Int)
             // specialization), check the substituted base too.
             Str vb_concrete = vb;
-            if (ctx->generic_params && ctx->generic_args) {
-                const AstIdentifierPart* gp = ctx->generic_params;
-                const AstTypeRef* ga = ctx->generic_args;
-                while (gp && ga) {
-                    if (str_eq(gp->text, vb)) {
-                        vb_concrete = get_base_type_name(ga);
-                        break;
-                    }
-                    gp = gp->next; ga = ga->next;
-                }
-            }
             bool is_num_prim = is_scalar_primitive_type(vb_concrete);
             if (!str_eq_cstr(vb, "Buffer") && !str_eq_cstr(vb, "List") && !str_eq_cstr(vb, "Any") && !is_num_prim) {
                 is_struct_view = true;
@@ -1198,7 +1138,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &compared, 0);
           if (ltr && !ltr->is_opt && !made
               && ctx->module && rae_named_type_value_comparable(ctx->module, lbase)) {
-              const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+              const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL,
                   &(AstTypeRef){.parts = &(AstIdentifierPart){.text = lbase}});
               fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? "((bool)(!rae_eq_%s(" : "((bool)(rae_eq_%s(", m);
               emit_expr(ctx, expr->as.binary.lhs, out, PREC_LOWEST, false, false);
@@ -1214,8 +1154,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
            * the C compiler as `a == b` and fail to build. Each operand is
            * evaluated once into a local; the comparison only reads them. */
           const AstTypeRef* deep_tr = ltr;
-          if (deep_tr && ctx->generic_params && ctx->generic_args)
-              deep_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, deep_tr);
           if (deep_tr && !deep_tr->is_opt) {
               Str dbase = get_base_type_name(deep_tr);
               bool is_list = str_eq_cstr(dbase, "List") && deep_tr->generic_args;
@@ -1495,8 +1433,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                             fprintf(out, "))");
                         } else if (agg_lvalue) {
                             const char* tn = rae_mangle_type_specialized(
-                                ctx->compiler_ctx, ctx->generic_params,
-                                ctx->generic_args, pp->type);
+                                ctx->compiler_ctx, NULL, NULL, pp->type);
                             int tid = ctx->temp_counter++;
                             fprintf(out, "(__extension__ ({ %s __cpy%d; rae_deep_copy_%s(&__cpy%d, ",
                                     tn, tid, tn, tid);
@@ -1742,7 +1679,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // Built-in method: toJson() → rae_toJson_TYPE_(&object)
         if (str_eq_cstr(expr->as.method_call.method_name, "toJson") && !expr->as.method_call.args) {
             const AstTypeRef* obj_tr = infer_expr_type_ref(ctx, expr->as.method_call.object);
-            const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
+            const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, obj_tr);
             if (obj_tr && (obj_tr->is_view || obj_tr->is_mod)) {
                 // A view/mod receiver already IS a pointer to the value: pass it
                 // as is. Taking its address passed a pointer-to-pointer, and the
@@ -1775,7 +1712,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             const AstTypeRef* written = default_of->kind == AST_EXPR_IDENT ? NULL : try_as_type_arg(ctx, default_of);
             if (default_of->kind == AST_EXPR_IDENT) { part.text = default_of->as.ident; tmp.parts = &part; }
             else if (written) tmp = *written;
-            const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+            const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, &tmp);
             const AstTypeRef* eff = sub ? sub : &tmp;
             // #961: a non-generic user struct has a generated default that
             // honors declared field defaults; everything else is the zero
@@ -1813,7 +1750,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 // over T mangles to the concrete instantiation instead of the
                 // literal `rae_T`. A non-generic `Pos.fromJson` is unchanged.
                 AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = type_name; tmp.parts = &part;
-                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &tmp);
                 fprintf(out, "rae_fromJson_%s_(", mangled);
                 if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
                 fprintf(out, ")");
@@ -1840,7 +1777,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     tail = ga;
                 }
                 if (all_types && generic_struct_template(ctx->compiler_ctx, &tmp)) {
-                    const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
+                    const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &tmp);
                     fprintf(out, "rae_fromJson_%s_(", mangled);
                     if (expr->as.method_call.args) emit_expr(ctx, expr->as.method_call.args->value, out, PREC_LOWEST, false, false);
                     fprintf(out, ")");
@@ -1971,8 +1908,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, base_tr, 0);
             if (base_is_owned) {
                 const AstTypeRef* base_concrete = base_tr;
-                if (ctx->generic_params && ctx->generic_args)
-                    base_concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, base_tr);
                 // A call that returns a value it made owns it (the owning
                 // drop), but one that returns a shallow copy of a container's
                 // slot (eventAt, queueAt: `let v: T = buf_get(...); ret v`)
@@ -2132,7 +2067,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             }
         }
         {
-            c_record_moved_local(ctx, expr);
             // A local moved on some paths only clears its live flag as the
             // move is evaluated (#55453128); every other local is marked moved.
             const AstExpr* moved = expr->as.unary.operand;
@@ -2265,9 +2199,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // the function's type parameters (`let box: Box(V) = { value:
             // value }`): resolve those too, so `value` is the concrete Holder
             // and gets the deep copy `=` promises instead of a shallow alias.
-            if (eff_field_tr && ctx->generic_params && ctx->generic_args)
-                eff_field_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                    ctx->generic_args, eff_field_tr);
             if (eff_field_tr) {
                 // An `opt T` FIELD is a RaeAny and needs the same boxing an
                 // `opt T` return gets. Without this the raw payload was
@@ -2491,8 +2422,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 // sub-copies so the field's heap is independent of
                 // the source.
                 const char* tn_dc = rae_mangle_type_specialized(
-                    ctx->compiler_ctx, ctx->generic_params,
-                    ctx->generic_args, (AstTypeRef*)eff_field_tr);
+                    ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)eff_field_tr);
                 int tmp_id = ctx->temp_counter++;
                 fprintf(out, "(__extension__ ({ %s __fdc%d; rae_deep_copy_%s(&__fdc%d, ",
                         tn_dc, tmp_id, tn_dc, tmp_id);
@@ -2539,9 +2469,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     && f->value && f->value->kind == AST_EXPR_IDENT) {
                     const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
                     // (a `view T` of a number is the number in this instance)
-                    if (rhs_tr && ctx->generic_params && ctx->generic_args)
-                        rhs_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                                     (AstTypeRef*)rhs_tr);
                     if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
                         && !is_primitive_ref(ctx, rhs_tr)) {
                         // Stage 6: view-on-numeric-primitive is a value at
@@ -2576,8 +2503,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                 if (given || !td->type || td->type->is_view || td->type->is_mod) continue;
                 const AstTypeRef* field_tr = substitute_type_ref(ctx->compiler_ctx,
                     struct_decl->as.type_decl.generic_params, obj_tr ? obj_tr->generic_args : NULL, td->type);
-                if (field_tr && ctx->generic_params && ctx->generic_args)
-                    field_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, field_tr);
                 if (!field_tr) continue;
                 const AstDecl* nested = NULL;
                 if (!td->default_value) {
@@ -2626,11 +2551,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // takes it from anywhere else (no inference).
         const AstTypeRef* writtenType = expr->as.collection.type;
         const AstTypeRef* listType = writtenType
-            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                  ctx->generic_args, (AstTypeRef*)writtenType)
+            ? substitute_type_ref(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)writtenType)
             : savedHasExpected
-            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                  ctx->generic_args, &savedExpected) : NULL;
+            ? substitute_type_ref(ctx->compiler_ctx, NULL, NULL, &savedExpected) : NULL;
         const AstTypeRef* elementType = listType ? listType->generic_args : NULL;
         const AstFuncDecl* createFunction = NULL;
         const AstFuncDecl* addFunction = NULL;

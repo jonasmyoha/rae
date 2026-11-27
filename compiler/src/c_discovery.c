@@ -43,8 +43,6 @@ static void register_owned_argument_drop(CFuncContext* ctx, const AstExpr* value
     if (!type || type->is_view || type->is_mod || type->is_opt) return;
     if (!is_drop_target_type(type) || !type->generic_args) return;
     const AstTypeRef* elem_type = type->generic_args;
-    if (ctx->generic_params && ctx->generic_args)
-        elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, get_base_type_name(type));
     if (drop_fd) discovery_register_instance(ctx->compiler_ctx, drop_fd, elem_type);
 }
@@ -163,9 +161,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     long long receiver_cap = -1;
                     if (expr->as.call.args) {
                         const AstTypeRef* recv_tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
-                        if (recv_tr && ctx->generic_params && ctx->generic_args) {
-                            recv_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, recv_tr);
-                        }
                         if (recv_tr) receiver_base = get_base_type_name(recv_tr);
                         receiver_cap = rae_array_ref_cap(recv_tr);
                     }
@@ -178,8 +173,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     size_t typed_arg_count = 0;
                     for (const AstCallArg* ca = expr->as.call.args; ca && typed_arg_count < max_typed_args; ca = ca->next) {
                         const AstTypeRef* atr = ca->value ? infer_expr_type_ref(ctx, ca->value) : NULL;
-                        if (atr && ctx->generic_params && ctx->generic_args)
-                            atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
                         Str base = atr ? get_base_type_name(atr) : (Str){0};
                         if (str_eq_cstr(base, "Any")) base = (Str){0};
                         arg_bases[typed_arg_count++] = base;
@@ -236,14 +229,14 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 if (!d) d = find_function_overload(ctx->module, ctx, callee->as.ident, NULL, param_count, true, expr);
                 call_decl = d;
                 if ((str_eq_cstr(callee->as.ident, "sizeof") || str_eq_cstr(callee->as.ident, "__buf_alloc") || str_eq_cstr(callee->as.ident, "__buf_free") || str_eq_cstr(callee->as.ident, "__buf_copy")) && expr->as.call.generic_args) {
-                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, expr->as.call.generic_args); register_generic_type(ctx->compiler_ctx, sub);
+                    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, expr->as.call.generic_args); register_generic_type(ctx->compiler_ctx, sub);
                 }
                 if (d && d->generic_params) {
                     AstTypeRef* inferred_args = NULL;
                     if (expr->as.call.generic_args) {
                         AstTypeRef* concrete_args = NULL; AstTypeRef* last_arg = NULL;
                         for (const AstTypeRef* arg = expr->as.call.generic_args; arg; arg = arg->next) {
-                            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg);
+                            AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, arg);
                             if (!concrete_args) concrete_args = sub; else last_arg->next = sub; last_arg = sub;
                         }
                         inferred_args = concrete_args;
@@ -257,8 +250,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         const AstCallArg* a = expr->as.call.args;
                         while (p && a && np < 32) {
                             const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, c_without_own(a->value));
-                            if (arg_tr && ctx->generic_params && ctx->generic_args)
-                                arg_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, arg_tr);
                             patterns[np] = p->type; concretes[np] = arg_tr; np++;
                             p = p->next; a = a->next;
                         }
@@ -275,7 +266,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     // Try return-type inference from expected type (let x: Type = genericFunc(...))
                     if (!inferred_args && ctx->has_expected_type && d->returns && d->returns->type) {
                         AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
-                        if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                        if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, inferred);
                     }
                     if (inferred_args) discovery_register_instance(ctx->compiler_ctx, d, inferred_args);
                 }
@@ -307,10 +298,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         }
                     }
                     if (param_tr) {
-                        AstTypeRef* sub = ctx->generic_params && ctx->generic_args
-                            ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)param_tr)
-                            : (AstTypeRef*)param_tr;
-                        ctx->expected_type = *sub;
+                        ctx->expected_type = *param_tr;
                         ctx->expected_type.next = NULL;
                         ctx->has_expected_type = true;
                     } else {
@@ -337,8 +325,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     // The payload's TypeInfo is not the optional's: kept, it
                     // would make this compare equal to the plain T entry.
                     opt_ref->resolved_type = NULL;
-                    if (ctx->generic_params && ctx->generic_args)
-                        opt_ref = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, opt_ref);
                     register_generic_type(ctx->compiler_ctx, opt_ref);
                 }
             }
@@ -423,11 +409,9 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 // When discovering inside a generic body, `this`'s type is the template
                 // (e.g. `view List(T)` with literal T). Substitute through the current
                 // generic context so inference can bind T to the concrete arg.
-                if (receiver_type && ctx->generic_params && ctx->generic_args)
-                    receiver_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, receiver_type);
                 AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
                 if (inferred) {
-                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
+                    AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, inferred);
                     discovery_register_instance(ctx->compiler_ctx, d, concrete);
                     method_generic_args = concrete;
                 }
@@ -465,8 +449,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         AstTypeRef* sub = (AstTypeRef*)param_tr;
                         if (d->generic_params)
                             sub = substitute_type_ref(ctx->compiler_ctx, d->generic_params, method_generic_args, sub);
-                        else if (ctx->generic_params && ctx->generic_args)
-                            sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, sub);
                         ctx->expected_type = *sub;
                         ctx->expected_type.next = NULL;
                         ctx->expected_type.is_view = false;
@@ -571,8 +553,6 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 const AstTypeRef* elem_type = ctx->expected_type.generic_args;
                 /* Inside a specialization the literal's element is the
                  * concrete argument, not the template's `T` */
-                if (ctx->generic_params && ctx->generic_args)
-                    elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                 const AstFuncDecl* create_fd = c_list_literal_function(ctx->compiler_ctx, "createList");
                 const AstFuncDecl* add_fd = c_list_literal_function(ctx->compiler_ctx, "add");
                 if (create_fd) discovery_register_instance(ctx->compiler_ctx, create_fd, elem_type);
@@ -652,13 +632,10 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                 if (!s->as.let_stmt.value && s->as.let_stmt.type && ctx->local_count < 256 &&
                     !type_mentions_any(s->as.let_stmt.type)) {
                     const AstTypeRef* type = s->as.let_stmt.type;
-                    if (type->generic_args && ctx->generic_params && ctx->generic_args)
-                        register_generic_type(ctx->compiler_ctx,
-                            substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
-                    else if (type->generic_args && discovery_in_instance(ctx))
+                    if (type->generic_args && discovery_in_instance(ctx))
                         register_generic_type(ctx->compiler_ctx, type);
                     ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
-                    const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+                    const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, type);
                     ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
                 }
                 if (s->as.let_stmt.value) {
@@ -670,16 +647,12 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                     // `rae_Box_rae_Holder` — without it the C did not compile.
                     // ... and so is an `opt T` the struct of that optional.
                     if (type && (type->generic_args || (type->is_opt && !type->is_view && !type->is_mod))
-                        && ctx->generic_params && ctx->generic_args)
-                        register_generic_type(ctx->compiler_ctx,
-                            substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
-                    else if (type && (type->generic_args || (type->is_opt && !type->is_view && !type->is_mod))
                              && discovery_in_instance(ctx))
                         register_generic_type(ctx->compiler_ctx, type);
                     discover_specializations_expr_impl(ctx, s->as.let_stmt.value); ctx->has_expected_type = false;
                     if (ctx->local_count < 256) {
                         ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
-                        const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+                        const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, type);
                         ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
                     }
                     // Stage 2 scope-exit dealloc (docs/scope-exit-dealloc.md):
@@ -697,8 +670,6 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                          * Holder. Registered for the template's `T`, the drop
                          * was declared nowhere and defined after its caller
                          * (an undeclared rae_core_List_drop_rae_Holder_...). */
-                        if (elem_type && ctx->generic_params && ctx->generic_args)
-                            elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                         if (drop_fd && elem_type) {
                             discovery_register_instance(ctx->compiler_ctx, drop_fd, elem_type);
                         }

@@ -18,8 +18,6 @@
 bool c_has_deep_copy_helper(CFuncContext* ctx, const AstTypeRef* type) {
   if (!type || type->is_opt || type->is_view || type->is_mod) return false;
   AstTypeRef concrete = *type;
-  if (ctx->generic_params && ctx->generic_args)
-    concrete = *substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   concrete.next = NULL;
   if (c_is_any(&concrete)) return true;
   Str base = get_base_type_name(&concrete);

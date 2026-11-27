@@ -67,8 +67,6 @@ int c_discard_builtin_temp(CFuncContext* ctx, const AstExpr* expr) {
       memset(named->parts, 0, sizeof(*named->parts));
       named->parts->text = expr->as.method_call.object->as.ident;
       type = named;
-      if (ctx->generic_params && ctx->generic_args)
-        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, named);
       const AstDecl* decl = find_type_decl(ctx, ctx->module, get_base_type_name(type));
       if (!decl || decl->kind != AST_DECL_TYPE || (decl->as.type_decl.generic_params && !type->generic_args)) return -1;
     }

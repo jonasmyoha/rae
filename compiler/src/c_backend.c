@@ -110,24 +110,6 @@ bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
     const TypeInfo* base = type->resolved_type;
     if (base && base->kind == TYPE_OPT) base = base->as.opt.base;
     /* A generic param payload: resolve through the current specialization. */
-    if (base && base->kind == TYPE_GENERIC_PARAM && ctx
-        && ctx->generic_params && ctx->generic_args) {
-        const AstIdentifierPart* gp = ctx->generic_params;
-        const AstTypeRef* ga = ctx->generic_args;
-        while (gp && ga) {
-            if (str_eq(gp->text, base->as.generic_param.param_name)) {
-                // #960: an argument INFERRED from a `mod`/`view` alias carries
-                // the reference in its TypeInfo; the payload is the base.
-                const TypeInfo* gt = ga->resolved_type;
-                if (gt && gt->kind == TYPE_REF && gt->as.ref.base
-                    && gt->as.ref.base->kind != TYPE_OPT
-                    && gt->as.ref.base->kind != TYPE_GENERIC_PARAM)
-                    return rae_typeinfo_opt_is_struct_rep(gt->as.ref.base);
-                return rae_opt_is_struct_rep(ctx, ga);
-            }
-            gp = gp->next; ga = ga->next;
-        }
-    }
     if (base && base->kind != TYPE_OPT && base->kind != TYPE_GENERIC_PARAM)
         return rae_typeinfo_opt_is_struct_rep(base);
     /* Fallback (unresolved clone / no TypeInfo): name-based. Every non-`Any`
@@ -143,8 +125,7 @@ bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
 
 // Mangled C name of the `rae_opt_<T>` struct for a value-optional type.
 const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type) {
-    return rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                       ctx->generic_args, opt_type);
+    return rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, opt_type);
 }
 
 void emit_type_info_as_c_type(CFuncContext* ctx, TypeInfo* t, FILE* out) {
@@ -344,14 +325,6 @@ bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
     // primitive/String tests, so a specialized `view T`(=String) is recognized
     // as a wrapper ref (rae_View_String, read `(*x.ptr)`), not misclassified as
     // a raw struct pointer — mirroring the concrete `view String` lowering.
-    if (ctx && ctx->generic_params && ctx->generic_args) {
-        const AstIdentifierPart* gp = ctx->generic_params;
-        const AstTypeRef* ga = ctx->generic_args;
-        while (gp && ga) {
-            if (str_eq(gp->text, base)) { base = get_base_type_name(ga); break; }
-            gp = gp->next; ga = ga->next;
-        }
-    }
     // Buffer and List are already pointers — no wrapper struct
     if (str_eq_cstr(base, "Buffer") || str_eq_cstr(base, "List") || str_eq_cstr(base, "Any")) return false;
     // Stage 6: for plain numeric/bool/char primitives, `view T` lowers
@@ -802,7 +775,7 @@ const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext*
                         else if (call_expr && call_expr->kind == AST_EXPR_METHOD_CALL) {
                             const AstTypeRef* tr = infer_expr_type_ref(ctx, call_expr->as.method_call.object);
                             if (tr) {
-                                const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+                                const char* m = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, tr);
                                 obj_type = str_from_cstr(m);
                             }
                         }
@@ -812,8 +785,6 @@ const AstFuncDecl* find_function_overload(const AstModule* module, CFuncContext*
                         if (call_expr && call_expr->kind == AST_EXPR_METHOD_CALL
                             && rae_array_ref_cap(fd->params->type) >= 0) {
                             const AstTypeRef* rtr = infer_expr_type_ref(ctx, call_expr->as.method_call.object);
-                            if (rtr && ctx->generic_params && ctx->generic_args)
-                                rtr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, rtr);
                             if (rae_array_ref_cap(rtr) != rae_array_ref_cap(fd->params->type)) continue;
                         }
                         if (obj_type.len > 0) {
@@ -995,16 +966,6 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
           if (is_ptr) fprintf(out, "*");
           return true;
       }
-      if (t->kind == TYPE_GENERIC_PARAM && ctx && ctx->generic_params && ctx->generic_args) {
-          const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
-          while (gp && arg) {
-              if (str_eq(gp->text, t->as.generic_param.param_name)) {
-                  AstTypeRef tmp = *arg; tmp.is_view = type->is_view; tmp.is_mod = type->is_mod;
-                  return emit_type_ref_as_c_type(ctx, &tmp, out, skip_ptr);
-              }
-              gp = gp->next; arg = arg->next;
-          }
-      }
       /* Sema types every enum as Int, so a `view <Enum>` ref (spelled by
        * its enum name, resolved to TYPE_INT — e.g. a specialized `view T`
        * with T = Direction) must NOT take the Int fast path below: that
@@ -1049,14 +1010,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
            * with identical layout and no ABI cost.
            * See docs/value-aggregates-and-ownership.md §1.5. */
           if (type->is_view) fprintf(out, "const ");
-          /* A template's `Array(T, cap: N)` inside a specialization: the
-           * element is still the type parameter here, so spell the
-           * substituted name (the mangler walks the written arguments). */
-          bool elem_is_param = t->as.array.base->kind == TYPE_GENERIC_PARAM || t->as.array.base->kind == TYPE_VOID;
-          if (elem_is_param && ctx && ctx->generic_params && ctx->generic_args)
-              fprintf(out, "%s", rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
-          else
-              fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
+          fprintf(out, "%s", type_mangle_name(ctx->compiler_ctx->ast_arena, t).data);
           if (is_ptr) fprintf(out, "*");
           return true;
       }
@@ -1089,7 +1043,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
               // The enum-argument case: the TypeInfo spelling would erase the
               // enum to int64 and collide with the Int instantiation, whose
               // typedef/toString are a DIFFERENT type. Use the written name.
-              fprintf(out, "%s", rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type));
+              fprintf(out, "%s", rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)type));
           } else {
               const char* name = type_mangle_name(ctx->compiler_ctx->ast_arena, t).data;
               fprintf(out, "%s", name);
@@ -1127,32 +1081,6 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
         emit_type_ref_as_c_type(ctx, type->generic_args, out, false); fprintf(out, "*"); return true;
   }
   if (str_eq_cstr(base, "Task")) { fprintf(out, (type->is_view || type->is_mod) ? "RaeTask**" : "RaeTask*"); return true; }
-  if (ctx && ctx->generic_params && ctx->generic_args) {
-      const AstIdentifierPart* gp = ctx->generic_params; const AstTypeRef* arg = ctx->generic_args;
-      while (gp && arg) {
-          if (str_eq(gp->text, base)) {
-              // #758: carry the ORIGINAL view/mod (+ skip_ptr) onto the concrete
-              // type, so `view T`(=String/struct) lowers to its reference form
-              // (rae_View_String / const Struct*) instead of the by-value type.
-              AstTypeRef tmp = *arg; tmp.is_view = type->is_view; tmp.is_mod = type->is_mod;
-              // Stage 6: `view`(not `mod`) on a NUMERIC primitive still passes by
-              // value — don't re-introduce the ref wrapper when T resolves to one.
-              Str cb = get_base_type_name(arg);
-              bool num = is_scalar_primitive_type(cb);
-              // A T that is itself an optional is passed by its address, whatever it
-              // holds: `view T` of one is a `const rae_opt_X*`, `mod T` a `rae_opt_X*`
-              // (c_type_parameter_is_optional).
-              if (arg->is_opt && (tmp.is_view || tmp.is_mod) && rae_opt_is_struct_rep(ctx, arg)) {
-                  if (tmp.is_view && !tmp.is_mod) fprintf(out, "const ");
-                  fprintf(out, "%s%s", rae_opt_type_name(ctx, arg), skip_ptr ? "" : "*");
-                  return true;
-              }
-              if (num && tmp.is_view && !tmp.is_mod) tmp.is_view = false;
-              return emit_type_ref_as_c_type(ctx, &tmp, out, skip_ptr);
-          }
-          gp = gp->next; arg = arg->next;
-      }
-  }
   // Check if this is an enum type — emit as int64_t
   if (ctx) {
       const AstDecl* ed = find_enum_decl(ctx, ctx->module, base);
@@ -1171,7 +1099,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   // as the resolved-struct branch above spells it: one rule, so passing a
   // view on never drops `const` (-Wincompatible-pointer-types-discards-
   // qualifiers, which `-w` used to hide).
-  const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+  const char* mangled = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, type);
   if (is_ptr && is_view) fprintf(out, "const ");
   fprintf(out, "%s", mangled);
   if (is_ptr) fprintf(out, "*");
@@ -1190,10 +1118,6 @@ bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type) {
         boxed.is_view = false; boxed.is_mod = false; boxed.is_optional_box = false; boxed.resolved_type = NULL;
         return rae_opt_is_struct_rep(ctx, &boxed);
     }
-    if (!type || type->is_opt || !(type->is_view || type->is_mod) || !type->parts || type->generic_args) return false;
-    const AstTypeRef* arg = ctx->generic_args;
-    for (const AstIdentifierPart* param = ctx->generic_params; param && arg; param = param->next, arg = arg->next)
-        if (str_eq(param->text, type->parts->text)) return arg->is_opt && rae_opt_is_struct_rep(ctx, arg);
     return false;
 }
 
@@ -1204,14 +1128,6 @@ void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_
         }
         /* `opt view T` (`opt mod T`, `opt own T`) in a specialization is that of
          * the concrete type: as `T` it was a pointer to the optional's box */
-        if (p->type->is_opt && !is_extern && ctx->generic_params && ctx->generic_args) {
-            AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, p->type);
-            if (concrete && !concrete->is_opt) concrete->is_opt = true;
-            if (concrete) {
-                emit_type_ref_as_c_type(ctx, concrete, out, false);
-                return;
-            }
-        }
         bool is_mod = p->type->is_mod, is_val = p->type->is_val, is_view = p->type->is_view;
         Str base = get_base_type_name(p->type);
         // Stage 6: `view`/`copy`/`own` on a numeric primitive lowers
@@ -1264,10 +1180,6 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // An optional REFERENCE return is a nullable pointer, not a box (spec 4.1);
     // only a non-reference optional needs RaeAny.
     AstTypeRef* tr = func->returns->type;
-    if (ctx && ctx->generic_params && ctx->generic_args) {
-      tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                               ctx->generic_args, tr);
-    }
     if (tr->is_opt && !(tr->is_view || tr->is_mod)) {
       if (rae_opt_is_struct_rep(ctx, tr)) return rae_opt_type_name(ctx, tr);
       return "RaeAny";
@@ -1324,7 +1236,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
         && has_property(typeDecl->as.type_decl.properties, "c_struct");
     const char* typeName = isCStruct
         ? str_to_cstr(base)
-        : rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+        : rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, tr);
     if (strcmp(typeName, "RaeAny") == 0) return "RaeAny";
     if (strcmp(typeName, "rae_Int64") == 0 || strcmp(typeName, "int64_t") == 0) return "int64_t";
     if (strcmp(typeName, "rae_Bool") == 0) return "rae_Bool";
@@ -1461,7 +1373,7 @@ bool is_generic_param(const AstIdentifierPart* params, Str name) { const AstIden
  * left as its name: one bound to an optional, which has no spelling as an expression. Its
  * argument, from the clone's specialization_args; NULL for any other name. */
 const AstTypeRef* c_clone_type_parameter(CFuncContext* ctx, Str name) {
-    if (!ctx || ctx->generic_params || !ctx->func_decl) return NULL;
+    if (!ctx || !ctx->func_decl) return NULL;
     const AstFuncDecl* f = ctx->func_decl;
     if (!f->generic_template || f->generic_template->kind != AST_DECL_FUNC) return NULL;
     const AstTypeRef* arg = f->specialization_args;
@@ -1508,11 +1420,6 @@ AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     // Inside a generic function body, the bound generic param is also
     // a valid type expression — e.g. `createIntMap(V)` body calls
     // `createInt64Map(V, initialCap: …)` where V resolves to a type.
-    if (!is_type && ctx->generic_params) {
-        for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next) {
-            if (str_eq(gp->text, name)) { is_type = true; break; }
-        }
-    }
     if (!is_type) return NULL;
     AstIdentifierPart* part = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
     *part = (AstIdentifierPart){.text = name};
@@ -1662,7 +1569,7 @@ const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExp
     const AstExpr* te = c_call_enum_from_name_type(expr);
     if (!te) return NULL;
     AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
-    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, tr);
     if (sub && sub != tr) {
         AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
         *copy = *sub; copy->next = NULL; tr = copy;
@@ -1688,7 +1595,7 @@ const AstTypeRef* c_call_enum_name_enum_type(CFuncContext* ctx, const AstExpr* e
     const AstExpr* te = c_call_enum_name_type(expr);
     if (!te) return NULL;
     AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
-    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, tr);
     if (sub && sub != tr) {
         AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
         *copy = *sub; copy->next = NULL; tr = copy;
@@ -1741,7 +1648,7 @@ Str c_call_enum_query_name(CFuncContext* ctx, const AstExpr* te) {
     Str empty = {0};
     if (!te) return empty;
     AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
-    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
+    AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, tr);
     if (sub) tr = sub;
     Str name = get_base_type_name(tr);
     if (tr->is_opt || tr->generic_args || !find_enum_decl(ctx, ctx->module, name)) return empty;
@@ -1945,8 +1852,6 @@ static const AstTypeRef* c_generic_call_type(CFuncContext* ctx, const AstExpr* e
     const AstParam* p = callee->params;
     for (const AstCallArg* a = expr->as.call.args; a && p && count < 32; a = a->next, p = p->next) {
         const AstTypeRef* type = infer_expr_type_ref(ctx, c_without_own(a->value));
-        if (type && ctx->generic_params && ctx->generic_args)
-            type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
         patterns[count] = p->type;
         concretes[count++] = type;
     }
@@ -2031,8 +1936,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
              * substituted through the current specialization. */
             {
                 const AstTypeRef* atr = infer_expr_type_ref(ctx, expr->as.index.target);
-                if (atr && ctx->generic_params && ctx->generic_args)
-                    atr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, atr);
                 if (atr && str_eq_cstr(get_base_type_name(atr), "Array")) {
                     for (const AstTypeRef* a = atr->generic_args; a; a = a->next) {
                         if (a->is_value_arg) continue;
@@ -2160,16 +2063,12 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
             // type PARAMETER (`var comp: T`); resolve it to the concrete struct
             // so the field's type — and the String-field assignment ownership
             // rules that depend on it — are known.
-            if (obj_tr && ctx->generic_params && ctx->generic_args) {
-                const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, obj_tr);
-                if (sub) obj_tr = sub;
-            }
             Str obj_name = get_base_type_name(obj_tr);
             if (obj_name.len == 0) obj_name = infer_expr_type(ctx, expr->as.member.object);
             const AstDecl* d = find_type_decl(ctx, ctx->module, obj_name);
             if (d && d->kind == AST_DECL_TYPE) {
                 for (const AstTypeField* f = d->as.type_decl.fields; f; f = f->next) {
-                    if (str_eq(f->name, expr->as.member.member)) return substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : ctx->generic_args, f->type);
+                    if (str_eq(f->name, expr->as.member.member)) return substitute_type_ref(ctx->compiler_ctx, d->as.type_decl.generic_params, (obj_tr && obj_tr->generic_args) ? obj_tr->generic_args : NULL, f->type);
                 }
             }
             break;
@@ -2234,9 +2133,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
                             return cfd->returns->type;
                         const AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx,
                             cfd->generic_params, type_args, cfd->returns->type);
-                        if (concrete && ctx->generic_params && ctx->generic_args)
-                            concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                ctx->generic_args, concrete);
                         if (concrete) return concrete;
                     }
                 }
@@ -2498,8 +2394,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
                 : mfd->generic_template && mfd->generic_template->kind == AST_DECL_FUNC ? &mfd->generic_template->as.func_decl : NULL;
             if (tmpl && tmpl->params && !mfd->specialization_args && type_ref_mentions_params(rt, tmpl->generic_params)) {
                 const AstTypeRef* receiver = infer_expr_type_ref(ctx, expr->as.method_call.object);
-                if (receiver && ctx->generic_params && ctx->generic_args)
-                    receiver = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)receiver);
                 const AstTypeRef* bound = receiver ? infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->params->type, receiver) : NULL;
                 if (bound) return substitute_type_ref(ctx->compiler_ctx, tmpl->generic_params, bound, tmpl->returns->type);
             }
@@ -2513,7 +2407,7 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
 Str infer_expr_type(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return (Str){0};
     const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
-    if (tr) return str_from_cstr(rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr));
+    if (tr) return str_from_cstr(rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, tr));
     return (Str){0};
 }
 

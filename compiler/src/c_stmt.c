@@ -59,8 +59,6 @@ bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, c
   if (!opt_type || !opt_type->is_opt || opt_type->is_view || opt_type->is_mod) return false;
   if (!plain || plain->kind == AST_EXPR_NONE || plain->kind == AST_EXPR_UNBOX) return false;
   const AstTypeRef* type = infer_expr_type_ref(ctx, plain);
-  if (type && ctx->generic_params && ctx->generic_args)
-    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   if ((type && type->is_opt) || (plain->resolved_type && plain->resolved_type->kind == TYPE_OPT)) return false;
   Str base = type ? get_base_type_name(type) : (Str){0};
   if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
@@ -94,7 +92,7 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
       && type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)elem_type, 0)) {
     if (c_has_deep_copy_helper(ctx, elem_type)) {
       const char* type_name = rae_mangle_type_specialized(
-          ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
+          ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)elem_type);
       int id = ctx->temp_counter++;
       fprintf(out, "(__extension__ ({ %s __elc%d; rae_deep_copy_%s(&__elc%d, ", type_name, id, type_name, id);
       emit_deep_copy_source(ctx, value, out);
@@ -138,8 +136,6 @@ bool expr_is_raw_slot_read(const AstExpr* e);
  * unnecessary. */
 /* The element type of a `List(T)` type, in the current specialization */
 static const AstTypeRef* c_list_element_type(CFuncContext* ctx, const AstTypeRef* list_type) {
-  if (list_type && ctx->generic_params && ctx->generic_args)
-    list_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)list_type);
   return list_type ? list_type->generic_args : NULL;
 }
 
@@ -148,8 +144,6 @@ static const AstTypeRef* c_list_element_type(CFuncContext* ctx, const AstTypeRef
 const AstTypeRef* c_raw_slot_type(CFuncContext* ctx, const AstExpr* read) {
   if (!expr_is_raw_slot_read(read) || !read->as.call.args) return NULL;
   const AstTypeRef* buffer = infer_expr_type_ref(ctx, read->as.call.args->value);
-  if (buffer && ctx->generic_params && ctx->generic_args)
-    buffer = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)buffer);
   return buffer && str_eq_cstr(get_base_type_name(buffer), "Buffer") ? buffer->generic_args : NULL;
 }
 
@@ -162,19 +156,6 @@ static const AstTypeRef* c_raw_slot_field_type(CFuncContext* ctx, const AstExpr*
   for (const AstTypeField* f = decl->as.type_decl.fields; f; f = f->next) {
     if (!str_eq(f->name, field->as.member.member)) continue;
     return substitute_type_ref(ctx->compiler_ctx, decl->as.type_decl.generic_params, slot->generic_args, f->type);
-  }
-  return NULL;
-}
-
-/* The type `T.default()` of a type parameter has in the current specialization */
-static const AstTypeRef* c_type_parameter_default(CFuncContext* ctx, const AstExpr* value) {
-  if (!value || value->kind != AST_EXPR_METHOD_CALL || value->as.method_call.args
-      || !str_eq_cstr(value->as.method_call.method_name, "default")
-      || value->as.method_call.object->kind != AST_EXPR_IDENT) return NULL;
-  const AstTypeRef* argument = ctx->generic_args;
-  for (const AstIdentifierPart* param = ctx->generic_params; param && argument; param = param->next) {
-    if (str_eq(param->text, value->as.method_call.object->as.ident)) return argument;
-    argument = argument->next;
   }
   return NULL;
 }
@@ -229,8 +210,6 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
   // In a specialization the binding's `T` is the concrete type: as `T` a
   // String was bound bit for bit (not copied), a `view T` as a plain pointer
   const AstTypeRef* element_type = binding->as.let_stmt.type;
-  if (ctx->generic_params && ctx->generic_args)
-    element_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, element_type);
   AstTypeRef value_type = *element_type;
   value_type.is_opt = false;
   value_type.is_view = false;
@@ -253,7 +232,7 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
           binding->as.let_stmt.name.data);
   if (deep_value) {
     const char* type_name = rae_mangle_type_specialized(
-        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &value_type);
+        ctx->compiler_ctx, NULL, NULL, &value_type);
     fprintf(out, ";\n      rae_deep_copy_%s(&%.*s, &__rae_list%d->data[__rae_index%d]%s)",
             type_name, (int)binding->as.let_stmt.name.len,
             binding->as.let_stmt.name.data, fast_id, fast_id, payload);
@@ -399,9 +378,6 @@ static bool c_expr_is_moved_string_local(const CFuncContext* ctx, const AstExpr*
   for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
     if (!str_eq(ctx->locals[i], expr->as.ident)) continue;
     const AstTypeRef* type = ctx->local_type_refs[i];
-    if (ctx->generic_params && ctx->generic_args)
-      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                 ctx->generic_args, (AstTypeRef*)type);
     if (!c_type_is_plain_string(type) || ctx->local_is_ptr[i]) return false;
     return given_away || ctx->local_moved[i];
   }
@@ -436,16 +412,13 @@ static const char* c_optional_payload_drop_fn(CFuncContext* ctx,
   if (is_drop_target_type(payload)) {
     const AstTypeRef* elem_type = payload->generic_args;
     if (!elem_type) return NULL;
-    if (ctx->generic_params && ctx->generic_args) // #889: concrete element in a generic fn
-      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     Str loc_base = get_base_type_name(payload);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
     if (!drop_fd) return NULL;
     register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
     return rae_mangle_specialized_function(ctx->compiler_ctx, drop_fd, elem_type);
   }
-  return rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                     ctx->generic_args, payload);
+  return rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, payload);
 }
 
 static bool c_optional_payload_is_boxed_pointer(CFuncContext* ctx,
@@ -465,7 +438,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   const AstExpr* parameter = value->kind == AST_EXPR_UNBOX || value->kind == AST_EXPR_BOX ? value->as.unary.operand : value;
   if (parameter->kind == AST_EXPR_IDENT
       && c_type_parameter_is_optional(ctx, infer_expr_type_ref(ctx, parameter))) {
-    AstTypeRef optional = *substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+    AstTypeRef optional = *substitute_type_ref(ctx->compiler_ctx, NULL, NULL,
                                                (AstTypeRef*)infer_expr_type_ref(ctx, parameter));
     optional.is_view = false; optional.is_mod = false; optional.next = NULL;
     if (!type_needs_deep_copy(ctx->compiler_ctx, ctx->module, &optional, 0)) {
@@ -506,11 +479,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
           || value->kind == AST_EXPR_INDEX)) {
     const AstTypeRef* value_tr = infer_expr_type_ref(ctx, value);
     /* (a `copy T` / `own T` parameter, or a `T` local, whose T is an optional) */
-    if (value_tr && ctx->generic_params && ctx->generic_args)
-      value_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)value_tr);
     AstTypeRef payload = {0};
-    AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                  ctx->generic_args, (AstTypeRef*)opt_type);
+    AstTypeRef* substituted = substitute_type_ref(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)opt_type);
     payload = substituted ? *substituted : *opt_type;
     payload.is_opt = false;
     payload.next = NULL;
@@ -532,8 +502,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       if (c_type_is_plain_string(&payload)) {
         fprintf(out, "__dc%d.value = rae_string_copy(__dcs%d->value);", tmpn, tmpn);
       } else {
-        const char* payload_c = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                                            ctx->generic_args, &payload);
+        const char* payload_c = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, &payload);
         fprintf(out, "rae_deep_copy_%s(&__dc%d.value, &__dcs%d->value);", payload_c, tmpn, tmpn);
       }
       fprintf(out, " } __dc%d; }))", tmpn);
@@ -588,11 +557,8 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     }
   }
   const AstTypeRef* val_tr = c_raw_slot_type(ctx, value);
-  if (!val_tr) val_tr = c_type_parameter_default(ctx, value);
   if (!val_tr) val_tr = infer_expr_type_ref(ctx, value->kind == AST_EXPR_OWN ? value->as.unary.operand : value);
   /* in a specialization a `T` can be an optional */
-  if (val_tr && ctx->generic_params && ctx->generic_args)
-    val_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)val_tr);
   if (val_tr && val_tr->is_opt && !(val_tr->is_view || val_tr->is_mod) && expr_is_raw_slot_read(value)
       && rae_opt_is_struct_rep(ctx, val_tr)) {
     /* A slot of a list of optionals: the list keeps it, so it is copied */
@@ -620,8 +586,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   }
 
   AstTypeRef* substituted_opt = opt_type
-      ? substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                            ctx->generic_args, (AstTypeRef*)opt_type)
+      ? substitute_type_ref(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)opt_type)
       : NULL;
   AstTypeRef payload = substituted_opt ? *substituted_opt
       : opt_type ? *opt_type : (AstTypeRef){0};
@@ -680,7 +645,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
       if (needs_deep_agg && !moves_local && (!c_expr_can_move_owned_payload(value)
                                              || c_opt_source_aliases(ctx, value))) {
         const char* copy_name = rae_mangle_type_specialized(
-            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
+            ctx->compiler_ctx, NULL, NULL, &payload);
         fprintf(out, "rae_deep_copy_%s(&__opt%d.value, ", copy_name, optn);
         emit_deep_copy_source(ctx, value, out);
         fprintf(out, "); ");
@@ -733,7 +698,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   if (needs_deep && (!c_expr_can_move_owned_payload(value)
                      || c_opt_source_aliases(ctx, value))) {
     const char* copy_name = rae_mangle_type_specialized(
-        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &payload);
+        ctx->compiler_ctx, NULL, NULL, &payload);
     fprintf(out, "rae_deep_copy_%s(__optp%d, &(", copy_name, tmpn);
     emit_expr(ctx, value, out, PREC_LOWEST, false, false);
     fprintf(out, ")); ");
@@ -991,8 +956,6 @@ bool emit_alias_call_copy(CFuncContext* ctx, const AstExpr* value, const AstType
   if (!value || !type || type->is_view || type->is_mod || type->is_opt) return false;
   if (!expr_is_alias_call(ctx, value)) return false;
   const AstTypeRef* concrete = type;
-  if (ctx->generic_params && ctx->generic_args)
-    concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   if (concrete->is_opt || !type_needs_deep_copy(ctx->compiler_ctx, ctx->module, (AstTypeRef*)concrete, 0)) return false;
   Str base = get_base_type_name(concrete);
   if (str_eq_cstr(base, "String")) {
@@ -1246,9 +1209,6 @@ bool emit_implicit_drops_for_own_params(CFuncContext* ctx, FILE* out,
     // concrete value leaked: StringMap(Holder).set deep-copies its `value:
     // own V` into the entry, and the parameter itself was never released
     // (three Strings per `set` of a Holder, fixture 918).
-    if (ctx->generic_params && ctx->generic_args)
-        type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                   (AstTypeRef*)type);
     if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) {
       continue;
     }
@@ -1293,8 +1253,6 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
   if (is_drop_target_type(type)) {
     const AstTypeRef* elem_type = type->generic_args;
     if (!elem_type) return;
-    if (ctx->generic_params && ctx->generic_args) // #889: concrete element in a generic fn
-      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, tbase);
     if (!drop_fd) return;
     register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
@@ -1308,10 +1266,6 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
     // specialized rae_drop_struct_<instance> Pass A' synthesises for every
     // registered instance. Anything else generic has no helper to call.
     AstTypeRef concrete = *type;
-    if (ctx->generic_params && ctx->generic_args) {
-      const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
-      if (sub) concrete = *sub;
-    }
     concrete.next = NULL;
     if (!generic_struct_template(ctx->compiler_ctx, &concrete)) {
       // generic_struct_template leaves out the container-shaped generics
@@ -1337,7 +1291,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
     return;
   }
   const char* struct_mangled = rae_mangle_type_specialized(
-      ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+      ctx->compiler_ctx, NULL, NULL, type);
   fprintf(out, "  rae_drop_struct_%s%s(&%s);\n", struct_mangled,
           owns_heap ? "" : "_alias", cname);
 }
@@ -1572,8 +1526,6 @@ static void declare_live_flag(CFuncContext* ctx, Str name, const AstStmt* rest, 
   size_t local = ctx->local_count - 1;
   if (!str_eq(ctx->locals[local], name) || ctx->local_drop_flag[local]) return;
   const AstTypeRef* type = ctx->local_type_refs[local];
-  if (type && ctx->generic_params && ctx->generic_args)
-    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   if (!type || type->is_view || type->is_mod) return;
   if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return;
   bool explicit_drop = false;
@@ -1601,9 +1553,6 @@ void declare_param_live_flags(CFuncContext* ctx, const AstBlock* body, FILE* out
   for (size_t i = 0; i < ctx->func_first_let_idx; i++) {
     const AstTypeRef* type = ctx->local_type_refs[i];
     if (!type || !(type->is_own || type->is_copy)) continue;
-    if (ctx->generic_params && ctx->generic_args)
-      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                 (AstTypeRef*)type);
     Str name = ctx->locals[i];
     if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) continue;
     bool explicit_drop = type_has_user_drop(ctx->compiler_ctx, type)
@@ -1672,24 +1621,10 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
   // always owns its payload — the drop below does not consult the alias
   // classification for it — and that classification, made on `opt T`,
   // reads as "no heap".)
-  if (ctx->generic_params && ctx->generic_args
-      && !type->generic_args && (ctx->local_struct_owns_heap[idx] || type->is_opt)) {
-    Str tb = get_base_type_name(type);
-    bool is_param = false;
-    for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
-      if (str_eq(gp->text, tb)) { is_param = true; break; }
-    if (is_param)
-      type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                 ctx->generic_args, (AstTypeRef*)type);
-  }
   // The same for a user generic STRUCT of the function's type parameters
   // (`let box: Box(V)`): as Box(V) it looked heap-free, so the local was
   // never dropped and whatever it held leaked. Containers with their own drop
   // overload (List/StringMap/IntMap) substitute their element further down.
-  if (ctx->generic_params && ctx->generic_args && !type->is_opt
-      && type->generic_args && !is_drop_target_type(type) && ctx->local_struct_owns_heap[idx])
-    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                               ctx->generic_args, (AstTypeRef*)type);
   // Task(T): join-on-drop. A Task is a RaeTask* (not a cascade-drop
   // struct), so it'd be skipped below — handle it here. rae_task_drop
   // joins (no-op if already get()'d) then frees, so a worker thread
@@ -1741,8 +1676,6 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
     // element is the abstract `T`; substitute the enclosing type arguments so
     // the drop is emitted for the concrete element (e.g. List(Int)), not the
     // undeclared `rae_T`.
-    if (ctx->generic_params && ctx->generic_args)
-      elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     Str loc_base = get_base_type_name(type);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, loc_base);
     if (!drop_fd) return;
@@ -1768,7 +1701,7 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
     // IntMap) still go through the `is_drop_target_type` branch
     // above because they have their own `drop(T)` overload.
     const char* struct_mangled = rae_mangle_type_specialized(
-        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
+        ctx->compiler_ctx, NULL, NULL, type);
     const char* suffix = ctx->local_struct_owns_heap[idx] ? "" : "_alias";
     /* the bits of a slot (a map's `entry`): the map owns all they hold */
     if (c_local_is_slot_alias(ctx, (int)idx)) return;
@@ -1909,9 +1842,6 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         bool bind_is_opt = false;
         if (bind->as.let_stmt.type) {
             const AstTypeRef* bound = bind->as.let_stmt.type;
-            if (ctx->generic_params && ctx->generic_args)
-                bound = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                            (AstTypeRef*)bound);
             bind_is_opt = bound->is_opt;
             synth_opt_tr = *bound;
             synth_opt_tr.is_opt = true; synth_opt_tr.is_view = false;
@@ -1923,7 +1853,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         /* A call whose type sema gave (a generic call has its instance's result) is
          * held as what it answers: `if let one: Int = kinds.copyAt(index: 0)` of a
          * List(Kind) answers an `opt Kind`, read as the Int it is */
-        if (!ctx->generic_params && src && src->resolved_type && src->resolved_type->kind == TYPE_OPT
+        if (src && src->resolved_type && src->resolved_type->kind == TYPE_OPT
             && src_tr && src_tr->is_opt && !(src_tr->is_view || src_tr->is_mod) && rae_opt_is_struct_rep(ctx, src_tr)
             && !c_is_any(src_tr)) {
             src_opt_struct = true; opt_name_tr = src_tr;
@@ -2286,7 +2216,7 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
          * internal name of the instance */
         TypeInfo* resolved = stmt->as.loop_stmt.condition ? stmt->as.loop_stmt.condition->resolved_type : NULL;
         bool resolved_ref = resolved && resolved->kind == TYPE_REF;
-        if (resolved && !ctx->generic_params && (!collection_type || !collection_type->generic_args)) {
+        if (resolved && (!collection_type || !collection_type->generic_args)) {
             AstTypeRef* written = sema_type_ref_of(ctx->compiler_ctx, resolved_ref ? resolved->as.ref.base : resolved);
             if (written) {
                 written->is_view = resolved_ref && !resolved->as.ref.is_mod;
@@ -2302,9 +2232,6 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         // In a specialization the element's `T` is the concrete type: as `T`
         // a value was bound bit for bit (the list freed it too), and a `view
         // T` of a String as a plain pointer.
-        if (ctx->generic_params && ctx->generic_args)
-            binding_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                               binding_type);
 
         int loop_id = ctx->temp_counter++;
         AstTypeRef collection_value_type = *collection_type;
@@ -2320,8 +2247,6 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
          * iterates directly over the elements: no optional construction and
          * no per-element bounds check. */
         const AstTypeRef* collection_sub = collection_type;
-        if (ctx->generic_params && ctx->generic_args)
-            collection_sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, collection_type);
         long long array_cap = rae_array_ref_cap(collection_sub);
         bool collection_is_array = array_cap >= 0;
         bool collection_is_ref = collection_type->is_view || collection_type->is_mod;
@@ -2423,7 +2348,7 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                                     &binding_value_type, 0);
         if (deep_value) {
             const char* type_name = rae_mangle_type_specialized(
-                ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
+                ctx->compiler_ctx, NULL, NULL,
                 &binding_value_type);
             fprintf(out, ";\n      rae_deep_copy_%s(&%.*s, "
                          "&__rae_collection%d%s[__rae_collection_index%d])",
@@ -2725,13 +2650,9 @@ static bool type_may_carry_pool_string(const CFuncContext* ctx, const AstTypeRef
   if (tr->is_view || tr->is_mod) return false;
   // Inside a specialization the abstract `T` is the concrete argument (Float
   // in Array(Float).copyAt), so judge that one.
-  if (ctx->generic_params && ctx->generic_args)
-    tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
   Str base = get_base_type_name(tr);
   if (str_eq_cstr(base, "String") || str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny"))
     return true;
-  for (const AstIdentifierPart* gp = ctx->generic_params; gp; gp = gp->next)
-    if (str_eq(gp->text, base)) return true;
   return false;
 }
 
@@ -3110,34 +3031,18 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 const AstExpr* call = stmt->as.expr_stmt;
                 /* In a specialization emitted from its template the type of a
                  * field is known only here (sema checks the rest). */
-                if (ctx->generic_params && call && call->kind == AST_EXPR_METHOD_CALL
-                    && str_eq_cstr(call->as.method_call.method_name, "drop") && !call->as.method_call.args
-                    && call->as.method_call.object->kind == AST_EXPR_MEMBER) {
-                    const AstTypeRef* field = infer_expr_type_ref(ctx, call->as.method_call.object);
-                    if (field && ctx->generic_args)
-                        field = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                                    (AstTypeRef*)field);
-                    if (type_has_user_drop(ctx->compiler_ctx, field))
-                        diag_error(c_source_file(ctx), (int)call->line, (int)call->column,
-                                   "cannot drop a field by hand: its owner drops it, so the destructor would run "
-                                   "twice; assign the field a new value to release the old one now");
-                }
                 const AstExpr* dropped = explicit_drop_local(call);
                 if (dropped) {
                     Str name = dropped->as.ident;
                     for (int i = (int)ctx->local_count - 1; i >= 0; i--) {
                         if (!str_eq(ctx->locals[i], name)) continue;
                         const AstTypeRef* dropped_type = ctx->local_type_refs[i];
-                        if (dropped_type && ctx->generic_params && ctx->generic_args)
-                            dropped_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                               ctx->generic_args, (AstTypeRef*)dropped_type);
                         if (type_has_user_drop(ctx->compiler_ctx, dropped_type)) {
                             // The call above ran the destructor; the fields
                             // it left are released here, since scope exit
                             // skips the whole value.
                             fprintf(out, "  rae_drop_fields_%s%s(&%.*s);\n",
-                                    rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params,
-                                                                ctx->generic_args, (AstTypeRef*)dropped_type),
+                                    rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)dropped_type),
                                     ctx->local_struct_owns_heap[i] ? "" : "_alias",
                                     (int)name.len, name.data);
                             if (ctx->local_drop_flag[i]) {
@@ -3155,22 +3060,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             break;
         }
         case AST_STMT_LET: {
-            // In a specialization the binding's type is the concrete one: as
-            // `T` a String was not detached from the pool (its statement's
-            // flush freed it) and a place was bound bit for bit, so both
-            // owners freed it. A raw slot read keeps `T`: the binding holds
-            // the bits of a slot its container owns (c_local_is_slot_alias),
-            // and an abstract type is what keeps the scope exit off it. So does
-            // a binding without a value: `var zero: T` is all zeros for every
-            // T (List.copyAtDefault), not a struct's declared defaults.
-            AstStmt concrete_let;
-            if (ctx->generic_params && ctx->generic_args && stmt->as.let_stmt.type && stmt->as.let_stmt.value
-                && !expr_is_raw_slot_read(stmt->as.let_stmt.value)) {
-                concrete_let = *stmt;
-                concrete_let.as.let_stmt.type = substitute_type_ref(
-                    ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
-                stmt = &concrete_let;
-            }
             // Tracks whether the RHS was wrapped in rae_string_copy /
             // rae_deep_copy_<T>. The post-init ownership classifier
             // below uses this to mark the local as owning (since the
@@ -3185,9 +3074,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
              * reference its narrowing and its readers expect, not the
              * by-value `int64_t` a `view Int` parameter lowers to. */
             const AstTypeRef* ref_decl_type = stmt->as.let_stmt.type;
-            if (is_ref_bind && ctx->generic_params && ctx->generic_args)
-                ref_decl_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                    ctx->generic_args, (AstTypeRef*)ref_decl_type);
 
             // A `=>` onto a produced value. Two very different cases meet
             // here (spec 2.3.1):
@@ -3287,9 +3173,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                  * T`: decide the lowering on the substituted type, or a T =
                  * Int / String binding takes the struct path below. */
                 const AstTypeRef* bind_type = stmt->as.let_stmt.type;
-                if (ctx->generic_params && ctx->generic_args)
-                    bind_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                    ctx->generic_args, (AstTypeRef*)bind_type);
                 Str base = get_base_type_name(bind_type);
                 // Does the source ident ALREADY lower to a reference — a
                 // view/mod param or an earlier alias binding? Then it is a
@@ -3468,8 +3351,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 /* In a specialized generic body `List(T)` is the concrete
                  * list: createList / add for T would name `rae_T`, declared
                  * nowhere. */
-                if (list_type && ctx->generic_params && ctx->generic_args)
-                    list_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, list_type);
                 const AstTypeRef* elem_type = list_type ? list_type->generic_args : NULL;
                 int count = 0;
                 for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) count++;
@@ -3529,7 +3410,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     fprintf(out, "{0};\n");
                 }
                 // Skip the trailing ";\n" since we already emitted it
-                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
+                const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, stmt->as.let_stmt.type);
                 if (ctx->local_count < 256) {
                     size_t local_index = ctx->local_count;
                     ctx->locals[local_index] = stmt->as.let_stmt.name;
@@ -3575,9 +3456,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         /* substituted: in a generic body the payload is `T`,
                          * which on its own never needs a deep copy */
                         const AstTypeRef* let_declared = stmt->as.let_stmt.type;
-                        if (ctx->generic_params && ctx->generic_args)
-                            let_declared = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                               ctx->generic_args, (AstTypeRef*)let_declared);
                         AstTypeRef let_payload = *let_declared;
                         let_payload.is_opt = false;
                         let_payload.next = NULL;
@@ -3704,8 +3582,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // c_backend.c's copy_entries / container_entries
                     // emission).
                     const char* tn_dc = rae_mangle_type_specialized(
-                        ctx->compiler_ctx, ctx->generic_params,
-                        ctx->generic_args, stmt->as.let_stmt.type);
+                        ctx->compiler_ctx, NULL, NULL, stmt->as.let_stmt.type);
                     int tmp_id = ctx->temp_counter++;
                     fprintf(out, "(__extension__ ({ %s __dc%d; rae_deep_copy_%s(&__dc%d, ",
                             tn_dc, tmp_id, tn_dc, tmp_id);
@@ -3726,7 +3603,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 emit_auto_init(ctx, stmt->as.let_stmt.type, out);
             }
             fprintf(out, ";\n");
-            const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, stmt->as.let_stmt.type);
+            const char* tn = rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, stmt->as.let_stmt.type);
             if (ctx->local_count < 256) {
                 ctx->local_is_ptr[ctx->local_count] = false;
                 ctx->local_is_mod[ctx->local_count] = false;
@@ -3860,9 +3737,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             fprintf(out, "  ");
             // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
             const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
-            if (target_tr && ctx->generic_params && ctx->generic_args)
-                target_tr = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params,
-                                                 ctx->generic_args, target_tr);
             /* `mod T` whose T is an optional: the whole optional is stored, and
              * the one that was there released */
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT
@@ -3954,7 +3828,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         fprintf(out, ")");
                     } else if (rhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
-                            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &pointee);
+                            ctx->compiler_ctx, NULL, NULL, &pointee);
                         emit_deep_copy_value(ctx, tn_dc, rhs, tmpn, out);
                     } else {
                         if (rhs->kind == AST_EXPR_OBJECT && !rhs->as.object_literal.type) {
@@ -4070,7 +3944,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (hook_local >= 0) {
                     Str tname = stmt->as.assign_stmt.target->as.ident;
                     const char* tn_hook = rae_mangle_type_specialized(
-                        ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
+                        ctx->compiler_ctx, NULL, NULL, target_tr);
                     int tmpn = ctx->temp_counter++;
                     const AstExpr* hv = stmt->as.assign_stmt.value;
                     bool hv_is_place = hv->kind == AST_EXPR_IDENT || hv->kind == AST_EXPR_MEMBER
@@ -4244,8 +4118,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // valid. `&(src)` is well-formed: a borrow emits as a
                     // deref lvalue (`(*font)`), so `&((*font))` is the ptr.
                     const char* tn_dc = rae_mangle_type_specialized(
-                        ctx->compiler_ctx, ctx->generic_params,
-                        ctx->generic_args, target_tr);
+                        ctx->compiler_ctx, NULL, NULL, target_tr);
                     int tmpn = ctx->temp_counter++;
                     fprintf(out, "{ %s __asg%d; rae_deep_copy_%s(&__asg%d, ",
                             tn_dc, tmpn, tn_dc, tmpn);
@@ -4303,7 +4176,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         || expr_is_alias_call(ctx, arhs);
                     if (arhs_reads_location) {
                         const char* tn_dc = rae_mangle_type_specialized(
-                            ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, target_tr);
+                            ctx->compiler_ctx, NULL, NULL, target_tr);
                         emit_deep_copy_value(ctx, tn_dc, arhs, tmpn, out);
                     } else {
                         if (arhs->kind == AST_EXPR_OBJECT && !arhs->as.object_literal.type) {
@@ -4403,19 +4276,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             if (handed && !defer_uses && !c_has_several_results(ctx->func_decl)
                 && (!returns_any || returns_local_any || handed->kind == AST_EXPR_OWN))
                 mark_expr_moved_if_local(ctx, handed);
-            if (defer_uses && ctx->generic_params && ctx->generic_args && ctx->func_decl && ctx->func_decl->returns) {
-                // sema does not know the type in a template (flow_check_handed_over)
-                const AstTypeRef* handed_type = substitute_type_ref(
-                    ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, ctx->func_decl->returns->type);
-                Str base = handed_type ? get_base_type_name(handed_type) : (Str){0};
-                bool task = str_eq_cstr(base, "Task")
-                    || (handed_type && handed_type->generic_args
-                        && str_eq_cstr(get_base_type_name(handed_type->generic_args), "Task"));
-                if (task || (find_user_drop_for(ctx->compiler_ctx, base) && !find_user_copy_for(ctx->compiler_ctx, base)))
-                    diag_error(c_source_file(ctx), (int)handed->line, (int)handed->column,
-                               "cannot hand over this value: a defer that runs after this 'ret' uses it, so the caller "
-                               "would get a copy, and its type cannot be copied; do the defer's work before the 'ret'");
-            }
 
             // Stage 7 cleanup epilogue: every ret runs the same drops +
             // pool flush that fallthrough end-of-body runs. Without
@@ -4436,11 +4296,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // is about to receive. Move tracking above keeps the drop
             // pass from freeing a local whose data IS the return value.
             const AstTypeRef* ret_type = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-            if (ret_type && ctx->generic_params && ctx->generic_args) {
-                ret_type = substitute_type_ref(ctx->compiler_ctx,
-                                               ctx->generic_params,
-                                               ctx->generic_args, ret_type);
-            }
             bool has_value = stmt->as.ret_stmt.values && stmt->as.ret_stmt.values->value;
             bool is_main_fn = ctx->func_decl && str_eq_cstr(ctx->func_decl->name, "main");
 
@@ -4592,9 +4447,6 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 if (is_ref_return && ret_type && ret_type->is_opt && ret_slot->kind == AST_EXPR_MEMBER) {
                     ret_slot_type = c_raw_slot_field_type(ctx, ret_slot);
                     if (!ret_slot_type) ret_slot_type = infer_expr_type_ref(ctx, ret_slot);
-                    if (ret_slot_type && ctx->generic_params && ctx->generic_args)
-                        ret_slot_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args,
-                                                            (AstTypeRef*)ret_slot_type);
                     if (ret_slot_type && (ret_slot_type->is_view || ret_slot_type->is_mod)) ret_slot_type = NULL;
                 }
 
@@ -4698,8 +4550,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     // temp. The temp is detached storage; caller takes
                     // ownership.
                     const char* tn_dc = rae_mangle_type_specialized(
-                        ctx->compiler_ctx, ctx->generic_params,
-                        ctx->generic_args, ret_type);
+                        ctx->compiler_ctx, NULL, NULL, ret_type);
                     int tmp_id = ctx->temp_counter++;
                     fprintf(out, "(__extension__ ({ %s __rdc%d; rae_deep_copy_%s(&__rdc%d, ",
                             tn_dc, tmp_id, tn_dc, tmp_id);

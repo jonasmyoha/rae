@@ -390,7 +390,12 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    struct is written, and whether a callee's `view T` takes an optional is read from the callee's type parameters
    and the call's arguments. Every guarded substitution on them is dead code now; removing the fields and the
    guards, with the helpers that guess and the spawn wrappers, is the queue line
-   `[generic instances 8c/9: the dead type-parameter code removed]`.
+   `[generic instances 8c/9: the dead type-parameter code removed]`. Then (0.4.136): the two fields are gone from `CFuncContext`
+   with every use: the guarded substitutions, the mangler arguments (NULL), and the helpers that acted only
+   through them (`c_type_parameter_default`, `c_record_moved_local`, `respecialize_overload` and its
+   no-overload report, the loops over the parameters in `c_type_parameter_is_optional`, the specialized name of a
+   results struct). The C of 106, 121 and 136 is byte-identical. Left, the queue line
+   `[generic instances 8d/9: the guessing helpers, the prototype buffering and the spawn wrappers removed]`.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed

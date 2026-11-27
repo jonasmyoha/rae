@@ -249,7 +249,7 @@ bool c_lend_emit_spawn(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
  * outside a taskScope where it analyzes the code; here where it does not. */
 bool c_kept_spawn_open(CFuncContext* ctx, const AstExpr* spawn, FILE* out) {
   if (!spawn || spawn->kind != AST_EXPR_UNARY || spawn->as.unary.op != AST_UNARY_SPAWN) return false;
-  if (ctx->generic_params) return false;  /* the spawn itself is refused */
+    /* the spawn itself is refused */
   int top = ctx->lend_group_count - 1;
   if (!spawn->as.unary.spawn_kept || top < 0 || !ctx->lend_group_keeps[top]) {
     diag_error(c_source_file(ctx), (int)spawn->line, (int)spawn->column,

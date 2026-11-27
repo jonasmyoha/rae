@@ -18,15 +18,11 @@ bool c_has_several_results(const AstFuncDecl* func) {
   return func && func->returns && func->returns->next;
 }
 
-/* The struct's name: the function's C name and `_results`. In an instance of a
- * generic function (`ctx` has its type arguments) it is that instance's. */
+/* The struct's name: the function's C name and `_results`. An instance of a
+ * generic function is a function of its own, with its own name. */
 const char* c_results_type_name(CFuncContext* ctx, const AstFuncDecl* func) {
   CompilerContext* compiler = ctx->compiler_ctx;
-  const AstFuncDecl* generic = func->generic_template && func->generic_template->kind == AST_DECL_FUNC
-      ? &func->generic_template->as.func_decl : func;
-  const char* mangled = ctx->generic_args && (generic->generic_params || func->specialization_args)
-      ? rae_mangle_specialized_function(compiler, generic, ctx->generic_args)
-      : rae_mangle_function(compiler, func);
+  const char* mangled = rae_mangle_function(compiler, func);
   size_t length = strlen(mangled) + sizeof "_results";
   char* name = arena_alloc(compiler->ast_arena, length);
   snprintf(name, length, "%s_results", mangled);
@@ -165,7 +161,7 @@ void c_register_destructured_locals(CFuncContext* ctx, const AstStmt* stmt, FILE
     ctx->locals[slot] = b->local_name;
     ctx->local_type_refs[slot] = b->type;
     ctx->local_types[slot] = str_from_cstr(
-        rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, b->type));
+        rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, b->type));
     ctx->local_is_ptr[slot] = false;
     ctx->local_is_mod[slot] = false;
     ctx->local_drop_flag[slot] = false;

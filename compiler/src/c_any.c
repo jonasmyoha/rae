@@ -19,8 +19,6 @@ bool c_is_any(const AstTypeRef* type) {
 
 /* `type` as it is in this specialization */
 const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type) {
-  if (type && ctx->generic_params && ctx->generic_args)
-    type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)type);
   return type;
 }
 
@@ -50,8 +48,6 @@ void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out
   }
   const AstExpr* source = value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
   const AstTypeRef* slot = expr_is_raw_slot_read(source) ? c_raw_slot_type(ctx, source) : NULL;
-  if (slot && ctx->generic_params && ctx->generic_args)
-    slot = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)slot);
   if (c_is_any(slot)) {
     /* a slot of a list: the list keeps it */
     fprintf(out, mode == ANY_OWNED ? "rae_any_own(" : "(");
