@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.135, 2026-11-28: instances registered once, before the C
+
+- Every instance of a generic function is registered before the C is written; one registered while it is written
+  is an internal error (`RAE_LATE_SPECIALIZATIONS` is gone). Two spellings of one primitive (`Float32` and
+  `Float`) are one instance.
+- The backend no longer carries a generic function's type parameters while writing C.
+
 ## 0.4.134, 2026-11-27: discovery walks the analyzed instances
 
 - The backend's search for the types an instance uses walks the instance's analyzed copy instead of its template:

@@ -145,10 +145,13 @@ static bool c_is_place(CFuncContext* ctx, const AstExpr* value) {
 static bool c_parameter_takes_optional(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete,
                                        const AstTypeRef* type) {
     if (!fd->generic_params || !concrete || fd->is_extern) return false;
-    CFuncContext callee = *ctx;
-    callee.generic_params = fd->generic_params;
-    callee.generic_args = concrete;
-    return c_type_parameter_is_optional(&callee, type);
+    /* a `view T` / `mod T` whose T the call binds to an optional (as
+     * c_type_parameter_is_optional asks of a context, here of the callee's parameters) */
+    if (!type || type->is_opt || !(type->is_view || type->is_mod) || !type->parts || type->generic_args) return false;
+    const AstTypeRef* arg = concrete;
+    for (const AstIdentifierPart* param = fd->generic_params; param && arg; param = param->next, arg = arg->next)
+        if (str_eq(param->text, type->parts->text)) return arg->is_opt && rae_opt_is_struct_rep(ctx, arg);
+    return false;
 }
 
 /* The address of an optional that a `view T` / `mod T` takes when T is the

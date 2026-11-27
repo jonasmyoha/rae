@@ -209,9 +209,6 @@ for TARGET in "${TARGETS[@]}"; do
     # build time; under the suite a missing naga is an ERROR, never a silent
     # skip (docs/shaders-and-the-compiler.md). `cargo install naga-cli`.
     export RAE_SHADER_VALIDATE="${RAE_SHADER_VALIDATE:-require}"
-    # A specialization the discovery pass missed (registered only while a plain body was emitted)
-    # fails the build under the suite, so discovery stays complete (case 1490)
-    export RAE_LATE_SPECIALIZATIONS="${RAE_LATE_SPECIALIZATIONS:-error}"
     # An instance of a generic function shares no node with its template (src/ast_clone.c)
     export RAE_CHECK_CLONES="${RAE_CHECK_CLONES:-1}"
     # Sema decided every instance of a generic function the C calls (docs/generic-instances-design.md,

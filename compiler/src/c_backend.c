@@ -297,10 +297,10 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
                 fprintf(out, "typedef struct %s %s;\n", mangled, mangled);
                 fprintf(out, "struct %s {\n", mangled);
                 CFuncContext tctx = {0}; tctx.compiler_ctx = ctx; tctx.module = m;
-                tctx.generic_params = params; tctx.generic_args = args;
                 for (const AstTypeField* f = td->fields; f; f = f->next) {
                     fprintf(out, "  ");
-                    emit_type_ref_as_c_type(&tctx, f->type, out, false);
+                    /* the field's type with the struct's arguments written in */
+                    emit_type_ref_as_c_type(&tctx, f->type ? substitute_type_ref(ctx, params, args, f->type) : NULL, out, false);
                     bool p = f->type && (f->type->is_view || f->type->is_mod);
                     fprintf(out, "%s %.*s;\n", p ? "*" : "", (int)f->name.len, f->name.data);
                 }
@@ -581,6 +581,17 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
             const AstTypeRef* a = ctx->specialized_funcs[i].concrete_args; const AstTypeRef* b = concrete_args;
             bool match = true;
             while (a && b) {
+                /* Two spellings of one primitive (`Float32` and `Float`, `Char32` and `Char`)
+                 * are one C type, so one instance: the emission registered the alias's again,
+                 * late, as the same C function */
+                if (a->parts && b->parts && (uintptr_t)a->parts >= 0x1000 && (uintptr_t)b->parts >= 0x1000
+                    && !a->generic_args && !b->generic_args && a->is_opt == b->is_opt && a->is_view == b->is_view
+                    && a->is_mod == b->is_mod && !str_eq(a->parts->text, b->parts->text)
+                    && is_scalar_primitive_type(a->parts->text) && is_scalar_primitive_type(b->parts->text)) {
+                    const char* ac = map_rae_type_to_c(a->parts->text);
+                    const char* bc = map_rae_type_to_c(b->parts->text);
+                    if (ac && bc && strcmp(ac, bc) == 0) { a = a->next; b = b->next; continue; }
+                }
                 // #960: an enum's TypeInfo is the Int TypeInfo, so the
                 // resolved-type shortcut inside type_refs_equal would dedupe
                 // decodeField(LayoutType) against decodeField(Int) (and
@@ -2771,93 +2782,49 @@ static const AstFuncDecl* c_instance_clone(CompilerContext* ctx, const AstFuncDe
 }
 
 /* The prototype of the instance of `f` for `args` (its results type first), from its
- * analyzed clone; one with no clone (sema makes one for every body) keeps the
- * template's, with its type arguments */
+ * analyzed clone */
 static void emit_specialization_prototype(CompilerContext* ctx, const AstModule* module, const AstFuncDecl* f,
                                           const AstTypeRef* args, FILE* out) {
   const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-  const AstIdentifierPart* gp = f->generic_params;
-  if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
-    gp = f->generic_template->as.func_decl.generic_params;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+  /* (with no clone there is no body either: emit_specialized_function reports it) */
   const AstFuncDecl* clone = c_instance_clone(ctx, f, args);
-  if (clone) { f = clone; tctx.generic_params = NULL; tctx.generic_args = NULL; tctx.func_decl = clone; }
+  if (!clone) return;
+  f = clone;
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .func_decl = clone};
   c_emit_results_type(&tctx, f, out);
   fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
   emit_param_list(&tctx, f->params, out, false);
   fprintf(out, ")%s;\n", c_effect_attribute(f));
 }
 
-/* Prototype every specialization registered from `*prototyped` on. A body
- * emitted into a buffer can register new specializations (the first use of a
- * function inside a generic one); their prototypes must reach the output
- * BEFORE that body, or C sees an undeclared function and then a static
- * declaration after a non-static one. */
+static int g_instance_errors;
+
+/* Every instance is sema's and registered before the C is written (docs/generic-instances-design.md
+ * step 8): one registered from `*prototyped` on, while a body was written, is a compiler fault.
+ * Its prototype is still written, so the C stays whole. */
 static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstModule* module, size_t* prototyped, FILE* out) {
   while (*prototyped < ctx->specialized_func_count) {
     const AstFuncDecl* f = ctx->specialized_funcs[*prototyped].decl;
     const AstTypeRef* args = ctx->specialized_funcs[*prototyped].concrete_args;
     (*prototyped)++;
     if (f->is_extern) continue;
+    char message[512];
+    snprintf(message, sizeof message, "internal: the instance %s was registered while the C was written",
+             rae_mangle_specialized_function(ctx, f, args));
+    diag_error(f->generic_template && f->generic_template->origin_file ? f->generic_template->origin_file : "?",
+               f->body && f->body->first ? (int)f->body->first->line : 0, 0, message);
+    g_instance_errors++;
     emit_specialization_prototype(ctx, module, f, args, out);
   }
 }
 
-/* RAE_LATE_SPECIALIZATIONS=1: name every specialization a plain function's body registered while
- * it was emitted, which discovery should have found before. They are prototyped in time (the body
- * is buffered), so this only tells that discovery missed one (=error: the build fails). */
-static int g_late_specializations = 0;
-/* The C names of the specializations registered before a body was emitted: a late
- * entry with one of them is the same C function written another way (`Char32` and
- * `Char`), not one that was missed */
-static char** g_known_spec_names = NULL;
-static size_t g_known_spec_count = 0, g_known_spec_cap = 0, g_known_spec_through = 0;
-static const void* g_known_spec_array = NULL;
-static bool known_spec_name(CompilerContext* ctx, const char* name, size_t before) {
-  if (g_known_spec_array != (const void*)ctx || g_known_spec_through > before) {
-    for (size_t i = 0; i < g_known_spec_count; i++) free(g_known_spec_names[i]);
-    g_known_spec_count = 0;
-    g_known_spec_through = 0;
-    g_known_spec_array = ctx;
-  }
-  while (g_known_spec_through < before) {
-    size_t i = g_known_spec_through++;
-    if (ctx->specialized_funcs[i].decl->is_extern) continue;
-    RAE_GROW1(g_known_spec_names, g_known_spec_count, g_known_spec_cap);
-    /* (a copy: the mangler may hand back a buffer it reuses) */
-    g_known_spec_names[g_known_spec_count++] = strdup(rae_mangle_specialized_function(
-        ctx, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args));
-  }
-  for (size_t i = 0; i < g_known_spec_count; i++)
-    if (strcmp(g_known_spec_names[i], name) == 0) return true;
-  return false;
-}
 
-static void report_late_specializations(CompilerContext* ctx, size_t before, const AstFuncDecl* in, const char* body) {
-  const char* mode = getenv("RAE_LATE_SPECIALIZATIONS");
-  if (!mode || !*mode || strcmp(mode, "0") == 0) return;
-  for (size_t i = before; i < ctx->specialized_func_count; i++) {
-    const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
-    if (f->is_extern) continue;
-    const char* late_name = rae_mangle_specialized_function(ctx, f, ctx->specialized_funcs[i].concrete_args);
-    if (known_spec_name(ctx, late_name, before)) continue;
-    /* registered while a call's overloads were tried, and not called: not missed */
-    if (body && !strstr(body, late_name)) continue;
-    fprintf(stderr, "[late-specialization] %s while emitting %s\n",
-            rae_mangle_specialized_function(ctx, f, ctx->specialized_funcs[i].concrete_args),
-            rae_mangle_function(ctx, in));
-    g_late_specializations++;
-  }
-}
-
-static int g_instance_errors;
 bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const AstFuncDecl* f, const AstTypeRef* args, FILE* out) {
   // Specialized externs (sizeof(T)(), rae_ext_rae_buf_get(V), ...) have no
   // body and their call sites are inlined elsewhere — emitting an empty
   // function body produces -Wreturn-type warnings.
   if (f->is_extern) return true;
-  const AstIdentifierPart* gp_src = f->generic_params; if (!gp_src && f->generic_template) gp_src = f->generic_template->as.func_decl.generic_params;
-  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .generic_params = gp_src, .generic_args = args, .func_first_let_idx = (size_t)-1};
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = m, .func_decl = f, .func_first_let_idx = (size_t)-1};
   const char* rt = c_return_type(&tctx, f); const char* mangled = rae_mangle_specialized_function(ctx, f, args);
   // Dedup check: skip if already emitted
   for (size_t i = 0; i < g_emitted_spec_func_count; i++) {
@@ -2878,9 +2845,6 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   }
   f = clone;
   tctx.func_decl = clone;
-  gp_src = NULL;
-  tctx.generic_params = NULL;
-  tctx.generic_args = NULL;
   rt = c_return_type(&tctx, f);
   // A container drop whose elements are containers calls the ELEMENT
   // container's drop per element (Layer 5 below). That drop may be emitted
@@ -2903,7 +2867,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
       if (tctx.local_count < 256) {
           tctx.locals[tctx.local_count] = p->name;
           tctx.local_type_refs[tctx.local_count] = p->type;
-          tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, gp_src, args, p->type));
+          tctx.local_types[tctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, NULL, NULL, p->type));
           // Stage C: `own T` param — callee owns; mark for end-of-scope drop.
           // Stage 3: `copy T` param — callee owns the deep-copied
           // value the caller paid for; same drop responsibility.
@@ -5312,10 +5276,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           char* body = NULL;
           size_t body_len = 0;
           FILE* body_out = open_memstream(&body, &body_len);
-          size_t before_body = ctx->specialized_func_count;
           emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
           if (body_out) fflush(body_out);
-          report_late_specializations(ctx, before_body, &d->as.func_decl, body_out ? body : NULL);
           if (body_out) {
               fclose(body_out);
               emit_new_specialization_prototypes(ctx, module, &plain_prototyped, out);
@@ -5419,11 +5381,5 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   ctx->wait_graph = NULL;
   if (g_instance_errors > 0) return false;
   if (c_instances_wanted() && c_check_instances(ctx, out_path) > 0 && c_instances_strict()) return false;
-  const char* late_mode = getenv("RAE_LATE_SPECIALIZATIONS");
-  if (late_mode && strcmp(late_mode, "error") == 0 && g_late_specializations > 0) {
-    fprintf(stderr, "error: specialization discovery missed %d specialization(s) (RAE_LATE_SPECIALIZATIONS=error)\n",
-            g_late_specializations);
-    return false;
-  }
   return exported;
 }

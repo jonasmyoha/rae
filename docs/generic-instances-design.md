@@ -381,7 +381,16 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    `CFuncContext`'s `generic_params` / `generic_args` (still set for a generic struct's fields, a callee's
    parameter types at a call and a prototype with no clone) and their guarded substitutions (about 400
    mentions in `c_*.c`), the late-specialization report and `emit_new_specialization_prototypes`, the helpers
-   that guess, and the wrappers of `sema_spawn_generic_call`.
+   that guess, and the wrappers of `sema_spawn_generic_call`. Then (0.4.135): no case, example or check
+   registered an instance while the C was written but the 39 that were an alias's spelling of one already there
+   (`Float32` for `Float`, `Char32` for `Char`; `register_function_specialization` now takes two spellings of one
+   primitive as one instance), so `RAE_LATE_SPECIALIZATIONS` and its report are gone and such an instance is an
+   internal error; a prototype with no clone is no longer written; and nothing sets `CFuncContext`'s
+   `generic_params` / `generic_args` any more: a generic struct's field types are substituted once where its C
+   struct is written, and whether a callee's `view T` takes an optional is read from the callee's type parameters
+   and the call's arguments. Every guarded substitution on them is dead code now; removing the fields and the
+   guards, with the helpers that guess and the spawn wrappers, is the queue line
+   `[generic instances 8c/9: the dead type-parameter code removed]`.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
