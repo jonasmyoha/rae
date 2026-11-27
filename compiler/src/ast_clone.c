@@ -286,10 +286,16 @@ static AstStmt* clone_stmt(const AstCloner* cloner, const AstStmt* stmt) {
   switch (stmt->kind) {
     case AST_STMT_BREAK: case AST_STMT_CONTINUE:
       break;
-    case AST_STMT_LET:
-      copy->as.let_stmt.type = ast_clone_type_ref(cloner, stmt->as.let_stmt.type);
+    case AST_STMT_LET: {
+      const AstTypeRef* written = stmt->as.let_stmt.type;
+      copy->as.let_stmt.type = ast_clone_type_ref(cloner, written);
       copy->as.let_stmt.value = ast_clone_expr(cloner, stmt->as.let_stmt.value);
+      /* `var zero: T` keeps the template's meaning: all zeros */
+      if (!stmt->as.let_stmt.value && written && written->parts && !written->parts->next && !written->generic_args
+          && argument_of(cloner, written->parts->text))
+        copy->as.let_stmt.zero_init = true;
       break;
+    }
     case AST_STMT_DESTRUCT: {
       AstDestructureBinding** tail = &copy->as.destruct_stmt.bindings;
       *tail = NULL;

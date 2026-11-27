@@ -3718,6 +3718,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (wrap_str_take) fprintf(out, ")");
                 }
                 ctx->has_expected_type = false;
+            } else if (stmt->as.let_stmt.zero_init) {
+                // `var zero: T` of an instance's clone: all zeros, as in the template
+                fprintf(out, "{0}");
             } else {
                 // Auto-init: let x: Type (no initializer)
                 emit_auto_init(ctx, stmt->as.let_stmt.type, out);

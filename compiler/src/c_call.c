@@ -788,6 +788,8 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
     }
     if (str_eq_cstr(name, "sizeof")) {
         const AstTypeRef* tr = expr->as.call.generic_args;
+        /* a type written as an expression: `sizeof(StringMapEntry(V))` */
+        if (!tr && expr->as.call.args) tr = try_as_type_arg(ctx, expr->as.call.args->value);
         if (!tr && expr->as.call.args) tr = infer_expr_type_ref(ctx, expr->as.call.args->value);
         if (tr) { fprintf(out, "sizeof("); emit_type_ref_as_c_type(ctx, tr, out, false); fprintf(out, ")"); }
         else {

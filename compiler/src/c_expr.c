@@ -1772,11 +1772,16 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // construction reflection; #774). Substituted through the enclosing
         // generic context like fromJson, so `T.default()` inside a function
         // generic over T names the concrete instantiation.
+        const AstExpr* default_of = expr->as.method_call.object;
         if (str_eq_cstr(expr->as.method_call.method_name, "default")
             && !expr->as.method_call.args
-            && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
-            Str type_name = expr->as.method_call.object->as.ident;
-            AstTypeRef tmp = {0}; AstIdentifierPart part = {0}; part.text = type_name; tmp.parts = &part;
+            && (default_of->kind == AST_EXPR_IDENT
+                /* `Pair(Int).default()`: T written out in an instance's clone */
+                || (default_of->is_written_out && default_of->kind == AST_EXPR_CALL))) {
+            AstTypeRef tmp = {0}; AstIdentifierPart part = {0};
+            const AstTypeRef* written = default_of->kind == AST_EXPR_IDENT ? NULL : try_as_type_arg(ctx, default_of);
+            if (default_of->kind == AST_EXPR_IDENT) { part.text = default_of->as.ident; tmp.parts = &part; }
+            else if (written) tmp = *written;
             const AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, &tmp);
             const AstTypeRef* eff = sub ? sub : &tmp;
             // #961: a non-generic user struct has a generated default that

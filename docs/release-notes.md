@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.126, 2026-11-27: more generic instances written from their clones
+
+- With `RAE_GENERIC_INSTANCES=1`, ten more cases pass (1405 of 1415) and the type matrix passes completely: a type
+  written out in an instance as `Task(Int)`, `Array(Int, cap: 2)` or `Entry(V)` of an optional V is read as a
+  type, an optional type parameter the clone left as its name is read from the instance's arguments, `Pair(Int).default()`
+  works, `var zero: T` keeps its meaning (all zeros), and an instance asked for through a `mod T` place is the
+  same instance (it was a second one with types spelled empty). Off, nothing changes.
+
 ## 0.4.125, 2026-11-27: generic instances written from their analyzed clones, behind a switch
 
 - `RAE_GENERIC_INSTANCES=1` writes each instance of a generic function (its prototype and body) from the clone

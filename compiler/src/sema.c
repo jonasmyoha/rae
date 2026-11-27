@@ -12715,6 +12715,8 @@ static size_t sema_backend_instance_types(CompilerContext* ctx, const AstTypeRef
         one.next = NULL;
         types[count] = a->resolved_type ? a->resolved_type
                                         : sema_resolve_type_internal(ctx, s_current_module, s_lifecycle_symbols, &one);
+        /* an argument the backend read off a `mod T` place carries the reference's type */
+        while (types[count] && types[count]->kind == TYPE_REF) types[count] = types[count]->as.ref.base;
         if (!types[count] || types[count]->kind == TYPE_GENERIC_PARAM) return 0;
         count++;
     }

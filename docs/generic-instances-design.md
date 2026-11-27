@@ -274,7 +274,21 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    optional type parameter stays its name `T` in the clone, which the backend cannot resolve without type
    parameters (8: `sizeof(T)`, `T.default()`, `List.create(V, ...)`, a `view` of an optional); a map's entry type
    is not collected for an instance (4); a type the backend spells empty, `rae_` (4); a `view List` in text or `is`
-   (2); leaks (1574, 1602). They are the queue line `[generic instances 5b/9: the 20 listed cases]`.
+   (2); leaks (1574, 1602). They are the queue line `[generic instances 5b/9: the 20 listed cases]`. Second part
+   (0.4.126), ten of them and the matrix: a type written out as a call with no declaration (`Task(Int)`) or with a
+   value argument (`Array(Int, cap: 2)`) is a type argument (`try_as_type_arg` reads a node the clone wrote out,
+   and a call's own type arguments, where the clone puts an optional `V` of `Entry(V)`); a name the clone left
+   (an optional type parameter) is read from the clone's `specialization_args` (`c_clone_type_parameter`);
+   `sizeof(Entry(V))` reads its argument as a type first; `Pair(Int).default()` of a written-out T; an argument
+   the backend read off a `mod T` place is keyed by its referenced type (it made a second instance with types it
+   could not spell, `rae_`); and `var zero: T` without a value keeps the template's meaning in the clone, all
+   zeros (`zero_init`, set by the cloner), not the struct's declared defaults. The type matrix passes with the
+   switch, its list is empty. Ten cases are left, the queue line `[generic instances 5c/9: the 10 listed cases]`:
+   a `view T` of an optional T (887, 1645, 1668: in the template a pointer to the optional, in the clone `view`
+   and `opt` of the payload, the same as a written `opt view X`, so the type needs a mark of its own and the
+   body's reads with it; a mark on the prototype alone was tried, the body still read it as an optional view),
+   an Array's elements (1671, 1678), a `view List` in text or `is` (889, 1676), a map of an optional aborting at
+   run time (1654), and two leaks (1574, 1602).
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the
    realtime check and the twins read the instances instead of following calls by name.
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.

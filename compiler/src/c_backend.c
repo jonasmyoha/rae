@@ -1337,16 +1337,33 @@ bool is_generic_param(const AstIdentifierPart* params, Str name) { const AstIden
 //   String.createList(initialCap: 4)         // dot-call on type
 //
 // all hoist `String` into `expr->as.call.generic_args`.
+/* In an instance's clone (no type parameters in the context), a type parameter the clone
+ * left as its name: one bound to an optional, which has no spelling as an expression. Its
+ * argument, from the clone's specialization_args; NULL for any other name. */
+const AstTypeRef* c_clone_type_parameter(CFuncContext* ctx, Str name) {
+    if (!ctx || ctx->generic_params || !ctx->func_decl) return NULL;
+    const AstFuncDecl* f = ctx->func_decl;
+    if (!f->generic_template || f->generic_template->kind != AST_DECL_FUNC) return NULL;
+    const AstTypeRef* arg = f->specialization_args;
+    for (const AstIdentifierPart* param = f->generic_template->as.func_decl.generic_params; param && arg;
+         param = param->next, arg = arg->next)
+        if (str_eq(param->text, name)) return arg;
+    return NULL;
+}
+
 AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     if (!val) return NULL;
     Str name = {0};
     AstCallArg* nested_args = NULL;
+    /* `Entry(V)` of an optional V in an instance's clone: V is the call's type argument */
+    const AstTypeRef* nested_types = NULL;
     if (val->kind == AST_EXPR_IDENT) {
         name = val->as.ident;
     } else if (val->kind == AST_EXPR_CALL && val->as.call.callee
                && val->as.call.callee->kind == AST_EXPR_IDENT) {
         name = val->as.call.callee->as.ident;
         nested_args = val->as.call.args;
+        nested_types = val->as.call.generic_args;
     } else {
         return NULL;
     }
@@ -1354,7 +1371,18 @@ AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     // A local / global binding with the same name takes priority —
     // `let String = 0; foo(String, ...)` passes a value, not a type.
     if (get_local_type_ref(ctx, name)) return NULL;
+    if (!nested_args && !nested_types) {
+        const AstTypeRef* left = c_clone_type_parameter(ctx, name);
+        if (left) {
+            AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+            *copy = *left;
+            copy->next = NULL;
+            return copy;
+        }
+    }
     bool is_type = is_primitive_type(name) || str_eq_cstr(name, "Ptr")
+        /* a type argument written out in an instance's clone (`Task(Int)` has no declaration) */
+        || val->is_written_out
         || (ctx->module && find_type_decl(ctx, ctx->module, name) != NULL)
         || (ctx->module && find_enum_decl(ctx, ctx->module, name) != NULL);  // an enum is a type argument too
     // Inside a generic function body, the bound generic param is also
@@ -1370,10 +1398,25 @@ AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val) {
     *part = (AstIdentifierPart){.text = name};
     AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
     *tr = (AstTypeRef){.parts = part};
-    if (nested_args) {
+    if (nested_args || nested_types) {
         AstTypeRef* head = NULL; AstTypeRef* tail = NULL;
+        for (const AstTypeRef* nt = nested_types; nt; nt = nt->next) {
+            AstTypeRef* inner = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+            *inner = *nt;
+            inner->next = NULL;
+            if (!head) head = inner; else tail->next = inner;
+            tail = inner;
+        }
         for (AstCallArg* na = nested_args; na; na = na->next) {
-            AstTypeRef* inner = try_as_type_arg(ctx, na->value);
+            AstTypeRef* inner = NULL;
+            if (na->name.len && na->value && na->value->kind == AST_EXPR_INTEGER) {
+                /* a value argument of the type: `cap: 2` of `Array(Int, cap: 2)` */
+                inner = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *inner = (AstTypeRef){.is_value_arg = true, .value_name = na->name, .value_expr = na->value,
+                                      .value_folded = strtoll(na->value->as.integer.data, NULL, 10)};
+            } else {
+                inner = try_as_type_arg(ctx, na->value);
+            }
             if (!inner) return NULL;
             if (!head) head = inner; else tail->next = inner;
             tail = inner;
@@ -2666,6 +2709,11 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
     gp_src = NULL;
     tctx.generic_params = NULL;
     tctx.generic_args = NULL;
+    if (getenv("RAE_GI_KEEP")) {
+      const AstFuncDecl* template_decl = &clone->generic_template->as.func_decl;
+      tctx.generic_params = template_decl->generic_params;
+      tctx.generic_args = clone->specialization_args;
+    }
     rt = c_return_type(&tctx, f);
   }
   // A container drop whose elements are containers calls the ELEMENT

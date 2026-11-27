@@ -393,6 +393,9 @@ struct AstStmt {
       bool is_bind;
       bool is_var;    // declared with `var` (mutable). let/const are immutable.
       bool is_const;  // declared with `const` (compile-time constant).
+      // `var zero: T` with no value, cloned from a template: all zeros for every T
+      // (List.copyAtDefault), as the template has it, not a struct's declared defaults
+      bool zero_init;
       AstExpr* value;
       // Where an alias binding was written with the removed `=>` (0: it was
       // not). Sema reports it; the parser accepts it so `rae format` can
