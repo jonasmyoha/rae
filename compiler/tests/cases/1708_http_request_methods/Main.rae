@@ -1,0 +1,187 @@
+# httpRequest (lib/net/HttpGet) against a local Rae server on a spawned worker (lib/net/ecs,
+# 127.0.0.1): a POST with a JSON body, a Content-Type and a bearer Authorization comes back
+# echoed whole (the request as the server read it, its Host line left out: the port changes);
+# a PUT with a text body; a 404's body is kept with `ok` true; a GET through httpGet is
+# unchanged; a reply that never comes times out. A method that is not a token and a caller's
+# Content-Length are refused before anything is sent. Line ends are shown as \r\n.
+import String
+open Channel
+open ecs/Event
+open net/Tcp
+open http/Http
+open net/ecs/HttpServer
+open net/ecs/HttpSystems
+open net/HttpGet
+
+type EchoRouter {
+  routed: Int
+}
+
+# The request as read, without its Host line
+func echoed(server: view HttpServer, event: view HttpRequestEvent) ret String {
+  let whole: String = requestText(server: server, event: event, range: event.request.whole)
+  var kept: String = ""
+  loop let line: view String in whole.split(sep: "\r\n") {
+    if not line.startsWith(prefix: "Host: ") {
+      kept = "{kept}{line}\r\n"
+    }
+  }
+  ret kept
+}
+
+func route(router: mod EchoRouter, server: mod HttpServer, event: view HttpRequestEvent) {
+  router.routed = router.routed + 1
+  if requestPathIs(server: server, event: event, path: "/slow") {
+    # never answered: the client's timeout ends it
+    ret
+  }
+  if requestPathIs(server: server, event: event, path: "/missing") {
+    respond(
+      server: server
+      event: event
+      status: 404
+      contentType: "application/json"
+      body: "\{\"error\":\"no such save\"\}"
+    )
+    ret
+  }
+  respond(
+    server: server
+    event: event
+    status: 200
+    contentType: "text/plain"
+    body: echoed(server: server, event: event)
+  )
+}
+
+func serve(listenerHandle: own Int, stop: own Channel(Int)) ret Int {
+  var server: HttpServer = createHttpServer(idleTimeoutMs: 0)
+  let shared: NetStatus = httpServerShareListener(
+    server: server
+    listenerSocketId: SocketId { handle: listenerHandle }
+  )
+  var router: EchoRouter = { routed: 0 }
+  var frames: Int = 0
+  loop pending(this: stop) is 0 and frames < 3000 {
+    httpServerFrameBegin(
+      EchoRouter
+      router: router
+      server: server
+      timeoutMs: 5
+    )
+    httpServerFrameEnd(server: server)
+    frames = frames + 1
+  }
+  ret router.routed
+}
+
+func shown(text: view String) ret String {
+  ret text.replace(old: "\r\n", new: "\\r\\n")
+}
+
+func show(label: view String, result: view HttpGetResult) {
+  if not result.ok {
+    log("{label}: failed, {result.error}")
+    ret
+  }
+  let body: String = String.fromBytes(bytes: result.body, start: 0, count: result.body.length)
+  log("{label}: status {result.status}, body {shown(text: body)}")
+}
+
+func main() ret Int {
+  let listeningSocketId: SocketId = socketId,
+    let listeningStatus: NetStatus = status = tcpListen(host: "127.0.0.1", port: 0, backlog: 16)
+  var port: Int = 0
+  if let localPort: Int = socketLocalPort(socketId: listeningSocketId) {
+    port = localPort
+  }
+  let stop: Channel(Int) = createChannel(Int)
+  let serverTask: Task(Int) = spawn serve(listenerHandle: listeningSocketId.handle, stop: stop)
+  let base: String = "http://127.0.0.1:{port}"
+
+  let jsonHeaders: List(String) = [
+    "Content-Type: application/json"
+    "Authorization: Bearer abc.def"
+  ]
+  show(
+    label: "POST"
+    result: httpRequestString(
+      method: "POST"
+      url: "{base}/guest"
+      headers: jsonHeaders
+      body: "\{\"device\":\"Pähkinä\"\}"
+      timeoutMs: 5000
+    )
+  )
+  let textHeaders: List(String) = ["Content-Type: text/plain"]
+  show(
+    label: "PUT"
+    result: httpRequestString(
+      method: "PUT"
+      url: "{base}/save/7"
+      headers: textHeaders
+      body: "level=3"
+      timeoutMs: 5000
+    )
+  )
+  let noHeaders: List(String) = List.create(String, cap: 0)
+  let empty: List(UInt8) = List.create(UInt8, cap: 0)
+  show(
+    label: "DELETE, no body"
+    result: httpRequest(
+      method: "DELETE"
+      url: "{base}/friend/9"
+      headers: noHeaders
+      body: empty
+      timeoutMs: 5000
+    )
+  )
+  show(
+    label: "404"
+    result: httpRequestString(
+      method: "POST"
+      url: "{base}/missing"
+      headers: jsonHeaders
+      body: "\{\}"
+      timeoutMs: 5000
+    )
+  )
+  show(label: "GET", result: httpGet(url: "{base}/page", timeoutMs: 5000))
+  show(label: "slow", result: httpGet(url: "{base}/slow", timeoutMs: 300))
+  show(
+    label: "a method with a space"
+    result: httpRequestString(
+      method: "POST /x"
+      url: "{base}/guest"
+      headers: noHeaders
+      body: ""
+      timeoutMs: 10
+    )
+  )
+  show(
+    label: "a method with a line break"
+    result: httpRequestString(
+      method: "GET\r\nX-Evil: 1"
+      url: "{base}/guest"
+      headers: noHeaders
+      body: ""
+      timeoutMs: 10
+    )
+  )
+  let ownLength: List(String) = ["Content-Length: 3"]
+  show(
+    label: "a Content-Length of the caller's"
+    result: httpRequestString(
+      method: "POST"
+      url: "{base}/guest"
+      headers: ownLength
+      body: "abc"
+      timeoutMs: 10
+    )
+  )
+
+  channelSend(this: stop, value: 1)
+  log("the server routed {serverTask.get()} request(s)")
+  freeChannel(this: stop)
+  ret 0
+}

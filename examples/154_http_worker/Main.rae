@@ -1,0 +1,115 @@
+# A UI app that calls an HTTP API without stopping its frames (lib/net/HttpGet): httpRequest
+# waits for its connection's events, so the app spawns it on a worker, the result comes back on
+# a Channel, and the frame loop asks the channel each frame. The bar keeps moving while the
+# request is out; the square turns green for a 2xx, orange for another status, red for a
+# failure, and the result is logged.
+#
+#   rae run examples/154_http_worker/Main.rae
+#   RAE_FETCH_URL=https://example.com/ rae run examples/154_http_worker/Main.rae
+import Gpu2d
+import Sys
+open Channel
+open Gpu2dCanvas
+open net/HttpGet
+
+# What the worker sends back: a small copy of the result for the UI
+type FetchDone {
+  ok: Bool
+  status: Int
+  bodyBytes: Int
+  error: String
+}
+
+const waitingColor: Int = 0x5A6B7DFF
+
+const okColor: Int = 0x3FB950FF
+
+const otherStatusColor: Int = 0xD29922FF
+
+const failedColor: Int = 0xF85149FF
+
+# The worker: one POST with a JSON body, its result on `results`
+func fetch(url: own String, results: own Channel(FetchDone)) ret Int {
+  let headers: List(String) = ["Content-Type: application/json"]
+  let result: HttpGetResult = httpRequestString(
+    method: "POST"
+    url: url
+    headers: headers
+    body: "\{\"hello\":\"rae\"\}"
+    timeoutMs: 10000
+  )
+  channelSend(
+    this: results
+    value: FetchDone {
+      ok: result.ok
+      status: result.status
+      bodyBytes: result.body.length
+      error: result.error
+    }
+  )
+  ret 0
+}
+
+func resultColor(done: view FetchDone) ret Int {
+  if not done.ok {
+    ret failedColor
+  }
+  if done.status >= 200 and done.status < 300 {
+    ret okColor
+  }
+  ret otherStatusColor
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 480, height: 320, title: "154: an HTTP call on a worker")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var url: String = Sys.getEnv(name: "RAE_FETCH_URL")
+  if url.length() is 0 {
+    url = "https://example.com/"
+  }
+  let results: Channel(FetchDone) = createChannel(FetchDone)
+  let worker: Task(Int) = spawn fetch(url: url, results: results)
+  log("sent POST {url}")
+  var color: Int = waitingColor
+  var frame: Int = 0
+  loop not Gpu2d.pollClose() {
+    frame = frame + 1
+    if pending(this: results) > 0 {
+      let done: FetchDone = receive(this: results)
+      color = resultColor(done: done)
+      if done.ok {
+        log("reply: status {done.status}, {done.bodyBytes} bytes, at frame {frame}")
+      } else {
+        log("failed: {done.error}, at frame {frame}")
+      }
+    }
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.063
+      g: 0.070
+      b: 0.094
+      a: 1.0
+    )
+    let barX: Float = ((frame * 4) % 400) as Float
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 40.0 + barX
+      y: 40.0
+      w: 40.0
+      h: 12.0
+      color: 0xC9D1D9FF
+    )
+    Gpu2d.drawRect(
+      canvas: canvas
+      x: 190.0
+      y: 110.0
+      w: 100.0
+      h: 100.0
+      color: color
+    )
+    Gpu2d.endFrame(canvas: canvas)
+  }
+  let joined: Int = worker.get()
+  freeChannel(this: results)
+  ret 0
+}

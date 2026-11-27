@@ -1,0 +1,10 @@
+POST: status 200, body POST /guest HTTP/1.1\r\nUser-Agent: Rae\r\nAccept: */*\r\nContent-Type: application/json\r\nAuthorization: Bearer abc.def\r\nContent-Length: 22\r\nConnection: close\r\n\r\n{"device":"Pähkinä"}\r\n
+PUT: status 200, body PUT /save/7 HTTP/1.1\r\nUser-Agent: Rae\r\nAccept: */*\r\nContent-Type: text/plain\r\nContent-Length: 7\r\nConnection: close\r\n\r\nlevel=3\r\n
+DELETE, no body: status 200, body DELETE /friend/9 HTTP/1.1\r\nUser-Agent: Rae\r\nAccept: */*\r\nContent-Length: 0\r\nConnection: close\r\n\r\n\r\n
+404: status 404, body {"error":"no such save"}
+GET: status 200, body GET /page HTTP/1.1\r\nUser-Agent: Rae\r\nAccept: */*\r\nConnection: close\r\n\r\n\r\n
+slow: failed, timed out after 300 ms
+a method with a space: failed, not an HTTP method (a token, no space or line break): 'POST /x'
+a method with a line break: failed, not an HTTP method (a token, no space or line break): 'GET\r\nX-Evil: 1'
+a Content-Length of the caller's: failed, the content-length header is the request's own: Content-Length: 3
+the server routed 6 request(s)

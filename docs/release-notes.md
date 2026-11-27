@@ -4,6 +4,21 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.124, 2026-11-27: HTTP requests with a method and a body; game proto4's requests released
+
+- `lib/net/HttpGet`: `httpRequest(method:, url:, headers:, body: List(UInt8), timeoutMs:)` and
+  `httpRequestString(..., body: String)` send any method (POST, PUT, DELETE, ...) with header lines of the caller's
+  (`Content-Type: application/json`, `Authorization: Bearer ...`) and the body with its `Content-Length`. A method
+  that is not a token (a space, a line break) is refused before anything is sent, as is a caller's
+  `Content-Length`. A 4xx or 5xx comes back with `ok` true, its status and its body. `httpGet` / `httpGetWith`
+  are unchanged (now a GET through `httpRequest`). Case 1708 against lib/net/ecs's server: a POST and a PUT
+  echoed back, a DELETE with no body, a 404's body, a timeout, the refusals.
+- `examples/154_http_worker`: a UI app's HTTP call on a spawned worker, the result back on a `Channel`, the frame
+  loop polling it, so the frames never wait for the network.
+- With this, every request game proto4's port made on Rae 0.4.96 has run (0.4.97 to 0.4.124): done, or
+  postponed only for hardware or accounts this machine does not have (push notifications on a real
+  Firebase project and on an iPhone with an APNs key).
+
 ## 0.4.123, 2026-11-27: App Tracking Transparency and SKAdNetwork
 
 - `lib/AppTracking` (iOS): `appTrackingStatus()` (`TrackingStatus` notDetermined, restricted, denied,

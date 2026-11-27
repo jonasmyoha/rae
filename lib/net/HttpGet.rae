@@ -7,7 +7,10 @@
 #
 # httpGetWith adds request header lines of the caller's ("User-Agent:
 # Weather/1.0 me@example.org", which api.met.no asks every client for);
-# httpGet is httpGetWith with none.
+# httpGet is httpGetWith with none. httpRequest sends any method with a body
+# (a JSON API's POST and PUT, with "Content-Type: application/json" and
+# "Authorization: Bearer ..." among the header lines); httpRequestString takes
+# the body as text. GET is httpRequest with the method "GET" and no body.
 import String
 open net/NetworkConnection
 
@@ -232,7 +235,7 @@ func headerLineName(line: view String) ret String {
 
 # What is wrong with the caller's header lines, "" when nothing: each is
 # "Name: value" on one line (a line break would let a value add headers of
-# its own), and Host and Connection are the request's own
+# its own), and Host, Connection and Content-Length are the request's own
 func headerLinesError(headers: view List(String)) ret String {
   loop let line: view String in headers {
     if line.contains(sub: "\r") or line.contains(sub: "\n") {
@@ -243,11 +246,29 @@ func headerLinesError(headers: view List(String)) ret String {
     if name.length() is 0 {
       ret "a header line is \"Name: value\": {line}"
     }
-    if name is "host" or name is "connection" {
+    if name is "host" or name is "connection" or name is "content-length" {
       ret "the {name} header is the request's own: {line}"
     }
   }
   ret ""
+}
+
+# Whether `method` is an HTTP method: a token (RFC 9110: letters, digits and
+# ! # $ % & ' * + - . ^ _ ` | ~), so it cannot carry a space or a line break
+# into the request line
+func isHttpMethod(method: view String) ret Bool {
+  if method.length() is 0 {
+    ret false
+  }
+  loop var i: Int = 0, i < method.length(), ++i {
+    let byte: Int = method.byteAt(index: i)
+    let letterOrDigit: Bool = (byte >= 48 and byte <= 57) or (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
+    let mark: Bool = byte is 33 or (byte >= 35 and byte <= 39) or byte is 42 or byte is 43 or byte is 45 or byte is 46 or byte is 94 or byte is 95 or byte is 96 or byte is 124 or byte is 126
+    if not letterOrDigit and not mark {
+      ret false
+    }
+  }
+  ret true
 }
 
 func headerLinesName(headers: view List(String), name: view String) ret Bool {
@@ -259,11 +280,17 @@ func headerLinesName(headers: view List(String), name: view String) ret Bool {
   ret false
 }
 
-# The request text: the GET line, Host, then User-Agent (Rae) and Accept
-# (*/*) unless the caller's lines name their own, the caller's lines in
-# their order, and Connection: close
-func httpGetRequestText(url: view HttpUrl, headers: view List(String)) ret String {
-  var text: String = "GET {url.path} HTTP/1.1\r\nHost: {url.host}\r\n"
+# The request's head: the request line, Host, then User-Agent (Rae) and
+# Accept (*/*) unless the caller's lines name their own, the caller's lines
+# in their order, Content-Length (unless a GET or HEAD has no body), and
+# Connection: close
+func httpRequestHead(
+  method: view String
+  url: view HttpUrl
+  headers: view List(String)
+  bodyLength: view Int
+) ret String {
+  var text: String = "{method} {url.path} HTTP/1.1\r\nHost: {url.host}\r\n"
   if headerLinesName(headers: headers, name: "user-agent") is false {
     text = "{text}User-Agent: Rae\r\n"
   }
@@ -273,7 +300,20 @@ func httpGetRequestText(url: view HttpUrl, headers: view List(String)) ret Strin
   loop let line: view String in headers {
     text = "{text}{line}\r\n"
   }
+  if bodyLength > 0 or (method is not "GET" and method is not "HEAD") {
+    text = "{text}Content-Length: {bodyLength}\r\n"
+  }
   ret "{text}Connection: close\r\n\r\n"
+}
+
+# The GET request's text (httpGetWith's)
+func httpGetRequestText(url: view HttpUrl, headers: view List(String)) ret String {
+  ret httpRequestHead(
+    method: "GET"
+    url: url
+    headers: headers
+    bodyLength: 0
+  )
 }
 
 # GET `url`, waiting up to `timeoutMs` in all. Redirects are not followed
@@ -284,14 +324,58 @@ func httpGet(url: view String, timeoutMs: view Int) ret HttpGetResult {
 }
 
 # httpGet with request header lines of the caller's ("Name: value" each, no
-# line break): a User-Agent or Accept line replaces the default one; Host
-# and Connection are the request's own and are refused, as is a line with a
-# line break, before anything is sent
+# line break): a User-Agent or Accept line replaces the default one; Host,
+# Connection and Content-Length are the request's own and are refused, as is
+# a line with a line break, before anything is sent
 func httpGetWith(
   url: view String
   headers: view List(String)
   timeoutMs: view Int
 ) ret HttpGetResult {
+  let noBody: List(UInt8) = List.create(UInt8, cap: 0)
+  ret httpRequest(
+    method: "GET"
+    url: url
+    headers: headers
+    body: noBody
+    timeoutMs: timeoutMs
+  )
+}
+
+# httpRequest with the body as text (its UTF-8 bytes)
+func httpRequestString(
+  method: view String
+  url: view String
+  headers: view List(String)
+  body: view String
+  timeoutMs: view Int
+) ret HttpGetResult {
+  ret httpRequest(
+    method: method
+    url: url
+    headers: headers
+    body: networkTextBytes(text: body)
+    timeoutMs: timeoutMs
+  )
+}
+
+# One request: `method` (a token: "POST", "PUT", "DELETE", ...), the caller's
+# header lines (as httpGetWith's), and `body`, sent with its Content-Length;
+# waiting up to `timeoutMs` in all. A method that is not a token is refused
+# before anything is sent. The reply comes back whatever its status: a 4xx or
+# 5xx has `ok` true, its status and its body (an API's error message).
+# Redirects are not followed.
+func httpRequest(
+  method: view String
+  url: view String
+  headers: view List(String)
+  body: view List(UInt8)
+  timeoutMs: view Int
+) ret HttpGetResult {
+  if not isHttpMethod(method: method) {
+    let visible: String = method.replace(old: "\r", new: "\\r").replace(old: "\n", new: "\\n")
+    ret httpGetFailed(error: "not an HTTP method (a token, no space or line break): '{visible}'")
+  }
   let parsed: HttpUrl = parseHttpUrl(url: url)
   if parsed.valid is false {
     ret httpGetFailed(error: "not an http:// or https:// URL: {url}")
@@ -299,6 +383,15 @@ func httpGetWith(
   let headerError: String = headerLinesError(headers: headers)
   if headerError.length() > 0 {
     ret httpGetFailed(error: headerError)
+  }
+  var request: List(UInt8) = networkTextBytes(text: httpRequestHead(
+    method: method
+    url: parsed
+    headers: headers
+    bodyLength: body.length
+  ))
+  loop let byte: view UInt8 in body {
+    request.add(value: byte)
   }
   var connection: NetworkConnection = networkConnectTcp(host: parsed.host, port: parsed.port)
   if parsed.secure {
@@ -316,8 +409,7 @@ func httpGetWith(
     }
     let event: NetworkEvent = networkNextEvent(connection: connection, timeoutMs: left)
     if event.kind is NetworkEventKind.ready {
-      let request: String = httpGetRequestText(url: parsed, headers: headers)
-      let sent: Bool = networkSendText(connection: connection, text: request)
+      let sent: Bool = networkSend(connection: connection, bytes: request)
     } else if event.kind is NetworkEventKind.message {
       loop let byte: view UInt8 in event.bytes {
         received.add(value: byte)
