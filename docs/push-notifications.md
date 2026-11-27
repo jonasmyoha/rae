@@ -49,7 +49,9 @@ message's `data` keys (see the Android section).
   the system and reaches the app only if the person taps it. Waking the app in the background for a
   silent push (`content-available`) is not supported.
 - Each notification comes once, whole, in the order they came, and wakes the frame loop
-  (`EventLoop.wake`). At most 64 wait; more are dropped until the app reads them.
+  (`EventLoop.wake`). On iOS the token and the notifications come through the main thread's run
+  loop, so they arrive while the app pumps its events (each frame), not during a long blocking
+  call in `main`. At most 64 wait; more are dropped until the app reads them.
 - Only remote notifications come here. A local notification (LocalNotification) does not.
 
 ## Headless and tests
@@ -133,8 +135,18 @@ intent extras, in `onCreate` and `onNewIntent`) call into the same header throug
 ## What has been run
 
 The headless path on a Mac (case 1706), the shim compiled for iOS arm64 with `-Wall -Wextra
--Werror`, and the module type-checked for every target (check-targets). Not yet run on an iPhone
-with a real APNs send.
+-Werror`, and the module type-checked for every target (check-targets).
+
+On the iOS Simulator (iPhone 16 Pro, iOS 27, 2026-11-27; `RAE_IOS_SDK=iphonesimulator`
+gen-ios.sh, a window app that pumps its events each frame): `pushNotificationRegister()` got a real
+APNs token (80 bytes, hex) within a second, and a notification sent with `xcrun simctl push`
+while the app was in front came at once as `tapped=false` with the whole `userInfo`
+(`{"aps":{"alert":{...}},"chest":"ready",...}`). A first probe that blocked `main` in a `sleep`
+loop got neither until it returned: on iOS the Rae `main` runs on the main thread, and the token
+and the delegate's calls come through its run loop. An app gets them while it pumps its events
+(each frame), never inside a long blocking call. Not yet run on an iPhone: a tap from the
+background and a tap that launches the app (a simulator banner cannot be tapped from a script),
+and a send through APNs with a `.p8` key.
 
 On an Android 15 emulator with Google Play services (2026-11-27), with a placeholder
 `google-services.json` (a made-up project): Firebase starts from the values, the ask answers and
