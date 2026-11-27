@@ -43,8 +43,12 @@ open ui/Transform
 
 # Per-app gpu2d render resources, passed to renderSystemGpu2d each frame.
 type Gpu2dUi {
-  textFont: SdfFont  # body text (e.g. Roboto MSDF atlas)
+  textFont: SdfFont  # body text (e.g. Roboto MSDF atlas): the first text font, `text`
   iconFont: SdfFont  # Material-icon MSDF atlas (mat:* glyphs)
+  # the other text fonts by name, a theme's `assets.fonts` but `text` and `icons`
+  # (UiShell); a text style picks one with its `font` (TextFonts uiTextFont)
+  fonts: List(SdfFont) = {}
+  fontNames: List(String) = {}
   # Text styles (size/color-slot/align) loaded from the .raescene
   # theme (#230/#231). The single source of styleId resolution for
   # this render path — see ui/text_style resolveText*.

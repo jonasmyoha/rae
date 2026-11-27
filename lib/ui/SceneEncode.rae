@@ -344,6 +344,9 @@ func encodeText(world: view UiWorld, entityId: view EntityId, text: view Text) r
       valueJson: encodeColorOrSlot(color: override.color, slot: override.colorSlot)
     )
   }
+  if override.font.length() > 0 {
+    Json.jbField(builder: builder, key: "font", valueJson: Json.quote(text: override.font))
+  }
   let inner: String = base.sub(start: 1, len: base.length() - 2)
   ret "\{{inner}, \"styleOverride\": {Json.jbEndObject(builder: builder)}\}"
 }

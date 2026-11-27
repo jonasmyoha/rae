@@ -1,0 +1,81 @@
+# UiFonts — the text fonts a theme's `assets.fonts` names beside `text` and `icons` (ui/SceneImports
+# fontNames / fontPaths), loaded into Gpu2dUi.fonts by name (the font cache by path: a path loaded
+# already costs no second atlas), and the theme's text styles whose `font` names none of them,
+# reported once: such a style draws in the first font (ui/RenderSystem TextFonts).
+open SdfText
+open ui/RenderSystem
+open ui/Scene
+open ui/SceneImports
+open ui/ThemeResolved
+open ui/ScenePolicy
+
+# Load each named font of `assets` that `resources` does not hold at that path; one that does not
+# load keeps what was there (and is reported)
+func loadNamedUiFonts(
+  resources: mod Gpu2dUi
+  assets: view SceneAssets
+  diagnostics: mod List(SceneDiagnostic)
+  sceneLabel: view String
+) {
+  loop var i: Int = 0, i < assets.fontNames.length, ++i {
+    let name: String = assets.fontNames.copyAtDefault(index: i)
+    let path: String = assets.fontPaths.copyAtDefault(index: i)
+    var slot: Int = -1
+    if let known: Int = resources.fontNames.indexOf(value: name) {
+      slot = known
+    }
+    if slot >= 0 {
+      if let font: view SdfFont = resources.fonts.viewAt(index: slot) {
+        if font.jsonPath is path {
+          continue
+        }
+      }
+    }
+    let font: SdfFont = SdfText.loadSdfFontJson(jsonPath: path)
+    if font.atlas <= 0 {
+      log("[ui] error: {sceneLabel}: the font '{name}' {path} did not load")
+      reportSceneDiagnostic(
+        diagnostics: diagnostics
+        sceneId: sceneLabel
+        nodeId: ""
+        kind: SceneDiagnosticKind.missingFont
+        name: "fonts.{name}"
+        message: "the font '{name}' {path} did not load; its styles draw in the first font"
+      )
+      continue
+    }
+    if slot >= 0 {
+      resources.fonts.set(index: slot, value: own font)
+    } else {
+      resources.fontNames.add(value: name)
+      resources.fonts.add(value: own font)
+    }
+  }
+}
+
+# Each text style of the theme whose `font` names no font of `resources`: a diagnostic, and a log
+# line; it draws in the first font
+func reportUnknownStyleFonts(
+  resources: view Gpu2dUi
+  diagnostics: mod List(SceneDiagnostic)
+  sceneLabel: view String
+) {
+  loop var i: Int = 0, i < resources.theme.textNames.length, ++i {
+    let font: String = resources.theme.textFonts.copyAtDefault(index: i)
+    if uiHasFont(res: resources, name: font) {
+      continue
+    }
+    let style: String = resources.theme.textNames.copyAtDefault(index: i)
+    log(
+      "[ui] {sceneLabel}: the text style '{style}' names the font '{font}', which assets.fonts does not declare; it is drawn in the first font (text)"
+    )
+    reportSceneDiagnostic(
+      diagnostics: diagnostics
+      sceneId: sceneLabel
+      nodeId: ""
+      kind: SceneDiagnosticKind.unknownToken
+      name: "text.{style}.font"
+      message: "the font '{font}' is not in assets.fonts; the style draws in the first font"
+    )
+  }
+}

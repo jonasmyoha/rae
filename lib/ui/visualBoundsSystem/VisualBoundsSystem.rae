@@ -48,7 +48,11 @@ func refreshVisualBounds(
   if isIcon {
     b = SdfText.sdfMeasureTextBounds(font: res.iconFont, text: text, sizePx: sizePx)
   } else {
-    b = SdfText.sdfMeasureTextBounds(font: res.textFont, text: text, sizePx: sizePx)
+    b = SdfText.sdfMeasureTextBounds(
+      font: RenderSystem.uiEntityTextFont(world: world, entityId: entityId, res: res)
+      text: text
+      sizePx: sizePx
+    )
   }
   let keyText: String = "{text}"
   let vb: VisualBounds = {
@@ -185,6 +189,12 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
   loop i < n {
     let entityId: EntityId = componentEntityAt(this: world.texts, i: i)
     let t: view Text = queryViewAt(table: world.texts, denseIndex: i)
+    let textFont: view SdfFont = RenderSystem.uiTextFont(
+      world: world
+      entityId: entityId
+      styleId: t.styleId
+      res: res
+    )
     if t.text.length() > 0 {
       var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
       if componentHas(this: world.styleOverrides, entityId: entityId) {
@@ -192,7 +202,7 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
         size = styleOverrideSize(base: size, so: so)
       }
       let b: SdfTextBounds = SdfText.sdfMeasureTextBounds(
-        font: res.textFont
+        font: textFont
         text: t.text
         sizePx: size
       )
@@ -205,7 +215,7 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
       # height (the style's lineHeight) more for each line after the first
       if SdfText.sdfHasHardBreak(text: t.text) {
         let lines: SdfTextLines = SdfText.sdfMeasureLines(
-          font: res.textFont
+          font: textFont
           text: t.text
           sizePx: size
         )

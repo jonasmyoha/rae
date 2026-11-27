@@ -1,0 +1,85 @@
+# TextFonts — which text font a text draws and measures in: a theme's `assets.fonts` names
+# several MTSDF fonts (`text` is the first, Gpu2dUi.textFont; the others are Gpu2dUi.fonts by
+# name, loaded by UiShell), a text style picks one with its `font`, and a StyleOverride's `font`
+# wins over the style's. A name that is no font (and an empty one) is the first font; the theme's
+# styles naming no font are reported when the fonts are loaded (reportUnknownStyleFonts). Each font
+# keeps its own atlas, so the glyph batches stay one per atlas.
+import SdfText
+open ui/Ecs
+open ui/Components
+open ui/TextStyle
+open ui/ThemeResolved
+open ecs/ComponentTable
+
+# The font named `name`: one of the other text fonts, else the first
+func uiFontNamed(res: view Gpu2dUi, name: view String) ret view SdfFont {
+  if name.length() > 0 and name is not "text" {
+    loop var i: Int = 0, i < res.fontNames.length and i < res.fonts.length, ++i {
+      if res.fontNames.copyAtDefault(index: i) is name {
+        unsafe {
+          ret view rae_ext_rae_buf_get(buf: res.fonts.data, index: i)
+        }
+      }
+    }
+  }
+  ret res.textFont
+}
+
+# The font name a text of style `styleId` on `entityId` is drawn in: its StyleOverride's, else
+# its style's
+func uiTextFontName(
+  world: view UiWorld
+  entityId: view EntityId
+  styleId: view String
+  res: view Gpu2dUi
+) ret String {
+  if componentHas(this: world.styleOverrides, entityId: entityId) {
+    let override: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
+    if override.font.length() > 0 {
+      ret "{override.font}"
+    }
+  }
+  ret resolveTextFont(theme: res.theme, styleId: styleId)
+}
+
+# The font a text of style `styleId` on `entityId` draws and measures in
+func uiTextFont(
+  world: view UiWorld
+  entityId: view EntityId
+  styleId: view String
+  res: view Gpu2dUi
+) ret view SdfFont {
+  ret uiFontNamed(
+    res: res
+    name: uiTextFontName(
+      world: world
+      entityId: entityId
+      styleId: styleId
+      res: res
+    )
+  )
+}
+
+# Whether `name` is a text font of `res` (empty and `text` are the first)
+func uiHasFont(res: view Gpu2dUi, name: view String) ret Bool {
+  ret name.length() is 0 or name is "text" or res.fontNames.contains(value: name)
+}
+
+# The font the text on `entityId` draws and measures in (its Text's style and StyleOverride); the
+# first font for a node without a Text
+func uiEntityTextFont(
+  world: view UiWorld
+  entityId: view EntityId
+  res: view Gpu2dUi
+) ret view SdfFont {
+  if componentHas(this: world.texts, entityId: entityId) {
+    let text: view Text = componentView(this: world.texts, entityId: entityId)
+    ret uiTextFont(
+      world: world
+      entityId: entityId
+      styleId: text.styleId
+      res: res
+    )
+  }
+  ret res.textFont
+}

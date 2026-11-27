@@ -23,14 +23,20 @@
 #       "dirs": ["../textures"],
 #       "map": { "menu.playButton": "../art/Play_Button.png" }
 #     },
-#     "fonts": { "text": "../fonts/Body.mtsdf.json", "icons": "../fonts/Icons.mtsdf.json" }
+#     "fonts": {
+#       "text": "../fonts/Body.mtsdf.json",
+#       "icons": "../fonts/Icons.mtsdf.json",
+#       "cards": "../fonts/JostBold.mtsdf.json"
+#     }
 #   }
 #
 # Binary data is the opposite of a scene reference: a FILE path WITH its
 # extension, relative to the file that declares it. `map` is key -> file,
 # `dirs` is `<dir>/<key>.png`; lookup is map, then dirs, in resolution order.
 # Fonts are world-level: the first `fonts` declaration wins and a conflicting
-# later one is a diagnostic.
+# later one is a diagnostic. `text` is the first text font (a style without a
+# `font`, or naming an unknown one, draws in it) and `icons` the `mat:` glyphs;
+# every other name is another text font a style picks with `"font": "<name>"`.
 import Json
 import String
 open Sys
@@ -55,6 +61,9 @@ type SceneAssets {
   textureDirs: List(String)
   textFontPath: String
   iconFontPath: String
+  # the other text fonts by name (`assets.fonts` but `text` and `icons`), paths joined
+  fontNames: List(String)
+  fontPaths: List(String)
   importedIds: List(String)
   importedPaths: List(String)
 }
@@ -66,6 +75,8 @@ func createSceneAssets() ret SceneAssets {
     textureDirs: List.create(String, cap: 4)
     textFontPath: ""
     iconFontPath: ""
+    fontNames: List.create(String, cap: 4)
+    fontPaths: List.create(String, cap: 4)
     importedIds: List.create(String, cap: 4)
     importedPaths: List.create(String, cap: 4)
   }
@@ -248,6 +259,36 @@ func collectSceneAssetsBlock(
           name: "fonts.icons"
           message: "the icon font is world-level; {assets.iconFontPath} was declared first, {path} is ignored"
         )
+      }
+    }
+    # the other text fonts, by name: the first declaration of a name wins
+    if fonts.kind is JsonKind.object {
+      loop var i: Int = 0, i < Json.objectLen(this: fonts), ++i {
+        let name: String = Json.objectKeyAt(doc: doc, this: fonts, idx: i)
+        let relative: String = Json.jsonString(
+          this: Json.objectValueAt(doc: doc, this: fonts, idx: i)
+          fallback: ""
+        )
+        if name is "text" or name is "icons" or name.length() is 0 or relative.length() is 0 {
+          continue
+        }
+        let path: String = joinAssetPath(directory: directory, relative: relative)
+        if let known: Int = assets.fontNames.indexOf(value: name) {
+          let knownPath: String = assets.fontPaths.copyAtDefault(index: known)
+          if knownPath is not path {
+            reportSceneDiagnostic(
+              diagnostics: diagnostics
+              sceneId: sceneLabel
+              nodeId: ""
+              kind: SceneDiagnosticKind.unknownToken
+              name: "fonts.{name}"
+              message: "the font '{name}' is world-level; {knownPath} was declared first, {path} is ignored"
+            )
+          }
+        } else {
+          assets.fontNames.add(value: name)
+          assets.fontPaths.add(value: path)
+        }
       }
     }
   }

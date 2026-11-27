@@ -167,7 +167,7 @@ A `TextStyle` is a named bundle:
 
 | field | type | notes |
 |---|---|---|
-| `font` | font id (string) | `"body"` / `"icons"` / future `"mono"` — indirection over the app's loaded font set, NOT a file path |
+| `font` | font name (string) | a name of the scene's `assets.fonts` (`"text"`, the first, or another such as `"cards"`) — indirection over the loaded fonts, NOT a file path; unknown: the first font and a diagnostic (docs/ui-scene-format.md §4) |
 | `size` | Float (du) | |
 | `weight` | enum or Float | today we fake bold by double-draw (debug panel); a weight slot lets the style own that trick, or a real variable-font axis later |
 | `lineHeight` | Float multiplier | for future multi-line text |
@@ -220,7 +220,7 @@ the section keys are what matter, not the filename.
   "version": 3,
   "palette": { "surface": {"r":15,"g":15,"b":18,"a":255}, "…": "…" },
   "text": {
-    "body":      { "font": "body", "size": 43.4, "color": "textPrimary" },
+    "body":      { "font": "text", "size": 43.4, "color": "textPrimary" },
     "miniTitle": { "extends": "body", "size": 39.0,
                    "color": "accentText", "shadow": "textOnAccent" },
     "miniMuted": { "extends": "miniTitle", "size": 30.4,

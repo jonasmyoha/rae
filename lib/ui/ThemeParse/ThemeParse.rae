@@ -409,7 +409,8 @@ func parseThemeText(out: mod ResolvedTheme, doc: view JsonDoc, root: view JsonVa
     let bag: JsonValue = Json.objectValueAt(doc: doc, this: section, idx: i)
     var parentName: String = ""
     var fieldMask: Int = 0
-    var font: String = "body"
+    # no `font`: the first text font (ui/RenderSystem TextFonts)
+    var font: String = ""
     # a style without a size is body text (ui/TextStyle styleBodySize, 17 pt)
     var size: Float = 17.0
     var weight: Float = 400.0
@@ -608,7 +609,8 @@ func resolveThemeTextExtends(theme: mod ResolvedTheme) {
   loop var target: Int = 0, target < theme.textNames.length, ++target {
     let name: String = theme.textNames.copyAtDefault(index: target)
     let chain: List(Int) = themeMergedTextChain(theme: theme, name: name)
-    var font: String = "body"
+    # no `font`: the first text font (ui/RenderSystem TextFonts)
+    var font: String = ""
     # a style without a size is body text (ui/TextStyle styleBodySize, 17 pt)
     var size: Float = 17.0
     var weight: Float = 400.0

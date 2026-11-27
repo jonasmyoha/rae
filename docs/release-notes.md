@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.112, 2026-11-27: a theme with more than one text font
+
+- A scene's `assets.fonts` may name more text fonts beside `text` and `icons` (`"cards": "../fonts/Jost-Bold.mtsdf.json"`);
+  the UI loads them all (UiShell, loadUiAssets; the font cache by path), each with its own atlas. A text style's
+  `font` picks one, and so does a Text's `styleOverride` `font`; the text draws and measures (Hug, shrinkToFit,
+  the layout's measure) in it. A style without `font` draws in `text`, and so does one naming a font the scene
+  does not declare, which is an `unknownToken` diagnostic (`text.<style>.font`) and a log line.
+- A style's default font is now none (the first font) instead of the word `"body"`, which named nothing; the
+  themes in the repository that wrote `"font": "body"` now write `"font": "text"`. A theme elsewhere that keeps
+  `"body"` draws as before and gets the diagnostic.
+- `Gpu2dUi.fonts` / `fontNames` hold the other fonts; ui/RenderSystem `uiTextFont` / `uiEntityTextFont` give a
+  text's font. Case 1698.
+
 ## 0.4.111, 2026-11-27: a text outline past its font's distance range thins instead of boxing
 
 - An MTSDF atlas carries a distance of half its `distanceRange` outside each glyph, scaled to the drawn size. An

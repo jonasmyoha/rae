@@ -51,6 +51,15 @@ func resolveTextWeight(theme: view ResolvedTheme, styleId: view String) pub ret 
   ret 400.0
 }
 
+# The name of the text font a style draws in (`font`, inherited through `extends`; "" for none:
+# the first font). ui/RenderSystem TextFonts turns it into the font.
+func resolveTextFont(theme: view ResolvedTheme, styleId: view String) ret String {
+  if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
+    ret theme.textFonts.copyAtDefault(index: i)
+  }
+  ret ""
+}
+
 func resolveTextLineHeight(theme: view ResolvedTheme, styleId: view String) pub ret Float {
   if let i: Int = themeTextStyleIndex(theme: theme, styleId: styleId) {
     if let lineHeight: Float = theme.textLineHeights.copyAt(index: i) {

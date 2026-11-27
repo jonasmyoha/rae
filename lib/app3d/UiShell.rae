@@ -60,6 +60,7 @@ open ui/safeAreaSystem/SafeAreaSystem
 open ui/fitSystem/FitSystem
 open ui/DesignUnits
 open ui/UiZoom
+open app3d/UiFonts
 
 # ----- window extent --------------------------------------------------
 # The window's size in design units: its framebuffer pixels over the display's
@@ -211,12 +212,29 @@ func loadUiAssets(
   )
   let themeScene: Scene = loadSceneFile(path: "{dir}{themeFile}")
   let theme: ResolvedTheme = parseTheme(scene: themeScene)
+  # the theme's own `assets.fonts`: the text fonts besides `text` (app3d/UiFonts)
+  var assets: SceneAssets = createSceneAssets()
+  var diagnostics: List(SceneDiagnostic) = {}
+  collectSceneAssetsBlock(
+    assets: assets
+    scene: themeScene
+    directory: dir
+    sceneLabel: themeFile
+    diagnostics: diagnostics
+  )
   # #764: the active palette is the built-in light theme overlaid with the
   # .raescene's palette section (the old applyThemePalette, now pure). It is
   # carried in the returned Gpu2dUi; the app installs it — and the token tables —
   # onto each UiWorld via seedWorldTheme, instead of the old module globals.
   resources.activeTheme = overlayPalette(base: lightTheme(), tokens: theme)
   resources.theme = own theme
+  loadNamedUiFonts(
+    resources: resources
+    assets: assets
+    diagnostics: diagnostics
+    sceneLabel: themeFile
+  )
+  reportUnknownStyleFonts(resources: resources, diagnostics: diagnostics, sceneLabel: themeFile)
   ret resources
 }
 
@@ -504,6 +522,18 @@ func mountSceneOnPage(
       )
     }
   }
+  # the other text fonts by name, and the styles naming none of them (app3d/UiFonts)
+  loadNamedUiFonts(
+    resources: resources
+    assets: assets
+    diagnostics: world.sceneDiagnostics
+    sceneLabel: sceneId
+  )
+  reportUnknownStyleFonts(
+    resources: resources
+    diagnostics: world.sceneDiagnostics
+    sceneLabel: sceneId
+  )
 
   # Token names are resolved while component bags are deserialized, so the
   # world must see the imported theme before loadScene runs — and the

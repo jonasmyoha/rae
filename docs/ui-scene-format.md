@@ -200,7 +200,8 @@ the author, not of the loader.
         "map":  { "menu.playButton": "../art/Play_Button_x1024.png" }
       },
       "fonts": {
-        "text":  "../fonts/ChelaOne-Regular.mtsdf.json"
+        "text":  "../fonts/ChelaOne-Regular.mtsdf.json",
+        "cards": "../fonts/Jost-Bold.mtsdf.json"
       }
     }
 
@@ -213,9 +214,15 @@ the author, not of the loader.
   does not have is an `unknownIcon` diagnostic at load (ui/IconCheck).
 - A font names its `.mtsdf.json` sidecar; the atlas is the sibling `.png`
   (what msdf-atlas-gen writes) or `.raw` (the RGBA dump), whichever exists —
-  `SdfText.loadSdfFontJson`. Fonts are world-level in v1: the first `fonts`
-  declaration wins and a conflicting later one is a diagnostic (per-node fonts
-  are a renderer change).
+  `SdfText.loadSdfFontJson`. Fonts are world-level: the first declaration of a
+  name wins and a conflicting later one is a diagnostic.
+- `text` is the first text font and `icons` the `mat:` glyphs; every other
+  name (`cards` above) is another text font. A text style picks one with
+  `"font": "cards"` (and a `StyleOverride` with `"font"`); a style without one
+  draws in `text`, and so does one naming a font `assets.fonts` does not
+  declare, which is an `unknownToken` diagnostic (`text.<style>.font`) and a
+  log line at load. The text draws and measures (Hug, shrinkToFit, the layout's
+  measure) in its style's font; each font keeps its own atlas (case 1698).
 - Mounting many scenes costs no font memory: a mount whose theme names the
   font already in use keeps it (`SdfFont.jsonPath`), and the runtime returns
   the atlas it already holds for a loaded atlas path, so alternating two

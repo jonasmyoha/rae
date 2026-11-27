@@ -32,6 +32,12 @@ func paintTextG(
   content: view String
 ) {
   let t: view Text = componentView(this: world.texts, entityId: entityId)
+  let textFont: view SdfFont = uiTextFont(
+    world: world
+    entityId: entityId
+    styleId: t.styleId
+    res: res
+  )
   if content.length() is 0 {
     ret
   }
@@ -158,7 +164,7 @@ func paintTextG(
     # line box [top, top + size] with the baseline at its bottom left the
     # capitals about 0.15 of the size low.
     let capital: SdfTextBounds = SdfText.sdfMeasureTextBounds(
-      font: res.textFont
+      font: textFont
       text: "H"
       sizePx: size
     )
@@ -210,7 +216,7 @@ func paintTextG(
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
     warnTextRange(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       styleId: t.styleId
       emPixels: size * pixelsPerUnit
       outlinePixels: outline.width
@@ -219,7 +225,7 @@ func paintTextG(
     if outline.width > 0.0 {
       Gpu2dText.drawTextWrappedEx(
         canvas: canvas
-        font: res.textFont
+        font: textFont
         text: content
         x: drawX
         y: drawY
@@ -233,7 +239,7 @@ func paintTextG(
     }
     Gpu2dText.drawTextWrappedEx(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -305,7 +311,7 @@ func paintTextG(
   }
   warnTextRange(
     canvas: canvas
-    font: res.textFont
+    font: textFont
     styleId: t.styleId
     emPixels: size * pixelsPerUnit
     outlinePixels: outline.width
@@ -321,7 +327,7 @@ func paintTextG(
       let shadowColor: Int = g2dColor(color: g2dChain(color: shCol, chain255: chain255))
       Gpu2dText.emitRun(
         canvas: canvas
-        font: res.textFont
+        font: textFont
         text: content
         x: drawX + shOffX * wt.scale.x
         y: drawY + shOffY * wt.scale.y
@@ -334,7 +340,7 @@ func paintTextG(
     }
     Gpu2dText.emitRun(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -346,7 +352,7 @@ func paintTextG(
     )
     Gpu2dText.emitRun(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -362,7 +368,7 @@ func paintTextG(
     let shChained: RgbaColor = g2dChain(color: shCol, chain255: chain255)
     Gpu2dText.drawTextEx(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -380,7 +386,7 @@ func paintTextG(
   if boldWidth > 0.0 {
     Gpu2dText.drawTextEx(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -396,7 +402,7 @@ func paintTextG(
   } else {
     Gpu2dText.drawText(
       canvas: canvas
-      font: res.textFont
+      font: textFont
       text: content
       x: drawX
       y: drawY
@@ -680,13 +686,19 @@ func textCutToBox(
   content: view String
 ) ret String {
   let t: view Text = componentView(this: world.texts, entityId: entityId)
+  let textFont: view SdfFont = uiTextFont(
+    world: world
+    entityId: entityId
+    styleId: t.styleId
+    res: res
+  )
   var size: Float = resolveTextSize(theme: res.theme, styleId: t.styleId)
   if componentHas(this: world.styleOverrides, entityId: entityId) {
     let override: view StyleOverride = componentView(this: world.styleOverrides, entityId: entityId)
     size = styleOverrideSize(base: size, so: override)
   }
   ret middleCutText(
-    font: res.textFont
+    font: textFont
     text: content
     sizePx: size * wt.scale.x
     width: worldRectOf(wt: wt, cr: cr).w
