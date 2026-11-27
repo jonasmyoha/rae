@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.131, 2026-11-27: instances from sema's registry, behind a switch
+
+- `RAE_DISCOVERY_INSTANCES=0` builds the C from sema's instances alone, with the backend's own search used only
+  for types: the same functions, 12 to 15 % less CPU. Not the default yet (one case, 1648, needs the call emission
+  to read sema's instances). Sema's instances are now registered in the order sema made them.
+
 ## 0.4.130, 2026-11-27: faster builds, two more scans made lookups
 
 - Registering an instance of a generic function compares it only with the same function's instances, and the

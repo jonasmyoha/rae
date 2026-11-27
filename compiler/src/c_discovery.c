@@ -9,6 +9,8 @@
 #include "c_binary.h"
 #include "mangler.h"
 #include "sema.h"
+#include <string.h>
+#include <stdlib.h>
 #include "str.h"
 #include "progress.h"
 
@@ -16,6 +18,12 @@
 #include <stdlib.h>
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr);
+bool c_discovery_registers_instances(void);
+
+/* An instance discovery found: registered only in the old way (the instances are sema's) */
+static void discovery_register_instance(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* args) {
+    if (c_discovery_registers_instances()) register_function_specialization(ctx, decl, args);
+}
 static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt* stmt);
 
 // The drop() a call argument that makes an owned value will be released
@@ -33,7 +41,7 @@ static void register_owned_argument_drop(CFuncContext* ctx, const AstExpr* value
     if (ctx->generic_params && ctx->generic_args)
         elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, (AstTypeRef*)elem_type);
     const AstFuncDecl* drop_fd = find_drop_overload_for(ctx, get_base_type_name(type));
-    if (drop_fd) register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+    if (drop_fd) discovery_register_instance(ctx->compiler_ctx, drop_fd, elem_type);
 }
 
 // Whether a type names `any` anywhere (a field-reflection loop's binding,
@@ -264,7 +272,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                         AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->returns->type, &ctx->expected_type);
                         if (inferred) inferred_args = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
                     }
-                    if (inferred_args) register_function_specialization(ctx->compiler_ctx, d, inferred_args);
+                    if (inferred_args) discovery_register_instance(ctx->compiler_ctx, d, inferred_args);
                 }
             }
             {
@@ -415,7 +423,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 AstTypeRef* inferred = infer_generic_args(ctx->compiler_ctx, d, d->params->type, receiver_type);
                 if (inferred) {
                     AstTypeRef* concrete = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, inferred);
-                    register_function_specialization(ctx->compiler_ctx, d, concrete);
+                    discovery_register_instance(ctx->compiler_ctx, d, concrete);
                     method_generic_args = concrete;
                 }
             }
@@ -574,8 +582,8 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                     const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
                     if (d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
                 }
-                if (create_fd) register_function_specialization(ctx->compiler_ctx, create_fd, elem_type);
-                if (add_fd) register_function_specialization(ctx->compiler_ctx, add_fd, elem_type);
+                if (create_fd) discovery_register_instance(ctx->compiler_ctx, create_fd, elem_type);
+                if (add_fd) discovery_register_instance(ctx->compiler_ctx, add_fd, elem_type);
                 // A stable copy: the registry keeps the pointer, and
                 // ctx->expected_type is rewritten for every expression.
                 AstTypeRef* list_type = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
@@ -598,7 +606,7 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                 {
                     Str list_base = get_base_type_name(&ctx->expected_type);
                     const AstFuncDecl* list_drop = find_drop_overload_for(ctx, list_base);
-                    if (list_drop) register_function_specialization(ctx->compiler_ctx, list_drop, elem_type);
+                    if (list_drop) discovery_register_instance(ctx->compiler_ctx, list_drop, elem_type);
                 }
                 // Recurse into each element. A nested collection literal element
                 // (`[[7]]` inside `[[[7]]]`) is discovered with the ELEMENT type
@@ -694,7 +702,7 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                         if (elem_type && ctx->generic_params && ctx->generic_args)
                             elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
                         if (drop_fd && elem_type) {
-                            register_function_specialization(ctx->compiler_ctx, drop_fd, elem_type);
+                            discovery_register_instance(ctx->compiler_ctx, drop_fd, elem_type);
                         }
                     }
                 }
@@ -897,8 +905,24 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
     }
 }
 
+/* RAE_DISCOVERY_INSTANCES=0 (docs/generic-instances-design.md step 7b, not yet the
+ * default): the instances the C has are sema's (its registry), registered first, and
+ * discovery's walk only collects the types their bodies and the program's functions
+ * use. By default discovery still registers the instances it finds, too: the call
+ * emission resolves a call itself and can register an instance sema has not, whose
+ * types nothing collects (case 1648). */
+bool c_discovery_registers_instances(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* value = getenv("RAE_DISCOVERY_INSTANCES");
+        on = !(value && strcmp(value, "0") == 0);
+    }
+    return on == 1 || !sema_generic_instances_emitted();
+}
+
 void collect_type_refs_module(CompilerContext* ctx) {
     size_t last_generic_count = 0; size_t last_func_count = 0;
+    if (!c_discovery_registers_instances()) c_register_sema_instances(ctx);
     /* Progress: the run's window is split by halving — the first walk gets
      * half of it, the next a quarter, and so on — since how many walks it
      * takes to reach the fixpoint is not known up front. */

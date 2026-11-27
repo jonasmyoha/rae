@@ -347,9 +347,19 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    and 136 are the same, and `--report-realtime` lists a function's trusted C in the order the walk meets it
    (case 1407).
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.
-   First part done (0.4.130): the scans (section 3, measured there). Discovery stays for now, the queue line
-   `[generic instances 7b/9: discovery removed]`: it is about 6 % of 121's build, and its removal makes the backend
-   emit sema's registry alone.
+   First part done (0.4.130): the scans (section 3, measured there). Second part (0.4.131), behind
+   `RAE_DISCOVERY_INSTANCES=0`: sema's instances are registered first, in the order sema made them (the registry
+   lists them newest first; reversed, an error each instance reports while it is written comes in the program's
+   order, case 1397), and discovery's walk only collects types. With it every case passes but 1648, and 106,
+   121 and 136 have the same functions with the same bodies as with discovery (only their order differs), in 12 to
+   15 % less CPU (106 4.2 to 3.7 s, 121 5.9 to 5.1 s, 136 9.3 to 7.9 s). It is not the default because the call
+   emission still resolves a call by itself: in 1648 (a program's own `add` beside List's) it registers an
+   instance sema never made (`add` of `Stack(UInt8)`, while writing lib's `jsonScanString`, which then calls the
+   other one), and with discovery off no walk collects that instance's types, so its C does not compile. The fix
+   is the queue line `[generic instances 7c/9: the call emission reads instances]`: a generic call's target from
+   sema's `instance`. On the way, the late-specialization report (`RAE_LATE_SPECIALIZATIONS`) no longer counts an
+   instance that is the C function of an earlier one written another way (`Char32` / `Char`), nor one the body
+   does not call.
 8. **The template way removed**: what section 6 lists, and the switch.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 

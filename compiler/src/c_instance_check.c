@@ -50,7 +50,15 @@ size_t c_register_sema_instances(CompilerContext* ctx) {
                                                ctx->specialized_funcs[i].concrete_args);
   known_count = sorted_unique(known, known_count);
   size_t added = 0;
-  for (SpecializationEntry* e = ctx->type_registry ? ctx->type_registry->specializations : NULL; e; e = e->next) {
+  /* in the order sema made them (the registry list is newest first), so the C, and an
+   * error each instance reports as it is written, follow the program */
+  size_t entry_count = 0;
+  for (SpecializationEntry* e = ctx->type_registry ? ctx->type_registry->specializations : NULL; e; e = e->next) entry_count++;
+  SpecializationEntry** entries = malloc(sizeof *entries * (entry_count + 1));
+  size_t at = entry_count;
+  for (SpecializationEntry* e = ctx->type_registry ? ctx->type_registry->specializations : NULL; e; e = e->next) entries[--at] = e;
+  for (size_t k = 0; k < entry_count; k++) {
+    SpecializationEntry* e = entries[k];
     if (e->made_for_backend || !e->generic_decl || e->generic_decl->kind != AST_DECL_FUNC) continue;
     const AstFuncDecl* f = &e->generic_decl->as.func_decl;
     const AstDecl* spec = e->specialized_decl;
@@ -60,7 +68,16 @@ size_t c_register_sema_instances(CompilerContext* ctx) {
     size_t before = ctx->specialized_func_count;
     register_function_specialization(ctx, f, spec->as.func_decl.specialization_args);
     added += ctx->specialized_func_count - before;
+    /* the generic types its signature names (`this: mod Stack(UInt8)`), written out in the
+     * clone: their C types exist even when no body discovery walks names them */
+    if (ctx->specialized_func_count > before) {
+      for (const AstParam* p = spec->as.func_decl.params; p; p = p->next)
+        if (p->type && p->type->generic_args) register_generic_type(ctx, p->type);
+      for (const AstReturnItem* r = spec->as.func_decl.returns; r; r = r->next)
+        if (r->type && r->type->generic_args) register_generic_type(ctx, r->type);
+    }
   }
+  free(entries);
   free(known);
   return added;
 }

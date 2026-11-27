@@ -2787,12 +2787,42 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
  * it was emitted, which discovery should have found before. They are prototyped in time (the body
  * is buffered), so this only tells that discovery missed one (=error: the build fails). */
 static int g_late_specializations = 0;
-static void report_late_specializations(CompilerContext* ctx, size_t before, const AstFuncDecl* in) {
+/* The C names of the specializations registered before a body was emitted: a late
+ * entry with one of them is the same C function written another way (`Char32` and
+ * `Char`), not one that was missed */
+static char** g_known_spec_names = NULL;
+static size_t g_known_spec_count = 0, g_known_spec_cap = 0, g_known_spec_through = 0;
+static const void* g_known_spec_array = NULL;
+static bool known_spec_name(CompilerContext* ctx, const char* name, size_t before) {
+  if (g_known_spec_array != (const void*)ctx || g_known_spec_through > before) {
+    for (size_t i = 0; i < g_known_spec_count; i++) free(g_known_spec_names[i]);
+    g_known_spec_count = 0;
+    g_known_spec_through = 0;
+    g_known_spec_array = ctx;
+  }
+  while (g_known_spec_through < before) {
+    size_t i = g_known_spec_through++;
+    if (ctx->specialized_funcs[i].decl->is_extern) continue;
+    RAE_GROW1(g_known_spec_names, g_known_spec_count, g_known_spec_cap);
+    /* (a copy: the mangler may hand back a buffer it reuses) */
+    g_known_spec_names[g_known_spec_count++] = strdup(rae_mangle_specialized_function(
+        ctx, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args));
+  }
+  for (size_t i = 0; i < g_known_spec_count; i++)
+    if (strcmp(g_known_spec_names[i], name) == 0) return true;
+  return false;
+}
+
+static void report_late_specializations(CompilerContext* ctx, size_t before, const AstFuncDecl* in, const char* body) {
   const char* mode = getenv("RAE_LATE_SPECIALIZATIONS");
   if (!mode || !*mode || strcmp(mode, "0") == 0) return;
   for (size_t i = before; i < ctx->specialized_func_count; i++) {
     const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
     if (f->is_extern) continue;
+    const char* late_name = rae_mangle_specialized_function(ctx, f, ctx->specialized_funcs[i].concrete_args);
+    if (known_spec_name(ctx, late_name, before)) continue;
+    /* registered while a call's overloads were tried, and not called: not missed */
+    if (body && !strstr(body, late_name)) continue;
     fprintf(stderr, "[late-specialization] %s while emitting %s\n",
             rae_mangle_specialized_function(ctx, f, ctx->specialized_funcs[i].concrete_args),
             rae_mangle_function(ctx, in));
@@ -2826,11 +2856,6 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
     gp_src = NULL;
     tctx.generic_params = NULL;
     tctx.generic_args = NULL;
-    if (getenv("RAE_GI_KEEP")) {
-      const AstFuncDecl* template_decl = &clone->generic_template->as.func_decl;
-      tctx.generic_params = template_decl->generic_params;
-      tctx.generic_args = clone->specialization_args;
-    }
     rt = c_return_type(&tctx, f);
   }
   // A container drop whose elements are containers calls the ELEMENT
@@ -5278,7 +5303,8 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           FILE* body_out = open_memstream(&body, &body_len);
           size_t before_body = ctx->specialized_func_count;
           emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
-          report_late_specializations(ctx, before_body, &d->as.func_decl);
+          if (body_out) fflush(body_out);
+          report_late_specializations(ctx, before_body, &d->as.func_decl, body_out ? body : NULL);
           if (body_out) {
               fclose(body_out);
               emit_new_specialization_prototypes(ctx, module, &plain_prototyped, out);
