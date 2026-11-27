@@ -195,8 +195,10 @@ func composeVisual(
   entityId: view EntityId
   parentAlpha: view Float
   parentVisible: view Bool
+  parentSaturation: view Float
 ) ret WorldVisual {
   let fx: TransformFx = fxOf(world: world, entityId: entityId)
+  let saturation: Float = parentSaturation * Math.max(a: fx.saturation, b: 0.0)
   var visible: Bool = parentVisible
   if active(world: world, entityId: entityId) is false {
     visible = false
@@ -229,7 +231,7 @@ func composeVisual(
   if alpha > 1.0 {
     alpha = 1.0
   }
-  ret WorldVisual { alpha: alpha, visible: visible }
+  ret WorldVisual { alpha: alpha, visible: visible, saturation: saturation }
 }
 
 # Populate each laid-out entity's LOCAL Transform2D (#727): parent-content-local
@@ -472,6 +474,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
       entityId: entityId
       parentAlpha: 1.0
       parentVisible: true
+      parentSaturation: 1.0
     )
     componentSet(this: uiSystems.transform2d.worldVisuals, entityId: entityId, data: wv)
   }
@@ -515,6 +518,7 @@ func accumulateVisibility(world: mod UiWorld, uiSystems: mod UiSystems) {
         entityId: entityId
         parentAlpha: inherited
         parentVisible: parentWv.visible
+        parentSaturation: parentWv.saturation
       )
       componentSet(this: uiSystems.transform2d.worldVisuals, entityId: entityId, data: wv)
     }

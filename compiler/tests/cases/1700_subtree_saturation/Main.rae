@@ -1,0 +1,137 @@
+# A node's saturation for its subtree (TransformFx.saturation, accumulated like its alpha into
+# WorldVisual; the canvas mixes every color toward its BT.601 luminance): a sold offer's group at
+# 0 draws its sprite, its shape and its text grey (the three channels equal, alpha kept; an
+# image's texels by its uniform's saturation), at 1 unchanged, and its layout is the same either
+# way. A node outside the group keeps its colors.
+import Math
+import SdfText
+import Gpu2d
+open gpu/GpuIds
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open Gpu2dCanvasImage
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "shop",
+    "root": "Shop",
+    "text": { "price": { "size": 20, "color": { "r": 220, "g": 40, "b": 30, "a": 255 } } },
+    "nodes": {
+      "Shop": { "Rect": { "x": 0, "y": 0, "w": 600, "h": 400 }, "Children": ["Offer", "Other"] },
+      "Offer": {
+        "Rect": { "x": 20, "y": 20, "w": 200, "h": 300 },
+        "TransformFx": { "scaleX": 1, "scaleY": 1, "alpha": 1, "visible": true },
+        "Children": ["Back", "Art", "Price"]
+      },
+      "Back": { "Rect": { "x": 0, "y": 0, "w": 200, "h": 300 }, "Shape": { "kind": "Rect", "fill": { "r": 30, "g": 120, "b": 240, "a": 200 } } },
+      "Art": { "Rect": { "x": 20, "y": 20, "w": 160, "h": 160 }, "Sprite": { "textureKey": "chest", "scaleMode": "Stretch", "tint": { "r": 255, "g": 200, "b": 100, "a": 255 } } },
+      "Price": { "Rect": { "x": 20, "y": 220, "w": 160, "h": 30 }, "Text": { "text": "120", "styleId": "price" } },
+      "Other": { "Rect": { "x": 300, "y": 20, "w": 100, "h": 100 }, "Shape": { "kind": "Rect", "fill": { "r": 30, "g": 120, "b": 240, "a": 200 } } }
+    }
+  }"#
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 1000.0) / 1000.0
+}
+
+func rgb(values: view List(Float), at: view Int) ret String {
+  ret "{rounded(value: values.copyAtDefault(index: at))} {rounded(
+    value: values.copyAtDefault(index: at + 1)
+  )} {rounded(value: values.copyAtDefault(index: at + 2))} a {rounded(
+    value: values.copyAtDefault(index: at + 3)
+  )}"
+}
+
+func paint(saturation: view Float) {
+  log("saturation {saturation}:")
+  let scene: Scene = parseScene(source: sceneText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  Gpu2d.setDesignResolution(width: 600.0, height: 400.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let fx: mod TransformFx = componentMod(
+    this: world.transforms
+    entityId: nodeOf(world: world, nodeId: "Offer")
+  )
+  fx.saturation = saturation
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  canvas.images.add(
+    value: Gpu2dImage {
+      texture: noTextureId()
+      textureView: noTextureViewId()
+      width: 64
+      height: 64
+    }
+  )
+  canvasRegisterImageKey(canvas: canvas, key: "chest", handle: 1)
+  clipReset(canvas: canvas)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  # the boxes: the offer's back, then the other node (fill at 8..11 of each 24-float record)
+  log("  back fill {rgb(values: canvas.prims, at: 8)}")
+  log("  other fill {rgb(values: canvas.prims, at: 24 + 8)}")
+  log(
+    "  art tint {rgb(values: canvas.imageCommands, at: 4)}, texel saturation {canvas.imageCommands.copyAtDefault(
+      index: 28
+    )}"
+  )
+  loop let atlas: view Gpu2dTextAtlas in canvas.textAtlases {
+    if atlas.glyphs.length > 0 {
+      log("  price glyph color {rgb(values: atlas.glyphs, at: 8)}")
+    }
+  }
+  let offer: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: nodeOf(world: world, nodeId: "Art")
+  )
+  log("  art laid out at {offer.position.x},{offer.position.y} {offer.size.x}x{offer.size.y}")
+  log("  canvas saturation after the UI {canvas.saturation}")
+}
+
+func main() {
+  paint(saturation: 0.0)
+  paint(saturation: 1.0)
+}

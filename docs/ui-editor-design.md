@@ -373,7 +373,7 @@ it (`Coverage` unless a nicer example exists).
 | Overflow | mode None / Clip / ScaleToFitY | yes | Clip (rounded when the node has a radius) | Coverage `Screen` |
 | ExtentAnchor | h | yes | yes (roots) | Coverage |
 | Aspect, ScaleToFit | ratio; mode | yes | yes (fit system) | Coverage `GradientBox` |
-| TransformFx | scaleX scaleY rotation alpha visible pivot anchor | yes | scale about the pivot (#1000), rotation about the pivot (#1003: boxes, images and glyphs turn; children follow), alpha, visible; `anchor` is accepted but has no layout meaning yet | CardStrip, Coverage `ScaledBox` |
+| TransformFx | scaleX scaleY rotation alpha saturation visible pivot anchor | yes | scale about the pivot (#1000), rotation about the pivot (#1003: boxes, images and glyphs turn; children follow), alpha, visible; `anchor` is accepted but has no layout meaning yet | CardStrip, Coverage `ScaledBox` |
 | Sprite | textureKey (`mat:` glyph or image), tint, tintSlot, scaleMode Fit / Fill / Stretch, tileScale, nineSlice, hasNineSlice, nineSliceScale | yes | key, tint, scaleMode; nineSlice (borders drawn nineSliceScale design units a source pixel, 1 by default; authoring any border implies the flag) and tileScale (repeat) since #1003 | MainMenu `Panel`, Coverage `NineSlice` |
 | Text | text, styleId, wrapWidthMode None / NodeWidth, styleOverride | yes | yes | Coverage `WrappedText` |
 | TextShadow | color, offset, softness | yes | yes | Coverage `Heading` |

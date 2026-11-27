@@ -218,6 +218,10 @@ type Gpu2dCanvas {
   # stage ---
   layerAlpha: Float = 1.0
   layerStack: List(Float)
+  # --- the saturation of what is queued now (Transform.rae canvasPushSaturation): 1 unchanged, 0
+  # grey (BT.601 luminance in every channel); nested pushes multiply ---
+  saturation: Float = 1.0
+  saturationStack: List(Float) = {}
   # --- box pass ---
   pipeMade: Bool
   pipeline: RenderPipelineId
@@ -259,7 +263,7 @@ type Gpu2dCanvas {
 const canvasManagerCapacity: Int = 16384
 
 # rect, tint, params, uv, clip rect, clip params (#1003) — see gpu2d_image.wgsl.
-const imageUniformFloats: Int = 28
+const imageUniformFloats: Int = 32
 
 # One box primitive = 6 x vec4 (std430): rect, radius, fill, border, params, grad.
 const boxPrimFloats: Int = 24

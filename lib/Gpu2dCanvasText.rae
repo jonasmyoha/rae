@@ -219,6 +219,9 @@ func canvasDrawGlyphEx(
   glyphX = stageX(canvas: canvas, x: glyphX)
   glyphY = stageY(canvas: canvas, y: glyphY)
   let layerAlpha: Float = canvas.layerAlpha
+  # the saturation in force (Gpu2dCanvas Transform.rae canvasPushSaturation)
+  color = saturatedColor(color: color, saturation: canvas.saturation)
+  outlineColor = saturatedColor(color: outlineColor, saturation: canvas.saturation)
   if let entry: mod Gpu2dTextAtlas = canvas.textAtlases.modAt(index: ai) {
     entry.glyphs.add(value: glyphX)
     entry.glyphs.add(value: glyphY)

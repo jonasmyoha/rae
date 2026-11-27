@@ -34,7 +34,9 @@ func colorAlpha(color: view Int) ret Int {
 }
 
 func pushPremultiplied(canvas: mod Gpu2dCanvas, color: copy Int) {
-  # premultiplied: the layer's alpha scales all four channels
+  # the saturation in force (Transform.rae canvasPushSaturation), then premultiplied: the layer's
+  # alpha scales all four channels
+  color = saturatedColor(color: color, saturation: canvas.saturation)
   let layerAlpha: Float = canvas.layerAlpha
   canvas.prims.add(value: premultipliedChannel(color: color, shift: 65536) * layerAlpha)
   canvas.prims.add(value: premultipliedChannel(color: color, shift: 256) * layerAlpha)

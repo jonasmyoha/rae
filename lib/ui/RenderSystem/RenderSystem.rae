@@ -283,6 +283,9 @@ func paintEntityG(
   if wv.alpha <= 0.0 {
     ret
   }
+  # the subtree's saturation (TransformFx.saturation, accumulated like the alpha): every color
+  # and image texel this node paints is mixed toward its luminance by the canvas
+  canvasSetSaturation(canvas: canvas, saturation: wv.saturation)
   var chain255: Int = (wv.alpha * 255.0).toInt()
   if chain255 > 255 {
     chain255 = 255
@@ -784,6 +787,8 @@ func renderSystemGpu2d(
     res: res
     canvas: canvas
   )
+  # the guides and whatever the app draws after the UI are not inside any node's saturation
+  canvasSetSaturation(canvas: canvas, saturation: 1.0)
   # a dragged canvas node's snapping guides, over everything (ui/canvasGestureSystem)
   paintCanvasGuidesG(world: world, canvas: canvas)
 }
@@ -809,6 +814,7 @@ func renderSharedNodesGpu2d(
       )
     }
   }
+  canvasSetSaturation(canvas: canvas, saturation: 1.0)
 }
 
 # A shared node a page hands over is drawn last; a marker moving inside one world is drawn under

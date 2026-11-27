@@ -114,6 +114,8 @@ func canvasClearStage(canvas: mod Gpu2dCanvas) {
   canvas.stageStack.clear()
   canvas.layerAlpha = 1.0
   canvas.layerStack.clear()
+  canvas.saturation = 1.0
+  canvas.saturationStack.clear()
 }
 
 # Draw a UI layer (ui/UiLayers) until canvasPopLayer: every color's alpha times `opacity` (inside
@@ -166,4 +168,47 @@ func stageLength(canvas: view Gpu2dCanvas, length: view Float) ret Float {
 
 func canvasHasStage(canvas: view Gpu2dCanvas) ret Bool {
   ret canvas.stageScale is not 1.0 or canvas.stageX is not 0.0 or canvas.stageY is not 0.0
+}
+
+# Draw with `saturation` (1 unchanged, 0 grey) until canvasPopSaturation: every queued color, and an
+# image's texels, mixed toward their BT.601 luminance; inside another push the two multiply
+func canvasPushSaturation(canvas: mod Gpu2dCanvas, saturation: view Float) {
+  canvas.saturationStack.add(value: canvas.saturation)
+  canvas.saturation = canvas.saturation * Math.max(a: saturation, b: 0.0)
+}
+
+# The saturation of what is queued from now on, outside any push (ui/RenderSystem sets each
+# node's own before it paints)
+func canvasSetSaturation(canvas: mod Gpu2dCanvas, saturation: view Float) {
+  canvas.saturation = Math.max(a: saturation, b: 0.0)
+}
+
+func canvasPopSaturation(canvas: mod Gpu2dCanvas) {
+  if canvas.saturationStack.length is 0 {
+    canvas.saturation = 1.0
+    ret
+  }
+  canvas.saturation = canvas.saturationStack.pop()
+}
+
+# 0xAARRGGBB at `saturation`: each channel mixed toward the BT.601 luminance (0.299, 0.587,
+# 0.114) of the three, alpha kept; itself at 1
+func saturatedColor(color: view Int, saturation: view Float) ret Int {
+  if saturation is 1.0 {
+    ret color
+  }
+  let alpha: Int = (color / 16777216) % 256
+  let red: Float = ((color / 65536) % 256).toFloat()
+  let green: Float = ((color / 256) % 256).toFloat()
+  let blue: Float = (color % 256).toFloat()
+  let luminance: Float = 0.299 * red + 0.587 * green + 0.114 * blue
+  let r: Int = saturatedChannel(channel: red, luminance: luminance, saturation: saturation)
+  let g: Int = saturatedChannel(channel: green, luminance: luminance, saturation: saturation)
+  let b: Int = saturatedChannel(channel: blue, luminance: luminance, saturation: saturation)
+  ret alpha * 16777216 + r * 65536 + g * 256 + b
+}
+
+func saturatedChannel(channel: view Float, luminance: view Float, saturation: view Float) ret Int {
+  let mixed: Float = luminance + (channel - luminance) * saturation
+  ret Math.round(x: Math.clamp(val: mixed, low: 0.0, high: 255.0)).toInt()
 }

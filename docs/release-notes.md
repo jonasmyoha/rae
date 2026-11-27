@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.114, 2026-11-27: a node's saturation for its subtree
+
+- `TransformFx.saturation` (1 by default, 0 grey) reaches everything a node and its subtree paint, like `alpha`:
+  shapes, text, a sprite's tint and an image's texels are mixed toward their BT.601 luminance (0.299, 0.587,
+  0.114), the alpha kept, nested values multiplying, the layout unchanged (docs/ui-scene-format.md section 58).
+  It is accumulated into `WorldVisual.saturation`; the canvas applies it where every color is queued
+  (Gpu2dCanvas `canvasSetSaturation` / `canvasPushSaturation` / `canvasPopSaturation`), and gpu2d_image.wgsl
+  to the texels (an image's uniform is 32 floats).
+- Case 1700 and the hardware check checks/uiSaturation.
+
 ## 0.4.113, 2026-11-27: Fit and Fill art under an uneven scale
 
 - A `Sprite` with `scaleMode` Fit or Fill under a node scaled unevenly (`scaleX` 0.5, `scaleY` 1: a card flip) is

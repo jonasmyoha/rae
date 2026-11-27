@@ -438,6 +438,9 @@ func queueImageEx(
   canvas.imageCommands.add(value: drawY)
   canvas.imageCommands.add(value: w * stageScale)
   canvas.imageCommands.add(value: h * stageScale)
+  # the saturation in force (Gpu2dCanvas Transform.rae): of the tint here, of the texels in the
+  # shader (uImg[7].x)
+  tint = saturatedColor(color: tint, saturation: canvas.saturation)
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 65536))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 256))
   canvas.imageCommands.add(value: tintChannel(color: tint, shift: 1))
@@ -469,6 +472,11 @@ func queueImageEx(
     let value: Float = clipShapeFloat(canvas: canvas, clip: clip, part: part)
     canvas.imageCommands.add(value: value)
   }
+  # uImg[7]: the saturation of the texels
+  canvas.imageCommands.add(value: canvas.saturation)
+  canvas.imageCommands.add(value: 0.0)
+  canvas.imageCommands.add(value: 0.0)
+  canvas.imageCommands.add(value: 0.0)
   canvas.imageCommandHandles.add(value: handle)
   canvas.imageCommandClips.add(value: clip)
 }

@@ -1923,3 +1923,18 @@ own box first and then scaled, so a square image in a square box under `scaleX` 
 wide and as tall as before, not evenly smaller (case 1699). A `Text` does not squeeze: its glyphs scale
 evenly, by the horizontal scale (`scaleX`), so under `scaleX` 0.5 a text is half its size in both
 directions; a flip that must squeeze its letters draws them as a Sprite (an image of the text).
+
+## 58. `TransformFx.saturation`: a grey subtree
+
+`"saturation"` on a node's `TransformFx` (1 by default) reaches everything the node and its subtree
+paint, the way `alpha` does: 1 leaves the colors, 0 draws them grey, each mixed toward its BT.601
+luminance (0.299 r + 0.587 g + 0.114 b) with the alpha kept. It is for a sold offer, a locked card,
+a disabled group of sprites: shapes, text, a sprite's tint and an image's texels all follow it, and
+nested values multiply. The layout does not change.
+
+    "Offer": { "TransformFx": { "saturation": 0 }, "Children": ["Art", "Price"] }
+
+The transform pass accumulates it into `WorldVisual.saturation`; the painter sets it on the canvas
+(Gpu2dCanvas `canvasSetSaturation`, or `canvasPushSaturation` / `canvasPopSaturation` around any
+drawing), which mixes each queued color and gives the image shader the texels' share. Case 1700 and
+the check `checks/uiSaturation` (read back from the GPU).
