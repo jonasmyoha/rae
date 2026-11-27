@@ -202,6 +202,26 @@ if [ -n "$location_usage" ]; then
   extra_plist="$extra_plist<key>NSLocationWhenInUseUsageDescription</key><string>$location_usage</string>"
 fi
 
+# App Tracking Transparency (lib/AppTracking, docs/app-tracking.md): iOS ends an app
+# that asks without NSUserTrackingUsageDescription, so an app whose C includes the shim
+# must set RAE_IOS_TRACKING_USAGE (plain text: what the tracking is for), and links
+# AppTrackingTransparency, AdSupport and StoreKit (SKAdNetwork).
+tracking_usage=${RAE_IOS_TRACKING_USAGE:-}
+tracking_link=""
+if grep -q 'runtime_app_tracking_apple.h' "$gen/app.c"; then
+  if [ -z "$tracking_usage" ]; then
+    echo "error: the app uses lib/AppTracking: set RAE_IOS_TRACKING_USAGE to the words iOS shows when it asks (what the tracking is for)" >&2
+    exit 1
+  fi
+  tracking_link=' "-framework AppTrackingTransparency" "-framework AdSupport" "-framework StoreKit"'
+fi
+if [ -n "$tracking_usage" ]; then
+  case "$tracking_usage" in
+    *'<'*|*'>'*|*'&'*|*'"'*) echo "error: a purpose string may not contain < > & or \": $tracking_usage" >&2; exit 1 ;;
+  esac
+  extra_plist="$extra_plist<key>NSUserTrackingUsageDescription</key><string>$tracking_usage</string>"
+fi
+
 # The Focus status (packages/audio's focusStatus, docs/audio-design.md §9.2):
 # iOS ends an app that asks for it without this purpose string, so it is
 # written when RAE_IOS_FOCUS_USAGE gives the words iOS shows when it asks.
@@ -444,7 +464,7 @@ target_link_libraries(\${APP}
   "-framework AVFoundation" "-framework AudioToolbox" "-framework CoreHaptics"
   "-framework CoreText" "-framework UniformTypeIdentifiers"
   "-framework CoreBluetooth" "-framework CoreMedia" "-framework CoreVideo"
-  "-framework OpenGLES" "-framework Security"$location_link$notification_link)
+  "-framework OpenGLES" "-framework Security"$location_link$notification_link$tracking_link)
 
 # A real Info.plist (with UILaunchScreen for native resolution + portrait lock);
 # CMake's INFOPLIST_KEY_* build settings do not apply to a MACOSX_BUNDLE target.

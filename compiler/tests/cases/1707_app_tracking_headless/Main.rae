@@ -1,0 +1,55 @@
+# AppTracking's state machine in a headless run. Before a request the status is notDetermined
+# and there is no advertising id; the first request takes the simulated answer
+# (RAE_TRACKING_ANSWER, denied when unset), and later requests keep it, as iOS asks once. Only
+# authorized gives the id. A conversion value is 0 to 63; one out of range is refused.
+import Sys
+open AppTracking
+
+func showId() {
+  if let advertisingId: String = appAdvertisingId() {
+    log("id {advertisingId}")
+  } else {
+    log("no id")
+  }
+}
+
+func main() {
+  let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
+  log("status {appTrackingStatus()}")
+  showId()
+  let answer: Bool = Sys.setEnv(name: "RAE_TRACKING_ANSWER", value: "authorized")
+  log("asked {requestAppTracking()}")
+  log("status {appTrackingStatus()}")
+  showId()
+  let changed: Bool = Sys.setEnv(name: "RAE_TRACKING_ANSWER", value: "denied")
+  log("asked again {requestAppTracking()}")
+  log("status {appTrackingStatus()}")
+  log(
+    "sent {updateConversionValue(
+      fineValue: 12
+      coarseValue: ConversionCoarseValue.medium
+      lockWindow: false
+    )}"
+  )
+  log(
+    "sent {updateConversionValue(
+      fineValue: 63
+      coarseValue: ConversionCoarseValue.high
+      lockWindow: true
+    )}"
+  )
+  log(
+    "sent {updateConversionValue(
+      fineValue: 64
+      coarseValue: ConversionCoarseValue.low
+      lockWindow: false
+    )}"
+  )
+  log(
+    "sent {updateConversionValue(
+      fineValue: -1
+      coarseValue: ConversionCoarseValue.low
+      lockWindow: false
+    )}"
+  )
+}

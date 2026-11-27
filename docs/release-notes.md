@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.123, 2026-11-27: App Tracking Transparency and SKAdNetwork
+
+- `lib/AppTracking` (iOS): `appTrackingStatus()` (`TrackingStatus` notDetermined, restricted, denied,
+  authorized), `requestAppTracking()`, `appAdvertisingId()` when authorized, and
+  `updateConversionValue(fineValue:, coarseValue:, lockWindow:)` for SKAdNetwork (0 to 63; iOS 16.1's full call, older
+  forms before). Elsewhere notDetermined and no-ops. Headless, a simulated answer (`RAE_TRACKING_ANSWER`).
+  `tools/ios/gen-ios.sh` requires `RAE_IOS_TRACKING_USAGE` for such an app and links the frameworks. Case 1707;
+  docs/app-tracking.md.
+
 ## 0.4.122, 2026-11-27: push notifications on Android
 
 - `lib/PushNotification` on Android through Firebase Cloud Messaging: an app built with

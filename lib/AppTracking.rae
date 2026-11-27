@@ -1,0 +1,207 @@
+# AppTracking — iOS's App Tracking Transparency, the advertising id, and SKAdNetwork's
+# conversion values for install attribution (docs/app-tracking.md).
+#
+#     if appTrackingStatus() is TrackingStatus.notDetermined { requestAppTracking() }
+#     ...                                         # later, each frame or on the next screen:
+#     if let advertisingId: String = appAdvertisingId() { ...send it with the analytics... }
+#     updateConversionValue(fineValue: 12, coarseValue: ConversionCoarseValue.medium, lockWindow:
+#     false)
+#
+# The request asks the person once per install; it does not wait, and the answer is read with
+# appTrackingStatus afterward. The advertising id is there only when the status is authorized.
+# iOS ends an app that asks without the purpose string: tools/ios/gen-ios.sh writes it from
+# RAE_IOS_TRACKING_USAGE, which an app that imports this module must set.
+#
+# On iOS this is ATTrackingManager, ASIdentifierManager and SKAdNetwork
+# (runtime_app_tracking_apple.h). Elsewhere (Android, the Mac, the web) the status is
+# notDetermined, the request and the updates do nothing and answer false, and there is no id.
+# In a headless run (RAE_UI_HEADLESS, RAE_SDL_HEADLESS_MS or RAE_HEADLESS_FRAMES set) each call
+# logs `[tracking] <what>`, and the person's answer is simulated: RAE_TRACKING_ANSWER
+# (authorized, denied or restricted; denied when unset) becomes the status at the first request,
+# and stays, as on iOS.
+import Sys
+cheader "runtime_app_tracking_apple.h"
+
+const hasAppTracking: Bool = Target.os is Os.ios
+
+# ATTrackingManager's status: no answer yet, not allowed to ask (a parental control or a
+# managed device), said no, or said yes
+enum TrackingStatus { notDetermined, restricted, denied, authorized }
+
+# SKAdNetwork's coarse conversion value, for postbacks with too few installs for the fine one
+enum ConversionCoarseValue { low, medium, high }
+
+# The highest fine conversion value (six bits)
+const maxFineConversionValue: Int = 63
+
+# The advertising id a headless run gives when the simulated answer is authorized
+const simulatedAdvertisingId: String = "00000000-0000-4000-8000-000000000001"
+
+func rae_ext_AppTracking_simulatedStatus() unsafe extern("rae_ext_AppTracking_simulatedStatus") ret
+  Int
+
+func rae_ext_AppTracking_setSimulatedStatus(
+  status: Int
+) unsafe extern("rae_ext_AppTracking_setSimulatedStatus")
+
+when hasAppTracking {
+  func rae_ext_AppTracking_status() unsafe extern("rae_ext_AppTracking_status") ret Int
+
+  func rae_ext_AppTracking_request() mainThread unsafe extern("rae_ext_AppTracking_request") ret Int
+
+  func rae_ext_AppTracking_advertisingId() unsafe extern("rae_ext_AppTracking_advertisingId") ret
+    String
+
+  func rae_ext_AppTracking_updateConversion(
+    fine: Int
+    coarse: Int
+    lockWindow: Bool
+  ) unsafe extern("rae_ext_AppTracking_updateConversion") ret Int
+}
+
+# A headless run, by the window's own definition (lib/Gpu2d headlessRequested)
+func appTrackingHeadless() ret Bool {
+  ret Sys.getEnv(name: "RAE_UI_HEADLESS").length() > 0 or Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
+}
+
+# The status from ATTrackingAuthorizationStatus's number (and the simulated one's)
+func trackingStatusFromNumber(number: view Int) ret TrackingStatus {
+  if number is 1 {
+    ret TrackingStatus.restricted
+  }
+  if number is 2 {
+    ret TrackingStatus.denied
+  }
+  if number is 3 {
+    ret TrackingStatus.authorized
+  }
+  ret TrackingStatus.notDetermined
+}
+
+# The simulated answer of a headless run: RAE_TRACKING_ANSWER, denied when unset or unknown
+func simulatedTrackingAnswer() ret Int {
+  let answer: String = Sys.getEnv(name: "RAE_TRACKING_ANSWER")
+  if answer is "authorized" {
+    ret 3
+  }
+  if answer is "restricted" {
+    ret 1
+  }
+  ret 2
+}
+
+# What the person answered, or notDetermined before any answer (and where there is no ATT)
+func appTrackingStatus() ret TrackingStatus {
+  if appTrackingHeadless() {
+    unsafe {
+      let status: TrackingStatus = trackingStatusFromNumber(
+        number: rae_ext_AppTracking_simulatedStatus()
+      )
+      log("[tracking] status {status}")
+      ret status
+    }
+  }
+  when hasAppTracking {
+    unsafe {
+      ret trackingStatusFromNumber(number: rae_ext_AppTracking_status())
+    }
+  } else {
+    ret TrackingStatus.notDetermined
+  }
+}
+
+# Ask the person, the first time; afterward the system answers from what they chose, without
+# asking. It does not wait: see appTrackingStatus. True when the system was asked. iOS shows
+# the question only while the app is active (in front, not while it is starting).
+func requestAppTracking() ret Bool {
+  if appTrackingHeadless() {
+    log("[tracking] request")
+    unsafe {
+      if rae_ext_AppTracking_simulatedStatus() is 0 {
+        rae_ext_AppTracking_setSimulatedStatus(status: simulatedTrackingAnswer())
+      }
+    }
+    ret false
+  }
+  when hasAppTracking {
+    unsafe {
+      ret rae_ext_AppTracking_request() is 1
+    }
+  } else {
+    ret false
+  }
+}
+
+# The advertising id (IDFA) when tracking is authorized, else none
+func appAdvertisingId() ret opt String {
+  if appTrackingHeadless() {
+    unsafe {
+      if rae_ext_AppTracking_simulatedStatus() is 3 {
+        log("[tracking] advertisingId")
+        ret simulatedAdvertisingId
+      }
+    }
+    log("[tracking] advertisingId: none, not authorized")
+    ret none
+  }
+  when hasAppTracking {
+    unsafe {
+      if rae_ext_AppTracking_status() is not 3 {
+        ret none
+      }
+      let identifier: String = rae_ext_AppTracking_advertisingId()
+      if identifier.length() is 0 or identifier is "00000000-0000-0000-0000-000000000000" {
+        ret none
+      }
+      ret identifier
+    }
+  } else {
+    ret none
+  }
+}
+
+# The coarse value as the shim's number
+func conversionCoarseNumber(coarseValue: view ConversionCoarseValue) ret Int {
+  if coarseValue is ConversionCoarseValue.medium {
+    ret 1
+  }
+  if coarseValue is ConversionCoarseValue.high {
+    ret 2
+  }
+  ret 0
+}
+
+# SKAdNetwork's conversion value for this install's postback: `fineValue` 0 to 63, the
+# coarse value, and whether to lock the window (send the postback now, without waiting for
+# the window's end). On iOS 16.1 and later all three go; on 15.4 the fine value only; before,
+# the old conversion value. False for a fine value out of range, which sends nothing, and
+# where there is no SKAdNetwork. Updates in one window may only grow (iOS keeps the higher).
+func updateConversionValue(
+  fineValue: view Int
+  coarseValue: view ConversionCoarseValue
+  lockWindow: view Bool
+) ret Bool {
+  if fineValue < 0 or fineValue > maxFineConversionValue {
+    if appTrackingHeadless() {
+      log("[tracking] conversion fine={fineValue}: refused, it is 0 to {maxFineConversionValue}")
+    }
+    ret false
+  }
+  if appTrackingHeadless() {
+    log("[tracking] conversion fine={fineValue} coarse={coarseValue} lockWindow={lockWindow}")
+    ret false
+  }
+  when hasAppTracking {
+    unsafe {
+      ret rae_ext_AppTracking_updateConversion(
+        fine: fineValue
+        coarse: conversionCoarseNumber(coarseValue: coarseValue)
+        lockWindow: lockWindow
+      ) > 0
+    }
+  } else {
+    ret false
+  }
+}
