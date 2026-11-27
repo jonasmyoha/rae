@@ -322,8 +322,8 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
         return;
       }
       /* A method call to a function that may sleep is not transformed */
-      if (expr->decl_link && ctx->compiler_ctx->wait_graph &&
-          may_wait_reaches_sleep(ctx->compiler_ctx->wait_graph, expr->decl_link)) {
+      if ((expr->decl_link || expr->instance) && ctx->compiler_ctx->wait_graph &&
+          may_wait_call_reaches_sleep(ctx->compiler_ctx->wait_graph, expr, expr->decl_link)) {
         ctx->twin_failed = true;
       }
       scan_expr(ctx, object, hoistable, points);
@@ -377,7 +377,8 @@ static void scan_expr(CFuncContext* ctx, const AstExpr* expr, bool hoistable, Tw
         add_point(points, point);
         return;
       }
-      if (target && ctx->compiler_ctx->wait_graph && may_wait_reaches_sleep(ctx->compiler_ctx->wait_graph, target)) {
+      if ((target || expr->instance) && ctx->compiler_ctx->wait_graph
+          && may_wait_call_reaches_sleep(ctx->compiler_ctx->wait_graph, expr, target)) {
         /* It may sleep, and has no twin to suspend through */
         ctx->twin_failed = true;
       }

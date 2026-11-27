@@ -461,6 +461,19 @@ static void edge_by_name(WalkContext* walk, Str name, const AstCallArg* args, co
 static void walk_block(WalkContext* walk, const AstBlock* block);
 static void walk_stmt(WalkContext* walk, const AstStmt* stmt);
 
+/* The call's target from the instance sema decided for it (every generic call it
+ * analyzed, docs/generic-instances-design.md step 4): its template with the
+ * instance's type arguments, the node a written-out call would reach. False when
+ * sema decided none (a call inside a template the walk follows with its bindings). */
+static bool edge_to_instance(WalkContext* walk, const AstExpr* call, const AstCallArg* args, const AstExpr* receiver) {
+  const AstDecl* instance = call->instance;
+  if (!instance || instance->kind != AST_DECL_FUNC || !instance->as.func_decl.specialization_args) return false;
+  const AstDecl* generic = instance->as.func_decl.generic_template;
+  if (!generic || generic->kind != AST_DECL_FUNC || !generic->as.func_decl.generic_params) return false;
+  edge_to_decl(walk, generic, args, instance->as.func_decl.specialization_args, receiver);
+  return true;
+}
+
 /* A method call sema left to the backend, outside a generic body: its
  * targets by name, as effect-only edges (wait_graph.h). The may-wait edges
  * and counters are put back as they were. */
@@ -553,7 +566,9 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
         walk->cold = was_cold;
         break;
       }
-      if (target) {
+      if (edge_to_instance(walk, expr, expr->as.call.args, NULL)) {
+        /* sema decided the instance */
+      } else if (target) {
         edge_to_decl(walk, target, expr->as.call.args, expr->as.call.generic_args, NULL);
       } else if (expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT) {
         edge_by_name(walk, expr->as.call.callee->as.ident, expr->as.call.args, expr->as.call.generic_args, NULL);
@@ -566,6 +581,8 @@ static void walk_expr(WalkContext* walk, const AstExpr* expr) {
           expr->as.method_call.method_name.len == 3 && memcmp(expr->as.method_call.method_name.data, "get", 3) == 0) {
         note_wait(walk, WAIT_TASK_GET);
         note_effect(walk, EFFECT_WAITS, expr->line, expr->column, "Task.get (it waits for the task)");
+      } else if (edge_to_instance(walk, expr, expr->as.method_call.args, expr->as.method_call.object)) {
+        /* sema decided the instance */
       } else if (expr->decl_link) {
         edge_to_decl(walk, expr->decl_link, expr->as.method_call.args, expr->as.method_call.generic_args,
                      expr->as.method_call.object);
@@ -749,15 +766,22 @@ void wait_graph_walk_all(WaitGraph* graph) {
                   func->is_extern ? "C that only the main thread may call" : "a function marked mainThread");
     }
     WalkContext walk = { graph, (int)i, wait_graph_is_stdlib(graph, graph->nodes[i].decl) ? 1 : 0, func, { NULL, NULL }, false, 0, 0, 0 };
+    const AstBlock* body = func->body;
     if (graph->nodes[i].key) {
       walk.bindings.params = func->generic_params;
       walk.bindings.args = graph->nodes[i].concrete_args;
+      /* the instance's analyzed clone, where sema made one: its calls carry the
+       * instances sema decided (edge_to_instance), its types are written out */
+      if (sema_generic_instances_emitted()) {
+        const AstFuncDecl* clone = sema_find_instance_decl(graph->ctx, func, graph->nodes[i].concrete_args);
+        if (clone && clone->body) body = clone->body;
+      }
     } else if (func->generic_template && func->specialization_args) {
       /* sema's own specialization: a cloned body that still spells T */
       walk.bindings.params = func->generic_template->as.func_decl.generic_params;
       walk.bindings.args = func->specialization_args;
     }
-    walk_block(&walk, func->body);
+    walk_block(&walk, body);
   }
 }
 

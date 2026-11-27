@@ -64,6 +64,16 @@ bool may_wait_report(CompilerContext* ctx, const AstModule* merged, const char* 
   }
   fprintf(out, "  resumable twins (may wait and reachable from a spawn): %zu in the program, %zu in lib/\n", twins[0],
           twins[1]);
+  /* RAE_REPORT_WAITS_DEBUG=1: every function of the program that may wait, with its chain */
+  if (getenv("RAE_REPORT_WAITS_DEBUG")) {
+    for (size_t i = 0; i < graph.count; i++) {
+      const WaitNode* node = &graph.nodes[i];
+      if (!node->may_wait || wait_graph_is_stdlib(&graph, node->decl)) continue;
+      fprintf(out, "  may wait: ");
+      print_chain(out, &graph, (int)i);
+      fprintf(out, "\n");
+    }
+  }
   /* `spawn thread` targets (§6.6.1 of docs/realtime-language-design.md):
    * always their own OS thread, never the pool, so no twins */
   for (size_t i = 0; i < graph.count; i++) {

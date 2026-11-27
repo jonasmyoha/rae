@@ -36,6 +36,8 @@ bool may_wait_spawn_on_pool(struct WaitGraph* graph, const AstDecl* decl, bool a
  * (sleep, Time.waitUntil) or a socket / poller wait — can be reached from
  * `decl` */
 bool may_wait_reaches_sleep(struct WaitGraph* graph, const AstDecl* decl);
+/* The same for a call: the instance sema decided for a generic call, else `target` */
+bool may_wait_call_reaches_sleep(struct WaitGraph* graph, const struct AstExpr* call, const AstDecl* target);
 /* Whether a socket / poller wait can be reached from `decl` (it suspends
  * only where the runtime has a readiness poller: RAE_SCHED_IO_SUSPENDS) */
 bool may_wait_reaches_socket(struct WaitGraph* graph, const AstDecl* decl);

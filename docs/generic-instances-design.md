@@ -313,9 +313,20 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    --emit-c`, with the full suite running beside it): 106 8.3 s to 4.5 s, 121 13.2 s to 6.8 s, 136 24.5 s to
    12.3 s; with the switch alone, before the index, the two ways cost the same (106 8.2 s, 121 13.3 s, 136 24 s).
    Every example (86) and check (67) builds both ways, the examples' C compiles, wasm_smoke and wasm_webgpu_smoke
-   pass, and the visual gate of 106 and 136 passes. Left, the queue line `[generic instances 6b/9: the walks
-   read instances]`: the may-wait walk, the realtime check and the twins take a call's target from sema's
-   `instance` / `decl_link` where they still resolve it by name.
+   pass, and the visual gate of 106 and 136 passes. Second part (0.4.129): the walks read instances.
+   The may-wait walk (and the realtime check, which builds on it) takes a generic call's target from the instance
+   sema decided (`edge_to_instance`: the template with the instance's types, the node a written-out call reaches),
+   and walks an instance node's analyzed clone instead of the template (`sema_find_instance_decl`, which makes
+   nothing), so the calls in it carry their instances too. The twins ask the same of a call
+   (`may_wait_call_reaches_sleep`: a generic call's own instance node; through `decl_link` alone it was the
+   template, which has no node, so a generic call was never taken to sleep). Calls resolved conservatively:
+   106 3 + 3344 in lib/ to 0, 121 5543 + 5268 to 0, 136 8 + 3839 to 0. On the way a bug of the field-loop
+   rewrite was found: `reflect_expand_field_loop` turned a loop into an `if` in place without clearing the
+   `if`'s fields, which share the loop's memory, so `is_task_scope` could read as true and the walk counted a
+   task join that is not there (every "task join" of 106, 121 and 136 was one). With both, the may-wait sets
+   are smaller (121: 200 to 23 in the program, 301 to 99 in lib/), the resumable twins and the C of 106, 121
+   and 136 are the same, and `--report-realtime` lists a function's trusted C in the order the walk meets it
+   (case 1407).
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.
 8. **The template way removed**: what section 6 lists, and the switch.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.

@@ -292,6 +292,25 @@ bool may_wait_reaches_sleep(WaitGraph* graph, const AstDecl* decl) {
   return start >= 0 && reach_any(graph, start, node_sleeps, false);
 }
 
+/* The node of what `call` calls: the instance sema decided for a generic call (its
+ * template with the instance's types), else its declaration */
+static int call_node(WaitGraph* graph, const AstExpr* call, const AstDecl* target) {
+  const AstDecl* instance = call ? call->instance : NULL;
+  if (graph && instance && instance->kind == AST_DECL_FUNC && instance->as.func_decl.specialization_args
+      && instance->as.func_decl.generic_template) {
+    char key[1024];
+    wait_graph_specialization_key(instance->as.func_decl.specialization_args, key, sizeof key);
+    int index = wait_graph_node(graph, instance->as.func_decl.generic_template, key, NULL, false);
+    if (index >= 0) return index;
+  }
+  return decl_node(graph, target);
+}
+
+bool may_wait_call_reaches_sleep(WaitGraph* graph, const AstExpr* call, const AstDecl* target) {
+  int start = call_node(graph, call, target);
+  return start >= 0 && reach_any(graph, start, node_sleeps, false);
+}
+
 static bool node_waits_on_socket(WaitGraph* graph, const WaitNode* node, bool flag) {
   (void)graph; (void)flag;
   return node->direct == WAIT_SOCKET;

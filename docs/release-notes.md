@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.129, 2026-11-27: the may-wait walk reads instances
+
+- The may-wait analysis (and the realtime check and the resumable twins on it) follows each generic call to the
+  instance the compiler decided for it, instead of resolving it by name: no call is approximated any more in
+  106, 121 or 136, and the reports are exact. A field loop rewritten into an `if` no longer looks like a
+  `taskScope` to it (the reports counted task joins that were not there).
+
 ## 0.4.128, 2026-11-27: generic instances written from their clones by default, a spawn in a generic function
 
 - Each instance of a generic function is written from the copy sema analyzed, by default (docs/generic-instances-design.md

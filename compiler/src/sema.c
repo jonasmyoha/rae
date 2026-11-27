@@ -5182,10 +5182,10 @@ static void reflect_expand_field_loop(CompilerContext* ctx, AstModule* module,
     AstBlock* out = arena_alloc(ctx->ast_arena, sizeof(AstBlock));
     out->first = NULL;
     stmt->kind = AST_STMT_IF;
+    /* the loop's fields share this memory: none may read as the if's (a taskScope) */
+    memset(&stmt->as.if_stmt, 0, sizeof stmt->as.if_stmt);
     stmt->as.if_stmt.condition = reflect_make_true(ctx, line, column);
     stmt->as.if_stmt.then_block = out;
-    stmt->as.if_stmt.else_block = NULL;
-    stmt->as.if_stmt.binding = NULL;
 
     #define REFLECT_FAIL(ln, col, msg) do { \
         diag_error(sema_diag_file(module), (int)(ln), (int)(col), (msg)); \
@@ -12756,6 +12756,19 @@ bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generi
     ctx->type_registry->specializations_for_backend = saved_for_backend;
     s_checking_backend_instances = saved;
     return diag_error_count() == errors;
+}
+
+/* The clone of the instance of `generic` for `args` when one was made, NULL otherwise
+ * (nothing is made or analyzed: the may-wait walk asks it) */
+const AstFuncDecl* sema_find_instance_decl(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args) {
+    if (!generic || !generic->generic_params || !generic->body || generic->is_extern) return NULL;
+    if (!s_current_module || !s_lifecycle_symbols || !ctx || !ctx->type_registry) return NULL;
+    AstDecl* generic_decl = (AstDecl*)((const char*)generic - offsetof(AstDecl, as.func_decl));
+    TypeInfo* types[16];
+    size_t count = sema_backend_instance_types(ctx, args, types);
+    if (args && count == 0) return NULL;
+    AstDecl* spec = type_registry_find_specialization(ctx->type_registry, generic_decl, types, count);
+    return spec && spec->kind == AST_DECL_FUNC && spec->as.func_decl.body ? &spec->as.func_decl : NULL;
 }
 
 /* The analyzed clone of the instance of `generic` (a template) for `args`, made and
