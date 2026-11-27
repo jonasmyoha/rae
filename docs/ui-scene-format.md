@@ -1463,9 +1463,26 @@ outline, then the glyphs in the style's color, all from the font's distance
 field. The outline cannot reach past that field: about half the atlas's
 distance range, scaled to the text size (`distanceRange / 2 * size /
 atlasSize`; Roboto's atlas, range 12 at size 48, allows about 2 points at 17
-point text and 4 at 34). A wider outline is cut off at that distance. The
-check `checks/uiTextOutline` draws two outlined styles in one frame; case
-1524 checks the parsing.
+point text and 4 at 34). The rule for an atlas, at the smallest size a style
+is drawn, all in pixels on the screen:
+
+    distanceRange >= (2 x outline + softness) x bakeSize / drawn em
+
+`bakeSize` is the atlas's pixels per em (its JSON's `atlas.size`), `softness`
+the style's shadow softness, at least 1 (a crisp edge). A 16 point label at 2x
+(32 px) with a 1 point outline (2 px) on an atlas baked at 48 px needs
+`(4 + 1) x 48 / 32 = 7.5`: `-pxrange 8` or more, not 4. Past it the outline
+would fill each glyph's whole box (a box round every letter), so the shader
+thins the outline (and the softness) to what the range carries, and the
+renderer logs once per style and font:
+
+    [text] style 'label' at 32 px with a 2 px outline and a softness of 0 px needs an atlas distanceRange of 8 or more; the font ... has 4 (baked at 48 px per em): rebake it with -pxrange 8; ...
+
+Rebaking the atlas with that `-pxrange` (msdf-atlas-gen) gives the full
+outline. The check `checks/uiTextOutline` draws two outlined styles in one
+frame, `checks/uiTextOutlineRange` a small outlined label on a range-4 font
+(no box round its letters); case 1524 checks the parsing, case 1697 the
+logged line.
 
 ## 43. Line breaks in a `Text`
 

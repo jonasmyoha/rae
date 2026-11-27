@@ -65,6 +65,8 @@ type SdfFont {
   atlasHeight: Float
   pxRange: Float
   emSize: Float
+  # the atlas's pixels per em (its `size`); 0 when its JSON does not say
+  bakeSize: Float = 0.0
   lineHeight: Float
   ascender: Float
   glyphs: List(SdfGlyph)
@@ -196,6 +198,12 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
       key: "distanceRange"
       fallback: 4.0
     )
+    let bakeSize: Float = sdfFloatField(
+      doc: doc
+      obj: atlasJ
+      key: "size"
+      fallback: 0.0
+    )
 
     let metricsIdx: Int = Json.field(doc: doc, this: root, key: "metrics")
     let metricsJ: JsonValue = Json.jsonValueAt(doc: doc, idx: metricsIdx)
@@ -291,6 +299,7 @@ func loadSdfFont(jsonPath: view String, rawAtlasPath: view String) ret SdfFont {
       atlasHeight: atlasH
       pxRange: pxRange
       emSize: emSize
+      bakeSize: bakeSize
       lineHeight: lineHeight
       ascender: ascender
       glyphs: own glyphs

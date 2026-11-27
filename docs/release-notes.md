@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.111, 2026-11-27: a text outline past its font's distance range thins instead of boxing
+
+- An MTSDF atlas carries a distance of half its `distanceRange` outside each glyph, scaled to the drawn size. An
+  outline (or a shadow's softness) wider than that filled each glyph's whole quad, a box round every letter of a
+  small outlined text. gpu2d_text.wgsl now holds the outline and the softness to what the range carries, so the
+  outline thins.
+- The renderer logs once per text style and font when its outline and softness at the drawn size need more:
+  `[text] style 'label' at 32 px with a 2 px outline ... needs an atlas distanceRange of 8 or more ...`. The rule,
+  in docs/ui-scene-format.md section 42: distanceRange >= (2 x outline + softness) x bakeSize / drawn em, in
+  pixels. `SdfFont.bakeSize` is the atlas's `size` (pixels per em).
+- Case 1697 (logged once with range 4, nothing with 12) and the hardware check checks/uiTextOutlineRange (no
+  filled corner of any glyph quad on a range-4 font; all of them filled without the shader's limit).
+
 ## 0.4.110, 2026-11-27: a nine-slice's border scale
 
 - `Sprite.nineSliceScale` (1 by default) draws a nine-slice's borders that many design units a source pixel,

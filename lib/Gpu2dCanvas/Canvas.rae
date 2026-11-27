@@ -194,6 +194,9 @@ type Gpu2dCanvas {
   clipFrames: List(Float)
   clipFull: List(Bool)
   clipStack: List(Int)
+  # each text style and font whose outline or softness its atlas's distanceRange cannot carry,
+  # said once (ui/RenderSystem RenderText warnTextRange)
+  textRangeWarnings: List(String)
   currentClip: Int
   # --- rotation (#1003): every queued box / image / glyph turns by this angle
   # (radians) about the pivot (design units) until it is cleared; 0 = none ---
@@ -291,6 +294,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       clipFrames: List.create(Float, cap: 256)
       clipFull: List.create(Bool, cap: 32)
       clipStack: List.create(Int, cap: 32)
+      textRangeWarnings: List.create(String, cap: 4)
       currentClip: 0
       spinAngle: 0.0
       stageStack: {}

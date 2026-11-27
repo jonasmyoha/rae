@@ -87,11 +87,16 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
 // scale). Positive inside the glyph.
   let sc = (uXform[0].z + uXform[0].w) * 0.5;
   let sd = g.params.x * sc * (median3(s.r, s.g, s.b) - 0.5);
+// The atlas carries a distance of half its range (pr) outside a glyph; at the
+// quad's edge sd stops there. An outline or a softness past it covers the whole
+// quad (a box round every letter), so both are held to what the range carries:
+// the outline thins instead (RenderText logs the distanceRange the style needs).
+  let pr = max(g.params.x * sc, 0.0001);
 // softness widens the coverage falloff (px) — 1 = crisp AA, larger = a soft
 // blurred edge (used for soft drop-shadows).
-  let sw = max(g.params.z, 1.0);
+  let sw = clamp(g.params.z, 1.0, max(pr, 1.0));
   let bodyCov = clamp(sd / sw + 0.5, 0.0, 1.0) * clipCov;
-  let ow = g.params.y;
+  let ow = min(g.params.y, max(pr * 0.5 - sw * 0.5, 0.0));
   if (ow <= 0.0) {
     let a = g.color.a * bodyCov;
     return vec4<f32>(g.color.rgb * a, a);  // premultiplied

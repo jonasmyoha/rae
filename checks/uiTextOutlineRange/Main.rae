@@ -1,0 +1,245 @@
+# Hardware check for an outline wider than its font's distance range (gpu2d_text.wgsl): a 32 px
+# word with a 2 px outline on an atlas told it has a range of 4 (baked at 48 px per em, so it
+# carries about 1.3 px outside each glyph) is drawn into a 640 x 640 slot and read back. Before the
+# shader held the outline to the range, every glyph's quad was filled with the outline's color (a
+# box round each letter); now each quad's corners are empty and its letter still has ink. Exit
+# code 0 = passed.
+import Gpu2d
+import Gpu2dText
+import SdfText
+import Math
+import Sys
+open webgpu/Context
+open webgpu/WebgpuEnums
+open gpu/GpuResources
+open gpu/GpuLifetime
+open gpu/GpuReadback
+open gpu/GpuRenderTransfer
+open Gpu2dCanvas
+open Gpu2dCanvasCache
+
+const slotSize: Int = 640
+
+const checkWaitTries: Int = 1000
+
+const glyphFloats: Int = 20
+
+func checkWaitForGpu() {
+  unsafe {
+    webgpuPoll(wait: 1)
+  }
+}
+
+# A pixel box: the first and last row and column whose alpha is at least half
+func byteAt(bytes: view List(UInt8), index: view Int) ret Int {
+  if let value: UInt8 = bytes.copyAt(index: index) {
+    ret value as Int
+  }
+  ret -1
+}
+
+func readTexture(
+  resources: mod GpuResources
+  texture: view TextureId
+  rowBytes: view Int
+  height: view Int
+) ret opt List(UInt8) {
+  let size: Int = rowBytes * height
+  if let buffer: BufferId = createBuffer(
+    resources: resources
+    size: size
+    usage: WGPUBufferUsage_MapRead + WGPUBufferUsage_CopyDst
+  ) {
+    if var recording: Recording = beginRecording(resources: resources) {
+      if not recordCopyTextureToBuffer(
+        recording: recording
+        resources: resources
+        texture: texture
+        buffer: buffer
+        bytesPerRow: rowBytes
+      ) {
+        log("FAIL: texture copy refused")
+        ret none
+      }
+      if let submission: SubmissionId = submit(resources: resources, recording: recording) {
+        var status: Int = 0
+        loop var tries: Int = 0, status is 0 and tries < checkWaitTries, ++tries {
+          status = pollSubmission(resources: resources, id: submission)
+          if status is 0 {
+            checkWaitForGpu()
+          }
+        }
+        retireSubmission(resources: resources, id: submission)
+        if let read: ReadbackId = startReadback(
+          resources: resources
+          buffer: buffer
+          offset: 0
+          size: size
+        ) {
+          var done: Int = 0
+          loop var tries: Int = 0, done is 0 and tries < checkWaitTries, ++tries {
+            done = pollReadback(resources: resources, id: read)
+            if done is 0 {
+              checkWaitForGpu()
+            }
+          }
+          var bytes: List(UInt8) = List.create(UInt8, cap: size)
+          loop var i: Int = 0, i < size, ++i {
+            bytes.add(value: 0)
+          }
+          let copied: Bool = copyReadback(resources: resources, id: read, destination: bytes)
+          retireReadback(resources: resources, id: read)
+          let retired: Bool = retireBuffer(resources: resources, id: buffer)
+          if copied {
+            ret bytes
+          }
+        }
+      }
+    }
+  }
+  log("FAIL: readback")
+  ret none
+}
+
+type GlyphQuad {
+  x: Int
+  y: Int
+  w: Int
+  h: Int
+}
+
+# The glyph quads the frame queued (rect x, y, w, h first in each instance)
+func queuedQuads(canvas: view Gpu2dCanvas) ret List(GlyphQuad) {
+  var quads: List(GlyphQuad) = {}
+  loop let atlas: view Gpu2dTextAtlas in canvas.textAtlases {
+    let count: Int = atlas.glyphs.length / glyphFloats
+    loop var i: Int = 0, i < count, ++i {
+      let base: Int = i * glyphFloats
+      quads.add(
+        value: GlyphQuad {
+          x: atlas.glyphs.copyAtFallback(index: base, fallback: 0.0).toInt()
+          y: atlas.glyphs.copyAtFallback(index: base + 1, fallback: 0.0).toInt()
+          w: atlas.glyphs.copyAtFallback(index: base + 2, fallback: 0.0).toInt()
+          h: atlas.glyphs.copyAtFallback(index: base + 3, fallback: 0.0).toInt()
+        }
+      )
+    }
+  }
+  ret quads
+}
+
+# How many quads hold the pixel (its own is one)
+func inOtherQuad(quads: view List(GlyphQuad), x: view Int, y: view Int) ret Int {
+  var holding: Int = 0
+  loop let quad: view GlyphQuad in quads {
+    if x >= quad.x and x < quad.x + quad.w and y >= quad.y and y < quad.y + quad.h {
+      holding = holding + 1
+    }
+  }
+  ret holding
+}
+
+func alphaAt(bytes: view List(UInt8), x: view Int, y: view Int) ret Int {
+  if x < 0 or y < 0 or x >= slotSize or y >= slotSize {
+    ret 0
+  }
+  ret byteAt(bytes: bytes, index: y * slotSize * 4 + x * 4 + 3)
+}
+
+func main() ret Int {
+  Gpu2d.initWindow(width: 800, height: 600, title: "UI text outline range check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var font: SdfFont = SdfText.loadSdfFontJson(
+    jsonPath: Sys.stdlibPath(path: "lib/assets/walker/Roboto-Regular.mtsdf.json")
+  )
+  # the atlas is baked with range 12; told 4, the shader sees what a range-4 atlas carries
+  font.pxRange = 4.0
+  var slot: Int = -1
+  var quads: List(GlyphQuad) = {}
+  var frames: Int = 0
+  loop not Gpu2d.pollClose() and frames < 3 {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    slot = canvasCacheBegin(
+      canvas: canvas
+      key: 5
+      width: slotSize
+      height: slotSize
+    )
+    let pen: Float = Gpu2dText.emitRun(
+      canvas: canvas
+      font: font
+      text: "Coins"
+      x: 100.0
+      y: 300.0
+      sizePx: 32.0
+      color: 0xFF603414
+      outlineWidth: 2.0
+      outlineColor: 0xFF603414
+      softness: 1.0
+    )
+    quads = queuedQuads(canvas: canvas)
+    canvasCacheEnd(canvas: canvas)
+    Gpu2d.endFrame(canvas: canvas)
+    frames = frames + 1
+  }
+  var passed: Bool = slot >= 0 and quads.length > 0
+  if passed {
+    let rowBytes: Int = slotSize * 4
+    if let resources: mod GpuResources = canvas.gpuResources {
+      if let bytes: List(UInt8) = readTexture(
+        resources: resources
+        texture: canvasCacheTexture(canvas: canvas, slot: slot)
+        rowBytes: rowBytes
+        height: slotSize
+      ) {
+        var filledCorners: Int = 0
+        var corners: Int = 0
+        var inked: Int = 0
+        loop let quad: view GlyphQuad in quads {
+          if quad.w < 4 or quad.h < 4 {
+            continue
+          }
+          loop let corner: Int in List(Int) { 0, 1, 2, 3 } {
+            let x: Int = quad.x + 1 + (corner % 2) * (quad.w - 3)
+            let y: Int = quad.y + 1 + (corner / 2) * (quad.h - 3)
+            # a corner inside a neighbor's quad may hold that letter's ink
+            if inOtherQuad(quads: quads, x: x, y: y) > 1 {
+              continue
+            }
+            corners = corners + 1
+            if alphaAt(bytes: bytes, x: x, y: y) >= 64 {
+              filledCorners = filledCorners + 1
+            }
+          }
+          loop var y: Int = quad.y, y < quad.y + quad.h, ++y {
+            loop var x: Int = quad.x, x < quad.x + quad.w, ++x {
+              if alphaAt(bytes: bytes, x: x, y: y) >= 128 {
+                inked = inked + 1
+              }
+            }
+          }
+        }
+        log(
+          "{quads.length} glyph quads: {filledCorners} of {corners} quad corners filled, {inked} pixels inked"
+        )
+        passed = filledCorners is 0 and corners > 0 and inked > 0
+      } else {
+        passed = false
+      }
+    }
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if not passed {
+    log("FAIL: an outline past the font's range filled its glyph boxes, or nothing was drawn")
+    ret 1
+  }
+  log("TEXT OUTLINE RANGE OK: no box round the letters, the outline thinned to the range")
+  ret 0
+}

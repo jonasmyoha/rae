@@ -205,8 +205,17 @@ func paintTextG(
     chain255: chain255
     scale: wt.scale.x * canvasPixelsPerUnit(canvas: canvas)
   )
+  let pixelsPerUnit: Float = Math.abs(value: wt.scale.x) * canvasPixelsPerUnit(canvas: canvas)
   if t.wrapWidthMode is WrapWidthMode.nodeWidth {
     let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+    warnTextRange(
+      canvas: canvas
+      font: res.textFont
+      styleId: t.styleId
+      emPixels: size * pixelsPerUnit
+      outlinePixels: outline.width
+      softnessPixels: 0.0
+    )
     if outline.width > 0.0 {
       Gpu2dText.drawTextWrappedEx(
         canvas: canvas
@@ -290,6 +299,18 @@ func paintTextG(
       }
     }
   }
+  var shadowSoftness: Float = 0.0
+  if hasShadow {
+    shadowSoftness = shSoft
+  }
+  warnTextRange(
+    canvas: canvas
+    font: res.textFont
+    styleId: t.styleId
+    emPixels: size * pixelsPerUnit
+    outlinePixels: outline.width
+    softnessPixels: shadowSoftness
+  )
   if outline.width > 0.0 {
     # The shadow (of the outlined glyphs), the outline, then the glyphs
     if hasShadow {
@@ -715,4 +736,59 @@ func middleCutText(
     }
   }
   ret "{text.sub(start: 0, len: head)}{dots}{text.sub(start: tail, len: text.length() - tail)}"
+}
+
+# A font's atlas carries a distance of half its distanceRange outside each glyph, at its bake size
+# (px per em); drawn smaller, proportionally less. An outline (and a shadow's softness) past that
+# fills the glyph's whole box, so the shader thins it to fit, and this says, once per style and
+# font, which distanceRange the style needs: pxRange >= (2 x outline + softness) x bakeSize / the
+# drawn em, in pixels, softness at least 1 (docs/ui-scene-format.md "Text outlines"). The
+# distanceRange it needs, 0 when the font's is enough or the style has neither.
+func textRangeNeeded(
+  font: view SdfFont
+  emPixels: view Float
+  outlinePixels: view Float
+  softnessPixels: view Float
+) ret Float {
+  let outline: Float = Math.max(a: outlinePixels, b: 0.0)
+  let softness: Float = Math.max(a: softnessPixels, b: 1.0)
+  if (outline <= 0.0 and softness <= 1.0) or font.bakeSize <= 0.0 or emPixels <= 0.0 {
+    ret 0.0
+  }
+  # the shader's limit (gpu2d_text.wgsl): the range in drawn pixels holds 2 x outline + softness
+  let needed: Float = (2.0 * outline + softness) * font.bakeSize / emPixels
+  if font.pxRange >= needed {
+    ret 0.0
+  }
+  ret needed
+}
+
+func warnTextRange(
+  canvas: mod Gpu2dCanvas
+  font: view SdfFont
+  styleId: view String
+  emPixels: view Float
+  outlinePixels: view Float
+  softnessPixels: view Float
+) {
+  let needed: Float = textRangeNeeded(
+    font: font
+    emPixels: emPixels
+    outlinePixels: outlinePixels
+    softnessPixels: softnessPixels
+  )
+  if needed <= 0.0 {
+    ret
+  }
+  let key: String = "{styleId}|{font.jsonPath}"
+  loop let known: view String in canvas.textRangeWarnings {
+    if known is key {
+      ret
+    }
+  }
+  canvas.textRangeWarnings.add(value: key)
+  let rebake: Int = Math.ceil(x: needed).toInt()
+  log(
+    "[text] style '{styleId}' at {Math.round(x: emPixels)} px with a {outlinePixels} px outline and a softness of {softnessPixels} px needs an atlas distanceRange of {rebake} or more; the font {font.jsonPath} has {font.pxRange} (baked at {font.bakeSize} px per em): rebake it with -pxrange {rebake}; until then the outline is thinned to what the range carries"
+  )
 }

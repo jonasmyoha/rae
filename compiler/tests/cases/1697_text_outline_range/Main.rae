@@ -1,0 +1,81 @@
+# A text outline wider than its font's distance range carries (ui/RenderSystem RenderText
+# warnTextRange): a 32 px label (a 16 point label at 2x) with a 2 px outline on an atlas baked at
+# 48 px per em needs a distanceRange of (2 x 2 + 1) x 48 / 32 = 7.5. With range 4 the renderer logs
+# once which range it needs (a second frame logs nothing more); with range 12 it logs nothing.
+# The shader thins such an outline to what the range carries (checks/uiTextOutlineRange looks at
+# the pixels).
+import SdfText
+import Gpu2d
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "labels",
+    "root": "Page",
+    "palette": { "brown": { "r": 96, "g": 52, "b": 20, "a": 255 } },
+    "outline": { "thin": { "color": "brown", "width": 2 } },
+    "text": { "label": { "size": 32, "outline": "thin" }, "plain": { "size": 32 } },
+    "nodes": {
+      "Page": { "Rect": { "x": 0, "y": 0, "w": 600, "h": 400 }, "Children": ["Coins", "Score", "Plain"] },
+      "Coins": { "Rect": { "x": 20, "y": 20, "w": 200, "h": 40 }, "Text": { "text": "Coins", "styleId": "label" } },
+      "Score": { "Rect": { "x": 20, "y": 80, "w": 200, "h": 40 }, "Text": { "text": "Score", "styleId": "label" } },
+      "Plain": { "Rect": { "x": 20, "y": 140, "w": 200, "h": 40 }, "Text": { "text": "Plain", "styleId": "plain" } }
+    }
+  }"#
+}
+
+func frames(range: view Float) {
+  log("distanceRange {range}:")
+  let scene: Scene = parseScene(source: sceneText())
+  var resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  resources.textFont.pxRange = range
+  Gpu2d.setDesignResolution(width: 600.0, height: 400.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  loop var frame: Int = 0, frame < 2, ++frame {
+    runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+    clipReset(canvas: canvas)
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: resources
+      canvas: canvas
+    )
+  }
+  log("  said {canvas.textRangeWarnings.length} time(s)")
+}
+
+func main() {
+  frames(range: 4.0)
+  frames(range: 12.0)
+}
