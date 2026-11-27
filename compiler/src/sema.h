@@ -27,14 +27,9 @@ TypeInfo* sema_resolve_type(CompilerContext* ctx, AstTypeRef* type_ref);
  * arguments), for code that needs the spelling, not just the TypeInfo */
 AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t);
 bool sema_own_argument_error(const AstFuncDecl* fd, const AstParam* param, const AstExpr* value, char* out, size_t size);
-void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* module, const char* file,
-                                    const AstFuncDecl* fd, const AstBlock* body,
-                                    const AstIdentifierPart* generic_params, const AstTypeRef* generic_args,
-                                    const AstExpr* const* moved_values, size_t moved_value_count);
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p);
 bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args);
-bool sema_generic_instances_emitted(void);
 const AstFuncDecl* sema_backend_instance_decl(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args);
 const AstFuncDecl* sema_find_instance_decl(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args);
 

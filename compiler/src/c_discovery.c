@@ -18,11 +18,10 @@
 #include <stdlib.h>
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr);
-bool c_discovery_registers_instances(void);
-
-/* An instance discovery found: registered only in the old way (the instances are sema's) */
+/* An instance discovery found: not registered, the instances are sema's
+ * (docs/generic-instances-design.md step 7); discovery collects types */
 static void discovery_register_instance(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* args) {
-    if (c_discovery_registers_instances()) register_function_specialization(ctx, decl, args);
+    (void)ctx; (void)decl; (void)args;
 }
 static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt* stmt);
 
@@ -895,20 +894,10 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
 
 /* The instances the C has are sema's (its registry, docs/generic-instances-design.md
  * step 7), registered first; discovery's walk only collects the types their bodies and
- * the program's functions use. Since 0.4.132 by default; RAE_DISCOVERY_INSTANCES=1 is
- * the way back for one version (discovery registers the instances it finds, too). */
-bool c_discovery_registers_instances(void) {
-    static int on = -1;
-    if (on < 0) {
-        const char* value = getenv("RAE_DISCOVERY_INSTANCES");
-        on = value && strcmp(value, "1") == 0;
-    }
-    return on == 1 || !sema_generic_instances_emitted();
-}
-
+ * the program's functions use. */
 void collect_type_refs_module(CompilerContext* ctx) {
     size_t last_generic_count = 0; size_t last_func_count = 0;
-    if (!c_discovery_registers_instances()) c_register_sema_instances(ctx);
+    c_register_sema_instances(ctx);
     /* Progress: the run's window is split by halving — the first walk gets
      * half of it, the next a quarter, and so on — since how many walks it
      * takes to reach the fixpoint is not known up front. */

@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.133, 2026-11-27: the template way of generic instances removed
+
+- `RAE_GENERIC_INSTANCES` and `RAE_DISCOVERY_INSTANCES` are gone: every instance of a generic function is written
+  from the copy sema analyzed, and the C has sema's instances (docs/generic-instances-design.md step 8). The
+  pre-suite stage that kept the old way working is removed with it.
+
 ## 0.4.132, 2026-11-27: the C from sema's instances by default; a list literal's own add
 
 - The backend builds the C from the instances the compiler decided, by default; its own search only collects

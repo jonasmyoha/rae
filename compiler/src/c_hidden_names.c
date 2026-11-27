@@ -191,9 +191,8 @@ static void walk_block(Hider* h, AstBlock* block) {
 }
 
 void c_rename_hidden_names(CompilerContext* ctx, AstFuncDecl* func) {
-  /* An instance is a full copy of its template (ast_clone.c); it is what the C is
-   * emitted from only with RAE_GENERIC_INSTANCES=1 */
-  if (!func->body || (func->specialization_args && !sema_generic_instances_emitted())) return;
+  /* (an instance is a full copy of its template, ast_clone.c, and what the C is emitted from) */
+  if (!func->body) return;
   Hider h = { .ctx = ctx };
   for (AstParam* p = func->params; p; p = p->next) bind_name(&h, &p->name);
   walk_block(&h, func->body);

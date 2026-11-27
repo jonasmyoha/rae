@@ -772,7 +772,7 @@ void wait_graph_walk_all(WaitGraph* graph) {
       walk.bindings.args = graph->nodes[i].concrete_args;
       /* the instance's analyzed clone, where sema made one: its calls carry the
        * instances sema decided (edge_to_instance), its types are written out */
-      if (sema_generic_instances_emitted()) {
+      {
         const AstFuncDecl* clone = sema_find_instance_decl(graph->ctx, func, graph->nodes[i].concrete_args);
         if (clone && clone->body) body = clone->body;
       }

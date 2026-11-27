@@ -1444,16 +1444,6 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             case AST_UNARY_POST_DEC: emit_expr(ctx, expr->as.unary.operand, out, PREC_UNARY, true, false); fprintf(out, "--"); break;
             case AST_UNARY_SPAWN: {
                 const AstExpr* callexpr = expr->as.unary.operand;
-                /* With RAE_GENERIC_INSTANCES=0 a generic function's body is compiled from its
-                 * template, whose spawns have no types to pack arguments or read a result by;
-                 * an instance's clone (the default) has them */
-                if (ctx->generic_params) {
-                    diag_error(c_source_file(ctx), (int)expr->line, (int)expr->column,
-                               "a spawn inside a generic function needs instances written from their clones; "
-                               "unset RAE_GENERIC_INSTANCES=0");
-                    fprintf(out, "NULL");
-                    break;
-                }
                 // A spawn inside a taskScope that lends views (c_lend.c)
                 if (expr->as.unary.spawn_lends && c_lend_emit_spawn(ctx, expr, out)) break;
                 TypeInfo* resT = (expr->resolved_type && expr->resolved_type->kind == TYPE_TASK)

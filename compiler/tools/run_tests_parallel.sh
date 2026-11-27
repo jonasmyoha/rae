@@ -184,17 +184,6 @@ if [ -f tools/typeMatrix.py ]; then
   stage_time "tools/typeMatrix.py" "$stage_start"
   echo
 fi
-# The way back, RAE_GENERIC_INSTANCES=0 (instances written from their templates,
-# kept for one version): the cases that declare a generic function and the type
-# matrix with it (tools/generic-instances-stage.sh, docs/generic-instances-design.md
-# step 6).
-GENERIC_INSTANCES_CHECK=1
-if [ -f tools/generic-instances-stage.sh ]; then
-  stage_start=$(date +%s)
-  if bash tools/generic-instances-stage.sh; then GENERIC_INSTANCES_CHECK=0; fi
-  stage_time "tools/generic-instances-stage.sh" "$stage_start"
-  echo
-fi
 # lib/'s `when` branches type-checked for every real target
 # (tools/check-targets.sh, docs/platform-conditional-code.md §3.4).
 TARGETS_CHECK=1
@@ -273,7 +262,6 @@ if [ "$STRESS_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1
 if [ "$TSAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$REALTIME_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$TYPE_MATRIX" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
-if [ "$GENERIC_INSTANCES_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$ASAN_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$FLOAT8_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi
 if [ "$BENCH_CHECK" = "0" ]; then PASSED=$((PASSED+1)); else FAILED=$((FAILED+1)); fi

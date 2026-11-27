@@ -2760,18 +2760,19 @@ const AstFuncDecl* c_list_literal_function(CompilerContext* ctx, const char* nam
   return found;
 }
 
-/* RAE_GENERIC_INSTANCES=1 (docs/generic-instances-design.md step 5): the analyzed
- * clone of the instance of `f` for `args`, whose prototype and body are written as a
- * plain function's, with no type parameters; NULL when off, or when sema has none */
+/* The analyzed clone of the instance of `f` for `args` (docs/generic-instances-design.md),
+ * whose prototype and body are written as a plain function's, with no type parameters;
+ * NULL when sema has none (an extern) */
 static const AstFuncDecl* c_instance_clone(CompilerContext* ctx, const AstFuncDecl* f, const AstTypeRef* args) {
-  if (!sema_generic_instances_emitted() || !f || f->is_extern) return NULL;
+  if (!f || f->is_extern) return NULL;
   const AstFuncDecl* generic = f->generic_template && f->generic_template->kind == AST_DECL_FUNC
       ? &f->generic_template->as.func_decl : f;
   return sema_backend_instance_decl(ctx, generic, args);
 }
 
-/* The prototype of the instance of `f` for `args` (its results type first): from its
- * analyzed clone with RAE_GENERIC_INSTANCES=1, else from the template */
+/* The prototype of the instance of `f` for `args` (its results type first), from its
+ * analyzed clone; one with no clone (sema makes one for every body) keeps the
+ * template's, with its type arguments */
 static void emit_specialization_prototype(CompilerContext* ctx, const AstModule* module, const AstFuncDecl* f,
                                           const AstTypeRef* args, FILE* out) {
   const char* mangled = rae_mangle_specialized_function(ctx, f, args);
@@ -2867,16 +2868,20 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   /* analyzed as a function is, for its errors (docs/generic-instances-design.md) */
   if (!sema_check_backend_instance(ctx, f->generic_template ? &f->generic_template->as.func_decl : f, args))
     g_instance_errors++;
-  /* RAE_GENERIC_INSTANCES=1: written from the analyzed clone, as a plain function */
+  /* written from the analyzed clone, as a plain function (docs/generic-instances-design.md) */
   const AstFuncDecl* clone = c_instance_clone(ctx, f, args);
-  if (clone) {
-    f = clone;
-    tctx.func_decl = clone;
-    gp_src = NULL;
-    tctx.generic_params = NULL;
-    tctx.generic_args = NULL;
-    rt = c_return_type(&tctx, f);
+  if (!clone) {
+    /* sema makes every instance a body is emitted for: none is a compiler fault */
+    diag_error(c_source_file(&tctx), (int)f->body->first->line, 0, "internal: an instance with no analyzed clone");
+    g_instance_errors++;
+    return true;
   }
+  f = clone;
+  tctx.func_decl = clone;
+  gp_src = NULL;
+  tctx.generic_params = NULL;
+  tctx.generic_args = NULL;
+  rt = c_return_type(&tctx, f);
   // A container drop whose elements are containers calls the ELEMENT
   // container's drop per element (Layer 5 below). That drop may be emitted
   // later or not be forward-declared yet (a `List(List(Point))` made with
@@ -3055,24 +3060,11 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   if (body_stream) out = body_stream;
   else fprintf(out, "  int __rae_spm_func = rae_string_pool_mark();\n");
   tctx.func_may_pool = false;
-  // #773: compile-time field reflection through a generic world parameter. If
-  // this specialization's body contains a `loop ... in fields(world)`, the field
-  // set depends on the concrete generic args, so expand it AFTER substitution —
-  // once per instantiation — into ordinary alias-bindings the emitter already
-  // handles. reflect_instantiate_body returns NULL for every other function, so
-  // this is inert for all non-reflection generics.
+  /* (field loops of the clone were expanded when sema analyzed it) */
   const AstBlock* body_to_emit = f->body;
-  if (!clone) {
-      AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
-      if (instantiated) body_to_emit = instantiated;
-  }
   declare_param_live_flags(&tctx, body_to_emit, out);
   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   c_forget_rejected_moves(&tctx);
-  /* a clone's moves were checked when sema analyzed it */
-  if (!clone)
-    sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
-                                   tctx.moved_values, tctx.moved_value_count);
   free(tctx.moved_values);
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);

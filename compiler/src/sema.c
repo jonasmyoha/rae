@@ -1089,13 +1089,6 @@ typedef struct LifecycleFlow {
     // names declared with a type that has a destructor (params + lets), and
     // whether the name owns the value or borrows it (`mod`)
     Str hook_names[128]; bool hook_owned[128]; int hook_count;
-    // the type arguments, when the body is a generic template checked for one
-    // specialization (sema_check_specialization_drops): nothing in it has a
-    // resolved type, so names are judged by their declared types, and the
-    // arguments that move a local are those the emission recorded
-    const AstIdentifierPart* generic_params;
-    const AstTypeRef* generic_args;
-    const AstExpr* const* moved_values; size_t moved_value_count;
     // the destructor call of the statement at hand that consumes its local
     const AstExpr* consuming_drop;
     FlowScope* scope;
@@ -1110,11 +1103,6 @@ typedef struct LifecycleFlow {
 static bool flow_is_hook_name(const LifecycleFlow* flow, Str name) {
     for (int i = 0; i < flow->hook_count; i++)
         if (str_eq(flow->hook_names[i], name)) return flow->hook_owned[i];
-    return false;
-}
-static bool flow_is_borrowed_name(const LifecycleFlow* flow, Str name) {
-    for (int i = 0; i < flow->hook_count; i++)
-        if (str_eq(flow->hook_names[i], name)) return !flow->hook_owned[i];
     return false;
 }
 static void flow_undeclare(LifecycleFlow* flow, Str name) {
@@ -1133,16 +1121,9 @@ static void flow_declare(LifecycleFlow* flow, Str name, const AstTypeRef* type) 
     if (!type || type->is_opt) return;
     bool owned = !type->is_view && !type->is_mod;
     Str base;
-    if (flow->generic_params) {
-        const AstTypeRef* concrete = substitute_type_ref(flow->ctx, flow->generic_params, flow->generic_args,
-                                                         (AstTypeRef*)type);
-        if (!concrete || concrete->is_opt || concrete->generic_args) return;
-        base = get_base_type_name(concrete);
-    } else {
-        if (type->generic_args) return;
-        const TypeInfo* resolved = type->resolved_type;
-        base = resolved && resolved->kind == TYPE_STRUCT ? resolved->name : get_base_type_name(type);
-    }
+    if (type->generic_args) return;
+    const TypeInfo* resolved = type->resolved_type;
+    base = resolved && resolved->kind == TYPE_STRUCT ? resolved->name : get_base_type_name(type);
     if (!find_user_drop_for(flow->ctx, base) || flow->hook_count >= 128) return;
     flow->hook_names[flow->hook_count] = name;
     flow->hook_owned[flow->hook_count++] = owned;
@@ -1174,10 +1155,6 @@ static const AstExpr* flow_destructor_target(const LifecycleFlow* flow, const As
                       || target->kind == AST_EXPR_UNBOX))
         target = target->as.unary.operand;
     if (!target) return NULL;
-    if (flow->generic_params)
-        return target->kind == AST_EXPR_IDENT
-            && (flow_is_hook_name(flow, target->as.ident) || flow_is_borrowed_name(flow, target->as.ident))
-            ? target : NULL;
     if (target->kind == AST_EXPR_OWN) return NULL;   /* an error of its own: sema_own_argument_error */
     const TypeInfo* type = target->resolved_type;
     while (type && (type->kind == TYPE_REF || type->kind == TYPE_OPT))
@@ -1256,7 +1233,7 @@ static void flow_sweep_create_args(LifecycleFlow* flow, const AstCallArg* a) {
 }
 static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
     if (!e) return;
-    if (!flow->generic_params && sema_is_pending_create(e)) {
+    if (sema_is_pending_create(e)) {
         if (!sema_create_was_attempted(e))
             flow_report(flow, e->line, e->column,
                         "'create(...)' has no expected type here; bind it ('let x: T = create(...)') or write 'T.create(...)'");
@@ -1300,11 +1277,6 @@ static void flow_sweep_create(LifecycleFlow* flow, const AstExpr* e) {
  * owns heap, takes that name out of play for the statements that follow.
  * Walks into nested calls too. A name moved twice in one statement is an
  * error here: the check before it saw the name still live. */
-static bool flow_specialization_moves(const LifecycleFlow* flow, const AstExpr* value) {
-    for (size_t i = 0; i < flow->moved_value_count; i++)
-        if (flow->moved_values[i] == value) return true;
-    return false;
-}
 static void flow_move_name(LifecycleFlow* flow, DroppedSet* set, const AstExpr* moved, GoneKind how) {
     if (!moved || moved->kind != AST_EXPR_IDENT || flow->results_only) return;
     Str name = moved->as.ident;
@@ -1314,7 +1286,7 @@ static void flow_move_name(LifecycleFlow* flow, DroppedSet* set, const AstExpr* 
 }
 /* `task.get()` of a result that owns memory moves it out: of one task, once. */
 static void flow_take_result(LifecycleFlow* flow, DroppedSet* set, const AstExpr* e) {
-    if (flow->generic_params || !str_eq_cstr(e->as.method_call.method_name, "get") || e->as.method_call.args) return;
+    if (!str_eq_cstr(e->as.method_call.method_name, "get") || e->as.method_call.args) return;
     const AstExpr* task = e->as.method_call.object;
     if (!task || task->kind != AST_EXPR_IDENT) return;
     const TypeInfo* type = task->resolved_type;
@@ -1336,7 +1308,7 @@ static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr
 static void flow_sweep_moves_args(LifecycleFlow* flow, DroppedSet* set, const AstCallArg* a) {
     for (; a; a = a->next) {
         const AstExpr* value = a->value;
-        if (value && (a->moves_local || flow_specialization_moves(flow, value))) {
+        if (value && a->moves_local) {
             const AstExpr* moved = value->kind == AST_EXPR_OWN ? value->as.unary.operand : value;
             flow_move_name(flow, set, moved, GONE_INTO_PARAMETER);
         } else {
@@ -1360,7 +1332,7 @@ static void flow_sweep_moves(LifecycleFlow* flow, DroppedSet* set, const AstExpr
             break;
         case AST_EXPR_BINARY: flow_sweep_moves(flow, set, e->as.binary.lhs); flow_sweep_moves(flow, set, e->as.binary.rhs); break;
         case AST_EXPR_OWN:
-            if (e->as.unary.moves_local || flow_specialization_moves(flow, e))
+            if (e->as.unary.moves_local)
                 flow_move_name(flow, set, e->as.unary.operand, GONE_BY_OWN);
             else flow_sweep_moves(flow, set, e->as.unary.operand);
             break;
@@ -1429,7 +1401,7 @@ static void flow_run_defers(LifecycleFlow* flow, const FlowScope* scope, Dropped
  * must be of a type that can be copied. */
 static void flow_check_handed_over(LifecycleFlow* flow, const FlowScope* scope, const AstExpr* value) {
     while (value && value->kind == AST_EXPR_BOX) value = value->as.unary.operand;
-    if (!value || value->kind != AST_EXPR_IDENT || flow->generic_params) return;
+    if (!value || value->kind != AST_EXPR_IDENT) return;
     TypeInfo* type = value->resolved_type;
     if (type && type->kind == TYPE_OPT) type = type->as.opt.base;
     if (!type || type->kind == TYPE_REF) return;
@@ -1666,21 +1638,6 @@ static void sema_lifecycle_post_pass(CompilerContext* ctx, AstModule* module, co
     flow_function(&flow, fd, fd->body);
 }
 
-/* The same check for one specialization of a generic function: c_backend.c
- * emits it from the template, whose body sema has not analyzed for these
- * arguments. `moved_values` are the argument values the emission found to
- * move a local into an `own` parameter. */
-void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* module, const char* file,
-                                    const AstFuncDecl* fd, const AstBlock* body,
-                                    const AstIdentifierPart* generic_params, const AstTypeRef* generic_args,
-                                    const AstExpr* const* moved_values, size_t moved_value_count) {
-    if (!body || !generic_params || !generic_args) return;
-    LifecycleFlow flow = {0};
-    flow.ctx = ctx; flow.module = (AstModule*)module; flow.file = file;
-    flow.generic_params = generic_params; flow.generic_args = generic_args;
-    flow.moved_values = moved_values; flow.moved_value_count = moved_value_count;
-    flow_function(&flow, fd, body);
-}
 
 // Defined further down (near the statement analyzer); used earlier by the
 // module-level global/const decl analysis.
@@ -12763,18 +12720,6 @@ static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, Type
     module->had_error = true;
 }
 
-/* The backend writes an instance's C from its analyzed clone (docs/generic-instances-design.md
- * steps 5 and 6), since 0.4.128 by default. RAE_GENERIC_INSTANCES=0 is the way back to the
- * template for one version. */
-bool sema_generic_instances_emitted(void) {
-    static int on = -1;
-    if (on < 0) {
-        const char* value = getenv("RAE_GENERIC_INSTANCES");
-        on = !(value && strcmp(value, "0") == 0);
-    }
-    return on == 1;
-}
-
 /* The template's types of `args`, resolved in the module; 0 when one is unknown or a parameter */
 static size_t sema_backend_instance_types(CompilerContext* ctx, const AstTypeRef* args, TypeInfo** types) {
     size_t count = 0;
@@ -12799,13 +12744,7 @@ bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generi
     AstModule* module = s_current_module;
     SymbolTable* symbols = s_lifecycle_symbols;
     if (!module || !symbols) return true;
-    static int wanted = -1;
-    if (wanted < 0) {
-        const char* value = getenv("RAE_CHECK_INSTANCES");
-        wanted = !value || strcmp(value, "0") != 0;
-    }
-    /* emitted from its clone, an instance is analyzed even with the check off */
-    if (!wanted && !sema_generic_instances_emitted()) return true;
+    /* (an instance is emitted from its analyzed clone: it is analyzed, always) */
     AstDecl* generic_decl = (AstDecl*)((const char*)generic - offsetof(AstDecl, as.func_decl));
     TypeInfo* types[16];
     size_t count = sema_backend_instance_types(ctx, args, types);
