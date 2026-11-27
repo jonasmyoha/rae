@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.125, 2026-11-27: generic instances written from their analyzed clones, behind a switch
+
+- `RAE_GENERIC_INSTANCES=1` writes each instance of a generic function (its prototype and body) from the clone
+  sema analyzed, as a plain function, instead of from the template with its type parameters substituted
+  (docs/generic-instances-design.md step 5). Off by default; nothing changes without it. With it, 1395 of 1415
+  cases pass, a spawn inside a generic function and `Array(T, cap: 2)` in one compile, and the type matrix fails
+  for one type only. A new pre-suite stage (`tools/generic-instances-stage.sh`) runs the cases that declare a
+  generic function and the type matrix with the switch, against lists of known failures that only get shorter.
+- The instance prototypes come from one function, and `enumFromName` / `enumName` / `enumMembers` /
+  `enumCount` accept a type written out as a call.
+
 ## 0.4.124, 2026-11-27: HTTP requests with a method and a body; game proto4's requests released
 
 - `lib/net/HttpGet`: `httpRequest(method:, url:, headers:, body: List(UInt8), timeoutMs:)` and

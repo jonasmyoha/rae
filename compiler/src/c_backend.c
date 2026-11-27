@@ -1464,6 +1464,23 @@ static const AstTypeRef* infer_tr_from_resolved(CFuncContext* ctx, const TypeInf
     return tr;
 }
 
+// The type the first argument of enumFromName, enumName, enumMembers and enumCount
+// names: a name, or a type written out in an instance (`List(Int)`). Arena-allocated.
+static AstTypeRef* c_enum_call_type_ref(CFuncContext* ctx, const AstExpr* te) {
+    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+    memset(tr, 0, sizeof *tr);
+    if (te->kind != AST_EXPR_IDENT) {
+        AstTypeRef* written = try_as_type_arg(ctx, te);
+        if (written) { *tr = *written; tr->next = NULL; return tr; }
+    }
+    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
+    memset(tr->parts, 0, sizeof *tr->parts);
+    tr->parts->text = te->kind == AST_EXPR_IDENT ? te->as.ident
+        : (te->kind == AST_EXPR_CALL && te->as.call.callee && te->as.call.callee->kind == AST_EXPR_IDENT
+           ? te->as.call.callee->as.ident : (Str){0});
+    return tr;
+}
+
 // #960: is `expr` the intrinsic call `enumFromName(E, name: s)`? Returns the
 // enum-type identifier expression (E) or NULL.
 const AstExpr* c_call_enum_from_name_type(const AstExpr* expr) {
@@ -1471,7 +1488,8 @@ const AstExpr* c_call_enum_from_name_type(const AstExpr* expr) {
         || expr->as.call.callee->kind != AST_EXPR_IDENT
         || !str_eq_cstr(expr->as.call.callee->as.ident, "enumFromName")) return NULL;
     const AstCallArg* ta = expr->as.call.args;
-    if (!ta || !ta->next || ta->next->next || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    if (!ta || !ta->next || ta->next->next || !ta->value
+        || (ta->value->kind != AST_EXPR_IDENT && !ta->value->is_written_out)) return NULL;
     return ta->value;
 }
 
@@ -1480,11 +1498,7 @@ const AstExpr* c_call_enum_from_name_type(const AstExpr* expr) {
 const AstTypeRef* c_call_enum_from_name_opt_type(CFuncContext* ctx, const AstExpr* expr) {
     const AstExpr* te = c_call_enum_from_name_type(expr);
     if (!te) return NULL;
-    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-    memset(tr, 0, sizeof *tr);
-    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
-    memset(tr->parts, 0, sizeof *tr->parts);
-    tr->parts->text = te->as.ident;
+    AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (sub && sub != tr) {
         AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
@@ -1501,7 +1515,8 @@ const AstExpr* c_call_enum_name_type(const AstExpr* expr) {
         || expr->as.call.callee->kind != AST_EXPR_IDENT
         || !str_eq_cstr(expr->as.call.callee->as.ident, "enumName")) return NULL;
     const AstCallArg* ta = expr->as.call.args;
-    if (!ta || !ta->next || ta->next->next || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    if (!ta || !ta->next || ta->next->next || !ta->value
+        || (ta->value->kind != AST_EXPR_IDENT && !ta->value->is_written_out)) return NULL;
     return ta->value;
 }
 
@@ -1509,11 +1524,7 @@ const AstExpr* c_call_enum_name_type(const AstExpr* expr) {
 const AstTypeRef* c_call_enum_name_enum_type(CFuncContext* ctx, const AstExpr* expr) {
     const AstExpr* te = c_call_enum_name_type(expr);
     if (!te) return NULL;
-    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-    memset(tr, 0, sizeof *tr);
-    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
-    memset(tr->parts, 0, sizeof *tr->parts);
-    tr->parts->text = te->as.ident;
+    AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (sub && sub != tr) {
         AstTypeRef* copy = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
@@ -1541,7 +1552,8 @@ static const AstExpr* c_call_enum_unary_type(const AstExpr* expr, const char* na
         || expr->as.call.callee->kind != AST_EXPR_IDENT
         || !str_eq_cstr(expr->as.call.callee->as.ident, name)) return NULL;
     const AstCallArg* ta = expr->as.call.args;
-    if (!ta || ta->next || ta->name.len != 0 || !ta->value || ta->value->kind != AST_EXPR_IDENT) return NULL;
+    if (!ta || ta->next || ta->name.len != 0 || !ta->value
+        || (ta->value->kind != AST_EXPR_IDENT && !ta->value->is_written_out)) return NULL;
     return ta->value;
 }
 // Is `expr` the intrinsic call `equals(a: x, b: y)`? Returns the `a` argument
@@ -1565,11 +1577,7 @@ const AstExpr* c_call_enum_count_type(const AstExpr* expr) { return c_call_enum_
 Str c_call_enum_query_name(CFuncContext* ctx, const AstExpr* te) {
     Str empty = {0};
     if (!te) return empty;
-    AstTypeRef* tr = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
-    memset(tr, 0, sizeof *tr);
-    tr->parts = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstIdentifierPart));
-    memset(tr->parts, 0, sizeof *tr->parts);
-    tr->parts->text = te->as.ident;
+    AstTypeRef* tr = c_enum_call_type_ref(ctx, te);
     AstTypeRef* sub = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, tr);
     if (sub) tr = sub;
     Str name = get_base_type_name(tr);
@@ -2573,6 +2581,33 @@ const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
   return NULL;
 }
 
+/* RAE_GENERIC_INSTANCES=1 (docs/generic-instances-design.md step 5): the analyzed
+ * clone of the instance of `f` for `args`, whose prototype and body are written as a
+ * plain function's, with no type parameters; NULL when off, or when sema has none */
+static const AstFuncDecl* c_instance_clone(CompilerContext* ctx, const AstFuncDecl* f, const AstTypeRef* args) {
+  if (!sema_generic_instances_emitted() || !f || f->is_extern) return NULL;
+  const AstFuncDecl* generic = f->generic_template && f->generic_template->kind == AST_DECL_FUNC
+      ? &f->generic_template->as.func_decl : f;
+  return sema_backend_instance_decl(ctx, generic, args);
+}
+
+/* The prototype of the instance of `f` for `args` (its results type first): from its
+ * analyzed clone with RAE_GENERIC_INSTANCES=1, else from the template */
+static void emit_specialization_prototype(CompilerContext* ctx, const AstModule* module, const AstFuncDecl* f,
+                                          const AstTypeRef* args, FILE* out) {
+  const char* mangled = rae_mangle_specialized_function(ctx, f, args);
+  const AstIdentifierPart* gp = f->generic_params;
+  if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
+    gp = f->generic_template->as.func_decl.generic_params;
+  CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
+  const AstFuncDecl* clone = c_instance_clone(ctx, f, args);
+  if (clone) { f = clone; tctx.generic_params = NULL; tctx.generic_args = NULL; tctx.func_decl = clone; }
+  c_emit_results_type(&tctx, f, out);
+  fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
+  emit_param_list(&tctx, f->params, out, false);
+  fprintf(out, ")%s;\n", c_effect_attribute(f));
+}
+
 /* Prototype every specialization registered from `*prototyped` on. A body
  * emitted into a buffer can register new specializations (the first use of a
  * function inside a generic one); their prototypes must reach the output
@@ -2584,15 +2619,7 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
     const AstTypeRef* args = ctx->specialized_funcs[*prototyped].concrete_args;
     (*prototyped)++;
     if (f->is_extern) continue;
-    const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-    const AstIdentifierPart* gp = f->generic_params;
-    if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC)
-      gp = f->generic_template->as.func_decl.generic_params;
-    CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-    c_emit_results_type(&tctx, f, out);
-    fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled);
-    emit_param_list(&tctx, f->params, out, false);
-    fprintf(out, ")%s;\n", c_effect_attribute(f));
+    emit_specialization_prototype(ctx, module, f, args, out);
   }
 }
 
@@ -2631,6 +2658,16 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   /* analyzed as a function is, for its errors (docs/generic-instances-design.md) */
   if (!sema_check_backend_instance(ctx, f->generic_template ? &f->generic_template->as.func_decl : f, args))
     g_instance_errors++;
+  /* RAE_GENERIC_INSTANCES=1: written from the analyzed clone, as a plain function */
+  const AstFuncDecl* clone = c_instance_clone(ctx, f, args);
+  if (clone) {
+    f = clone;
+    tctx.func_decl = clone;
+    gp_src = NULL;
+    tctx.generic_params = NULL;
+    tctx.generic_args = NULL;
+    rt = c_return_type(&tctx, f);
+  }
   // A container drop whose elements are containers calls the ELEMENT
   // container's drop per element (Layer 5 below). That drop may be emitted
   // later or not be forward-declared yet (a `List(List(Point))` made with
@@ -2816,15 +2853,17 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
   // handles. reflect_instantiate_body returns NULL for every other function, so
   // this is inert for all non-reflection generics.
   const AstBlock* body_to_emit = f->body;
-  {
+  if (!clone) {
       AstBlock* instantiated = reflect_instantiate_body(ctx, m, f->body, f->params, gp_src, args);
       if (instantiated) body_to_emit = instantiated;
   }
   declare_param_live_flags(&tctx, body_to_emit, out);
   if (body_to_emit) { for (AstStmt* s = body_to_emit->first; s; s = s->next) emit_stmt(&tctx, s, out); }
   c_forget_rejected_moves(&tctx);
-  sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
-                                 tctx.moved_values, tctx.moved_value_count);
+  /* a clone's moves were checked when sema analyzed it */
+  if (!clone)
+    sema_check_specialization_flow(ctx, m, c_source_file(&tctx), f, body_to_emit, gp_src, args,
+                                   tctx.moved_values, tctx.moved_value_count);
   free(tctx.moved_values);
   emit_implicit_drops_for_body(&tctx, out, first_let_idx);
   emit_implicit_drops_for_own_params(&tctx, out, first_let_idx);
@@ -4932,12 +4971,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   for (size_t i = 0; i < ctx->specialized_func_count; i++) {
       const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
       if (f->is_extern) continue;
-      const char* mangled = rae_mangle_specialized_function(ctx, f, args);
-      const AstIdentifierPart* gp = f->generic_params;
-      if (!gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) gp = f->generic_template->as.func_decl.generic_params;
-      CFuncContext tctx = {.compiler_ctx = ctx, .module = module, .generic_params = gp, .generic_args = args};
-      c_emit_results_type(&tctx, f, out);
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&tctx, f), mangled); emit_param_list(&tctx, f->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(f));
+      emit_specialization_prototype(ctx, module, f, args, out);
   }
   
   // #961: the `T.default()` bodies, declared above; here, after the module
@@ -5105,11 +5139,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       const AstFuncDecl* pf = ctx->specialized_funcs[i].decl;
       const AstTypeRef* pa = ctx->specialized_funcs[i].concrete_args;
       if (pf->is_extern) continue;
-      const char* pm = rae_mangle_specialized_function(ctx, pf, pa);
-      const AstIdentifierPart* pgp = pf->generic_params;
-      if (!pgp && pf->generic_template && pf->generic_template->kind == AST_DECL_FUNC) pgp = pf->generic_template->as.func_decl.generic_params;
-      CFuncContext ptctx = {.compiler_ctx = ctx, .module = module, .generic_params = pgp, .generic_args = pa};
-      fprintf(out, "RAE_UNUSED static %s %s(", c_return_type(&ptctx, pf), pm); emit_param_list(&ptctx, pf->params, out, false); fprintf(out, ")%s;\n", c_effect_attribute(pf));
+      emit_specialization_prototype(ctx, module, pf, pa, out);
   }
   {
       size_t emitted_idx = 0;

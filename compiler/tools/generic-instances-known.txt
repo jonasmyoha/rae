@@ -1,0 +1,30 @@
+# Cases that fail with RAE_GENERIC_INSTANCES=1 (an instance's C written from its analyzed clone,
+# docs/generic-instances-design.md step 5), one case a line with its cause. The list only gets
+# shorter: tools/generic-instances-stage.sh fails on a case that passes and is still listed.
+# An optional type parameter stays its name `T` in the clone (an optional has no spelling as an
+# expression), and the backend, without type parameters, cannot resolve it: sizeof(T), T.default(),
+# List.create(V, ...), a `view T` that is an optional
+1619_generic_let_owns  # T.default() of a struct in an instance
+1631_list_of_tasks_removed  # createStringMap(V) of an optional V
+1645_is_between_optionals  # a view of an optional T passed as a view of its value
+1666_call_result_not_kept  # T.default() in lib/core/List.rae
+1668_optional_into_generic  # a view of an optional T passed as a view of its value
+1671_array_that_owns_memory  # sizeof(T) of an optional T
+1678_array_text_and_is  # sizeof(T) of an optional T
+887_tostring_generic  # a view of an optional T passed as a view of its value
+# A map's entry type (rae_StringMapEntry_V, rae_IntMapEntry_V) is not collected for an instance
+1651_map_of_optionals  # StringMapEntry of an optional
+1652_map_of_optional_tasks  # StringMapEntry of an optional Task
+1654_map_text_and_is  # IntMapEntry
+1655_enum_and_array_in_generics  # StringMapEntry
+# A type the backend spells empty (`rae_`): a type argument it cannot name in the clone
+1646_generic_mod_number  # a mod of a number type argument
+1681_loop_over_generic_call  # Pair(T) of a loop over a generic call
+846_decode_field  # a field's type in a decoder
+864_reflect_list_field_populate  # a List field's element type in a field loop
+# A `view List` in text or `is`: a pointer in a plain function, a value in a template
+889_equals  # equals() of two List views
+1676_local_hides_outer  # a List view's member
+# A leak at exit
+1574_name_order  # 49999 Strings
+1602_alias_call_taken_copies  # 4 Strings

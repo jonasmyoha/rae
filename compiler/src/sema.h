@@ -34,6 +34,8 @@ void sema_check_specialization_flow(CompilerContext* ctx, const AstModule* modul
 AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* generic_params, const AstTypeRef* concrete_args, const AstTypeRef* type);
 AstIdentifierPart* clone_parts(CompilerContext* ctx, const AstIdentifierPart* p);
 bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args);
+bool sema_generic_instances_emitted(void);
+const AstFuncDecl* sema_backend_instance_decl(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args);
 
 // #773 compile-time field reflection through a generic world parameter. When a
 // generic function's body contains a `loop ... in fields(world)`, the field set

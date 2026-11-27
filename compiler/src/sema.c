@@ -12696,6 +12696,31 @@ static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, Type
     module->had_error = true;
 }
 
+/* RAE_GENERIC_INSTANCES=1: the backend writes an instance's C from its analyzed
+ * clone (docs/generic-instances-design.md step 5) instead of from the template */
+bool sema_generic_instances_emitted(void) {
+    static int on = -1;
+    if (on < 0) {
+        const char* value = getenv("RAE_GENERIC_INSTANCES");
+        on = value && strcmp(value, "1") == 0;
+    }
+    return on == 1;
+}
+
+/* The template's types of `args`, resolved in the module; 0 when one is unknown or a parameter */
+static size_t sema_backend_instance_types(CompilerContext* ctx, const AstTypeRef* args, TypeInfo** types) {
+    size_t count = 0;
+    for (const AstTypeRef* a = args; a && count < 16; a = a->next) {
+        AstTypeRef one = *a;
+        one.next = NULL;
+        types[count] = a->resolved_type ? a->resolved_type
+                                        : sema_resolve_type_internal(ctx, s_current_module, s_lifecycle_symbols, &one);
+        if (!types[count] || types[count]->kind == TYPE_GENERIC_PARAM) return 0;
+        count++;
+    }
+    return count;
+}
+
 /* An instance the C backend is about to emit from its template: analyzed as one
  * sema made (sema_analyze_instance), once, for its errors. `generic` is the
  * template; false when it made an error. */
@@ -12709,17 +12734,12 @@ bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generi
         const char* value = getenv("RAE_CHECK_INSTANCES");
         wanted = !value || strcmp(value, "0") != 0;
     }
-    if (!wanted) return true;
+    /* emitted from its clone, an instance is analyzed even with the check off */
+    if (!wanted && !sema_generic_instances_emitted()) return true;
     AstDecl* generic_decl = (AstDecl*)((const char*)generic - offsetof(AstDecl, as.func_decl));
     TypeInfo* types[16];
-    size_t count = 0;
-    for (const AstTypeRef* a = args; a && count < 16; a = a->next) {
-        AstTypeRef one = *a;
-        one.next = NULL;
-        types[count] = a->resolved_type ? a->resolved_type : sema_resolve_type_internal(ctx, module, symbols, &one);
-        if (!types[count] || types[count]->kind == TYPE_GENERIC_PARAM) return true;
-        count++;
-    }
+    size_t count = sema_backend_instance_types(ctx, args, types);
+    if (args && count == 0) return true;
     if (type_registry_find_specialization(ctx->type_registry, generic_decl, types, count)) return true;
     int errors = diag_error_count();
     bool saved = s_checking_backend_instances;
@@ -12731,6 +12751,21 @@ bool sema_check_backend_instance(CompilerContext* ctx, const AstFuncDecl* generi
     ctx->type_registry->specializations_for_backend = saved_for_backend;
     s_checking_backend_instances = saved;
     return diag_error_count() == errors;
+}
+
+/* The analyzed clone of the instance of `generic` (a template) for `args`, made and
+ * analyzed now when it is not there yet; NULL when it cannot be (an extern, a type
+ * argument that does not resolve) */
+const AstFuncDecl* sema_backend_instance_decl(CompilerContext* ctx, const AstFuncDecl* generic, const AstTypeRef* args) {
+    if (!generic || !generic->generic_params || !generic->body || generic->is_extern) return NULL;
+    if (!s_current_module || !s_lifecycle_symbols) return NULL;
+    sema_check_backend_instance(ctx, generic, args);
+    AstDecl* generic_decl = (AstDecl*)((const char*)generic - offsetof(AstDecl, as.func_decl));
+    TypeInfo* types[16];
+    size_t count = sema_backend_instance_types(ctx, args, types);
+    if (args && count == 0) return NULL;
+    AstDecl* spec = type_registry_find_specialization(ctx->type_registry, generic_decl, types, count);
+    return spec && spec->kind == AST_DECL_FUNC ? &spec->as.func_decl : NULL;
 }
 
 #include "sema_instances.inc"

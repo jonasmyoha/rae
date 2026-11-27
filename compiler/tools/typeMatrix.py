@@ -26,7 +26,9 @@ import tempfile
 import time
 
 COMPILER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KNOWN_FILE = os.path.join(COMPILER, "tools", "type-matrix-known.txt")
+# RAE_TYPE_MATRIX_KNOWN: another list, for a run with RAE_GENERIC_INSTANCES=1
+# (tools/type-matrix-known-instances.txt, tools/generic-instances-stage.sh)
+KNOWN_FILE = os.environ.get("RAE_TYPE_MATRIX_KNOWN") or os.path.join(COMPILER, "tools", "type-matrix-known.txt")
 RAE = os.environ.get("RAE_BIN") or os.path.join(COMPILER, "bin", "rae")
 CC = os.environ.get("RAE_ASAN_CC", "clang")
 KINDS = ("compile", "crash", "leak", "value")
@@ -484,7 +486,7 @@ def main():
     if not options.only:
         for number, program_name, name, _ in known:
             if not any(known_lines([(number, program_name, name, "")], p, f) for p in programs for f in p.functions):
-                problems.append(f"STALE: line {number} of type-matrix-known.txt names nothing")
+                problems.append(f"STALE: line {number} of {os.path.basename(KNOWN_FILE)} names nothing")
     for problem in problems:
         print(problem)
     functions = sum(len(p.functions) for p in programs)

@@ -259,7 +259,22 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    call's type instead of working it out again. The suite builds the cases with `RAE_CHECK_INSTANCES=error`, which
    fails on a difference.
 5. **Emission from instances** behind `RAE_GENERIC_INSTANCES=1`, prototypes and helpers too; the 29 cases; the suite
-   runs its cases both ways.
+   runs its cases both ways. First part done (0.4.125): with the switch, `emit_specialized_function` writes an
+   instance's prototype and body from its analyzed clone (`sema_backend_instance_decl`: the registry's clone, made and
+   analyzed when sema has none yet) as a plain function, with no type parameters in its context, and skips the
+   template-only steps (`reflect_instantiate_body`, `sema_check_specialization_flow`: sema checked the clone's moves).
+   The three loops that wrote instance prototypes are one function (`emit_specialization_prototype`), so a prototype
+   and its body come from the same place (that was the prototype's 17 "conflicting types"). `enumFromName`,
+   `enumName`, `enumMembers` and `enumCount` take a type written out as a call (`List(Int)`). Off, nothing changes.
+   On: 1395 of 1415 cases pass; the type matrix has one failing type (a StringMap of an Array) where the template
+   way has 405 known failures, the spawns in a generic function among them; and `Array(T, cap: 2)` in a generic
+   function compiles. The stage `tools/generic-instances-stage.sh` (pre-suite) runs the 93 cases that declare a
+   generic function and the listed ones with the switch against `tools/generic-instances-known.txt`, and the matrix
+   against `tools/type-matrix-known-instances.txt`; both lists only get shorter. The 20 listed cases, by cause: an
+   optional type parameter stays its name `T` in the clone, which the backend cannot resolve without type
+   parameters (8: `sizeof(T)`, `T.default()`, `List.create(V, ...)`, a `view` of an optional); a map's entry type
+   is not collected for an instance (4); a type the backend spells empty, `rae_` (4); a `view List` in text or `is`
+   (2); leaks (1574, 1602). They are the queue line `[generic instances 5b/9: the 20 listed cases]`.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the
    realtime check and the twins read the instances instead of following calls by name.
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.
