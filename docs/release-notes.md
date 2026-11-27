@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.128, 2026-11-27: generic instances written from their clones by default, a spawn in a generic function
+
+- Each instance of a generic function is written from the copy sema analyzed, by default (docs/generic-instances-design.md
+  step 6). `RAE_GENERIC_INSTANCES=0` goes back to the template for one version; a pre-suite stage keeps that way
+  working.
+- A spawn inside a generic function works (it was an error since 0.4.84). Case 1709.
+- Builds are about twice as fast: the may-wait walk looks a call's name up in an index instead of scanning every
+  declaration (CPU of `rae build --emit-c`: 106 8.3 s to 4.5 s, 121 13.2 s to 6.8 s, 136 24.5 s to 12.3 s).
+
 ## 0.4.127, 2026-11-27: every case passes with generic instances written from their clones
 
 - With `RAE_GENERIC_INSTANCES=1` every case (all 1415) and the type matrix pass; the lists of known failures are

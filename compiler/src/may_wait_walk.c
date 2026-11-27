@@ -4,6 +4,7 @@
  * becoming an edge. may_wait.c builds the nodes, solves the fixed points
  * and answers the questions; may_wait_block.c asks the same of one block. */
 #include <stddef.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -330,6 +331,71 @@ static void edge_to_decl(WalkContext* walk, const AstDecl* target, const AstCall
   }
 }
 
+/* The functions of the merged module by name, in list order: built once per
+ * module, so a call resolved by name is a lookup, not a scan of every decl (it
+ * was the largest item of a profile of 121) */
+typedef struct NamedFunctions {
+  Str name;
+  const AstDecl** decls;
+  size_t count;
+  size_t cap;
+  struct NamedFunctions* next;
+} NamedFunctions;
+
+#define NAMED_FUNCTION_BUCKETS 4096
+static const AstModule* s_named_for = NULL;
+static NamedFunctions* s_named[NAMED_FUNCTION_BUCKETS];
+
+static size_t named_bucket(Str name) {
+  uint64_t hash = 1469598103934665603ull;
+  for (size_t i = 0; i < name.len; i++) hash = (hash ^ (unsigned char)name.data[i]) * 1099511628211ull;
+  return (size_t)(hash % NAMED_FUNCTION_BUCKETS);
+}
+
+static void named_functions_reset(void) {
+  for (size_t b = 0; b < NAMED_FUNCTION_BUCKETS; b++) {
+    for (NamedFunctions* entry = s_named[b]; entry;) {
+      NamedFunctions* next = entry->next;
+      free(entry->decls);
+      free(entry);
+      entry = next;
+    }
+    s_named[b] = NULL;
+  }
+}
+
+static const NamedFunctions* named_functions(const AstModule* merged, Str name) {
+  if (s_named_for != merged) {
+    named_functions_reset();
+    s_named_for = merged;
+    for (const AstDecl* decl = merged->decls; decl; decl = decl->next) {
+      if (decl->kind != AST_DECL_FUNC) continue;
+      Str key = decl->as.func_decl.name;
+      size_t b = named_bucket(key);
+      NamedFunctions* entry = s_named[b];
+      while (entry && !str_eq(entry->name, key)) entry = entry->next;
+      if (!entry) {
+        entry = calloc(1, sizeof *entry);
+        if (!entry) continue;
+        entry->name = key;
+        entry->next = s_named[b];
+        s_named[b] = entry;
+      }
+      if (entry->count == entry->cap) {
+        size_t cap = entry->cap ? entry->cap * 2 : 4;
+        const AstDecl** grown = realloc(entry->decls, cap * sizeof *grown);
+        if (!grown) continue;
+        entry->decls = grown;
+        entry->cap = cap;
+      }
+      entry->decls[entry->count++] = decl;
+    }
+  }
+  for (const NamedFunctions* entry = s_named[named_bucket(name)]; entry; entry = entry->next)
+    if (str_eq(entry->name, name)) return entry;
+  return NULL;
+}
+
 /* A call sema left unresolved (it depends on a type parameter): resolve it
  * by name. One candidate is exact. Among several, the non-generic ones are
  * told apart by the concrete type of the first argument (the receiver of a
@@ -338,10 +404,9 @@ static void edge_by_name(WalkContext* walk, Str name, const AstCallArg* args, co
                          const AstExpr* receiver) {
   const AstDecl* candidates[64];
   size_t candidate_count = 0;
-  for (const AstDecl* decl = walk->graph->merged->decls; decl; decl = decl->next) {
-    if (decl->kind != AST_DECL_FUNC || !str_eq(decl->as.func_decl.name, name)) continue;
-    if (candidate_count < 64) candidates[candidate_count++] = decl;
-  }
+  const NamedFunctions* named = named_functions(walk->graph->merged, name);
+  for (size_t i = 0; named && i < named->count && candidate_count < 64; i++)
+    candidates[candidate_count++] = named->decls[i];
   if (candidate_count == 0) return;
   if (candidate_count == 1) {
     edge_to_decl(walk, candidates[0], args, generic_args, receiver);
@@ -652,6 +717,8 @@ bool wait_graph_is_stdlib(const WaitGraph* graph, const AstDecl* decl) {
 
 /* Walk every node not walked yet (walking adds the callees it meets) */
 void wait_graph_walk_all(WaitGraph* graph) {
+  /* the module's decls may have grown since another walk built the name index */
+  s_named_for = NULL;
   for (size_t i = 0; i < graph->count; i++) {
     if (graph->nodes[i].walked) continue;
     graph->nodes[i].walked = true;

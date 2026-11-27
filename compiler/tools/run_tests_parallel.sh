@@ -184,9 +184,10 @@ if [ -f tools/typeMatrix.py ]; then
   stage_time "tools/typeMatrix.py" "$stage_start"
   echo
 fi
-# The cases that declare a generic function, and the type matrix, with each
-# instance's C written from its analyzed clone (RAE_GENERIC_INSTANCES=1,
-# tools/generic-instances-stage.sh, docs/generic-instances-design.md step 5).
+# The way back, RAE_GENERIC_INSTANCES=0 (instances written from their templates,
+# kept for one version): the cases that declare a generic function and the type
+# matrix with it (tools/generic-instances-stage.sh, docs/generic-instances-design.md
+# step 6).
 GENERIC_INSTANCES_CHECK=1
 if [ -f tools/generic-instances-stage.sh ]; then
   stage_start=$(date +%s)

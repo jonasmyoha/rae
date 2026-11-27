@@ -12698,13 +12698,14 @@ static void sema_report_unknown_member_in(AstModule* module, AstExpr* expr, Type
     module->had_error = true;
 }
 
-/* RAE_GENERIC_INSTANCES=1: the backend writes an instance's C from its analyzed
- * clone (docs/generic-instances-design.md step 5) instead of from the template */
+/* The backend writes an instance's C from its analyzed clone (docs/generic-instances-design.md
+ * steps 5 and 6), since 0.4.128 by default. RAE_GENERIC_INSTANCES=0 is the way back to the
+ * template for one version. */
 bool sema_generic_instances_emitted(void) {
     static int on = -1;
     if (on < 0) {
         const char* value = getenv("RAE_GENERIC_INSTANCES");
-        on = value && strcmp(value, "1") == 0;
+        on = !(value && strcmp(value, "0") == 0);
     }
     return on == 1;
 }

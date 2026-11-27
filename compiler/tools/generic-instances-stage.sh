@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# generic-instances-stage.sh — the cases that declare a generic function, and the type matrix,
-# with RAE_GENERIC_INSTANCES=1: each instance's C written from its analyzed clone
-# (docs/generic-instances-design.md step 5). One pre-suite case of every full run.
+# generic-instances-stage.sh — the way back, RAE_GENERIC_INSTANCES=0 (each instance's C written
+# from its template, as before 0.4.128; docs/generic-instances-design.md step 6), kept working for
+# one version: the cases that declare a generic function, and the type matrix, with it. One
+# pre-suite case of every full run.
 #
 # A case that fails and is not in tools/generic-instances-known.txt fails the stage, and so does
 # one in the list that passes (STALE: the list only gets shorter). The type matrix runs against
-# its own list, tools/type-matrix-known-instances.txt.
+# its own list, tools/type-matrix-known-template.txt.
 #
 #   bash tools/generic-instances-stage.sh            # both parts
 #   bash tools/generic-instances-stage.sh --cases    # the cases only
@@ -21,28 +22,28 @@ cases=$(printf '%s\n%s\n' "$generic" "$listed" | grep -v '^$' | sort -u)
 count=$(printf '%s\n' "$cases" | wc -l | tr -d ' ')
 out=$(mktemp)
 # shellcheck disable=SC2086
-RAE_GENERIC_INSTANCES=1 RAE_CHECK_INSTANCES=error bash tools/run_cases.sh $cases > "$out" 2>&1
+RAE_GENERIC_INSTANCES=0 RAE_CHECK_INSTANCES=error bash tools/run_cases.sh $cases > "$out" 2>&1
 failed=$(grep -E '^FAIL' "$out" | awk '{ print $2 }' | sort -u)
 problems=""
 for name in $failed; do
   printf '%s\n' "$listed" | grep -qx "$name" || problems="$problems
-NEW: $name fails with RAE_GENERIC_INSTANCES=1: $(grep -m1 -E "^FAIL: $name" "$out")"
+NEW: $name fails with RAE_GENERIC_INSTANCES=0: $(grep -m1 -E "^FAIL: $name" "$out")"
 done
 for name in $listed; do
   printf '%s\n' "$failed" | grep -qx "$name" || problems="$problems
-STALE: $name passes with RAE_GENERIC_INSTANCES=1: remove it from $known"
+STALE: $name passes with RAE_GENERIC_INSTANCES=0: remove it from $known"
 done
 rm -f "$out"
 matrix=0
 if [ "$only_cases" = 0 ] && [ -f tools/typeMatrix.py ]; then
-  if ! RAE_GENERIC_INSTANCES=1 RAE_TYPE_MATRIX_KNOWN=tools/type-matrix-known-instances.txt python3 tools/typeMatrix.py; then
+  if ! RAE_GENERIC_INSTANCES=0 RAE_TYPE_MATRIX_KNOWN=tools/type-matrix-known-template.txt python3 tools/typeMatrix.py; then
     matrix=1
   fi
 fi
 known_count=$(printf '%s\n' "$listed" | grep -c .)
 if [ -n "$problems" ] || [ "$matrix" = 1 ]; then
   printf '%s\n' "$problems" | grep -v '^$'
-  echo "FAIL: generic-instances ($count cases with RAE_GENERIC_INSTANCES=1, $known_count known failures)"
+  echo "FAIL: generic-instances ($count cases with RAE_GENERIC_INSTANCES=0, $known_count known failures)"
   exit 1
 fi
-echo "PASS: generic-instances ($count cases with RAE_GENERIC_INSTANCES=1, $known_count known failures$([ "$only_cases" = 0 ] && echo "; the type matrix both ways"))"
+echo "PASS: generic-instances ($count cases with RAE_GENERIC_INSTANCES=0, $known_count known failures$([ "$only_cases" = 0 ] && echo "; the type matrix the template way"))"

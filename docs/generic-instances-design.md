@@ -301,7 +301,21 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    moves its `own` value in (`this[index] = own value`; as `= value` the clone stored the bits and then dropped
    the value), and `ret none` of an optional reference flushes the function's String pool mark.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the
-   realtime check and the twins read the instances instead of following calls by name.
+   realtime check and the twins read the instances instead of following calls by name. First part done (0.4.128):
+   instances are written from their clones by default, and `RAE_GENERIC_INSTANCES=0` is the way back, which the
+   pre-suite stage now runs (the cases that declare a generic function, against `generic-instances-known.txt`, and
+   the type matrix against `type-matrix-known-template.txt`, the template's 405 known failures); the main type
+   matrix list is empty. A spawn inside a generic function works (case 1709, on the ThreadSanitizer list); with
+   `RAE_GENERIC_INSTANCES=0` it is still an error. The may-wait walk's calls resolved by name (`edge_by_name`, the
+   largest item of a profile of 121, and what the realtime check builds on) look the name up in an index of the
+   merged module, made once per walk, instead of scanning every declaration; the C of 106, 121 and 136 is the same
+   as 0.4.127 with the switch, apart from the shader text the two checkouts embed. Compile CPU time (`rae build
+   --emit-c`, with the full suite running beside it): 106 8.3 s to 4.5 s, 121 13.2 s to 6.8 s, 136 24.5 s to
+   12.3 s; with the switch alone, before the index, the two ways cost the same (106 8.2 s, 121 13.3 s, 136 24 s).
+   Every example (86) and check (67) builds both ways, the examples' C compiles, wasm_smoke and wasm_webgpu_smoke
+   pass, and the visual gate of 106 and 136 passes. Left, the queue line `[generic instances 6b/9: the walks
+   read instances]`: the may-wait walk, the realtime check and the twins take a call's target from sema's
+   `instance` / `decl_link` where they still resolve it by name.
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.
 8. **The template way removed**: what section 6 lists, and the switch.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.

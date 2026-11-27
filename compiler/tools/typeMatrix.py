@@ -26,8 +26,8 @@ import tempfile
 import time
 
 COMPILER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# RAE_TYPE_MATRIX_KNOWN: another list, for a run with RAE_GENERIC_INSTANCES=1
-# (tools/type-matrix-known-instances.txt, tools/generic-instances-stage.sh)
+# RAE_TYPE_MATRIX_KNOWN: another list, for a run with RAE_GENERIC_INSTANCES=0
+# (tools/type-matrix-known-template.txt, tools/generic-instances-stage.sh)
 KNOWN_FILE = os.environ.get("RAE_TYPE_MATRIX_KNOWN") or os.path.join(COMPILER, "tools", "type-matrix-known.txt")
 RAE = os.environ.get("RAE_BIN") or os.path.join(COMPILER, "bin", "rae")
 CC = os.environ.get("RAE_ASAN_CC", "clang")

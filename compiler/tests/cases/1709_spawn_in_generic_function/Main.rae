@@ -1,0 +1,40 @@
+# A spawn inside a generic function (an instance's C is written from its analyzed clone, where the
+# spawned call has its types): the argument is copied for the task, the result read by `get`, for
+# a number, a String and a struct that owns memory, and a List of tasks joined in order.
+type Note {
+  text: String
+  words: List(String)
+}
+
+func echo(T: type, value: own T) ret T {
+  ret own value
+}
+
+func later(T: type, value: view T) ret T {
+  let task: Task(T) = spawn echo(value: value)
+  ret task.get()
+}
+
+func many(T: type, value: view T, count: view Int) ret List(T) {
+  var tasks: List(Task(T)) = {}
+  loop var i: Int = 0, i < count, ++i {
+    tasks.add(value: spawn echo(value: value))
+  }
+  var results: List(T) = {}
+  loop var i: Int = 0, i < count, ++i {
+    if let task: mod Task(T) = tasks.modAt(index: i) {
+      results.add(value: task.get())
+    }
+  }
+  ret results
+}
+
+func main() {
+  log("{later(value: 7)}")
+  log("{later(value: "a word")}")
+  let note: Note = { text: "note", words: { "one", "two" } }
+  log("{later(value: note)}")
+  log("{many(value: 3, count: 3)}")
+  log("{many(value: "x", count: 2)}")
+  log("{note}")
+}
