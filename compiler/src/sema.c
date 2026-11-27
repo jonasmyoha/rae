@@ -3548,6 +3548,71 @@ static bool sema_func_returns_reference(const AstFuncDecl* fd) {
  * is still unresolved here — the backend specializes it — so it answers from
  * the program's functions of that name and arity: a reference when every one
  * of them returns one. */
+/* The module's functions that are not instances, by name: sema_call_returns_reference
+ * asked every declaration for each `let` (a profile of 121). Instances are only ever
+ * prepended to module->decls, so the index catches up from the new head to the one it
+ * saw. */
+typedef struct SemaNamedFunctions {
+    Str name;
+    const AstDecl** decls;
+    size_t count, cap;
+    struct SemaNamedFunctions* next;
+} SemaNamedFunctions;
+#define SEMA_NAMED_BUCKETS 4096
+static const AstModule* s_named_module = NULL;
+static const AstDecl* s_named_head = NULL;
+static SemaNamedFunctions* s_named_functions[SEMA_NAMED_BUCKETS];
+
+static size_t sema_named_bucket(Str name) {
+    uint64_t hash = 1469598103934665603ull;
+    for (size_t i = 0; i < name.len; i++) hash = (hash ^ (unsigned char)name.data[i]) * 1099511628211ull;
+    return (size_t)(hash % SEMA_NAMED_BUCKETS);
+}
+
+static void sema_named_add(const AstDecl* decl) {
+    Str key = decl->as.func_decl.name;
+    size_t b = sema_named_bucket(key);
+    SemaNamedFunctions* entry = s_named_functions[b];
+    while (entry && !str_eq(entry->name, key)) entry = entry->next;
+    if (!entry) {
+        entry = calloc(1, sizeof *entry);
+        if (!entry) return;
+        entry->name = key;
+        entry->next = s_named_functions[b];
+        s_named_functions[b] = entry;
+    }
+    if (entry->count == entry->cap) {
+        entry->cap = entry->cap ? entry->cap * 2 : 4;
+        entry->decls = realloc(entry->decls, entry->cap * sizeof *entry->decls);
+    }
+    entry->decls[entry->count++] = decl;
+}
+
+static const SemaNamedFunctions* sema_named_functions(const AstModule* module, Str name) {
+    if (s_named_module != module) {
+        for (size_t b = 0; b < SEMA_NAMED_BUCKETS; b++) {
+            for (SemaNamedFunctions* entry = s_named_functions[b]; entry;) {
+                SemaNamedFunctions* next = entry->next;
+                free(entry->decls);
+                free(entry);
+                entry = next;
+            }
+            s_named_functions[b] = NULL;
+        }
+        s_named_module = module;
+        s_named_head = NULL;
+    }
+    if (module->decls != s_named_head) {
+        /* the decls prepended since (or all of them, the first time) */
+        for (const AstDecl* d = module->decls; d && d != s_named_head; d = d->next)
+            if (d->kind == AST_DECL_FUNC && !d->as.func_decl.specialization_args) sema_named_add(d);
+        s_named_head = module->decls;
+    }
+    for (const SemaNamedFunctions* entry = s_named_functions[sema_named_bucket(name)]; entry; entry = entry->next)
+        if (str_eq(entry->name, name)) return entry;
+    return NULL;
+}
+
 static bool sema_call_returns_reference(const AstModule* module, const AstExpr* call) {
     if (call->decl_link) {
         return call->decl_link->kind == AST_DECL_FUNC
@@ -3558,9 +3623,9 @@ static bool sema_call_returns_reference(const AstModule* module, const AstExpr* 
     size_t argCount = 0;
     for (const AstCallArg* a = call->as.call.args; a; a = a->next) argCount++;
     size_t candidates = 0;
-    for (const AstDecl* d = module->decls; d; d = d->next) {
-        if (d->kind != AST_DECL_FUNC || !str_eq(d->as.func_decl.name, callee->as.ident)) continue;
-        if (d->as.func_decl.specialization_args) continue;
+    const SemaNamedFunctions* named = sema_named_functions(module, callee->as.ident);
+    for (size_t k = 0; named && k < named->count; k++) {
+        const AstDecl* d = named->decls[k];
         size_t paramCount = 0;
         bool hasTypeParam = false;
         for (const AstParam* p = d->as.func_decl.params; p; p = p->next) paramCount++;

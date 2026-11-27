@@ -100,7 +100,26 @@ linear scans that a name or a hash answers: `edge_by_name` (the may-wait walk) a
 `type_registry_find_specialization` (every instance, per call). The first two are in today's compiler as well, and
 worth fixing for themselves.
 
-**Estimated after all steps**: discovery goes (its type collection stays, about 0.3 s), the analysis stays at 1.2 to
+**Measured after step 7's first part (0.4.130)**, CPU time of `rae build --emit-c` (user + system, the lowest of
+three runs on a loaded machine), against the compiler as it stood before step 4 measured above (sema + backend):
+
+| | 106 mobile UI | 121 UI editor | 136 walker |
+|---|---|---|---|
+| before step 1 (sema + backend in the table above) | 5.3 s | 7.9 s | 16.2 s |
+| 0.4.127 (instances from clones, behind the switch) | 8.3 s | 13.2 s | 24.5 s |
+| 0.4.128 (on by default, `edge_by_name` a lookup) | 4.5 s | 6.8 s | 12.3 s |
+| 0.4.130 (the scans of this section lookups) | 4.2 s | 5.7 s | 9.2 s |
+
+The four scans: `edge_by_name` (0.4.128), `type_refs_equal` in `register_function_specialization` (now an index from
+a template to its instances, in their order), `sema_call_returns_reference` (an index of the module's functions by
+name; its answer does not depend on their order) and `type_registry_find_specialization` (no longer in the
+profile). `generic_index_any` stays a chain per name: a finer bucket that keeps `type_refs_equal`'s answers (the
+name, the marks and the number of arguments) was tried and changed nothing, every `List` having one argument. Of
+121's build, discovery is now about 6 % (`discover_specializations_stmt_impl`), the type collection about 15 %
+(`collect_type_refs_module`, half of it `register_generic_type` and `generic_index_any`), the analysis of the
+instances about 13 % (`sema_drain_instances`).
+
+**Estimated after all steps** (written before step 4): discovery goes (its type collection stays, about 0.3 s), the analysis stays at 1.2 to
 2.8 s before those scans are fixed. For 106 that is 4.30 - 1.4 + 1.2 = about 4.1 s; for 121 about 7.4 s; for 136 about
 11.6 s. So the same compile time within 10 %, and less with the scans fixed. That is an estimate; step 7 measures it.
 
@@ -328,6 +347,9 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    and 136 are the same, and `--report-realtime` lists a function's trusted C in the order the walk meets it
    (case 1407).
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.
+   First part done (0.4.130): the scans (section 3, measured there). Discovery stays for now, the queue line
+   `[generic instances 7b/9: discovery removed]`: it is about 6 % of 121's build, and its removal makes the backend
+   emit sema's registry alone.
 8. **The template way removed**: what section 6 lists, and the switch.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 

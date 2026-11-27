@@ -484,13 +484,99 @@ bool is_concrete_type(const CompilerContext* ctx, const AstTypeRef* type) {
     return true;
 }
 
+/* The specialized_funcs of each template, in registration order: a registration
+ * compares only with the same template's instances (it scanned every instance of the
+ * program, the largest item of a profile of 121). Kept in step with the array:
+ * rebuilt when the array is not the one indexed or was cut back. */
+typedef struct SpecializationSlot {
+    const AstFuncDecl* decl;
+    size_t* indexes;
+    size_t count;
+    size_t cap;
+} SpecializationSlot;
+static SpecializationSlot* s_spec_slots = NULL;
+static size_t s_spec_slot_cap = 0;
+static size_t s_spec_indexed = 0;
+static const void* s_spec_array = NULL;
+
+static size_t spec_slot_hash(const AstFuncDecl* decl) {
+    uintptr_t key = (uintptr_t)decl;
+    key ^= key >> 17;
+    key *= 0xed5ad4bbu;
+    key ^= key >> 11;
+    return (size_t)key;
+}
+
+static SpecializationSlot* spec_slot(const AstFuncDecl* decl, bool create) {
+    if (s_spec_slot_cap == 0) {
+        if (!create) return NULL;
+        s_spec_slot_cap = 4096;
+        s_spec_slots = calloc(s_spec_slot_cap, sizeof *s_spec_slots);
+    }
+    size_t mask = s_spec_slot_cap - 1;
+    for (size_t i = spec_slot_hash(decl) & mask;; i = (i + 1) & mask) {
+        if (s_spec_slots[i].decl == decl) return &s_spec_slots[i];
+        if (!s_spec_slots[i].decl) {
+            if (!create) return NULL;
+            s_spec_slots[i].decl = decl;
+            return &s_spec_slots[i];
+        }
+    }
+}
+
+static void spec_index_add(size_t index, const AstFuncDecl* decl);
+
+static void spec_index_reset(void) {
+    for (size_t i = 0; i < s_spec_slot_cap; i++) free(s_spec_slots[i].indexes);
+    free(s_spec_slots);
+    s_spec_slots = NULL;
+    s_spec_slot_cap = 0;
+    s_spec_indexed = 0;
+}
+
+static void spec_index_add(size_t index, const AstFuncDecl* decl) {
+    /* grow at half full: every slot keeps its chain short */
+    if (s_spec_slot_cap && (s_spec_indexed + 1) * 2 > s_spec_slot_cap) {
+        SpecializationSlot* old = s_spec_slots;
+        size_t old_cap = s_spec_slot_cap;
+        s_spec_slot_cap *= 2;
+        s_spec_slots = calloc(s_spec_slot_cap, sizeof *s_spec_slots);
+        for (size_t i = 0; i < old_cap; i++) {
+            if (!old[i].decl) continue;
+            SpecializationSlot* moved = spec_slot(old[i].decl, true);
+            *moved = old[i];
+        }
+        free(old);
+    }
+    SpecializationSlot* slot = spec_slot(decl, true);
+    if (slot->count == slot->cap) {
+        slot->cap = slot->cap ? slot->cap * 2 : 4;
+        slot->indexes = realloc(slot->indexes, slot->cap * sizeof *slot->indexes);
+    }
+    slot->indexes[slot->count++] = index;
+}
+
+static void spec_index_sync(CompilerContext* ctx) {
+    if (s_spec_array != (const void*)ctx->specialized_funcs || s_spec_indexed > ctx->specialized_func_count) {
+        spec_index_reset();
+        s_spec_array = ctx->specialized_funcs;
+    }
+    while (s_spec_indexed < ctx->specialized_func_count) {
+        size_t index = s_spec_indexed++;
+        spec_index_add(index, ctx->specialized_funcs[index].decl);
+    }
+}
+
 void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* concrete_args) {
     if (!decl || !concrete_args) return;
     for (const AstTypeRef* arg = concrete_args; arg; arg = arg->next) {
         if ((uintptr_t)arg->parts < 0x1000 && (uintptr_t)arg->parts != 0) return;
         if (!is_concrete_type(ctx, arg)) return;
     }
-    for (size_t i = 0; i < ctx->specialized_func_count; i++) {
+    spec_index_sync(ctx);
+    const SpecializationSlot* same = spec_slot(decl, false);
+    for (size_t k = 0; same && k < same->count; k++) {
+        size_t i = same->indexes[k];
         if (ctx->specialized_funcs[i].decl == decl) {
             const AstTypeRef* a = ctx->specialized_funcs[i].concrete_args; const AstTypeRef* b = concrete_args;
             bool match = true;
@@ -524,6 +610,9 @@ void register_function_specialization(CompilerContext* ctx, const AstFuncDecl* d
     ctx->specialized_funcs[ctx->specialized_func_count].decl = decl;
     ctx->specialized_funcs[ctx->specialized_func_count].concrete_args = (AstTypeRef*)concrete_args;
     ctx->specialized_func_count++;
+    /* (a grown array moved: the index holds positions, so it only follows the new address) */
+    s_spec_array = ctx->specialized_funcs;
+    spec_index_sync(ctx);
 }
 
 /* Does `type` carry an ENUM generic argument (at any depth)?

@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.130, 2026-11-27: faster builds, two more scans made lookups
+
+- Registering an instance of a generic function compares it only with the same function's instances, and the
+  question whether a call returns a reference looks the name up: CPU of `rae build --emit-c` 106 4.5 s to 4.2 s,
+  121 6.8 s to 5.7 s, 136 12.3 s to 9.2 s (docs/generic-instances-design.md section 3).
+
 ## 0.4.129, 2026-11-27: the may-wait walk reads instances
 
 - The may-wait analysis (and the realtime check and the resumable twins on it) follows each generic call to the
