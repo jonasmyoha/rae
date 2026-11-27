@@ -1,0 +1,72 @@
+# An AnimFrames with an AnimTrigger waits for it (ui/AnimationSystem animFramesSystem): a tab icon
+# keeps its Sprite's own texture after some frames, plays its three frames at 10 fps once its
+# action fires, and ends on onEndTextureKey; an AnimFrames without a trigger (a looping idle) plays
+# from the first frame, as before.
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/AnimationSystem
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "tabs",
+    "root": "Bar",
+    "nodes": {
+      "Bar": { "Rect": { "x": 0, "y": 0, "w": 400, "h": 80 }, "Children": ["Icon", "Idle"] },
+      "Icon": {
+        "Rect": { "x": 0, "y": 0, "w": 80, "h": 80 },
+        "Sprite": { "textureKey": "tab.icon" },
+        "AnimFrames": { "baseKey": "tab.swing", "frameCount": 3, "fps": 10, "loopForever": false, "onEndTextureKey": "tab.selected" },
+        "AnimTrigger": { "actionId": "tab.chosen" }
+      },
+      "Idle": {
+        "Rect": { "x": 100, "y": 0, "w": 80, "h": 80 },
+        "Sprite": { "textureKey": "idle.still" },
+        "AnimFrames": { "baseKey": "idle.loop", "frameCount": 2, "fps": 10, "loopForever": true }
+      }
+    }
+  }"#
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func keyOf(world: view UiWorld, nodeId: view String) ret String {
+  ret "{componentView(this: world.sprites, entityId: nodeOf(world: world, nodeId: nodeId)).textureKey}"
+}
+
+# One frame of the animation systems, 1/20 s
+func frame(world: mod UiWorld, uiSystems: mod UiSystems, label: view String) {
+  animTriggerSystem(world: world, uiSystems: uiSystems)
+  let live: Bool = animFramesSystem(world: world, uiSystems: uiSystems, deltaTime: 0.05)
+  eventClear(this: world.uiActions)
+  log(
+    "{label}: icon {keyOf(world: world, nodeId: "Icon")}, idle {keyOf(world: world, nodeId: "Idle")}"
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  loop var i: Int = 1, i <= 4, ++i {
+    frame(world: world, uiSystems: uiSystems, label: "frame {i}")
+  }
+  eventSend(this: world.uiActions, value: UiAction { entityId: noEntity(), actionId: "tab.chosen" })
+  frame(world: world, uiSystems: uiSystems, label: "the tab chosen")
+  loop var i: Int = 1, i <= 8, ++i {
+    frame(world: world, uiSystems: uiSystems, label: "after it {i}")
+  }
+}

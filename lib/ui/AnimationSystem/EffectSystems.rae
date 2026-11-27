@@ -73,6 +73,11 @@ func animFramesSystem(
       continue
     }
     if componentHas(this: uiSystems.animation.animStates, entityId: entityId) is false {
+      # A sequence with an AnimTrigger waits for it (animTriggerSystem gives it its state), and
+      # its Sprite keeps its own texture until then; one without plays from the first frame
+      if componentHas(this: world.animTriggers, entityId: entityId) {
+        continue
+      }
       componentSet(
         this: uiSystems.animation.animStates
         entityId: entityId

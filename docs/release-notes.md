@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.116, 2026-11-27: an AnimFrames with an AnimTrigger waits for it
+
+- An `AnimFrames` whose node has an `AnimTrigger` no longer plays once at mount: it stays stopped and its Sprite
+  keeps its own texture until the trigger fires (a tab icon's swing on its tab's action, then
+  `onEndTextureKey`). An `AnimFrames` without a trigger still plays from its first frame (a looping idle).
+  Case 1702.
+
 ## 0.4.115, 2026-11-27: a sprite masked by another texture
 
 - `Sprite.maskKey` (a texture key) and `maskLuminance`: the sprite shows only where the mask image's alpha (or its
