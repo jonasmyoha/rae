@@ -1914,3 +1914,12 @@ What the OS drags onto the window is given to `dragSystem` by `Gpu2d.readOsDrop(
 
 `ui/EscapeHold`: `holdEscape` and `releaseEscape` around anything that Escape ends, so that the key does not
 also quit the program.
+
+## 57. Art and text under an uneven scale
+
+An uneven scale (a `TransformFx` with `scaleX` and `scaleY` apart, as in a card flip) squeezes what
+the node paints with it. A `Sprite` with `scaleMode` Fit or Fill is fitted (or filled) in the node's
+own box first and then scaled, so a square image in a square box under `scaleX` 0.5 paints half as
+wide and as tall as before, not evenly smaller (case 1699). A `Text` does not squeeze: its glyphs scale
+evenly, by the horizontal scale (`scaleX`), so under `scaleX` 0.5 a text is half its size in both
+directions; a flip that must squeeze its letters draws them as a Sprite (an image of the text).

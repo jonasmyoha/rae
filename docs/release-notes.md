@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.113, 2026-11-27: Fit and Fill art under an uneven scale
+
+- A `Sprite` with `scaleMode` Fit or Fill under a node scaled unevenly (`scaleX` 0.5, `scaleY` 1: a card flip) is
+  fitted or filled in the node's own box first and then scaled with it, so it squeezes with its node. Before, it
+  was fitted in the squeezed box and drawn evenly smaller, and Fill cut away what the squeeze took. At equal
+  scales nothing changes. Gpu2dCanvasImage `canvasDrawImageKeyScaledIn` takes the node's scales.
+- A `Text` scales evenly (by `scaleX`), now said in docs/ui-scene-format.md section 57. Case 1699.
+
 ## 0.4.112, 2026-11-27: a theme with more than one text font
 
 - A scene's `assets.fonts` may name more text fonts beside `text` and `icons` (`"cards": "../fonts/Jost-Bold.mtsdf.json"`);

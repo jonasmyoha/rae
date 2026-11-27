@@ -204,7 +204,9 @@ func paintSpriteG(
         tileY: sp.tileScale.y
       )
     } else {
-      Gpu2d.drawImageKeyScaled(
+      # fitted in the node's own box, then scaled with it: under scaleX 0.5 a square Fit
+      # sprite in a square box is squeezed with its node, not drawn evenly smaller
+      canvasDrawImageKeyScaledIn(
         canvas: canvas
         key: sp.textureKey
         x: imageX
@@ -214,6 +216,8 @@ func paintSpriteG(
         radius: radius * hoverMul
         tint: g2dColor(color: tint)
         scaleMode: g2dScaleMode(m: sp.scaleMode)
+        frameScaleX: wt.scale.x
+        frameScaleY: wt.scale.y
       )
     }
     if colored {

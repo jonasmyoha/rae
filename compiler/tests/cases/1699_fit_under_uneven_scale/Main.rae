@@ -1,0 +1,164 @@
+# Fit and Fill art inside an unevenly scaled node (ui/RenderSystem RenderSprite,
+# Gpu2dCanvasImage canvasDrawImageKeyScaledIn): the image is fitted (or filled) in the node's
+# own box first and then scaled with it. A square image in a square 100 x 100 box under a parent
+# turned to scaleX 0.5 paints 50 x 100, squeezed with its node; before, it was fitted in the
+# squeezed 50 x 100 box and drawn evenly smaller (50 x 50), and Fill cut half of it away. At equal
+# scales (0.5 x 0.5, 1 x 1) nothing changes. A wide image shows that the fit is made in the node's
+# box.
+import Math
+import SdfText
+import Gpu2d
+open gpu/GpuIds
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open Gpu2dCanvasImage
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText(mode: view String) ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "cards",
+    "root": "Table",
+    "nodes": {
+      "Table": { "Rect": { "x": 0, "y": 0, "w": 600, "h": 400 }, "Children": ["Card"] },
+      "Card": {
+        "Rect": { "x": 100, "y": 100, "w": 100, "h": 100 },
+        "TransformFx": { "scaleX": 1, "scaleY": 1, "alpha": 1, "visible": true, "pivot": { "x": 0, "y": 0 } },
+        "Children": ["Art"]
+      },
+      "Art": { "Rect": { "x": 0, "y": 0, "w": 100, "h": 100 }, "Sprite": { "textureKey": "square", "scaleMode": "MODE" } }
+    }
+  }"#.replace(
+    old: "MODE"
+    new: mode
+  )
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+func paint(
+  mode: view String
+  scaleX: view Float
+  scaleY: view Float
+  imageWidth: view Int
+) {
+  let scene: Scene = parseScene(source: sceneText(mode: mode))
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  Gpu2d.setDesignResolution(width: 600.0, height: 400.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  let fx: mod TransformFx = componentMod(
+    this: world.transforms
+    entityId: nodeOf(world: world, nodeId: "Card")
+  )
+  fx.scaleX = scaleX
+  fx.scaleY = scaleY
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  # a square image the canvas knows by key, without a GPU (its texture is never drawn here)
+  canvas.images.add(
+    value: Gpu2dImage {
+      texture: noTextureId()
+      textureView: noTextureViewId()
+      width: imageWidth
+      height: 64
+    }
+  )
+  canvasRegisterImageKey(canvas: canvas, key: "square", handle: 1)
+  clipReset(canvas: canvas)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let w: Float = canvas.imageCommands.copyAtDefault(index: 2)
+  let h: Float = canvas.imageCommands.copyAtDefault(index: 3)
+  let uvW: Float = canvas.imageCommands.copyAtDefault(index: 14)
+  let uvH: Float = canvas.imageCommands.copyAtDefault(index: 15)
+  log(
+    "{mode} of a {imageWidth} x 64 image under scale {scaleX} x {scaleY}: paints {rounded(value: w)} x {rounded(
+      value: h
+    )}, showing {rounded(value: uvW)} x {rounded(value: uvH)} of the image"
+  )
+}
+
+func main() {
+  loop let mode: String in List(String) { "Fit", "Fill" } {
+    paint(
+      mode: mode
+      scaleX: 0.5
+      scaleY: 1.0
+      imageWidth: 64
+    )
+    paint(
+      mode: mode
+      scaleX: 1.0
+      scaleY: 0.5
+      imageWidth: 64
+    )
+    paint(
+      mode: mode
+      scaleX: 0.5
+      scaleY: 0.5
+      imageWidth: 64
+    )
+    paint(
+      mode: mode
+      scaleX: 1.0
+      scaleY: 1.0
+      imageWidth: 64
+    )
+    # a wide image: fitted 100 x 50 in the node's own box, so 50 x 50 under scaleX 0.5 (in the
+    # squeezed box it was 50 x 25); filled, it shows half its width, as in the box unscaled
+    paint(
+      mode: mode
+      scaleX: 0.5
+      scaleY: 1.0
+      imageWidth: 128
+    )
+    paint(
+      mode: mode
+      scaleX: 1.0
+      scaleY: 1.0
+      imageWidth: 128
+    )
+  }
+}

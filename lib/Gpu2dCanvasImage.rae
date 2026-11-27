@@ -685,6 +685,37 @@ func canvasDrawImageKeyScaled(
   tint: copy Int
   scaleMode: copy Int
 ) {
+  canvasDrawImageKeyScaledIn(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: w
+    h: h
+    radius: radius
+    tint: tint
+    scaleMode: scaleMode
+    frameScaleX: 1.0
+    frameScaleY: 1.0
+  )
+}
+
+# The same in a box that is a node's own box scaled by (frameScaleX, frameScaleY): the image is
+# fitted (or filled) in the node's own box and then scaled with it, so under an uneven scale it is
+# squeezed with its node rather than drawn evenly smaller in the squeezed box
+func canvasDrawImageKeyScaledIn(
+  canvas: mod Gpu2dCanvas
+  key: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  radius: copy Float
+  tint: copy Int
+  scaleMode: copy Int
+  frameScaleX: copy Float
+  frameScaleY: copy Float
+) {
   let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
   if handle <= 0 or handle > canvas.images.length or w <= 0.0 or h <= 0.0 {
     ret
@@ -709,7 +740,12 @@ func canvasDrawImageKeyScaled(
     ret
   }
   let imageAspect: Float = imageWidth / imageHeight
-  let targetAspect: Float = w / h
+  # the aspect of the node's own box: the drawn box with its frame's scales taken out
+  var squeeze: Float = 1.0
+  if Math.abs(value: frameScaleX) > 0.000001 and Math.abs(value: frameScaleY) > 0.000001 {
+    squeeze = Math.abs(value: frameScaleX) / Math.abs(value: frameScaleY)
+  }
+  let targetAspect: Float = w / h / squeeze
   var drawX: Float = x
   var drawY: Float = y
   var drawW: Float = w
@@ -719,11 +755,12 @@ func canvasDrawImageKeyScaled(
   var u1: Float = 1.0
   var v1: Float = 1.0
   if scaleMode is 0 {
+    # fitted in the node's own box, then squeezed with it
     if imageAspect > targetAspect {
-      drawH = w / imageAspect
+      drawH = w / squeeze / imageAspect
       drawY = y + (h - drawH) * 0.5
     } else {
-      drawW = h * imageAspect
+      drawW = h * imageAspect * squeeze
       drawX = x + (w - drawW) * 0.5
     }
   } else if scaleMode is 1 {
