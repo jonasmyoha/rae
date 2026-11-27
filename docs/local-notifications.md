@@ -32,7 +32,8 @@ Each but the last answers true when the system was asked.
 - **The same id replaces** the one still to come.
 - **While the app is in the foreground the system shows nothing.** That is iOS's default for an app
   with no delegate, and such a notification does not reach Notification Center either. So an app
-  shows its own alarm while it runs.
+  shows its own alarm while it runs. A program that imports lib/PushNotification has a delegate,
+  which keeps this the same (docs/push-notifications.md).
 - **Ask first. What is scheduled after an ask and before its answer is held,** in order with any
   cancel, and added when the answer comes; it still rings at its moment, and one whose moment passes
   while the question is open is dropped. It is held in memory, so ending the app during the question

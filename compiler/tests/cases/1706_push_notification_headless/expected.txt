@@ -1,0 +1,14 @@
+before register: no token
+[push] register
+registered false
+after register: token simulated-push-token
+[push] register
+registered false
+with RAE_PUSH_TOKEN: token abc123
+no error
+push tapped=false payload={"aps":{"alert":"Your turn"},"match":7}
+push tapped=true payload={"message":"hi\nthere"}
+push tapped=true payload={"chest":"ready"}
+no more
+push tapped=false payload={}
+no more

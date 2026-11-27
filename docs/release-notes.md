@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.121, 2026-11-27: push notifications on iOS
+
+- `lib/PushNotification`: `pushNotificationRegister()` asks for the device token (APNs on iOS),
+  `pushNotificationToken()` / `pushNotificationError()` read it, and `nextPushNotification` hands out each
+  notification that arrived while the app ran (`tapped` false) or whose tap opened or launched it (`tapped` true),
+  with the server's JSON payload. The permission is LocalNotification's. Headless, a simulated token
+  (`RAE_PUSH_TOKEN`); everywhere, `RAE_PUSH_OPENED` and `simulatePushNotification` stand in for the system.
+  `tools/ios/gen-ios.sh` writes the `aps-environment` entitlement (`RAE_IOS_PUSH_ENVIRONMENT`). Android (FCM) is
+  not done yet. Case 1706; docs/push-notifications.md.
+
 ## 0.4.120, 2026-11-27: open a link in the browser or the store
 
 - `openUrl(url:)` in `lib/AppLinks` hands a link to the system: SDL3's `SDL_OpenURL` (iOS UIApplication open,

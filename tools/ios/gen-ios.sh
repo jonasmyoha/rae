@@ -224,7 +224,7 @@ fi
 # Notifications at a later time (lib/LocalNotification): an app whose C includes the shim
 # links UserNotifications. iOS needs no purpose string for them.
 notification_link=""
-if grep -q 'runtime_local_notification_apple.h' "$gen/app.c"; then
+if grep -q 'runtime_local_notification_apple.h\|runtime_push_notification.h' "$gen/app.c"; then
   notification_link=' "-framework UserNotifications"'
 fi
 
@@ -248,6 +248,18 @@ if [ -n "${RAE_APP_LINKS:-}" ]; then
     domains="$domains<string>applinks:${link%%/*}</string>"
   done
   entitlement_keys="$entitlement_keys<key>com.apple.developer.associated-domains</key><array>$domains</array>"
+fi
+# Push notifications (lib/PushNotification, docs/push-notifications.md): an app whose C
+# includes the shim gets the aps-environment entitlement, a capability the team's App ID
+# must allow. RAE_IOS_PUSH_ENVIRONMENT is development (the default, the sandbox APNs that a
+# build run from Xcode talks to) or production (TestFlight and the App Store).
+if grep -q 'runtime_push_notification.h' "$gen/app.c"; then
+  push_environment="${RAE_IOS_PUSH_ENVIRONMENT:-development}"
+  case "$push_environment" in
+    development|production) ;;
+    *) echo "error: RAE_IOS_PUSH_ENVIRONMENT is development or production: $push_environment" >&2; exit 1 ;;
+  esac
+  entitlement_keys="$entitlement_keys<key>aps-environment</key><string>$push_environment</string>"
 fi
 if [ "${RAE_IOS_COMMUNICATION_NOTIFICATIONS:-}" = "1" ]; then
   entitlement_keys="$entitlement_keys<key>com.apple.developer.usernotifications.communication</key><true/>"

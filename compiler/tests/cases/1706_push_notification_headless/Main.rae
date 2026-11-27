@@ -1,0 +1,51 @@
+# PushNotification in a headless run: no token before the register call, then the simulated
+# one (RAE_PUSH_TOKEN, else `simulated-push-token`). Notifications come one per call, in the
+# order they were handed over, whole (quotes, an escaped newline inside a JSON string), with
+# `tapped` as sent; RAE_PUSH_OPENED, the stand-in for a tap that launched the app, is handed
+# over at the first read, after the two simulated before it.
+import Sys
+open PushNotification
+
+func showToken(label: view String) {
+  if let token: String = pushNotificationToken() {
+    log("{label}: token {token}")
+  } else {
+    log("{label}: no token")
+  }
+}
+
+func drain(pushNotifications: mod PushNotifications) {
+  loop var index: Int = 0, index < 10, ++index {
+    if let push: PushNotification = nextPushNotification(pushNotifications: pushNotifications) {
+      log("push tapped={push.tapped} payload={push.payload}")
+    } else {
+      log("no more")
+      ret
+    }
+  }
+}
+
+func main() {
+  let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
+  showToken(label: "before register")
+  log("registered {pushNotificationRegister()}")
+  showToken(label: "after register")
+  let fromEnvironment: Bool = Sys.setEnv(name: "RAE_PUSH_TOKEN", value: "abc123")
+  log("registered {pushNotificationRegister()}")
+  showToken(label: "with RAE_PUSH_TOKEN")
+  if let error: String = pushNotificationError() {
+    log("error {error}")
+  } else {
+    log("no error")
+  }
+  let opened: Bool = Sys.setEnv(name: "RAE_PUSH_OPENED", value: "\{\"chest\":\"ready\"\}")
+  var pushNotifications: PushNotifications = createPushNotifications()
+  simulatePushNotification(
+    payload: "\{\"aps\":\{\"alert\":\"Your turn\"\},\"match\":7\}"
+    tapped: false
+  )
+  simulatePushNotification(payload: "\{\"message\":\"hi\\nthere\"\}", tapped: true)
+  drain(pushNotifications: pushNotifications)
+  simulatePushNotification(payload: "\{\}", tapped: false)
+  drain(pushNotifications: pushNotifications)
+}
