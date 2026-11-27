@@ -1,7 +1,9 @@
 # Local notifications (lib/LocalNotification)
 
 A system notification at a later time, which rings also with the app in the background or not
-running. On iOS it is UNUserNotificationCenter.
+running. On iOS it is UNUserNotificationCenter. On Android only the ask and its answer work so far:
+the `POST_NOTIFICATIONS` question of Android 13 and later, which push notifications share
+(docs/push-notifications.md); scheduling does nothing there yet.
 
 ```rae
 open LocalNotification

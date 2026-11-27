@@ -14,14 +14,21 @@
 # and before its answer is held until the answer comes, and still rings at its moment.
 #
 # On iOS this is UNUserNotificationCenter (runtime_local_notification_apple.h): each call
-# answers true when the system was asked. Elsewhere (the Mac, the web) every call does nothing
-# and answers false. In a headless run (RAE_UI_HEADLESS, RAE_SDL_HEADLESS_MS or
+# answers true when the system was asked. On Android only the ask and its answer work (the
+# POST_NOTIFICATIONS question of Android 13, runtime_local_notification_android.h), for
+# lib/PushNotification; the rest does nothing yet. Elsewhere (the Mac, the web) every call
+# does nothing and answers false. In a headless run (RAE_UI_HEADLESS, RAE_SDL_HEADLESS_MS or
 # RAE_HEADLESS_FRAMES set, as for the window) it answers false and logs `[local-notification]
 # <what>`, so a test sees each call.
 import Sys
 cheader "runtime_local_notification_apple.h"
+cheader "runtime_local_notification_android.h"
 
 const hasLocalNotifications: Bool = Target.os is Os.ios
+
+# Android has the permission (POST_NOTIFICATIONS on Android 13), for push notifications; it
+# schedules nothing yet
+const hasAndroidNotificationPermission: Bool = Target.os is Os.android
 
 func rae_ext_LocalNotification_realNowMs() unsafe extern("rae_ext_LocalNotification_realNowMs") ret
   Int
@@ -46,6 +53,13 @@ when hasLocalNotifications {
     Int
 
   func rae_ext_LocalNotification_clearDelivered() unsafe extern("rae_ext_LocalNotification_clearDelivered") ret
+    Int
+
+} else when hasAndroidNotificationPermission {
+  func rae_ext_LocalNotification_androidAsk() mainThread unsafe extern("rae_ext_LocalNotification_androidAsk") ret
+    Int
+
+  func rae_ext_LocalNotification_androidAnswer() unsafe extern("rae_ext_LocalNotification_androidAnswer") ret
     Int
 
 }
@@ -88,6 +102,10 @@ func localNotificationAllowed() ret opt Bool {
     unsafe {
       ret localNotificationAnswer(answer: rae_ext_LocalNotification_answer())
     }
+  } else when hasAndroidNotificationPermission {
+    unsafe {
+      ret localNotificationAnswer(answer: rae_ext_LocalNotification_androidAnswer())
+    }
   } else {
     ret none
   }
@@ -103,6 +121,10 @@ func localNotificationAsk() ret Bool {
   when hasLocalNotifications {
     unsafe {
       ret rae_ext_LocalNotification_ask() is 1
+    }
+  } else when hasAndroidNotificationPermission {
+    unsafe {
+      ret rae_ext_LocalNotification_androidAsk() is 1
     }
   } else {
     ret false

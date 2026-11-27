@@ -4,6 +4,17 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.122, 2026-11-27: push notifications on Android
+
+- `lib/PushNotification` on Android through Firebase Cloud Messaging: an app built with
+  `RAE_ANDROID_GOOGLE_SERVICES=<its google-services.json>` (kept out of git) gets the token, the messages that
+  arrive while it runs (the data keys, and "notification" with title and body) and the tap that opened it (the data
+  keys, `tapped` true). `tools/android/gen-android.sh` adds Firebase Messaging 24.1.2 and its libraries without
+  Gradle (`tools/android/firebase`: a pinned, sha256-checked lock, their resources, R classes and merged
+  manifests). Without the JSON the app builds without Firebase and registering answers false.
+- `localNotificationAsk()` / `localNotificationAllowed()` work on Android: Android 13's `POST_NOTIFICATIONS`
+  question, the permission push notifications share. Scheduling stays iOS-only.
+
 ## 0.4.121, 2026-11-27: push notifications on iOS
 
 - `lib/PushNotification`: `pushNotificationRegister()` asks for the device token (APNs on iOS),

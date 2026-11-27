@@ -15,8 +15,9 @@
  * delegate keeps the foreground as LocalNotification has it (nothing shown)
  * and passes on only remote notifications (UNPushNotificationTrigger): a
  * local one is not a push. rae_ext_PushNotification_register makes the one
- * registerForRemoteNotifications call. Elsewhere only the queue exists, for
- * the simulated token and arrivals.
+ * registerForRemoteNotifications call. On Android (FCM) the Java side calls
+ * in (below). Elsewhere only the queue exists, for the simulated token and
+ * arrivals.
  *
  * Header-only: included (`cheader`) by a program whose Rae imports
  * lib/PushNotification. tools/ios/gen-ios.sh links UserNotifications for it
@@ -237,5 +238,69 @@ int64_t rae_ext_PushNotification_register(void) {
   return 1;
 }
 #endif /* iOS */
+
+
+#if defined(__ANDROID__)
+/* Android: Firebase Cloud Messaging, through tools/android/firebase/java's
+ * RaePushService (the token, a message while the app runs) and RaeActivity
+ * (the tap that opened the app). Each Java callback hands its text here. The
+ * Java class is in the app only when it was built with the app's
+ * google-services.json; without it register answers 0. */
+#include <jni.h>
+#include <SDL3/SDL_system.h>
+
+static void rae_push_from_java(JNIEnv* env, jstring text, char kind) {
+  if (!text) return;
+  const char* utf8 = (*env)->GetStringUTFChars(env, text, NULL);
+  if (!utf8) return;
+  if (kind == 'k') rae_push_notification_set(rae_push_token, utf8, strlen(utf8));
+  else if (kind == 'e') rae_push_notification_set(rae_push_error, utf8, strlen(utf8));
+  else rae_push_notification_add(kind, utf8, strlen(utf8));
+  (*env)->ReleaseStringUTFChars(env, text, utf8);
+  rae_ext_EventLoop_wake();
+}
+
+JNIEXPORT void JNICALL Java_org_rae_app_push_RaePushService_nativePushToken(JNIEnv* env, jclass cls, jstring token) {
+  (void)cls;
+  rae_push_from_java(env, token, 'k');
+  rae_push_notification_set(rae_push_error, "", 0);
+}
+
+JNIEXPORT void JNICALL Java_org_rae_app_push_RaePushService_nativePushError(JNIEnv* env, jclass cls, jstring error) {
+  (void)cls;
+  rae_push_from_java(env, error, 'e');
+}
+
+JNIEXPORT void JNICALL Java_org_rae_app_push_RaePushService_nativePushArrived(JNIEnv* env, jclass cls, jstring payload) {
+  (void)cls;
+  rae_push_from_java(env, payload, 'a');
+}
+
+JNIEXPORT void JNICALL Java_org_rae_app_RaeActivity_nativePushTapped(JNIEnv* env, jclass cls, jstring payload) {
+  (void)cls;
+  rae_push_from_java(env, payload, 't');
+}
+
+/* Ask FCM for the device token (RaePushService.register); 0 when the app was
+ * built without Firebase */
+int64_t rae_ext_PushNotification_register(void) {
+  JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+  if (!env) return 0;
+  jclass service = (*env)->FindClass(env, "org/rae/app/push/RaePushService");
+  if (!service) {
+    (*env)->ExceptionClear(env);
+    rae_push_notification_set(rae_push_error, "built without Firebase (no google-services.json)", 48);
+    return 0;
+  }
+  jmethodID registerMethod = (*env)->GetStaticMethodID(env, service, "register", "()Z");
+  jboolean asked = registerMethod ? (*env)->CallStaticBooleanMethod(env, service, registerMethod) : JNI_FALSE;
+  if ((*env)->ExceptionCheck(env)) {
+    (*env)->ExceptionClear(env);
+    asked = JNI_FALSE;
+  }
+  (*env)->DeleteLocalRef(env, service);
+  return asked ? 1 : 0;
+}
+#endif /* Android */
 
 #endif /* RAE_RUNTIME_PUSH_NOTIFICATION_H */

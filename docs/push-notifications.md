@@ -2,7 +2,8 @@
 
 A notification that the app's server sends to one device: a chest is ready, a friend wrote, it is
 your turn in a match. The phone shows it also when the app is in the background or not running.
-On iOS it goes through APNs (Apple Push Notification service). Rae gives the app the device token
+On iOS it goes through APNs (Apple Push Notification service), on Android through Firebase Cloud
+Messaging (FCM). Rae gives the app the device token
 and the notifications that reach it. Sending them is the server's job, and is the app's own code.
 
 ```rae
@@ -27,13 +28,14 @@ if let push: PushNotification = nextPushNotification(pushNotifications: pushNoti
 | `nextPushNotification(pushNotifications:)` | the next notification, one per call, or `none` |
 | `simulatePushNotification(payload:, tapped:)`, `simulatePushToken(token:)` | the system's part, for a test |
 
-A `PushNotification` has `payload`, the JSON the server sent (on iOS the whole `userInfo`, with its
-`aps` dictionary and any keys the server added), and `tapped`.
+A `PushNotification` has `payload`, the JSON the server sent, and `tapped`. On iOS the payload is
+the whole `userInfo`, with its `aps` dictionary and any keys the server added; on Android it is the
+message's `data` keys (see the Android section).
 
 ## What to expect
 
-- **The permission is LocalNotification's.** On iOS one question covers both: call
-  `localNotificationAsk()`. Registering does not ask anything. The token comes even when the person
+- **The permission is LocalNotification's.** One question covers both: call
+  `localNotificationAsk()` (on Android 13 and later it asks for `POST_NOTIFICATIONS`). Registering does not ask anything. The token comes even when the person
   said no, but then the phone shows nothing.
 - **The token comes later and can change.** Register at each launch, and send the token to the
   server when it differs from the one the server has. A token from a development build works only
@@ -69,14 +71,51 @@ call, with `tapped` true. `simulatePushNotification` hands over one more. Case 1
   developer account. It belongs to the server, never to the app or to git.
 - The simulator gets no real token: `pushNotificationError()` says why.
 
-## Android (FCM): not yet
+## Android: what the app supplies
 
-On Android, Firebase Cloud Messaging is not done yet; today Android, the Mac and the web register
-nothing and receive nothing (`pushNotificationRegister()` answers false). When it comes, the app
-will supply its own Firebase config (`google-services.json`, or its project id, app id and API key),
-read at build time from a path outside the repository or from the environment. That file and the
-server's FCM service-account key are an app's secrets: keep them out of git (in `.gitignore`), as
-for every key.
+On Android it is Firebase Cloud Messaging (FCM). The server sends through FCM's HTTP v1 API with
+the token from `pushNotificationToken()`.
+
+- **The app's `google-services.json`,** downloaded from its Firebase project (Project settings, the
+  Android app whose package name is the app's `RAE_ANDROID_PACKAGE`). It is the app's secret: keep
+  it outside the repository, or gitignored, never committed. Build with
+  `RAE_ANDROID_GOOGLE_SERVICES=<path to it> sh tools/android/gen-android.sh <project>`. The build
+  turns it into the string resources Firebase reads when it starts (`google_app_id`,
+  `gcm_defaultSenderId`, `google_api_key`, `project_id`), as Google's Gradle plugin does.
+- **The server's FCM service-account key** (a JSON key of the Firebase project). It belongs to the
+  server, never to the app or to git.
+- Without `RAE_ANDROID_GOOGLE_SERVICES` an app that imports lib/PushNotification still builds, with
+  a note, but without Firebase: `pushNotificationRegister()` answers false, and
+  `pushNotificationError()` says it was built without Firebase.
+- **The permission** is the one question of Android 13 and later, `POST_NOTIFICATIONS`, asked by
+  `localNotificationAsk()` (`runtime_local_notification_android.h`, SDL's permission request).
+  Before Android 13 it is allowed without a question. The build declares it.
+- **A device or emulator with Google Play services.** A `google_apis` emulator image has them.
+
+The payload on Android is a JSON object of the message's `data` keys (FCM's data values are
+strings). One that arrives while the app runs also has `"notification": { "title": ..., "body":
+... }` when the message had a notification part; the system shows nothing then. When the app is in
+the background or not running, FCM shows the notification itself, and its tap starts the app with
+the data keys, which come with `tapped` true (Firebase's own `google.*`, `gcm.*`, `from` and
+`collapse_key` are left out). A message with only `data` that arrives in the background reaches the
+app only when it next runs in the foreground: waking the app in the background is not supported.
+
+### How the build gets Firebase without Gradle
+
+`tools/android/firebase/artifacts.lock` pins Firebase Messaging 24.1.2 and the 60 libraries it
+depends on, each with its sha256. `resolve.py` writes it from the POMs on Google's Maven
+repository and Maven Central, keeping the highest version of each, as Gradle would. Run it again
+only to move the pin. `fetch.sh` downloads those files once into
+`~/.cache/rae/android-firebase/<hash of the lock>/`, checks each sum and unpacks the AARs. Then
+`gen-android.sh`, for an app whose C includes the push header:
+
+- compiles the libraries' resources as overlays, with the app's Firebase values, and has `aapt2`
+  write the R classes of every library package;
+- merges the libraries' manifests into the app's (`merge-manifest.py`: their permissions and
+  components, one `ComponentDiscoveryService` with every registrar), and declares
+  `org.rae.app.push.RaePushService` for the messages;
+- compiles `tools/android/firebase/java` (`RaePushService`: the token, the messages, `register`)
+  against the jars, and turns all of it into `classes*.dex`.
 
 ## How it works
 
@@ -86,10 +125,21 @@ registration callbacks (`application:didRegisterForRemoteNotificationsWithDevice
 failure one) to SDL's app delegate, and in `application:willFinishLaunchingWithOptions:` sets a
 `UNUserNotificationCenter` delegate. That delegate keeps the foreground empty, as iOS does with no
 delegate, and passes on the notifications whose trigger is a `UNPushNotificationTrigger`.
-`lib/PushNotification.rae` reads them and hands them out.
+On Android, `RaePushService` (a `FirebaseMessagingService`) and `RaeActivity` (the tap's
+intent extras, in `onCreate` and `onNewIntent`) call into the same header through JNI, and
+`rae_ext_PushNotification_register` calls `RaePushService.register()`, which asks
+`FirebaseMessaging` for the token. `lib/PushNotification.rae` reads them and hands them out.
 
 ## What has been run
 
 The headless path on a Mac (case 1706), the shim compiled for iOS arm64 with `-Wall -Wextra
 -Werror`, and the module type-checked for every target (check-targets). Not yet run on an iPhone
 with a real APNs send.
+
+On an Android 15 emulator with Google Play services (2026-11-27), with a placeholder
+`google-services.json` (a made-up project): Firebase starts from the values, the ask answers and
+`localNotificationAllowed()` is true once the permission is granted, `pushNotificationRegister()`
+reaches the Firebase servers, which refuse the made-up project (`pushNotificationError()`:
+`FIS_AUTH_ERROR`), and an intent with a message's extras comes as `tapped=true
+payload={"chest":"ready","match":"7"}`. A build without the JSON answers false with its error. Not
+yet run with a real Firebase project: a real token and a message sent through FCM.

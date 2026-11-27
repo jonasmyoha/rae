@@ -28,6 +28,11 @@
 #                         always there
 #   RAE_APP_LINKS / RAE_APP_SCHEME  the links that open the app (docs/app-links.md)
 #   RAE_ANDROID_VERSION / RAE_ANDROID_BUILD  versionName / versionCode
+#   RAE_ANDROID_GOOGLE_SERVICES  the app's google-services.json, for push
+#                         notifications through Firebase (lib/PushNotification,
+#                         docs/push-notifications.md); kept outside the repository.
+#                         Without it an app using lib/PushNotification builds
+#                         without Firebase, and registering answers false
 #   RAE_ANDROID_KEYSTORE  the signing keystore (default ~/.android/debug.keystore,
 #                         made when missing; password "android", alias
 #                         androiddebugkey, as Android Studio's)
@@ -86,6 +91,21 @@ sh "$root/tools/stage-app-assets.sh" "$ex_dir" "$gen/app.c" "$gen/apk/assets"
   { echo "$stamp"; printf '%s\n' "$files"; } > raeAssets.txt
 )
 echo "gen-android: $(($(wc -l < "$gen/apk/assets/raeAssets.txt") - 1)) files to bundle"
+
+# Push notifications (lib/PushNotification, docs/push-notifications.md): an app whose C
+# includes the shim gets Firebase Cloud Messaging when RAE_ANDROID_GOOGLE_SERVICES names
+# its google-services.json: the pinned libraries (tools/android/firebase/artifacts.lock),
+# their resources and manifests, and the app's Firebase values as string resources.
+firebase=""
+if grep -q 'runtime_push_notification.h' "$gen/app.c"; then
+  if [ -n "${RAE_ANDROID_GOOGLE_SERVICES:-}" ]; then
+    [ -f "$RAE_ANDROID_GOOGLE_SERVICES" ] || { echo "error: no file $RAE_ANDROID_GOOGLE_SERVICES (RAE_ANDROID_GOOGLE_SERVICES)" >&2; exit 1; }
+    echo "gen-android: push notifications through Firebase (tools/android/firebase/artifacts.lock)"
+    firebase=$(sh "$here/firebase/fetch.sh")
+  else
+    echo "gen-android: note: this app uses lib/PushNotification; without RAE_ANDROID_GOOGLE_SERVICES it builds without Firebase"
+  fi
+fi
 
 # 3. libmain.so: the app, the runtime, the launch shim (and Box3D, compiled
 #    from its pinned sources when the app uses it), linked to libSDL3.so and
@@ -164,18 +184,7 @@ cat > "$gen/apk/assets/raeRun.txt" <<EOF
 [run] Rae $(sh "$root/tools/app-commit.sh" rae)
 EOF
 
-# 4. SDL's Java half (org.libsdl.app) and RaeActivity (the link that opened
-#    the app, lib/AppLinks), compiled against the platform and
-#    turned into classes.dex
-echo "gen-android: compiling SDL's Java half..."
-{ find "$deps/sdl3/java" -name '*.java'; find "$here/java" -name '*.java'; printf '%s\n' $package_java; } \
-  | grep -v '^$' > "$gen/javaSources.txt"
-javac -nowarn -Xlint:none --release 11 -cp "$platform/android.jar" -d "$gen/classes" @"$gen/javaSources.txt" 2>&1 \
-  | grep -v '^Note:' || true
-"$build_tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$gen/apk" \
-  $(find "$gen/classes" -name '*.class')
-
-# 5. The manifest and the icon, packed by aapt2 with the assets; and the
+# 4. The manifest and the icon, packed by aapt2 with the assets; and the
 #    package parts the build names (RAE_ANDROID_PARTS): their manifest lines
 #    and their compiled resources
 part_manifest=""
@@ -235,6 +244,11 @@ if [ -n "${RAE_APP_SCHEME:-}" ]; then
       </intent-filter>"
 fi
 extra_permissions=""
+# The notification question of Android 13 (lib/LocalNotification's ask)
+if grep -q 'runtime_local_notification_android.h' "$gen/app.c"; then
+  extra_permissions="$extra_permissions
+  <uses-permission android:name=\"android.permission.POST_NOTIFICATIONS\" />"
+fi
 for permission in ${RAE_ANDROID_PERMISSIONS:-}; do
   case "$permission" in
     *[!A-Z_]*) echo "error: RAE_ANDROID_PERMISSIONS names are like RECORD_AUDIO: $permission" >&2; exit 1 ;;
@@ -276,13 +290,57 @@ cat > "$gen/AndroidManifest.xml" <<EOF
   </application>
 </manifest>
 EOF
+# Firebase: the libraries' resources (overlays, so two may share a name) and the app's
+# Firebase values; the R classes of the libraries' packages; their manifests merged in,
+# with RaePushService taking the messages
+if [ -n "$firebase" ]; then
+  mkdir -p "$gen/firebaseValues/values" "$gen/rjava"
+  python3 -I "$here/firebase/google-services-values.py" "$RAE_ANDROID_GOOGLE_SERVICES" "$package" \
+    "$gen/firebaseValues/values/values.xml"
+  "$build_tools/aapt2" compile -o "$gen/firebaseValues.zip" --dir "$gen/firebaseValues"
+  firebase_resources="$gen/firebaseValues.zip"
+  for library_res in "$firebase"/res/*; do
+    "$build_tools/aapt2" compile -o "$gen/firebase-$(basename "$library_res").zip" --dir "$library_res"
+    firebase_resources="$firebase_resources $gen/firebase-$(basename "$library_res").zip"
+  done
+  push_service='    <service android:name="org.rae.app.push.RaePushService" android:exported="false">
+      <intent-filter>
+        <action android:name="com.google.firebase.MESSAGING_EVENT" />
+      </intent-filter>
+    </service>
+  </application>'
+  python3 -I -c 'import sys; path = sys.argv[1]; text = open(path).read(); open(path, "w").write(text.replace("  </application>", sys.argv[2], 1))' \
+    "$gen/AndroidManifest.xml" "$push_service"
+  python3 -I "$here/firebase/merge-manifest.py" "$gen/AndroidManifest.xml" "$package" "$firebase"/manifests/*.xml
+fi
 target_sdk=$(basename "$platform" | sed 's/android-//')
 set -- -o "$gen/unsigned.apk" --manifest "$gen/AndroidManifest.xml" -I "$platform/android.jar" \
   --min-sdk-version "$api" --target-sdk-version "$target_sdk" -A "$gen/apk/assets"
 [ -f "$gen/resources.zip" ] && set -- "$@" "$gen/resources.zip"
 for part_zip in $part_resources; do set -- "$@" "$part_zip"; done
+if [ -n "$firebase" ]; then
+  set -- "$@" --auto-add-overlay --java "$gen/rjava" --extra-packages "$(grep -v '^$' "$firebase/packages.txt" | sort -u | paste -sd: -)"
+  for firebase_zip in $firebase_resources; do set -- "$@" -R "$firebase_zip"; done
+fi
 "$build_tools/aapt2" link "$@"
-(cd "$gen/apk" && zip -q -r "$gen/unsigned.apk" classes.dex lib)
+# 5. SDL's Java half (org.libsdl.app) and RaeActivity (the link that opened
+#    the app, lib/AppLinks), compiled against the platform and turned into
+#    classes.dex; with Firebase, its jars, the R classes of its libraries
+#    (written by the link above) and RaePushService too, into classes*.dex
+echo "gen-android: compiling SDL's Java half..."
+{ find "$deps/sdl3/java" -name '*.java'; find "$here/java" -name '*.java'; printf '%s\n' $package_java
+  if [ -n "$firebase" ]; then find "$here/firebase/java" "$gen/rjava" -name '*.java'; fi; } \
+  | grep -v '^$' > "$gen/javaSources.txt"
+classpath="$platform/android.jar"
+dex_inputs=""
+if [ -n "$firebase" ]; then
+  for jar in "$firebase"/jars/*.jar; do classpath="$classpath:$jar"; dex_inputs="$dex_inputs $jar"; done
+fi
+javac -nowarn -Xlint:none --release 11 -cp "$classpath" -d "$gen/classes" @"$gen/javaSources.txt" 2>&1 \
+  | grep -v '^Note:' || true
+"$build_tools/d8" --release --min-api "$api" --lib "$platform/android.jar" --output "$gen/apk" \
+  $(find "$gen/classes" -name '*.class') $dex_inputs
+(cd "$gen/apk" && zip -q -r "$gen/unsigned.apk" classes*.dex lib)
 
 # 6. Aligned (16 KB pages, Android 15) and signed
 "$build_tools/zipalign" -f -P 16 4 "$gen/unsigned.apk" "$gen/aligned.apk"

@@ -18,8 +18,11 @@
 # Each comes once, whole, in the order they came, and wakes the frame loop (EventLoop.wake).
 #
 # On iOS this is APNs (runtime_push_notification.h; the app needs the aps-environment
-# entitlement, which tools/ios/gen-ios.sh writes). Android (FCM) is not there yet: it, the
-# Mac and the web register nothing and receive nothing. In a headless run (RAE_UI_HEADLESS,
+# entitlement, which tools/ios/gen-ios.sh writes). On Android it is Firebase Cloud Messaging,
+# in an app built with its google-services.json (tools/android/gen-android.sh); the payload is
+# the message's data keys, and "notification" with the title and body of one that arrives
+# while the app runs. The Mac and the web register nothing and receive nothing. In a headless run
+# (RAE_UI_HEADLESS,
 # RAE_SDL_HEADLESS_MS or RAE_HEADLESS_FRAMES set) the register call logs `[push] register`
 # and gives a simulated token (RAE_PUSH_TOKEN, or `simulated-push-token`). Everywhere,
 # RAE_PUSH_OPENED=<json> stands in for a tap that launched the app, and simulatePushNotification
@@ -27,7 +30,7 @@
 import Sys
 cheader "runtime_push_notification.h"
 
-const hasPushNotifications: Bool = Target.os is Os.ios
+const hasPushNotifications: Bool = Target.os is Os.ios or Target.os is Os.android
 
 func rae_ext_PushNotification_take() unsafe extern("rae_ext_PushNotification_take") ret String
 

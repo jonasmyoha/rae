@@ -124,3 +124,11 @@ missing), `RAE_ANDROID_API` (the oldest Android, default 28 = Android 9) and
 `RAE_APP_SCHEME` (a custom scheme) add intent filters to `RaeActivity`, the
 app's activity (`java/org/rae/app/RaeActivity.java`), which passes the URL to
 lib/AppLinks. docs/app-links.md lists the file the website must serve.
+
+## Push notifications
+
+An app that imports lib/PushNotification gets Firebase Cloud Messaging when it is built with
+`RAE_ANDROID_GOOGLE_SERVICES=<its google-services.json>` (kept outside the repository). The
+build downloads the pinned Firebase libraries once (`firebase/artifacts.lock`, `firebase/fetch.sh`)
+and adds their classes, resources and manifests without Gradle. docs/push-notifications.md has the
+rest.

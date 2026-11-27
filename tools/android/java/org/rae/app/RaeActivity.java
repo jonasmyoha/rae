@@ -1,5 +1,6 @@
-// The app's activity: SDL's, plus the link that opened it (lib/AppLinks), and
-// the media keys handed to the system's media sessions.
+// The app's activity: SDL's, plus the link that opened it (lib/AppLinks), the
+// push notification whose tap opened it (lib/PushNotification), and the media
+// keys handed to the system's media sessions.
 //
 // SDLActivity passes on only a link's path, and at launch before the event
 // queue exists, and it does nothing with a link that arrives while the app
@@ -18,6 +19,8 @@ import org.libsdl.app.SDLActivity;
 public class RaeActivity extends SDLActivity {
   private static native void nativeOpenLink(String url);
 
+  private static native void nativePushTapped(String payload);
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
@@ -25,6 +28,7 @@ public class RaeActivity extends SDLActivity {
     // was handed over before.
     if (savedInstanceState == null) {
       deliverLink(getIntent());
+      deliverPushTap(getIntent());
     }
   }
 
@@ -33,6 +37,7 @@ public class RaeActivity extends SDLActivity {
     super.onNewIntent(intent);
     setIntent(intent);
     deliverLink(intent);
+    deliverPushTap(intent);
   }
 
   // SDL turns every key into a key event of its own, the media keys too (a
@@ -66,6 +71,34 @@ public class RaeActivity extends SDLActivity {
         return true;
       default:
         return false;
+    }
+  }
+
+  // A tap on a notification that Firebase showed (the app was in the background
+  // or not running) starts this activity with the message's data keys as
+  // extras, beside Firebase's own (google.*, gcm.*, from, collapse_key). The
+  // data keys go on as a JSON object.
+  private static void deliverPushTap(Intent intent) {
+    Bundle extras = intent != null ? intent.getExtras() : null;
+    if (extras == null || !extras.containsKey("google.message_id")) {
+      return;
+    }
+    org.json.JSONObject payload = new org.json.JSONObject();
+    for (String key : extras.keySet()) {
+      if (key.startsWith("google.") || key.startsWith("gcm.") || key.equals("from") || key.equals("collapse_key")) {
+        continue;
+      }
+      Object value = extras.get(key);
+      try {
+        payload.put(key, value != null ? value.toString() : org.json.JSONObject.NULL);
+      } catch (org.json.JSONException error) {
+        // a key the JSON cannot hold is left out
+      }
+    }
+    try {
+      nativePushTapped(payload.toString());
+    } catch (UnsatisfiedLinkError error) {
+      // the app does not use lib/PushNotification
     }
   }
 
