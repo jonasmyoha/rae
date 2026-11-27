@@ -1,0 +1,251 @@
+# CharacterReach — reaching and holding with a posed skeleton (GltfSkin): after a
+# character is posed by its clips, turn single joints, bend an arm (or a leg) so
+# its end reaches a point by a two-bone IK, and curl a hand's fingers, before its
+# palette is built. A game uses it to put hands on what they hold (a tool, a
+# rail, a wheel): pose the clip, reach, then buildPaletteInto.
+#
+# Everything works in the skeleton's own space (nodeWorldMatrix: the whole node
+# chain, the model's transform not in it): bring a world point in by the inverse
+# of the character's model matrix first. A node's turn there is its local turns
+# multiplied from the root down; the scales along the chain must be even (one
+# number per node), as a glTF character's are.
+#
+# The two-bone IK: a shoulder, an elbow and a hand (the upper bone and the lower
+# bone keep their lengths); the hand on the target when it is within reach, the
+# elbow bent toward a pole point, and past the reach the arm pointing nearly
+# straight at it. Example 153 makes the walker's hands reach points in front of
+# it; case 1695 checks the reach on a skeleton built by hand.
+import Math
+import Quat
+import Vec3
+open Math3d
+open GltfSkin
+
+# A node by its name; -1 when the skeleton has none
+func skeletonNode(sk: view Skeleton, name: view String) ret Int {
+  if let node: Int = nodeByName(sk: sk, name: name) {
+    ret node
+  }
+  ret -1
+}
+
+# A node's local turn
+func skeletonLocalTurn(sk: view Skeleton, node: view Int) ret Quat {
+  ret Quat.create(
+    x: sk.localR.copyAtFallback(index: node * 4, fallback: 0.0)
+    y: sk.localR.copyAtFallback(index: node * 4 + 1, fallback: 0.0)
+    z: sk.localR.copyAtFallback(index: node * 4 + 2, fallback: 0.0)
+    w: sk.localR.copyAtFallback(index: node * 4 + 3, fallback: 1.0)
+  )
+}
+
+func skeletonSetLocalTurn(sk: mod Skeleton, node: view Int, turn: view Quat) {
+  let unit: Quat = Quat.qnorm(a: turn)
+  sk.localR.set(index: node * 4, value: unit.x)
+  sk.localR.set(index: node * 4 + 1, value: unit.y)
+  sk.localR.set(index: node * 4 + 2, value: unit.z)
+  sk.localR.set(index: node * 4 + 3, value: unit.w)
+}
+
+# A node's turn in the skeleton's space: its local turns from the root down
+func skeletonNodeTurn(sk: view Skeleton, node: view Int) ret Quat {
+  var turn: Quat = Quat.identity()
+  var at: Int = node
+  var guard: Int = 0
+  loop at >= 0 and guard < sk.nodeCount + 1 {
+    turn = Quat.qmul(a: skeletonLocalTurn(sk: sk, node: at), b: turn)
+    at = sk.parent.copyAtFallback(index: at, fallback: -1)
+    guard = guard + 1
+  }
+  ret turn
+}
+
+# Where a node is in the skeleton's space
+func skeletonNodeAt(sk: view Skeleton, node: view Int) ret Vec3 {
+  ret mat4TransformPoint(
+    m: nodeWorldMatrix(sk: sk, node: node)
+    p: Vec3.create(x: 0.0, y: 0.0, z: 0.0)
+  )
+}
+
+# Turn node `node` by `turn` more, as seen in the skeleton's space (its children
+# go with it): its local turn is set so
+func skeletonTurnNode(sk: mod Skeleton, node: view Int, turn: view Quat) {
+  let parent: Int = sk.parent.copyAtFallback(index: node, fallback: -1)
+  var parentTurn: Quat = Quat.identity()
+  if parent >= 0 {
+    parentTurn = skeletonNodeTurn(sk: sk, node: parent)
+  }
+  let now: Quat = skeletonNodeTurn(sk: sk, node: node)
+  skeletonSetLocalTurn(
+    sk: sk
+    node: node
+    turn: Quat.qmul(a: Quat.conjugate(a: parentTurn), b: Quat.qmul(a: turn, b: now))
+  )
+}
+
+# The shortest turn that takes way `from` onto way `to` (both of length 1)
+func turnBetween(from: view Vec3, to: view Vec3) ret Quat {
+  let dot: Float = Vec3.vdot(a: from, b: to)
+  if dot < -0.9999 {
+    # Opposite: half a turn round any axis across `from`
+    var across: Vec3 = Vec3.vcross(a: from, b: Vec3.create(x: 1.0, y: 0.0, z: 0.0))
+    if Vec3.vlen(a: across) < 0.001 {
+      across = Vec3.vcross(a: from, b: Vec3.create(x: 0.0, y: 1.0, z: 0.0))
+    }
+    ret Quat.fromAxisAngle(axis: Vec3.vnorm(a: across), angle: Math.pi)
+  }
+  let axis: Vec3 = Vec3.vcross(a: from, b: to)
+  ret Quat.qnorm(a: Quat.create(
+    x: axis.x
+    y: axis.y
+    z: axis.z
+    w: 1.0 + dot
+  ))
+}
+
+# Turn node `node` so the way from it to node `child` points along `way` (the
+# skeleton's space); nothing when either way has no length
+func skeletonPointNode(
+  sk: mod Skeleton
+  node: view Int
+  child: view Int
+  way: view Vec3
+) {
+  let from: Vec3 = Vec3.vsub(
+    a: skeletonNodeAt(sk: sk, node: child)
+    b: skeletonNodeAt(sk: sk, node: node)
+  )
+  if Vec3.vlen(a: from) < 0.000001 or Vec3.vlen(a: way) < 0.000001 {
+    ret
+  }
+  skeletonTurnNode(
+    sk: sk
+    node: node
+    turn: turnBetween(from: Vec3.vnorm(a: from), to: Vec3.vnorm(a: way))
+  )
+}
+
+# Bend node `node` by `angle` (radians) about `axis` of its own frame (a finger
+# joint about its X)
+func skeletonBendNode(
+  sk: mod Skeleton
+  node: view Int
+  axis: view Vec3
+  angle: view Float
+) {
+  skeletonSetLocalTurn(
+    sk: sk
+    node: node
+    turn: Quat.qmul(
+      a: skeletonLocalTurn(sk: sk, node: node)
+      b: Quat.fromAxisAngle(axis: axis, angle: angle)
+    )
+  )
+}
+
+# Where the elbow goes for the end to reach `target` from the shoulder at
+# `shoulder`: the upper bone `upper` and the lower bone `lower` long, the elbow
+# bent toward `pole`. Past the reach (or too near) the target is taken at the
+# nearest distance the bones can make.
+func twoBoneElbow(
+  shoulder: view Vec3
+  target: view Vec3
+  pole: view Vec3
+  upper: view Float
+  lower: view Float
+) ret Vec3 {
+  let toTarget: Vec3 = Vec3.vsub(a: target, b: shoulder)
+  let length: Float = Vec3.vlen(a: toTarget)
+  let way: Vec3 = Vec3.vscale(a: toTarget, s: 1.0 / Math.max(a: length, b: 0.0001))
+  let reach: Float = Math.clamp(
+    val: length
+    low: Math.abs(value: upper - lower) + 0.001
+    high: upper + lower - 0.001
+  )
+  let along: Float = (upper * upper - lower * lower + reach * reach) / (2.0 * reach)
+  let out: Float = Math.sqrt(x: Math.max(a: 0.0, b: upper * upper - along * along))
+  let toPole: Vec3 = Vec3.vsub(a: pole, b: shoulder)
+  var side: Vec3 = Vec3.vsub(a: toPole, b: Vec3.vscale(a: way, s: Vec3.vdot(a: toPole, b: way)))
+  if Vec3.vlen(a: side) < 0.0001 {
+    side = Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  }
+  side = Vec3.vnorm(a: side)
+  ret Vec3.vadd(
+    a: shoulder
+    b: Vec3.vadd(a: Vec3.vscale(a: way, s: along), b: Vec3.vscale(a: side, s: out))
+  )
+}
+
+# The two bones from node `upperNode` (the shoulder) through `lowerNode` (the
+# elbow) to `endNode` (the wrist) bent so the end reaches `target`, the elbow
+# toward `pole` (the skeleton's space). The end's own turn is left as it was.
+func twoBoneReach(
+  sk: mod Skeleton
+  upperNode: view Int
+  lowerNode: view Int
+  endNode: view Int
+  target: view Vec3
+  pole: view Vec3
+) {
+  if upperNode < 0 or lowerNode < 0 or endNode < 0 {
+    ret
+  }
+  let shoulder: Vec3 = skeletonNodeAt(sk: sk, node: upperNode)
+  let elbow: Vec3 = skeletonNodeAt(sk: sk, node: lowerNode)
+  let end: Vec3 = skeletonNodeAt(sk: sk, node: endNode)
+  let elbowTo: Vec3 = twoBoneElbow(
+    shoulder: shoulder
+    target: target
+    pole: pole
+    upper: Vec3.vlen(a: Vec3.vsub(a: elbow, b: shoulder))
+    lower: Vec3.vlen(a: Vec3.vsub(a: end, b: elbow))
+  )
+  skeletonPointNode(
+    sk: sk
+    node: upperNode
+    child: lowerNode
+    way: Vec3.vsub(a: elbowTo, b: shoulder)
+  )
+  skeletonPointNode(
+    sk: sk
+    node: lowerNode
+    child: endNode
+    way: Vec3.vsub(a: target, b: skeletonNodeAt(sk: sk, node: lowerNode))
+  )
+}
+
+# A hand's fingers curled round a grip on a Mixamo-named rig (Rae's walker:
+# "<prefix><side>HandIndex1" ...): each of the three joints of the index, middle,
+# ring and little finger bent `angle` about its own X, the thumb's by half
+func curlHandFingers(
+  sk: mod Skeleton
+  prefix: view String
+  side: view String
+  angle: view Float
+) {
+  let fingers: List(String) = {
+    "Index"
+    "Middle"
+    "Ring"
+    "Pinky"
+    "Thumb"
+  }
+  loop let finger: view String in fingers {
+    var bend: Float = angle
+    if finger is "Thumb" {
+      bend = angle * 0.5
+    }
+    loop var joint: Int = 1, joint <= 3, ++joint {
+      let node: Int = skeletonNode(sk: sk, name: "{prefix}{side}Hand{finger}{joint}")
+      if node >= 0 {
+        skeletonBendNode(
+          sk: sk
+          node: node
+          axis: Vec3.create(x: 1.0, y: 0.0, z: 0.0)
+          angle: bend
+        )
+      }
+    }
+  }
+}

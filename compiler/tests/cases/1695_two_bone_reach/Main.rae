@@ -1,0 +1,206 @@
+# Reaching with a posed skeleton (app3d/CharacterReach): an arm of a skeleton
+# built by hand (a root, a shoulder, an elbow 0.3 m on, a wrist 0.25 m on, a
+# finger) bent by the two-bone IK so the wrist is on a target, the bones keeping
+# their lengths and the elbow bent toward the pole; past the reach nearly
+# straight at it; a joint pointed along a way; a finger curled.
+import Math
+import Quat
+import Vec3
+open GltfSkin
+open app3d/CharacterReach
+
+func near(a: view Vec3, b: view Vec3, within: view Float) ret Bool {
+  ret Vec3.vlen(a: Vec3.vsub(a: a, b: b)) <= within
+}
+
+func arm() ret Skeleton {
+  ret Skeleton {
+    ok: true
+    jointNodes: {
+      0
+      1
+      2
+      3
+      4
+    }
+    inverseBind: {}
+    nodeCount: 5
+    parent: {
+      -1
+      0
+      1
+      2
+      3
+    }
+    nodeNames: {
+      "root"
+      "RightArm"
+      "RightForeArm"
+      "RightHand"
+      "RightHandIndex1"
+    }
+    localT: {
+      0.0
+      0.0
+      0.0
+      0.0
+      0.0
+      1.4
+      0.0
+      0.3
+      0.0
+      0.0
+      0.25
+      0.0
+      0.0
+      0.08
+      0.0
+    }
+    localR: {
+      0.0
+      0.0
+      0.0
+      1.0
+      0.0
+      0.0
+      0.0
+      1.0
+      0.0
+      0.0
+      0.0
+      1.0
+      0.0
+      0.0
+      0.0
+      1.0
+      0.0
+      0.0
+      0.0
+      1.0
+    }
+    localS: {
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+      1.0
+    }
+  }
+}
+
+func main() ret Int {
+  var sk: Skeleton = arm()
+  let shoulder: Int = skeletonNode(sk: sk, name: "RightArm")
+  let elbow: Int = skeletonNode(sk: sk, name: "RightForeArm")
+  let wrist: Int = skeletonNode(sk: sk, name: "RightHand")
+  log(
+    "nodes found: {shoulder is 1 and elbow is 2 and wrist is 3 and skeletonNode(
+      sk: sk
+      name: "nothing"
+    ) is -1}"
+  )
+  let target: Vec3 = Vec3.create(x: 0.1, y: 0.4, z: 1.2)
+  let pole: Vec3 = Vec3.create(x: 0.3, y: 0.0, z: 1.0)
+  twoBoneReach(
+    sk: sk
+    upperNode: shoulder
+    lowerNode: elbow
+    endNode: wrist
+    target: target
+    pole: pole
+  )
+  let at: Vec3 = skeletonNodeAt(sk: sk, node: wrist)
+  let elbowAt: Vec3 = skeletonNodeAt(sk: sk, node: elbow)
+  let shoulderAt: Vec3 = skeletonNodeAt(sk: sk, node: shoulder)
+  log("the wrist on the target (within 1 mm): {near(a: at, b: target, within: 0.001)}")
+  log(
+    "the bones keep their lengths: {Math.abs(
+      value: Vec3.vlen(a: Vec3.vsub(a: elbowAt, b: shoulderAt)) - 0.3
+    ) < 0.001 and Math.abs(value: Vec3.vlen(a: Vec3.vsub(a: at, b: elbowAt)) - 0.25) < 0.001}"
+  )
+  let middle: Vec3 = Vec3.vscale(a: Vec3.vadd(a: shoulderAt, b: target), s: 0.5)
+  log(
+    "the elbow bent toward the pole: {Vec3.vdot(
+      a: Vec3.vsub(a: elbowAt, b: middle)
+      b: Vec3.vsub(a: pole, b: middle)
+    ) > 0.0}"
+  )
+  # The finger goes with the hand
+  let fingerAt: Vec3 = skeletonNodeAt(sk: sk, node: 4)
+  log(
+    "the finger goes with the hand: {Math.abs(
+      value: Vec3.vlen(a: Vec3.vsub(a: fingerAt, b: at)) - 0.08
+    ) < 0.001}"
+  )
+  # Past the reach: nearly straight at the target
+  var far: Skeleton = arm()
+  twoBoneReach(
+    sk: far
+    upperNode: 1
+    lowerNode: 2
+    endNode: 3
+    target: Vec3.create(x: 2.0, y: 0.0, z: 1.4)
+    pole: pole
+  )
+  log(
+    "past the reach, pointing at it: {near(
+      a: skeletonNodeAt(sk: far, node: 3)
+      b: Vec3.create(x: 0.55, y: 0.0, z: 1.4)
+      within: 0.03
+    )}"
+  )
+  # A joint pointed along a way: the hand toward -Z
+  var pointed: Skeleton = arm()
+  skeletonPointNode(
+    sk: pointed
+    node: 3
+    child: 4
+    way: Vec3.create(x: 0.0, y: 0.0, z: -1.0)
+  )
+  log(
+    "a joint pointed along a way: {near(
+      a: skeletonNodeAt(sk: pointed, node: 4)
+      b: Vec3.create(x: 0.0, y: 0.55, z: 1.32)
+      within: 0.001
+    )}"
+  )
+  # The shortest turn, opposite ways too
+  let from: Vec3 = Vec3.vnorm(a: Vec3.create(x: 1.0, y: 2.0, z: -0.5))
+  let to: Vec3 = Vec3.vnorm(a: Vec3.create(x: -0.3, y: 0.2, z: 1.0))
+  log(
+    "a turn onto a way: {near(
+      a: Quat.rotate(q: turnBetween(from: from, to: to), v: from)
+      b: to
+      within: 0.0001
+    ) and near(
+      a: Quat.rotate(q: turnBetween(from: from, to: Vec3.vneg(a: from)), v: from)
+      b: Vec3.vneg(a: from)
+      within: 0.0001
+    )}"
+  )
+  # A finger curled about its own X
+  var curled: Skeleton = arm()
+  curlHandFingers(
+    sk: curled
+    prefix: ""
+    side: "Right"
+    angle: 1.1
+  )
+  let bent: Quat = skeletonLocalTurn(sk: curled, node: 4)
+  log(
+    "the finger curled 1.1 rad about its X: {Math.abs(value: bent.x - Math.sin(x: 0.55)) < 0.0001 and Math.abs(
+      value: bent.w - Math.cos(x: 0.55)
+    ) < 0.0001}"
+  )
+  ret 0
+}

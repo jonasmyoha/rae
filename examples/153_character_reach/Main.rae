@@ -1,0 +1,131 @@
+# Character reach (app3d/CharacterReach): the walker's skeleton, posed by its
+# idle clip, with both hands put on points in front of its chest by the two-bone
+# IK (the elbows bent down and out), its hands turned ahead and its fingers
+# curled, as a game holds a tool; then its skinning palette built as for a frame.
+# It prints how far each hand ended from its point and the bones' lengths before
+# and after. No window: the reach is the skeleton's, before any drawing.
+#
+#   rae run examples/153_character_reach/Main.rae
+import Math
+import Sys
+import Vec3
+open Gltf
+open GltfSkin
+open app3d/CharacterReach
+
+const rig: String = "mixamorig:"
+
+# The walker kit's character and clips (app3d/WalkerAppSetup walkerAssets)
+const walkerFolder: String = "lib/assets/walker/"
+
+func length(a: view Vec3, b: view Vec3) ret Float {
+  ret Vec3.vlen(a: Vec3.vsub(a: a, b: b))
+}
+
+func reachSide(
+  sk: mod Skeleton
+  side: view String
+  target: view Vec3
+  pole: view Vec3
+  ahead: view Vec3
+) {
+  let upper: Int = skeletonNode(sk: sk, name: "{rig}{side}Arm")
+  let lower: Int = skeletonNode(sk: sk, name: "{rig}{side}ForeArm")
+  let hand: Int = skeletonNode(sk: sk, name: "{rig}{side}Hand")
+  let finger: Int = skeletonNode(sk: sk, name: "{rig}{side}HandMiddle1")
+  let upperBefore: Float = length(
+    a: skeletonNodeAt(sk: sk, node: lower)
+    b: skeletonNodeAt(sk: sk, node: upper)
+  )
+  let lowerBefore: Float = length(
+    a: skeletonNodeAt(sk: sk, node: hand)
+    b: skeletonNodeAt(sk: sk, node: lower)
+  )
+  twoBoneReach(
+    sk: sk
+    upperNode: upper
+    lowerNode: lower
+    endNode: hand
+    target: target
+    pole: pole
+  )
+  skeletonPointNode(
+    sk: sk
+    node: hand
+    child: finger
+    way: ahead
+  )
+  curlHandFingers(
+    sk: sk
+    prefix: rig
+    side: side
+    angle: 1.1
+  )
+  let upperAfter: Float = length(
+    a: skeletonNodeAt(sk: sk, node: lower)
+    b: skeletonNodeAt(sk: sk, node: upper)
+  )
+  let lowerAfter: Float = length(
+    a: skeletonNodeAt(sk: sk, node: hand)
+    b: skeletonNodeAt(sk: sk, node: lower)
+  )
+  log(
+    "{side} hand: {length(a: skeletonNodeAt(sk: sk, node: hand), b: target)} off its point; upper arm {upperBefore} -> {upperAfter}, forearm {lowerBefore} -> {lowerAfter}"
+  )
+}
+
+func main() ret Int {
+  let assets: String = Sys.stdlibPath(path: walkerFolder)
+  let glb: Glb = loadGlb(path: "{assets}walker.glb")
+  var sk: Skeleton = loadSkeleton(glb: glb, skinIndex: 0)
+  if not sk.ok {
+    log("no skeleton in {assets}walker.glb")
+    ret 1
+  }
+  let idle: Clip = loadClip(glb: loadGlb(path: "{assets}idle.glb"), animIndex: 0, sk: sk)
+  applyClip(sk: sk, c: idle, time: 1.0)
+  # The character's own frame in the skeleton's space: up from the hips to the
+  # head, right from the left shoulder to the right, ahead across them
+  let hips: Vec3 = skeletonNodeAt(sk: sk, node: skeletonNode(sk: sk, name: "{rig}Hips"))
+  let head: Vec3 = skeletonNodeAt(sk: sk, node: skeletonNode(sk: sk, name: "{rig}Head"))
+  let rightShoulder: Vec3 = skeletonNodeAt(
+    sk: sk
+    node: skeletonNode(sk: sk, name: "{rig}RightArm")
+  )
+  let leftShoulder: Vec3 = skeletonNodeAt(sk: sk, node: skeletonNode(sk: sk, name: "{rig}LeftArm"))
+  let chest: Vec3 = skeletonNodeAt(sk: sk, node: skeletonNode(sk: sk, name: "{rig}Spine2"))
+  let tall: Float = length(a: head, b: hips)
+  let up: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: head, b: hips))
+  let right: Vec3 = Vec3.vnorm(a: Vec3.vsub(a: rightShoulder, b: leftShoulder))
+  let ahead: Vec3 = Vec3.vnorm(a: Vec3.vcross(a: up, b: right))
+  # Two points before the chest, a forearm's length apart, a little low (in
+  # the skeleton's units: a third of the hips-to-head height out)
+  let out: Vec3 = Vec3.vadd(
+    a: chest
+    b: Vec3.vsub(a: Vec3.vscale(a: ahead, s: tall * 0.6), b: Vec3.vscale(a: up, s: tall * 0.1))
+  )
+  let rightPoint: Vec3 = Vec3.vadd(a: out, b: Vec3.vscale(a: right, s: tall * 0.1))
+  let leftPoint: Vec3 = Vec3.vsub(a: out, b: Vec3.vscale(a: right, s: tall * 0.1))
+  let down: Vec3 = Vec3.vscale(a: up, s: 0.0 - tall)
+  reachSide(
+    sk: sk
+    side: "Right"
+    target: rightPoint
+    pole: Vec3.vadd(
+      a: rightShoulder
+      b: Vec3.vadd(a: down, b: Vec3.vscale(a: right, s: tall * 0.5))
+    )
+    ahead: ahead
+  )
+  reachSide(
+    sk: sk
+    side: "Left"
+    target: leftPoint
+    pole: Vec3.vadd(a: leftShoulder, b: Vec3.vsub(a: down, b: Vec3.vscale(a: right, s: tall * 0.5)))
+    ahead: ahead
+  )
+  var palette: List(Float) = {}
+  buildPaletteInto(sk: sk, out: palette)
+  log("the palette: {palette.length / 12} joints posed, the hands on their points")
+  ret 0
+}
