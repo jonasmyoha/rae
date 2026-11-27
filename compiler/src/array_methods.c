@@ -61,7 +61,7 @@ static const char* const array_module_template =
   "    ret\n"
   "  }\n"
   "  unsafe {\n"
-  "    this[index] = value\n"
+  "    this[index] = own value\n"
   "  }\n"
   "}\n"
   "\n"

@@ -874,6 +874,17 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
       return true;
     }
   }
+  /* a reference to an optional (an instance's `view T` of an optional T): a pointer to
+   * its box, as the template spells `view T` (c_type_parameter_is_optional) */
+  if (type->is_optional_box && type->is_opt) {
+    AstTypeRef boxed = *type;
+    boxed.is_view = false; boxed.is_mod = false; boxed.is_optional_box = false; boxed.resolved_type = NULL;
+    if (rae_opt_is_struct_rep(ctx, &boxed)) {
+      if (type->is_view && !type->is_mod) fprintf(out, "const ");
+      fprintf(out, "%s%s", rae_opt_type_name(ctx, &boxed), skip_ptr ? "" : "*");
+      return true;
+    }
+  }
     if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
       /* Ptr's TypeInfo is Buffer(void), but a borrowed Ptr is a reference to
@@ -1074,6 +1085,11 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
  * here (a `List(opt Int)`'s `contains(value: view T)`)? A reference to the
  * optional, not an `opt view` of its payload. */
 bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type) {
+    if (type && type->is_optional_box && type->is_opt) {
+        AstTypeRef boxed = *type;
+        boxed.is_view = false; boxed.is_mod = false; boxed.is_optional_box = false; boxed.resolved_type = NULL;
+        return rae_opt_is_struct_rep(ctx, &boxed);
+    }
     if (!type || type->is_opt || !(type->is_view || type->is_mod) || !type->parts || type->generic_args) return false;
     const AstTypeRef* arg = ctx->generic_args;
     for (const AstIdentifierPart* param = ctx->generic_params; param && arg; param = param->next, arg = arg->next)
@@ -1082,6 +1098,10 @@ bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type) {
 }
 
 void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern) {
+        if (!is_extern && p->type->is_optional_box && c_type_parameter_is_optional(ctx, p->type)) {
+            emit_type_ref_as_c_type(ctx, p->type, out, false);
+            return;
+        }
         /* `opt view T` (`opt mod T`, `opt own T`) in a specialization is that of
          * the concrete type: as `T` it was a pointer to the optional's box */
         if (p->type->is_opt && !is_extern && ctx->generic_params && ctx->generic_args) {
@@ -1997,6 +2017,14 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
         }
         case AST_EXPR_IDENT: {
             const AstTypeRef* lt = get_local_type_ref(ctx, expr->as.ident);
+            /* a reference to an optional reads as the optional (the name emits `(*name)`) */
+            if (lt && lt->is_optional_box && c_type_parameter_is_optional(ctx, lt)) {
+                AstTypeRef* value = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
+                *value = *lt;
+                value->is_view = false; value->is_mod = false; value->is_optional_box = false;
+                value->resolved_type = NULL;
+                return value;
+            }
             if (lt) return lt;
             // Module-level global (`var`/`let` at module scope, AST_DECL_GLOBAL_LET):
             // resolve its declared type so method calls / member access on a

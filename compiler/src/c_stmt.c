@@ -1699,6 +1699,10 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
             (int)ctx->locals[idx].len, ctx->locals[idx].data);
     return;
   }
+  /* a value read raw out of a container's slot as `let cur: T = rae_ext_rae_buf_get(...)`
+   * in an instance's clone is the slot's: the container drops it (in the template, T was
+   * abstract and never dropped) */
+  if (ctx->local_slot_of_parameter[idx] && c_local_is_slot_alias(ctx, (int)idx)) return;
   // Skip cheap value types — they own no heap and don't need a
   // drop call. Permissive predicate so String-only owning structs
   // are eligible too — alias safety is gated by local_struct_owns_heap
@@ -3606,7 +3610,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // future work — they need every early-return path to flush
                 // pools and run implicit drops, which isn't wired up yet.
                 bool wrap_str_take = false;
-                if (stmt->as.let_stmt.type
+                /* `let x: T = <raw slot read>` of an instance's clone: the slot's bits, as in the template */
+                bool slot_bits = stmt->as.let_stmt.type_was_parameter && expr_is_raw_slot_read(stmt->as.let_stmt.value);
+                if (stmt->as.let_stmt.type && !slot_bits
                     && !stmt->as.let_stmt.type->is_view
                     && !stmt->as.let_stmt.type->is_mod
                     && !stmt->as.let_stmt.type->is_opt) {
@@ -3808,6 +3814,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 ctx->local_struct_owns_heap[ctx->local_count] = owns;
                 ctx->local_slot_alias[ctx->local_count] =
                     (!owns && expr_is_raw_slot_read(init)) ? stmt->as.let_stmt.name.data : NULL;
+                ctx->local_slot_of_parameter[ctx->local_count] =
+                    stmt->as.let_stmt.type_was_parameter && expr_is_raw_slot_read(init);
                 // Alias-clearing for String locals from aliasing inits:
                 // a buf_get-flavored RHS hands back a String value
                 // whose is_owned bit was inherited from the container
@@ -3819,6 +3827,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 // Skip the clear if we deep-copied (rae_string_copy
                 // returns is_owned=1 and the heap really is private).
                 if (!owns && !let_did_deep_copy && stmt->as.let_stmt.type
+                    && !(stmt->as.let_stmt.type_was_parameter && expr_is_raw_slot_read(init))
                     && !stmt->as.let_stmt.type->is_view
                     && !stmt->as.let_stmt.type->is_mod
                     && !stmt->as.let_stmt.type->is_opt
@@ -4456,6 +4465,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     && stmt->as.ret_stmt.values->value->kind == AST_EXPR_NONE) {
                     fprintf(out, "NULL;\n");
                     emit_implicit_drops_for_body(ctx, out, ctx->func_first_let_idx);
+                    /* as every return: the function's String pool mark is flushed */
+                    if (!ctx->twin) fprintf(out, "    rae_string_pool_flush(__rae_spm_func);\n");
                     if (ctx->twin) fprintf(out, "    __rae_frame->result = __ret_val; return 1;\n  }\n");
                     else fprintf(out, "    return __ret_val;\n  }\n");
                     break;

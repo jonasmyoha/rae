@@ -35,6 +35,12 @@ typedef struct AstTypeRef {
   bool is_mod;
   bool is_val;
   bool is_own; // Ownership-transfer parameter mode — see docs/ownership-model.md
+  /* `view T` / `mod T` of a type parameter bound to an optional, written out (an
+   * instance's clone): a reference to the optional itself, a pointer to its box,
+   * read as the optional. Not an optional reference (`opt view X`, a pointer that
+   * may be null), which has the same is_opt and is_view. Set by substitute_type_ref
+   * and the cloner. */
+  bool is_optional_box;
   bool is_copy; // Independent owned copy. Stage A is annotation-only — codegen treats it identically to bare T. Stages B/C/D will make this the canonical "callee gets a fresh owned value" parameter mode.
   size_t line;
   size_t column;
@@ -396,6 +402,10 @@ struct AstStmt {
       // `var zero: T` with no value, cloned from a template: all zeros for every T
       // (List.copyAtDefault), as the template has it, not a struct's declared defaults
       bool zero_init;
+      /* its type was written as a bare type parameter (`let x: T`), cloned from a
+       * template: a raw slot read keeps the template's meaning (the slot's bits,
+       * no pool take, its String still owned for a move out: List.pop) */
+      bool type_was_parameter;
       AstExpr* value;
       // Where an alias binding was written with the removed `=>` (0: it was
       // not). Sema reports it; the parser accepts it so `rae format` can

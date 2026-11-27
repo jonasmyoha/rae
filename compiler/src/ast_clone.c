@@ -36,6 +36,8 @@ static AstTypeRef* clone_one_type(const AstCloner* cloner, const AstTypeRef* typ
     copy->is_val |= type->is_val;
     copy->is_own |= type->is_own;
     copy->is_copy |= type->is_copy;
+    /* `view T` of an optional T: a reference to the optional (AstTypeRef.is_optional_box) */
+    copy->is_optional_box = (type->is_view || type->is_mod) && !type->is_opt && arg->is_opt;
     copy->is_opt |= type->is_opt;
     copy->line = type->line;
     copy->column = type->column;
@@ -290,10 +292,13 @@ static AstStmt* clone_stmt(const AstCloner* cloner, const AstStmt* stmt) {
       const AstTypeRef* written = stmt->as.let_stmt.type;
       copy->as.let_stmt.type = ast_clone_type_ref(cloner, written);
       copy->as.let_stmt.value = ast_clone_expr(cloner, stmt->as.let_stmt.value);
-      /* `var zero: T` keeps the template's meaning: all zeros */
-      if (!stmt->as.let_stmt.value && written && written->parts && !written->parts->next && !written->generic_args
-          && argument_of(cloner, written->parts->text))
-        copy->as.let_stmt.zero_init = true;
+      /* `let x: T` keeps the template's meaning: `var zero: T` is all zeros, and a
+       * raw slot read is the slot's bits */
+      if (written && written->parts && !written->parts->next && !written->generic_args
+          && !written->is_view && !written->is_mod && argument_of(cloner, written->parts->text)) {
+        copy->as.let_stmt.type_was_parameter = true;
+        if (!stmt->as.let_stmt.value) copy->as.let_stmt.zero_init = true;
+      }
       break;
     }
     case AST_STMT_DESTRUCT: {

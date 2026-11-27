@@ -288,7 +288,18 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    and `opt` of the payload, the same as a written `opt view X`, so the type needs a mark of its own and the
    body's reads with it; a mark on the prototype alone was tried, the body still read it as an optional view),
    an Array's elements (1671, 1678), a `view List` in text or `is` (889, 1676), a map of an optional aborting at
-   run time (1654), and two leaks (1574, 1602).
+   run time (1654), and two leaks (1574, 1602). Third part (0.4.127), the rest: with the switch every case passes
+   (all 1415, not only the 93 the stage runs) and both lists are empty. A `view T` / `mod T` of a T bound to an
+   optional is marked (`AstTypeRef.is_optional_box`, set by `substitute_type_ref` and the cloner): a pointer to the
+   optional in its prototype, and a read of it is `(*name)` of the optional's type, still a reference for an `own`
+   argument (it is copied). A `let x: T` of the template keeps its meaning in the clone
+   (`let_stmt.type_was_parameter`): a raw slot read is the slot's bits, with no pool take, no clearing of a String's
+   ownership (List.pop moves it out) and no drop at the end of the scope (`local_slot_of_parameter`); a raw slot
+   read written with a concrete type in plain code still owns what it reads (lib/perf's name box). The clone's
+   hidden locals are renamed (`c_rename_hidden_names` on instances with the switch). And three fixes for plain
+   code that the clones found: `equals()` of a `view List` name reads the list (it was its pointer), `Array.set`
+   moves its `own` value in (`this[index] = own value`; as `= value` the clone stored the bits and then dropped
+   the value), and `ret none` of an optional reference flushes the function's String pool mark.
 6. **On by default**, the switch kept for one version. A spawn in a generic function works (#83491520). The waits, the
    realtime check and the twins read the instances instead of following calls by name.
 7. **Discovery removed**; the linear scans of section 3 replaced; the compile time measured against this document.

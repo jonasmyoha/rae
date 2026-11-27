@@ -10,6 +10,7 @@
  * was renamed has nothing hidden left, so a second run changes nothing.
  *
  * rae_shown_name gives a diagnostic the name as it was written. */
+#include "sema.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -190,9 +191,9 @@ static void walk_block(Hider* h, AstBlock* block) {
 }
 
 void c_rename_hidden_names(CompilerContext* ctx, AstFuncDecl* func) {
-  /* A specialization shares nodes with its template, and is not what the C is
-   * emitted from */
-  if (!func->body || func->specialization_args) return;
+  /* An instance is a full copy of its template (ast_clone.c); it is what the C is
+   * emitted from only with RAE_GENERIC_INSTANCES=1 */
+  if (!func->body || (func->specialization_args && !sema_generic_instances_emitted())) return;
   Hider h = { .ctx = ctx };
   for (AstParam* p = func->params; p; p = p->next) bind_name(&h, &p->name);
   walk_block(&h, func->body);

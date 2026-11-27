@@ -1,21 +1,4 @@
 # Cases that fail with RAE_GENERIC_INSTANCES=1 (an instance's C written from its analyzed clone,
 # docs/generic-instances-design.md step 5), one case a line with its cause. The list only gets
 # shorter: tools/generic-instances-stage.sh fails on a case that passes and is still listed.
-# A `view T` (`mod T`) of a T bound to an optional: in the template a pointer to the optional
-# (c_type_parameter_is_optional), in the clone `view` + `opt` of the payload, which is also how a
-# written `opt view X` (a pointer that may be null) looks: the clone's type needs a mark of its
-# own, and the body's reads of the parameter with it
-887_tostring_generic  # a view of an optional T
-1645_is_between_optionals  # a view of an optional T
-1668_optional_into_generic  # a view of an optional T
-# An Array's elements in an instance
-1671_array_that_owns_memory  # a wrong element value
-1678_array_text_and_is  # a wrong element value, and `is`
-# A `view List` in text or `is`: a pointer in a plain function, a value in a template
-889_equals  # equals() of two List views
-1676_local_hides_outer  # a List view's member
-# A map of an optional with text and `is`: aborts at run time
-1654_map_text_and_is  # an IntMap of opt Float
-# A leak at exit
-1574_name_order  # 49999 Strings
-1602_alias_call_taken_copies  # 4 Strings
+# Nothing fails (0.4.127).

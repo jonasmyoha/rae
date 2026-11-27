@@ -82,6 +82,9 @@ typedef struct {
   // The local bound by a raw slot read (c_local_is_slot_alias): its name in
   // the source, so that a reused index is not taken for it.
   const char* local_slot_alias[256];
+  /* `let x: T = <raw slot read>` of an instance's clone (let_stmt.type_was_parameter):
+   * the slot's bits, never dropped here, as the template's abstract `T` was not */
+  bool local_slot_of_parameter[256];
   // #885: a local with a destructor that the body drops explicitly somewhere
   // gets a runtime flag `int __rae_live_<name>`: 1 while it owns a value, 0
   // after `<name>.drop()`, 1 again after reassignment. Scope exit and

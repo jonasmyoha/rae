@@ -1841,6 +1841,8 @@ AstTypeRef* substitute_type_ref(CompilerContext* ctx, const AstIdentifierPart* g
                 if (type->is_mod) result->is_mod = true;
                 if (type->is_own) result->is_own = true;
                 if (type->is_copy) result->is_copy = true;
+                /* a view of an optional T refers to the optional, unlike a written `opt view X` */
+                result->is_optional_box = (type->is_view || type->is_mod) && !type->is_opt && match->is_opt;
                 if (type->is_opt) result->is_opt = true;
                 return result;
             }

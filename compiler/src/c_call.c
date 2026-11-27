@@ -733,7 +733,14 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     && type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, &value_tr, 0))
                     held = register_stmt_temp(ctx, &value_tr, true);
                 if (held >= 0) fprintf(out, "(__rae_stmt_tmp%d = (", held);
+                /* a `view List` name is the list's pointer (the name emitter leaves it so) */
+                const AstTypeRef* operand_tr = operands[side]->kind == AST_EXPR_IDENT
+                    ? infer_expr_type_ref(ctx, operands[side]) : NULL;
+                bool list_reference = operand_tr && (operand_tr->is_view || operand_tr->is_mod) && !operand_tr->is_opt
+                    && str_eq_cstr(get_base_type_name(operand_tr), "List");
+                if (list_reference) fprintf(out, "(*");
                 emit_expr(ctx, operands[side], out, PREC_LOWEST, false, false);
+                if (list_reference) fprintf(out, ")");
                 if (held >= 0) fprintf(out, ")), (__rae_stmt_tmp%d_set = 1), __rae_stmt_tmp%d", held, held);
                 fprintf(out, "); ");
             }
@@ -2224,7 +2231,9 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     own_takes_copy = true;
                 } else if (a->value->kind == AST_EXPR_IDENT) {
                     const AstTypeRef* itr = infer_expr_type_ref(ctx, a->value);
-                    bool is_alias = itr && (itr->is_view || itr->is_mod);
+                    const AstTypeRef* named = get_local_type_ref(ctx, a->value->as.ident);
+                    /* a reference to an optional reads as the optional, and is still a reference */
+                    bool is_alias = (itr && (itr->is_view || itr->is_mod)) || (named && named->is_optional_box);
                     int local = local_index_by_name(ctx, a->value->as.ident);
                     own_takes_copy = is_alias || local < 0 || c_local_is_slot_alias(ctx, local);
                 }

@@ -947,7 +947,9 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
     case AST_EXPR_IDENT: {
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         const Str cn = ident_c_name(ctx, expr);  // #816: prefixed symbol for a module global
-        if (c_type_parameter_is_optional(ctx, tr)) {
+        const AstTypeRef* boxed_local = get_local_type_ref(ctx, expr->as.ident);
+        if (c_type_parameter_is_optional(ctx, tr)
+            || (boxed_local && boxed_local->is_optional_box && c_type_parameter_is_optional(ctx, boxed_local))) {
             fprintf(out, suppress_deref ? "%.*s" : "(*%.*s)", (int)cn.len, cn.data);
             break;
         }

@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.127, 2026-11-27: every case passes with generic instances written from their clones
+
+- With `RAE_GENERIC_INSTANCES=1` every case (all 1415) and the type matrix pass; the lists of known failures are
+  empty. A `view T` of an optional T is a reference to the optional in an instance too, and a `let x: T` read raw
+  out of a slot keeps the template's meaning (the slot's value, not dropped, a String still owned when it is
+  moved out).
+- Fixes for plain code found on the way: `equals()` of a `view List` parameter compiles, `Array.set` moves its
+  value in instead of storing it and then dropping it, and `ret none` from a function that returns an optional
+  reference no longer skips its String pool flush.
+
 ## 0.4.126, 2026-11-27: more generic instances written from their clones
 
 - With `RAE_GENERIC_INSTANCES=1`, ten more cases pass (1405 of 1415) and the type matrix passes completely: a type
