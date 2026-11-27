@@ -339,14 +339,14 @@ func uiHitTestEntity(
     if componentHas(this: world.onClicks, entityId: entityId) or customPaintHits(
       world: world
       entityId: entityId
-    ) {
+    ) or pressSinkHits(world: world, entityId: entityId) {
       if uiPointOnEntity(
         world: world
         uiSystems: uiSystems
         entityId: entityId
         x: x
         y: y
-        targetSize: targetSize
+        targetSize: hitGrowth(world: world, entityId: entityId, targetSize: targetSize)
       ) {
         ret entityId
       }
@@ -653,7 +653,11 @@ func stepUiInput(
   }
   if released {
     if isNone(this: input.hoveredEntityId) is false {
-      if input.hoveredEntityId is input.pressedEntityId {
+      # a PressSink takes the press and fires nothing
+      if input.hoveredEntityId is input.pressedEntityId and componentHas(
+        this: world.onClicks
+        entityId: input.hoveredEntityId
+      ) {
         let click: view OnClick = componentView(
           this: world.onClicks
           entityId: input.hoveredEntityId
@@ -672,12 +676,13 @@ func stepUiInput(
   }
 
   # Project this frame's hovered/pressed refs onto the entities as components.
-  # Hover is marked only for a pointer that hovers (InputKind.showsHover).
+  # Hover is marked only for a pointer that hovers (InputKind.showsHover). A PressSink
+  # without an OnClick takes the press but is never hovered or pressed to look at.
   if showsHover(kind: kind, canHover: input.deviceWatch.facts.canHover) {
     buttonInteractionMark(
       world: world
       uiSystems: uiSystems
-      entityId: input.hoveredEntityId
+      entityId: interactionTarget(world: world, entityId: input.hoveredEntityId)
       hovered: true
       pressed: false
     )
@@ -685,10 +690,21 @@ func stepUiInput(
   buttonInteractionMark(
     world: world
     uiSystems: uiSystems
-    entityId: input.pressedEntityId
+    entityId: interactionTarget(world: world, entityId: input.pressedEntityId)
     hovered: false
     pressed: true
   )
+}
+
+# `entityId`, or none for a PressSink that is not also clickable: it shows no hover or press
+func interactionTarget(world: view UiWorld, entityId: view EntityId) ret EntityId {
+  if isNone(this: entityId) is false and componentHas(this: world.onClicks, entityId: entityId) is false and pressSinkHits(
+    world: world
+    entityId: entityId
+  ) {
+    ret noEntity()
+  }
+  ret entityId
 }
 
 # Fire the OnClick action under every finger that came down this frame, but
@@ -712,7 +728,7 @@ func sendFingerPresses(input: mod UiInput, world: mod UiWorld, uiSystems: view U
           kind: InputKind.touch
           touchTargetSize: input.touchTargetSize
         )
-        if isNone(this: hit) is false {
+        if isNone(this: hit) is false and componentHas(this: world.onClicks, entityId: hit) {
           let click: view OnClick = componentView(this: world.onClicks, entityId: hit)
           eventSend(
             this: world.uiActions

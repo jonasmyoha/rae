@@ -43,6 +43,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     componentTableGeneration(this: world.zChildOrders)
     componentTableGeneration(this: world.customPaints)
     componentTableGeneration(this: world.layerScopes)
+    componentTableGeneration(this: world.pressSinks)
   }
 }
 
@@ -50,7 +51,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 14 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 15 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
@@ -70,7 +71,9 @@ func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
     this: world.zChildOrders
   ) and key.copyAtDefault(index: 12) is componentTableGeneration(this: world.customPaints) and key.copyAtDefault(
     index: 13
-  ) is componentTableGeneration(this: world.layerScopes)
+  ) is componentTableGeneration(this: world.layerScopes) and key.copyAtDefault(index: 14) is componentTableGeneration(
+    this: world.pressSinks
+  )
 }
 
 # A clickable node in hit order, and the root of its space
@@ -141,7 +144,7 @@ func hitCollect(
     if componentHas(this: world.onClicks, entityId: entityId) or customPaintHits(
       world: world
       entityId: entityId
-    ) {
+    ) or pressSinkHits(world: world, entityId: entityId) {
       found.add(value: HitFound { entityId: entityId, spaceRootEntityId: space })
     }
   }
@@ -522,13 +525,18 @@ func hitIndexBest(
                 reachX: reachX
                 reachY: reachY
               ) {
+                let entryEntityId: EntityId = index.entries.copyAtDefault(index: at).entityId
                 if uiPointOnEntity(
                   world: world
                   uiSystems: uiSystems
-                  entityId: index.entries.copyAtDefault(index: at).entityId
+                  entityId: entryEntityId
                   x: x
                   y: y
-                  targetSize: targetSize
+                  targetSize: hitGrowth(
+                    world: world
+                    entityId: entryEntityId
+                    targetSize: targetSize
+                  )
                 ) {
                   best = at
                 }

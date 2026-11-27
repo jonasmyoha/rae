@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.117, 2026-11-27: a node that takes presses and fires nothing
+
+- `PressSink` (`"PressSink": {}` on a node) takes presses where the node is and fires nothing: the hit test returns
+  it like a clickable, so a tap on a HUD's or a toolbar's empty part no longer reaches the card under it; its
+  release sends no UiAction, it shows no pressed look, has no accessibility role, is no touch target and does not
+  grow for a finger. A clickable inside it keeps its taps; a scroll drag that begins on it scrolls as before
+  (docs/ui-scene-format.md section 60). Case 1703.
+
 ## 0.4.116, 2026-11-27: an AnimFrames with an AnimTrigger waits for it
 
 - An `AnimFrames` whose node has an `AnimTrigger` no longer plays once at mount: it stays stopped and its Sprite

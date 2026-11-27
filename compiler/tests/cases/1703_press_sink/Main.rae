@@ -1,0 +1,188 @@
+# A node that takes presses and fires nothing (PressSink, ui/InputSystem): a bar drawn over a
+# list of clickable rows (a HUD over a page of cards). A scripted finger through the input path
+# (updateUiInputWith): a tap on the bar's empty part fires nothing and does not reach the row under
+# it, and the bar shows no pressed look; a tap on the button in the bar fires the button; a tap
+# beside the bar opens the row; a tap just below the bar opens the row there. With `blocks: false`
+# the bar lets taps through.
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/InputKind
+open ui/Transform
+open ui/LayoutSystem
+open ui/InputSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "menu",
+    "root": "Window",
+    "nodes": {
+      "Window": { "Rect": { "x": 0, "y": 0, "w": 300, "h": 300 }, "Children": ["List", "Bar"] },
+      "List": {
+        "Rect": { "x": 0, "y": 0, "w": 300, "h": 300 },
+        "Layout": { "type": "Vertical" },
+        "Children": ["Row0", "Row1", "Row2"]
+      },
+      "Row0": { "Rect": { "x": 0, "y": 0, "w": 300, "h": 50 }, "Size": { "w": { "mode": "Fixed" }, "h": { "mode": "Fixed" } }, "OnClick": { "actionId": "row.0", "label": "Open card 0" } },
+      "Row1": { "Rect": { "x": 0, "y": 0, "w": 300, "h": 50 }, "Size": { "w": { "mode": "Fixed" }, "h": { "mode": "Fixed" } }, "OnClick": { "actionId": "row.1", "label": "Open card 1" } },
+      "Row2": { "Rect": { "x": 0, "y": 0, "w": 300, "h": 50 }, "Size": { "w": { "mode": "Fixed" }, "h": { "mode": "Fixed" } }, "OnClick": { "actionId": "row.2", "label": "Open card 2" } },
+      "Bar": { "Rect": { "x": 0, "y": 0, "w": 200, "h": 40 }, "PressSink": {}, "Children": ["Coins"] },
+      "Coins": { "Rect": { "x": 150, "y": 0, "w": 50, "h": 40 }, "OnClick": { "actionId": "bar.coins", "label": "Open the shop" } }
+    }
+  }"#
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  clicks: List(String)
+}
+
+func frame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  loop var i: Int = 0, i < eventCount(this: rig.world.uiActions), ++i {
+    rig.clicks.add(value: "{eventAt(this: rig.world.uiActions, i: i).actionId}")
+  }
+  eventClear(this: rig.world.uiActions)
+}
+
+func pressedLook(rig: view Rig, nodeId: view String) ret Bool {
+  let entityId: EntityId = entityOf(world: rig.world, nodeId: nodeId)
+  if componentHas(this: rig.uiSystems.button.interactions, entityId: entityId) is false {
+    ret false
+  }
+  ret componentView(this: rig.uiSystems.button.interactions, entityId: entityId).pressed
+}
+
+# A tap at (x, y): down, held a frame (the bar's pressed look is read then), up
+func tap(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  label: view String
+) {
+  frame(
+    rig: rig
+    x: x
+    y: y
+    down: true
+  )
+  frame(
+    rig: rig
+    x: x
+    y: y
+    down: true
+  )
+  let barPressed: Bool = pressedLook(rig: rig, nodeId: "Bar")
+  frame(
+    rig: rig
+    x: x
+    y: y
+    down: false
+  )
+  frame(
+    rig: rig
+    x: x
+    y: y
+    down: false
+  )
+  var clicked: String = "nothing"
+  if rig.clicks.length > 0 {
+    clicked = ""
+    loop let click: view String in rig.clicks {
+      clicked = "{clicked}{click} "
+    }
+  }
+  log("{label}: fires {clicked}(the bar looks pressed: {barPressed})")
+  rig.clicks.clear()
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 300.0
+  let root: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: scene
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    clicks: List.create(String, cap: 4)
+  }
+  tap(
+    rig: rig
+    x: 60.0
+    y: 20.0
+    label: "the bar's empty part"
+  )
+  tap(
+    rig: rig
+    x: 175.0
+    y: 20.0
+    label: "the button in the bar"
+  )
+  tap(
+    rig: rig
+    x: 250.0
+    y: 20.0
+    label: "beside the bar"
+  )
+  tap(
+    rig: rig
+    x: 60.0
+    y: 52.0
+    label: "just below the bar"
+  )
+  let sink: mod PressSink = componentMod(
+    this: rig.world.pressSinks
+    entityId: entityOf(world: rig.world, nodeId: "Bar")
+  )
+  sink.blocks = false
+  tap(
+    rig: rig
+    x: 60.0
+    y: 20.0
+    label: "the bar's empty part, blocks false"
+  )
+}

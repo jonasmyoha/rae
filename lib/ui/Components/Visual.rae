@@ -153,6 +153,15 @@ type OnClick {
   labelTriple: String = ""
 }
 
+# A node that takes presses where it is and fires nothing (a HUD, a toolbar, a header or a panel
+# over a list of clickable rows): the hit test returns it like a clickable, so a tap on it does
+# not reach what is under it, but its release sends no UiAction, it shows no pressed look, has no
+# accessibility role and is no button for LayoutCheck's touch target. A clickable inside it still
+# takes its own taps. `blocks: false` turns it off.
+type PressSink {
+  blocks: Bool = true
+}
+
 type Button {
   role: String
 }

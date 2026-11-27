@@ -1953,3 +1953,20 @@ A key that names no image draws the sprite unmasked. It masks the sprite's own i
 pass reads a second texture: Gpu2dCanvasImage `canvasSetImageMask` / `canvasClearImageMask` for
 any image draw), not a node's children or its shapes and text. Case 1701 and the check
 `checks/uiTextureMask` (a square masked by a circle shows the circle).
+
+## 60. `PressSink`: a node that takes presses and fires nothing
+
+A tap goes to the topmost clickable under it (a node with an `OnClick`, or a `CustomPaint` with
+`hit`); a node without one lets the tap through to what is under it. A HUD, a toolbar, a header or a
+panel over a list of clickable rows should keep the tap instead: give it `"PressSink": {}`.
+
+    "Hud": { "LayerTag": { "layer": "hud" }, "PressSink": {}, "Children": ["Name", "Coins"] }
+
+- The hit test returns it like a clickable, where it is: a tap on its empty part reaches nothing
+  under it. A clickable inside it (a button in the bar) still takes its own taps.
+- Its release sends no `UiAction`, it shows no hovered or pressed look, it has no accessibility
+  role, it is no button for app3d/LayoutCheck's touch target, and a finger's hit does not grow it to
+  touch size.
+- A scroll root's drag that begins on it works as over any node that is not clickable: the page
+  under it scrolls (the drag is the scroll root's, decided by where the finger is).
+- `"PressSink": { "blocks": false }` lets taps through again. Case 1703.

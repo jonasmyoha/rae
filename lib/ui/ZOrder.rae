@@ -18,6 +18,27 @@ func customPaintHits(world: view UiWorld, entityId: view EntityId) ret Bool {
   ).hit
 }
 
+# Whether `entityId` takes presses and fires nothing (a PressSink that blocks): the hit test
+# returns it like a clickable
+func pressSinkHits(world: view UiWorld, entityId: view EntityId) ret Bool {
+  ret componentHas(this: world.pressSinks, entityId: entityId) and componentView(
+    this: world.pressSinks
+    entityId: entityId
+  ).blocks
+}
+
+# The size a finger's hit grows `entityId` to: none for a PressSink that is not also clickable
+# (it takes presses only where it is, and is no touch target)
+func hitGrowth(world: view UiWorld, entityId: view EntityId, targetSize: view Float) ret Float {
+  if componentHas(this: world.onClicks, entityId: entityId) is false and pressSinkHits(
+    world: world
+    entityId: entityId
+  ) {
+    ret 0.0
+  }
+  ret targetSize
+}
+
 # A child's z: its ZIndex's, 0 without one
 func childZ(world: view UiWorld, entityId: view EntityId) ret Int {
   if componentHas(this: world.zIndexes, entityId: entityId) {
