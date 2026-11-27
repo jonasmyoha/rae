@@ -1,0 +1,24 @@
+# AppLinks openUrl in a headless run: an openable link is logged and not
+# opened (the answer is false); a malformed one, or one of another scheme, is
+# refused before anything is handed to the system.
+import Sys
+open AppLinks
+
+func tryOpen(url: view String) {
+  log("opened {openUrl(url: url)}")
+}
+
+func main() {
+  let headless: Bool = Sys.setEnv(name: "RAE_UI_HEADLESS", value: "1")
+  tryOpen(url: "https://example.com/privacy")
+  tryOpen(url: "HTTP://example.com/support?page=1")
+  tryOpen(url: "itms-apps://apps.apple.com/app/id123456789")
+  tryOpen(url: "market://details?id=org.example.game")
+  tryOpen(url: "https://")
+  tryOpen(url: "https:///no-host")
+  tryOpen(url: "https://example.com/a link")
+  tryOpen(url: "example.com")
+  tryOpen(url: "javascript:alert(1)")
+  tryOpen(url: "file:///etc/hosts")
+  tryOpen(url: "")
+}

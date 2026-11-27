@@ -12,12 +12,26 @@
 #
 # On a desktop nothing opens an app this way. RAE_OPEN_URL=<url> stands in for
 # a link that launched it, so the same code path runs in a test.
+#
+# The other way: `openUrl(url:)` hands a link to the system, which opens it in
+# the browser or the store (a privacy page, a store page, a link in a chat):
+#
+#     let opened: Bool = openUrl(url: "https://example.com/privacy")
+#
+# Only http(s) and the stores' own schemes (itms-apps://, market://) are
+# opened; anything else is refused. Through SDL3's SDL_OpenURL: iOS
+# UIApplication open, Android an ACTION_VIEW intent, macOS NSWorkspace, the
+# desktop's default browser, the web a new tab. A program without a window
+# (no SDL3) opens nothing. Headless (RAE_UI_HEADLESS, RAE_SDL_HEADLESS_MS or
+# RAE_HEADLESS_FRAMES set) it logs `[openUrl] <url>` and opens nothing.
 import Sys
 cheader "runtime_applinks_apple.h"
 
 func rae_ext_AppLinks_take() unsafe extern("rae_ext_AppLinks_take") ret String
 
 func rae_ext_AppLinks_simulate(url: String) unsafe extern("rae_ext_AppLinks_simulate")
+
+func rae_ext_AppLinks_open(url: String) mainThread unsafe extern("rae_ext_AppLinks_open") ret Bool
 
 type AppLinks {
   waiting: List(String) = List.create(String, cap: 2)
@@ -61,4 +75,54 @@ func nextAppLink(appLinks: mod AppLinks) ret opt String {
     ret first
   }
   ret none
+}
+
+# The schemes openUrl hands on: the web's and the stores' own
+const openableSchemes: String = "http:// https:// itms-apps:// market://"
+
+# A link openUrl may open: one of `openableSchemes` (any case), something after
+# it, and no space or control character
+func isOpenableUrl(url: view String) ret Bool {
+  if url.length() > 4096 {
+    ret false
+  }
+  loop var i: Int = 0, i < url.length(), ++i {
+    let byte: Int = url.byteAt(index: i)
+    if byte <= 32 or byte is 127 {
+      ret false
+    }
+  }
+  let lowered: String = url.toLower()
+  let schemes: List(String) = openableSchemes.split(sep: " ")
+  loop let scheme: view String in schemes {
+    if lowered.startsWith(prefix: scheme) and url.length() > scheme.length() {
+      ret url.byteAt(index: scheme.length()) is not 47
+    }
+  }
+  ret false
+}
+
+# A headless run, by the window's own definition (lib/Gpu2d headlessRequested)
+func appLinksHeadless() ret Bool {
+  ret Sys.getEnv(name: "RAE_UI_HEADLESS").length() > 0 or Sys.getEnv(name: "RAE_SDL_HEADLESS_MS").length() > 0 or Sys.getEnv(
+    name: "RAE_HEADLESS_FRAMES"
+  ).length() > 0
+}
+
+# Open `url` in the system's browser or store; true when the system took it.
+# A link `isOpenableUrl` refuses is never handed on.
+func openUrl(url: view String) ret Bool {
+  if not isOpenableUrl(url: url) {
+    if appLinksHeadless() {
+      log("[openUrl] refused \"{url}\"")
+    }
+    ret false
+  }
+  if appLinksHeadless() {
+    log("[openUrl] {url}")
+    ret false
+  }
+  unsafe {
+    ret rae_ext_AppLinks_open(url: url)
+  }
 }

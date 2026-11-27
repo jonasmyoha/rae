@@ -175,6 +175,34 @@ event is lost. So Rae does not read SDL's drop events for links:
 
 A web build has no such link: the page's own address is its link.
 
+## Opening a link from the app
+
+`openUrl(url:)` in `lib/AppLinks` goes the other way: it hands a link to the
+system, which opens it in the browser or in the store app. Use it for a privacy
+policy, a support page, a store page in an update notice, or a link in a chat:
+
+```
+open AppLinks
+
+let opened: Bool = openUrl(url: "https://example.com/privacy")
+```
+
+It answers true when the system took the link. It opens only `http://`,
+`https://` and the stores' own schemes, `itms-apps://` (the App Store) and
+`market://` (Google Play), in any case, with something after the scheme and no
+space or control character. Anything else (`file://`, `javascript:`, a bare
+`example.com`, `https://` with no host) is refused and answers false.
+
+It goes through SDL3's `SDL_OpenURL`: on iOS `UIApplication open` (the app's
+`Info.plist` declares `http`, `https` and `itms-apps` in
+`LSApplicationQueriesSchemes`, which SDL's `canOpenURL` check needs), on Android
+an `ACTION_VIEW` intent, on macOS `NSWorkspace`, on Linux and Windows the default
+browser, on the web a new tab. A program without a window (no SDL3) opens
+nothing and answers false. In a headless run (`RAE_UI_HEADLESS`,
+`RAE_SDL_HEADLESS_MS` or `RAE_HEADLESS_FRAMES` set) it opens nothing, answers
+false and logs `[openUrl] <url>`, or `[openUrl] refused "<url>"` for a refused
+link (case 1705).
+
 ## What has been run
 
 Run: `lib/AppLinks` on a Mac (`RAE_OPEN_URL`, case 1336). On the iOS Simulator, a custom
@@ -186,3 +214,7 @@ emulator, a `VIEW` intent, at launch and while running. On an iPhone 15 Pro (202
 `opened with: raejoin://join/cold`; a second link while it runs logs
 `opened with: raejoin://join/warm` in the same process. Built, not run: a universal link
 and an Android app link (they need a real domain), and a real Android phone.
+
+`openUrl`: the headless log and the refusals (case 1705), linked into a Mac window
+program, and type-checked for iOS and Android. Not yet run on a device or with a
+real browser opening.

@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.120, 2026-11-27: open a link in the browser or the store
+
+- `openUrl(url:)` in `lib/AppLinks` hands a link to the system: SDL3's `SDL_OpenURL` (iOS UIApplication open,
+  Android an ACTION_VIEW intent, macOS NSWorkspace, the desktop's default browser). It answers whether the system
+  took it, opens only http(s), `itms-apps://` and `market://`, and refuses anything else. Headless it logs
+  `[openUrl] <url>` and opens nothing. The iOS Info.plist declares `http`, `https` and `itms-apps` in
+  `LSApplicationQueriesSchemes`. Case 1705; docs/app-links.md.
+
 ## 0.4.119, 2026-11-27: the soft and rigid haptic impacts
 
 - `HapticImpact` has `soft` and `rigid` (iOS 13's UIImpactFeedbackStyle styles: a dull thud and a sharp
