@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.115, 2026-11-27: a sprite masked by another texture
+
+- `Sprite.maskKey` (a texture key) and `maskLuminance`: the sprite shows only where the mask image's alpha (or its
+  brightness, for a black-and-white mask) is set, the mask stretched over the sprite's box and moving with its
+  node (docs/ui-scene-format.md section 59). gpu2d's image pass binds a second texture for it (Gpu2dCanvasImage
+  `canvasSetImageMask` / `canvasClearImageMask`); an image's uniform is 36 floats.
+- A node's children, shapes and text are not masked by it. Case 1701 and the hardware check
+  checks/uiTextureMask.
+
 ## 0.4.114, 2026-11-27: a node's saturation for its subtree
 
 - `TransformFx.saturation` (1 by default, 0 grey) reaches everything a node and its subtree paint, like `alpha`:

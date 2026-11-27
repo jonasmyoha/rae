@@ -245,6 +245,16 @@ type Gpu2dCanvas {
   imageCommands: List(Float)  # queued draws, 16 floats each = the uImg uniform
   imageCommandHandles: List(Int)
   imageCommandClips: List(Int)
+  # each queued draw's mask image handle, 0 for none (Gpu2dCanvasImage canvasSetImageMask)
+  imageCommandMasks: List(Int) = {}
+  # the mask the next image draws use: an image handle (0 none), its rect in the window's points
+  # and whether its luminance (not its alpha) is what lets the image through
+  imageMask: Int = 0
+  imageMaskX: Float = 0.0
+  imageMaskY: Float = 0.0
+  imageMaskW: Float = 0.0
+  imageMaskH: Float = 0.0
+  imageMaskLuminance: Bool = false
   imageUniforms: List(BufferId)  # per-draw-slot 64-byte uniforms, persistent
   imageBinds: List(BindGroupId)  # per-draw-slot bind groups, cached by handle
   imageBindHandles: List(Int)
@@ -263,7 +273,7 @@ type Gpu2dCanvas {
 const canvasManagerCapacity: Int = 16384
 
 # rect, tint, params, uv, clip rect, clip params (#1003) — see gpu2d_image.wgsl.
-const imageUniformFloats: Int = 32
+const imageUniformFloats: Int = 36
 
 # One box primitive = 6 x vec4 (std430): rect, radius, fill, border, params, grad.
 const boxPrimFloats: Int = 24

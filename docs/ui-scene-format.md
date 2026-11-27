@@ -1938,3 +1938,18 @@ The transform pass accumulates it into `WorldVisual.saturation`; the painter set
 (Gpu2dCanvas `canvasSetSaturation`, or `canvasPushSaturation` / `canvasPopSaturation` around any
 drawing), which mixes each queued color and gives the image shader the texels' share. Case 1700 and
 the check `checks/uiSaturation` (read back from the GPU).
+
+## 59. `Sprite.maskKey`: a sprite masked by another texture
+
+A `Sprite` with `"maskKey"` (a texture key) shows only where that image lets it through: its alpha,
+or with `"maskLuminance": true` its brightness (white shows, black hides: a black-and-white mask).
+The mask is stretched over the sprite's own box and moves with its node; outside the box nothing
+shows. For a chest's shine masked by the chest's shape, give the shine the chest's box:
+
+    "Shine": { "Rect": { "x": 100, "y": 50, "w": 200, "h": 160 },
+               "Sprite": { "textureKey": "shine", "maskKey": "chestMask", "maskLuminance": true } }
+
+A key that names no image draws the sprite unmasked. It masks the sprite's own image (gpu2d's image
+pass reads a second texture: Gpu2dCanvasImage `canvasSetImageMask` / `canvasClearImageMask` for
+any image draw), not a node's children or its shapes and text. Case 1701 and the check
+`checks/uiTextureMask` (a square masked by a circle shows the circle).

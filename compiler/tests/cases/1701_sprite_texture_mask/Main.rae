@@ -1,0 +1,124 @@
+# A sprite masked by another texture (Sprite.maskKey, Gpu2dCanvasImage canvasSetImageMask): the
+# chest's shine has the chest's box and its mask; its draw carries the mask's image, its kind (1
+# its alpha, 2 its luminance with maskLuminance) and its rect, the sprite's box (moving with the
+# node: the chest moved by 40 moves the mask). A sprite without a mask, and a mask key that names
+# no image, draw unmasked. checks/uiTextureMask shows the pixels on a GPU.
+import Math
+import SdfText
+import Gpu2d
+open gpu/GpuIds
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/RenderSystem
+open ecs/ComponentTable
+open ecs/Entity
+open Gpu2dCanvas
+open Gpu2dCanvasClip
+open Gpu2dCanvasImage
+open app3d/UiShell
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene",
+    "version": 2,
+    "sceneId": "chest",
+    "root": "Reveal",
+    "nodes": {
+      "Reveal": { "Rect": { "x": 0, "y": 0, "w": 600, "h": 400 }, "Children": ["Chest", "Shine", "Glow", "Lost"] },
+      "Chest": { "Rect": { "x": 100, "y": 50, "w": 200, "h": 160 }, "Sprite": { "textureKey": "chest", "scaleMode": "Stretch" } },
+      "Shine": { "Rect": { "x": 100, "y": 50, "w": 200, "h": 160 }, "Sprite": { "textureKey": "shine", "scaleMode": "Stretch", "maskKey": "chestMask" } },
+      "Glow": { "Rect": { "x": 100, "y": 50, "w": 200, "h": 160 }, "Sprite": { "textureKey": "shine", "scaleMode": "Stretch", "maskKey": "chestMask", "maskLuminance": true } },
+      "Lost": { "Rect": { "x": 100, "y": 50, "w": 200, "h": 160 }, "Sprite": { "textureKey": "shine", "scaleMode": "Stretch", "maskKey": "noSuchMask" } }
+    }
+  }"#
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 1000.0) / 1000.0
+}
+
+func paint(offset: view Float) {
+  log("the reveal moved by {offset}:")
+  let scene: Scene = parseScene(source: sceneText())
+  let resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  Gpu2d.setDesignResolution(width: 600.0, height: 400.0, fit: 0)
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 400.0
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  loop let nodeId: String in List(String) { "Chest", "Shine", "Glow", "Lost" } {
+    let rect: mod Rect = componentMod(
+      this: world.rects
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    )
+    rect.position.x = rect.position.x + offset
+  }
+  runUiSystems(world: world, uiSystems: uiSystems, res: resources)
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  loop let size: Int in List(Int) { 64, 32, 16 } {
+    canvas.images.add(
+      value: Gpu2dImage {
+        texture: noTextureId()
+        textureView: noTextureViewId()
+        width: size
+        height: size
+      }
+    )
+  }
+  canvasRegisterImageKey(canvas: canvas, key: "chest", handle: 1)
+  canvasRegisterImageKey(canvas: canvas, key: "shine", handle: 2)
+  canvasRegisterImageKey(canvas: canvas, key: "chestMask", handle: 3)
+  clipReset(canvas: canvas)
+  renderSystemGpu2d(
+    world: world
+    uiSystems: uiSystems
+    res: resources
+    canvas: canvas
+  )
+  let names: List(String) = { "chest", "shine", "glow", "lost" }
+  loop var i: Int = 0, i < canvas.imageCommandMasks.length, ++i {
+    let base: Int = i * imageUniformFloats
+    log(
+      "  {names.copyAtDefault(index: i)}: mask image {canvas.imageCommandMasks.copyAtDefault(
+        index: i
+      )}, kind {canvas.imageCommands.copyAtDefault(index: base + 29)}, over {canvas.imageCommands.copyAtDefault(
+        index: base + 32
+      )},{canvas.imageCommands.copyAtDefault(index: base + 33)} {canvas.imageCommands.copyAtDefault(
+        index: base + 34
+      )}x{canvas.imageCommands.copyAtDefault(index: base + 35)}"
+    )
+  }
+  log("  the next draw's mask after the sprites {canvas.imageMask}")
+}
+
+func main() {
+  paint(offset: 0.0)
+  paint(offset: 40.0)
+}

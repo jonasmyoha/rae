@@ -474,11 +474,54 @@ func queueImageEx(
   }
   # uImg[7]: the saturation of the texels
   canvas.imageCommands.add(value: canvas.saturation)
+  # uImg[7].y: the mask's kind (0 none, 1 its alpha, 2 its luminance), uImg[8]: its rect
+  var maskKind: Float = 0.0
+  if canvas.imageMask > 0 {
+    maskKind = 1.0
+    if canvas.imageMaskLuminance {
+      maskKind = 2.0
+    }
+  }
+  canvas.imageCommands.add(value: maskKind)
   canvas.imageCommands.add(value: 0.0)
   canvas.imageCommands.add(value: 0.0)
-  canvas.imageCommands.add(value: 0.0)
+  canvas.imageCommands.add(value: canvas.imageMaskX)
+  canvas.imageCommands.add(value: canvas.imageMaskY)
+  canvas.imageCommands.add(value: canvas.imageMaskW)
+  canvas.imageCommands.add(value: canvas.imageMaskH)
   canvas.imageCommandHandles.add(value: handle)
   canvas.imageCommandClips.add(value: clip)
+  canvas.imageCommandMasks.add(value: canvas.imageMask)
+}
+
+# Draw the next images only where the image `maskKey` lets them through: its alpha (or, with
+# `luminance`, its brightness, for a black-and-white mask), stretched over the rect (x, y, w, h)
+# in design units; outside that rect nothing shows. Until canvasClearImageMask. A key that names no
+# image clears the mask.
+func canvasSetImageMask(
+  canvas: mod Gpu2dCanvas
+  maskKey: view String
+  x: copy Float
+  y: copy Float
+  w: copy Float
+  h: copy Float
+  luminance: copy Bool
+) {
+  let handle: Int = canvasImageHandleForKey(canvas: canvas, key: maskKey)
+  if handle <= 0 or handle > canvas.images.length {
+    canvasClearImageMask(canvas: canvas)
+    ret
+  }
+  canvas.imageMask = handle
+  canvas.imageMaskX = stageX(canvas: canvas, x: x)
+  canvas.imageMaskY = stageY(canvas: canvas, y: y)
+  canvas.imageMaskW = w * canvas.stageScale
+  canvas.imageMaskH = h * canvas.stageScale
+  canvas.imageMaskLuminance = luminance
+}
+
+func canvasClearImageMask(canvas: mod Gpu2dCanvas) {
+  canvas.imageMask = 0
 }
 
 # The borders of a nine-slice as drawn in a w x h box
@@ -834,6 +877,7 @@ func clearImageQueue(canvas: mod Gpu2dCanvas) {
   canvas.imageCommands.clear()
   canvas.imageCommandHandles.clear()
   canvas.imageCommandClips.clear()
+  canvas.imageCommandMasks.clear()
 }
 
 func imageFlushWith(canvas: mod Gpu2dCanvas, resources: mod GpuResources) {
@@ -891,6 +935,10 @@ func imageDrawCommand(
       ret
     }
   }
+  # the mask's texture is the bind group's second (the image's own when there is none: the shader
+  # does not read it then); the cache key holds both handles
+  let mask: Int = canvas.imageCommandMasks.copyAtFallback(index: i, fallback: 0)
+  let bindKey: Int = handle + mask * 1048576
   var cachedHandle: Int = 0
   if let known: Int = canvas.imageBindHandles.copyAt(index: slot) {
     cachedHandle = known
@@ -899,7 +947,7 @@ func imageDrawCommand(
   if let known: BindGroupId = canvas.imageBinds.copyAt(index: slot) {
     bind = known
   }
-  if cachedHandle is not handle or not bindGroupIsUsable(resources: resources, id: bind) {
+  if cachedHandle is not bindKey or not bindGroupIsUsable(resources: resources, id: bind) {
     retireBindGroup(resources: resources, id: bind)
     bind = noBindGroupId()
     if let image: Gpu2dImage = canvas.images.copyAt(index: handle - 1) {
@@ -908,6 +956,13 @@ func imageDrawCommand(
       entries.add(value: bufferRef(id: uniform))
       entries.add(value: textureViewRef(id: image.textureView))
       entries.add(value: samplerRef(id: canvas.imageSampler))
+      var maskView: TextureViewId = image.textureView
+      if mask >= 1 and mask <= canvas.images.length {
+        if let maskImage: Gpu2dImage = canvas.images.copyAt(index: mask - 1) {
+          maskView = maskImage.textureView
+        }
+      }
+      entries.add(value: textureViewRef(id: maskView))
       if let made: BindGroupId = createRenderBindGroup(
         resources: resources
         pipeline: canvas.imagePipeline
@@ -917,7 +972,7 @@ func imageDrawCommand(
       }
     }
     canvas.imageBinds.set(index: slot, value: bind)
-    canvas.imageBindHandles.set(index: slot, value: handle)
+    canvas.imageBindHandles.set(index: slot, value: bindKey)
   }
   var clip: Int = 0
   if let known: Int = canvas.imageCommandClips.copyAt(index: i) {

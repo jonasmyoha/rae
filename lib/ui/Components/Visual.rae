@@ -36,6 +36,12 @@ type Sprite {
   # a nine-slice's borders are drawn this many design units a source pixel, before the shrink to
   # fit a small box: 1/3 for art made at 3 canvas units a point in a layout in points
   nineSliceScale: Float = 1.0
+  # a mask image (a texture key, "" none): the sprite shows only where the mask's alpha is set, or
+  # with maskLuminance where it is white (a black-and-white mask); the mask is stretched over the
+  # sprite's box and moves with its node (a chest's shine drawn in the chest's box, masked by the
+  # chest's own shape)
+  maskKey: String = ""
+  maskLuminance: Bool = false
   # The art's color turned about the gray axis by this many degrees and scaled by `brightness`,
   # before the tint (Pixi's ColorMatrixFilter hue and brightness): one blue piece of art drawn red
   # (120) or green (-65). 0 and 1: unchanged.

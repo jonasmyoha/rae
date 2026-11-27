@@ -3,13 +3,14 @@
 // premultiplied. uImg = rect, tint (straight, premultiplied here),
 // params (radius, rotation about the quad center in radians, tile flag, premultiplied source),
 // uv (origin + size), clip (origin in design units, size in its node's units), clip (radius,
-// enabled), the clip's frame (uImg[6], Gpu2dCanvasClip) and the saturation (uImg[7].x) —
+// enabled), the clip's frame (uImg[6], Gpu2dCanvasClip), the saturation (uImg[7].x), the mask
+// (uImg[7].y its kind, uImg[8] its rect) —
 // the last two are the rounded clip the box pass has always had (#1003),
 // written per draw from the clip active when the image was queued; the clip's
 // vec4 ends with the color change (hue turn in radians, brightness less 1;
 // 0, 0 none: Gpu2dCanvasImage canvasSetImageColor).
 @group(0) @binding(0) var<uniform> uXform: array<vec4<f32>, 2>;
-@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 8>;
+@group(0) @binding(1) var<uniform> uImg: array<vec4<f32>, 9>;
 // The clip in its node's own frame (Gpu2dCanvasClip): the design offset from its origin
 // taken into the frame by the 2x2, then the rounded box there, so a turned or scaled
 // node's corners stay round and the smoothing (fwidth in that frame) is about a pixel
@@ -25,6 +26,10 @@ fn sdRoundBoxClip(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 }
 @group(0) @binding(2) var tex: texture_2d<f32>;
 @group(0) @binding(3) var samp: sampler;
+// the mask (Gpu2dCanvasImage canvasSetImageMask): a second image stretched over the rect uImg[8]
+// (design units), its alpha (uImg[7].y 1) or luminance (2) letting the image through; 0: none, and
+// the image's own texture is bound here unread
+@group(0) @binding(4) var maskTex: texture_2d<f32>;
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
   @location(0) uv: vec2<f32>,
@@ -95,6 +100,9 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let luminance = dot(texel.rgb, vec3<f32>(0.299, 0.587, 0.114));
     texel = vec4<f32>(mix(vec3<f32>(luminance), texel.rgb, uImg[7].x), texel.a);
   }
+  // sampled in uniform control flow (as fwidth below), used only with a mask
+  let maskUv = (in.posD - uImg[8].xy) / max(uImg[8].zw, vec2<f32>(0.0001, 0.0001));
+  let maskTexel = textureSample(maskTex, samp, clamp(maskUv, vec2<f32>(0.0), vec2<f32>(1.0)));
   let tint = uImg[1];
   let half = uImg[0].zw * 0.5;
   let rad = uImg[2].x;
@@ -105,6 +113,14 @@ fn fs(in: VsOut) -> @location(0) vec4<f32> {
     let cd = clipShapeDistance(in.posD, uImg[4].xy, uImg[4].zw, uImg[6], uImg[5].x);
     let caa = max(fwidth(cd), 0.0001);
     cov = cov * (1.0 - smoothstep(-caa, caa, cd));
+  }
+  if (uImg[7].y > 0.5) {
+    let inside = all(maskUv >= vec2<f32>(0.0)) && all(maskUv <= vec2<f32>(1.0));
+    var through = maskTexel.a;
+    if (uImg[7].y > 1.5) {
+      through = dot(maskTexel.rgb, vec3<f32>(0.299, 0.587, 0.114)) * maskTexel.a;
+    }
+    cov = cov * select(0.0, through, inside);
   }
   // A source that is premultiplied already (uImg[2].w: a cached drawing, Gpu2dCanvasCache)
   if (uImg[2].w > 0.5) {
