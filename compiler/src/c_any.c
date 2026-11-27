@@ -17,14 +17,6 @@ bool c_is_any(const AstTypeRef* type) {
   return str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny");
 }
 
-/* `type` as it is in this specialization */
-const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type) {
-  return type;
-}
-
-static const AstTypeRef* concrete_type(CFuncContext* ctx, const AstExpr* value) {
-  return c_concrete_type_ref(ctx, infer_expr_type_ref(ctx, value));
-}
 
 /* `value` as an Any: one of its own (ANY_OWNED: a place is copied), one that
  * borrows for this statement (ANY_BORROWED), or the value as it is, moved or made
@@ -55,7 +47,7 @@ void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out
     fprintf(out, ")");
     return;
   }
-  const AstTypeRef* type = concrete_type(ctx, source);
+  const AstTypeRef* type = infer_expr_type_ref(ctx, source);
   Str base = type ? get_base_type_name(type) : (Str){0};
   bool reference = type && (type->is_view || type->is_mod);
   bool had_expected = ctx->has_expected_type;
@@ -109,7 +101,7 @@ void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out) {
   while (value->kind == AST_EXPR_BOX) value = value->as.unary.operand;
   if (value->kind == AST_EXPR_UNARY && (value->as.unary.op == AST_UNARY_VIEW || value->as.unary.op == AST_UNARY_MOD))
     value = value->as.unary.operand;
-  const AstTypeRef* type = concrete_type(ctx, value);
+  const AstTypeRef* type = infer_expr_type_ref(ctx, value);
   bool call = value->kind == AST_EXPR_CALL || value->kind == AST_EXPR_METHOD_CALL;
   if (c_is_any(type) && (type->is_view || type->is_mod) && (call || value->kind == AST_EXPR_IDENT)) {
     emit_expr(ctx, value, out, PREC_LOWEST, false, true);
@@ -146,7 +138,7 @@ bool c_emit_any_equality(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
   for (int side = 0; side < 2; side++) {
     while (sides[side]->kind == AST_EXPR_BOX || sides[side]->kind == AST_EXPR_UNBOX)
       sides[side] = sides[side]->as.unary.operand;
-    if (c_is_any(concrete_type(ctx, sides[side]))) any = true;
+    if (c_is_any(infer_expr_type_ref(ctx, sides[side]))) any = true;
   }
   if (!any) return false;
   fprintf(out, expr->as.binary.op == AST_BIN_NEQ ? "((bool)(!rae_any_eq(" : "((bool)(rae_any_eq(");

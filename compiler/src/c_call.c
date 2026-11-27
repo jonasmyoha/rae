@@ -48,7 +48,7 @@ void emit_opt_unbox_suffix(CFuncContext* ctx, const AstFuncDecl* fd, const AstTy
     // Struct-rep opt returns are `struct rae_opt_<T>`; consuming the result as
     // the concrete payload reads `.value` (this is the site whose missing
     // suffix produced non-compiling C for `let p: Particle = list.at(...)`).
-    if (rae_opt_is_struct_rep(ctx, sub)) { fprintf(out, ".value"); return; }
+    if (rae_opt_is_struct_rep(sub)) { fprintf(out, ".value"); return; }
 
     Str expected_base = get_base_type_name(&ctx->expected_type);
     bool expected_concrete = str_eq_cstr(expected_base, "Int") || str_eq_cstr(expected_base, "Int64") ||
@@ -142,7 +142,7 @@ static bool c_is_place(CFuncContext* ctx, const AstExpr* value) {
 
 /* Does a parameter of `fd`, called with type arguments `concrete`, take the
  * address of an optional (c_type_parameter_is_optional)? */
-static bool c_parameter_takes_optional(CFuncContext* ctx, const AstFuncDecl* fd, const AstTypeRef* concrete,
+static bool c_parameter_takes_optional(const AstFuncDecl* fd, const AstTypeRef* concrete,
                                        const AstTypeRef* type) {
     if (!fd->generic_params || !concrete || fd->is_extern) return false;
     /* a `view T` / `mod T` whose T the call binds to an optional (as
@@ -150,7 +150,7 @@ static bool c_parameter_takes_optional(CFuncContext* ctx, const AstFuncDecl* fd,
     if (!type || type->is_opt || !(type->is_view || type->is_mod) || !type->parts || type->generic_args) return false;
     const AstTypeRef* arg = concrete;
     for (const AstIdentifierPart* param = fd->generic_params; param && arg; param = param->next, arg = arg->next)
-        if (str_eq(param->text, type->parts->text)) return arg->is_opt && rae_opt_is_struct_rep(ctx, arg);
+        if (str_eq(param->text, type->parts->text)) return arg->is_opt && rae_opt_is_struct_rep(arg);
     return false;
 }
 
@@ -163,7 +163,7 @@ static void emit_optional_address(CFuncContext* ctx, const AstTypeRef* opt_type,
                && (source->as.unary.op == AST_UNARY_VIEW || source->as.unary.op == AST_UNARY_MOD)))
         source = source->as.unary.operand;
     const AstTypeRef* type = infer_expr_type_ref(ctx, source);
-    bool reference = c_type_parameter_is_optional(ctx, type);
+    bool reference = c_type_parameter_is_optional(type);
     bool optional = type && type->is_opt && (reference || !(type->is_view || type->is_mod));
     bool saved_unbox = ctx->suppress_opt_unbox;
     if (optional && c_is_place(ctx, source)) {
@@ -960,7 +960,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 return true;
             }
         }
-        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(ctx, elem_tr);
+        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(elem_tr);
         const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
             ? "RaeAny"
             : elem_is_string
@@ -1432,7 +1432,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             int ai = 0;
             while (sa && ai < RAE_MAX_PRIM_WRAP) {
                 if (sp && sp->type && (sp->type->is_view || sp->type->is_mod)
-                    && !sp->type->is_opt && !c_parameter_takes_optional(ctx, fd, concrete, sp->type)) {
+                    && !sp->type->is_opt && !c_parameter_takes_optional(fd, concrete, sp->type)) {
                     const AstTypeRef* arg_tr = infer_expr_type_ref(ctx, sa->value);
                     if (!(arg_tr && (arg_tr->is_view || arg_tr->is_mod))) {
                         Str pbase = get_base_type_name(sp->type);
@@ -1680,7 +1680,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
             }
             /* `view T` / `mod T` of a generic function whose T is an optional: the
              * address of the optional, one made for a plain value or `none` */
-            if (p && p->type && a->value && c_parameter_takes_optional(ctx, fd, concrete, p->type)) {
+            if (p && p->type && a->value && c_parameter_takes_optional(fd, concrete, p->type)) {
                 AstTypeRef opt_pt = *substitute_type_ref(ctx->compiler_ctx, fd->generic_params, concrete, p->type);
                 opt_pt.is_view = false; opt_pt.is_mod = false; opt_pt.next = NULL;
                 emit_optional_address(ctx, &opt_pt, a->value, out);
@@ -1791,7 +1791,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
                     int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
                     /* (as it is in this instance: a local written `T`) */
-                    const AstTypeRef* given_type = local >= 0 ? c_concrete_type_ref(ctx, ctx->local_type_refs[local]) : NULL;
+                    const AstTypeRef* given_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
                     any_mode = (p->type->is_own && local >= 0 && !c_local_is_slot_alias(ctx, local) && given_type
                                   && !given_type->is_view && !given_type->is_mod
                                   && (a->moves_local || c_is_any(given_type))) ? ANY_TAKEN : ANY_OWNED;
@@ -2074,7 +2074,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                     Str pbase_copy = get_base_type_name(p_target);
                     if (p_target->is_opt
                         && !(p_target->is_view || p_target->is_mod)
-                        && rae_opt_is_struct_rep(ctx, p_target)) {
+                        && rae_opt_is_struct_rep(p_target)) {
                         // Struct-rep opt: deep-copy via rae_deep_copy_<optT>.
                         copy_arg_kind = 4;
                         opt_copy_type = rae_opt_type_name(ctx, p_target);
@@ -2264,7 +2264,7 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 int mv_id = ctx->temp_counter++;
                 const AstTypeRef* moved_type = infer_expr_type_ref(ctx, move_src);
                 /* an `opt String` is emptied to `none` */
-                const char* moved_c = moved_type && moved_type->is_opt && rae_opt_is_struct_rep(ctx, moved_type)
+                const char* moved_c = moved_type && moved_type->is_opt && rae_opt_is_struct_rep(moved_type)
                     ? rae_opt_type_name(ctx, moved_type) : "rae_String";
                 fprintf(out, "(__extension__ ({ %s __rae_mv%d = ", moved_c, mv_id);
                 emit_expr(ctx, (AstExpr*)move_src, out, PREC_LOWEST, false, false);

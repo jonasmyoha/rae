@@ -227,7 +227,7 @@ void emit_to_string_expr(CFuncContext* ctx, const AstExpr* operand, FILE* out) {
     // Format `.value` when present (via its concrete formatter), else "none"
     // — matching the Live VM's rendering of a none optional.
     if (tr && tr->is_opt && !(tr->is_view || tr->is_mod)
-        && rae_opt_is_struct_rep(ctx, tr)) {
+        && rae_opt_is_struct_rep(tr)) {
         const AstDecl* pd = (base.len > 0) ? find_type_decl(ctx, ctx->module, base) : NULL;
         bool payload_is_user_struct = pd && pd->kind == AST_DECL_TYPE
             && !has_property(pd->as.type_decl.properties, "c_struct")
@@ -622,7 +622,7 @@ static IsOperandKind is_operand_kind(CFuncContext* ctx, const AstExpr* source, A
     type->next = NULL;
     if (!type->is_opt) return IS_OPERAND_PLAIN;
     if (type->is_view || type->is_mod) return IS_OPERAND_REFERENCE;
-    return rae_opt_is_struct_rep(ctx, type) ? IS_OPERAND_OPTIONAL : IS_OPERAND_PLAIN;
+    return rae_opt_is_struct_rep(type) ? IS_OPERAND_OPTIONAL : IS_OPERAND_PLAIN;
 }
 
 /* `a is b` where one or both are optional: both none, or both there and equal
@@ -899,12 +899,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         const AstTypeRef* tr = infer_expr_type_ref(ctx, expr);
         const Str cn = ident_c_name(ctx, expr);  // #816: prefixed symbol for a module global
         const AstTypeRef* boxed_local = get_local_type_ref(ctx, expr->as.ident);
-        if (c_type_parameter_is_optional(ctx, tr)
-            || (boxed_local && boxed_local->is_optional_box && c_type_parameter_is_optional(ctx, boxed_local))) {
+        if (c_type_parameter_is_optional(tr)
+            || (boxed_local && boxed_local->is_optional_box && c_type_parameter_is_optional(boxed_local))) {
             fprintf(out, suppress_deref ? "%.*s" : "(*%.*s)", (int)cn.len, cn.data);
             break;
         }
-        bool is_prim_ref = is_primitive_ref(ctx, tr);
+        bool is_prim_ref = is_primitive_ref(tr);
         bool is_ptr = is_pointer_type(ctx, expr->as.ident);
         // `view T` / `mod T` for a non-primitive non-Buffer/List/Any
         // type lowers to a raw `T*` at the C level. When the IDENT
@@ -1049,7 +1049,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
               && none_compare_owns_call_result(ctx, operand, otr)) {
               static int none_tmp_id = 0;
               int id = none_tmp_id++;
-              bool struct_rep = rae_opt_is_struct_rep(ctx, otr);
+              bool struct_rep = rae_opt_is_struct_rep(otr);
               const char* tname = struct_rep ? rae_opt_type_name(ctx, otr) : "RaeAny";
               char tmp[48];
               snprintf(tmp, sizeof tmp, "__rae_nonetmp%d", id);
@@ -1075,7 +1075,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
           // A struct-rep value optional is `struct rae_opt_<T>`: emptiness is
           // the `.has` flag, not rae_any_is_none (which is for the RaeAny box).
           if (otr && otr->is_opt && !(otr->is_view || otr->is_mod)
-              && rae_opt_is_struct_rep(ctx, otr)) {
+              && rae_opt_is_struct_rep(otr)) {
               fprintf(out, "((bool)((");
               emit_expr(ctx, operand, out, PREC_LOWEST, false, false);
               fprintf(out, ").has%s))",
@@ -2470,7 +2470,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
                     const AstTypeRef* rhs_tr = infer_expr_type_ref(ctx, f->value);
                     // (a `view T` of a number is the number in this instance)
                     if (rhs_tr && (rhs_tr->is_view || rhs_tr->is_mod)
-                        && !is_primitive_ref(ctx, rhs_tr)) {
+                        && !is_primitive_ref(rhs_tr)) {
                         // Stage 6: view-on-numeric-primitive is a value at
                         // the C level, not a pointer — no deref needed.
                         Str rhs_base = get_base_type_name(rhs_tr);
@@ -2676,7 +2676,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             && (ctx->expected_type.is_view || ctx->expected_type.is_mod)) {
             fprintf(out, "NULL");
         } else if (ctx->has_expected_type && ctx->expected_type.is_opt
-                   && rae_opt_is_struct_rep(ctx, &ctx->expected_type)) {
+                   && rae_opt_is_struct_rep(&ctx->expected_type)) {
             fprintf(out, "(%s){0}", rae_opt_type_name(ctx, &ctx->expected_type));
         } else {
             fprintf(out, "rae_any_none()");

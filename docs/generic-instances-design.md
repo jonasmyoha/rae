@@ -395,7 +395,18 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    through them (`c_type_parameter_default`, `c_record_moved_local`, `respecialize_overload` and its
    no-overload report, the loops over the parameters in `c_type_parameter_is_optional`, the specialized name of a
    results struct). The C of 106, 121 and 136 is byte-identical. Left, the queue line
-   `[generic instances 8d/9: the guessing helpers, the prototype buffering and the spawn wrappers removed]`.
+   `[generic instances 8d/9: the guessing helpers, the prototype buffering and the spawn wrappers removed]`. Then (0.4.137): a probe at
+   each site, over every case and 106/121/136, logged what reached it, and each site was turned off alone and the
+   C compared. `c_generic_call_type` and the `ret Box(V)` branch of `infer_tr_from_resolved` were never reached; its
+   `ret opt T` branch and the generic method's `opt`/`view` slot branch were reached but changed no C. All four are
+   removed, and so is the prototype buffering: the bodies are written straight out, and an instance registered from
+   the task drops on is reported at the end (the build fails, as before). The identity helpers
+   `c_concrete_type_ref` and `c_list_element_type` and five unused `ctx` parameters went with them. The C of every
+   case and of 106/121/136 is byte-identical. Still live, so left to step 9: `hoist_type_arg_if_present` (without
+   it nearly every program's C changes, and 1103 do not build: a written type argument, `createList(Int, ...)`,
+   reaches the backend in the arguments), the other three `infer_tr_from_resolved` branches (503, 93 and 15
+   programs change), and the spawn wrappers (a spawn of a generic function runs through one: spawning the
+   instance itself needs a thunk per instance).
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed

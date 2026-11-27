@@ -239,7 +239,7 @@ CCallChoice c_call_choice(CFuncContext* ctx, const AstExpr* call, Str name);
 bool c_call_choice_allows(CFuncContext* ctx, const CCallChoice* choice, const AstExpr* call, const AstDecl* d);
 bool c_call_names_fit(const AstExpr* call, const AstFuncDecl* fd);
 void c_narrow_binding(CFuncContext* ctx, const AstStmt* binding);
-bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type);
+bool c_type_parameter_is_optional(const AstTypeRef* type);
 /* Does `plain` (an argument or element without its `own`) have to be wrapped to be a value of
  * `opt_type`? Not `none`, and not what already is an optional. */
 bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, const AstExpr* plain);
@@ -255,7 +255,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
 bool emitted_list_contains(EmittedTypeList* list, const char* name);
 void emitted_list_add(EmittedTypeList* list, const char* name);
 bool types_match(Str a, Str b);
-bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr);
+bool is_primitive_ref(const AstTypeRef* tr);
 bool is_pointer_type(CFuncContext* ctx, Str name);
 /* #816: the C symbol of a module-level `let`/`const` (AST_DECL_GLOBAL_LET):
  * `rae_g_<module>_<name>`, module = module_name with '/' -> '_' (else the
@@ -317,7 +317,7 @@ bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base);
 // #703: struct value-equality (`is`) support.
 bool rae_struct_value_comparable(const AstModule* module, const AstTypeDecl* td);
 bool rae_named_type_value_comparable(const AstModule* module, Str base);
-bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type);
+bool rae_opt_is_struct_rep(const AstTypeRef* type);
 const char* rae_opt_type_name(CFuncContext* ctx, const AstTypeRef* opt_type);
 
 // -- Type emission --
@@ -445,7 +445,6 @@ bool c_is_any(const AstTypeRef* type);
 typedef enum { ANY_BORROWED, ANY_OWNED, ANY_TAKEN } AnyMode;
 void c_emit_any(CFuncContext* ctx, const AstExpr* value, AnyMode mode, FILE* out);
 void c_emit_any_reference(CFuncContext* ctx, const AstExpr* value, FILE* out);
-const AstTypeRef* c_concrete_type_ref(CFuncContext* ctx, const AstTypeRef* type);
 /* c_results.c */
 bool c_has_several_results(const AstFuncDecl* func);
 const char* c_results_type_name(CFuncContext* ctx, const AstFuncDecl* func);

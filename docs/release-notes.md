@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.137, 2026-11-28: the backend's unreached type guesses removed
+
+- The backend's guesses of a generic call's result type that nothing reached, or that changed no C, are removed,
+  and the C of a program's functions is written straight out instead of through a buffer per body (every instance is
+  registered before the C). The C is unchanged: every case and 106, 121 and 136, byte for byte.
+
 ## 0.4.136, 2026-11-28: the backend's dead type-parameter code removed
 
 - The backend's leftover code for a generic function's type parameters is gone: `CFuncContext`'s

@@ -62,7 +62,7 @@ bool c_plain_value_for_optional(CFuncContext* ctx, const AstTypeRef* opt_type, c
   if ((type && type->is_opt) || (plain->resolved_type && plain->resolved_type->kind == TYPE_OPT)) return false;
   Str base = type ? get_base_type_name(type) : (Str){0};
   if (str_eq_cstr(base, "Any") || str_eq_cstr(base, "RaeAny")) return false;
-  return rae_opt_is_struct_rep(ctx, opt_type);
+  return rae_opt_is_struct_rep(opt_type);
 }
 
 void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstTypeRef* elem_type,
@@ -77,7 +77,7 @@ void emit_collection_element(CFuncContext* ctx, const AstExpr* value, const AstT
                             || value->kind == AST_EXPR_INDEX);
   /* an optional that is in a place stays there: the element is a copy of it */
   if (is_place && !elem_is_any && elem_type && elem_type->is_opt && !elem_type->is_view && !elem_type->is_mod
-      && rae_opt_is_struct_rep(ctx, elem_type)) {
+      && rae_opt_is_struct_rep(elem_type)) {
     emit_optional_boxed_expr(ctx, elem_type, value, out);
     return;
   }
@@ -134,10 +134,6 @@ bool expr_is_raw_slot_read(const AstExpr* e);
  * whose owned optional representation is RaeAny. The language semantics stay
  * optional; this only removes representation work that the branch makes
  * unnecessary. */
-/* The element type of a `List(T)` type, in the current specialization */
-static const AstTypeRef* c_list_element_type(CFuncContext* ctx, const AstTypeRef* list_type) {
-  return list_type ? list_type->generic_args : NULL;
-}
 
 /* The type of a slot of a raw read (`rae_ext_rae_buf_get(buf: this.data, ...)`),
  * in the current specialization: the buffer's element */
@@ -195,8 +191,8 @@ static bool emit_list_if_let(CFuncContext* ctx, const AstStmt* stmt, FILE* out) 
   }
   /* A list of optionals: a row that is `none` reads as a row that is not there
    * (Rae has no optional of an optional), and the payload is what is bound */
-  const AstTypeRef* row_type = c_list_element_type(ctx, list_type);
-  bool row_is_opt = row_type && row_type->is_opt && rae_opt_is_struct_rep(ctx, row_type);
+  const AstTypeRef* row_type = (list_type ? list_type->generic_args : NULL);
+  bool row_is_opt = row_type && row_type->is_opt && rae_opt_is_struct_rep(row_type);
   const char* payload = row_is_opt ? ".value" : "";
   // Proven in range by loop versioning (c_loop_versioning.c): no check.
   if (c_loop_version_fast_data(ctx, call))
@@ -437,7 +433,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   /* a `view T` / `mod T` parameter whose T is the optional: a copy of it */
   const AstExpr* parameter = value->kind == AST_EXPR_UNBOX || value->kind == AST_EXPR_BOX ? value->as.unary.operand : value;
   if (parameter->kind == AST_EXPR_IDENT
-      && c_type_parameter_is_optional(ctx, infer_expr_type_ref(ctx, parameter))) {
+      && c_type_parameter_is_optional(infer_expr_type_ref(ctx, parameter))) {
     AstTypeRef optional = *substitute_type_ref(ctx->compiler_ctx, NULL, NULL,
                                                (AstTypeRef*)infer_expr_type_ref(ctx, parameter));
     optional.is_view = false; optional.is_mod = false; optional.next = NULL;
@@ -454,7 +450,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   }
   if (!value || value->kind == AST_EXPR_NONE) {
     if (opt_type && !(opt_type->is_view || opt_type->is_mod)
-        && rae_opt_is_struct_rep(ctx, opt_type))
+        && rae_opt_is_struct_rep(opt_type))
       fprintf(out, "(%s){0}", rae_opt_type_name(ctx, opt_type));
     else
       fprintf(out, "rae_any_none()");
@@ -474,7 +470,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
    * `let`, a `ret` of a stored optional and a struct-literal field all did
    * (#56441898); an assignment had its own copy of this. */
   if (opt_type && !(opt_type->is_view || opt_type->is_mod)
-      && rae_opt_is_struct_rep(ctx, opt_type)
+      && rae_opt_is_struct_rep(opt_type)
       && (value->kind == AST_EXPR_IDENT || value->kind == AST_EXPR_MEMBER
           || value->kind == AST_EXPR_INDEX)) {
     const AstTypeRef* value_tr = infer_expr_type_ref(ctx, value);
@@ -548,7 +544,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     const AstExpr* inner = value->as.unary.operand;
     const AstTypeRef* inner_tr = infer_expr_type_ref(ctx, inner);
     if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
-        && rae_opt_is_struct_rep(ctx, inner_tr)) {
+        && rae_opt_is_struct_rep(inner_tr)) {
       bool saved_unbox = ctx->suppress_opt_unbox;
       ctx->suppress_opt_unbox = true;
       emit_expr(ctx, inner, out, PREC_LOWEST, false, false);
@@ -560,7 +556,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
   if (!val_tr) val_tr = infer_expr_type_ref(ctx, value->kind == AST_EXPR_OWN ? value->as.unary.operand : value);
   /* in a specialization a `T` can be an optional */
   if (val_tr && val_tr->is_opt && !(val_tr->is_view || val_tr->is_mod) && expr_is_raw_slot_read(value)
-      && rae_opt_is_struct_rep(ctx, val_tr)) {
+      && rae_opt_is_struct_rep(val_tr)) {
     /* A slot of a list of optionals: the list keeps it, so it is copied */
     AstTypeRef slot = *val_tr;
     slot.next = NULL;
@@ -608,7 +604,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     ctx->has_expected_type = true;
     ctx->expected_type = payload;
   }
-  if (rae_opt_is_struct_rep(ctx, &opt_for_name) && c_type_is_plain_string(&payload)
+  if (rae_opt_is_struct_rep(&opt_for_name) && c_type_is_plain_string(&payload)
       && c_expr_is_extern_opt_string_call(value)) {
     /* An extern `ret opt String` returns a plain rae_String in C: a NULL
      * data pointer is `none` (a missing file for readFile), anything else
@@ -625,7 +621,7 @@ void emit_optional_boxed_expr(CFuncContext* ctx, const AstTypeRef* opt_type,
     ctx->expected_type = saved_exp_box;
     return;
   }
-  if (rae_opt_is_struct_rep(ctx, &opt_for_name)) {
+  if (rae_opt_is_struct_rep(&opt_for_name)) {
     const char* optm = rae_opt_type_name(ctx, &opt_for_name);
     int optn = (int)ctx->temp_counter++;
     fprintf(out, "(__extension__ ({ %s __opt%d = {0}; __opt%d.has = 1; ",
@@ -1239,7 +1235,7 @@ void emit_drop_for_value(CFuncContext* ctx, FILE* out, const AstTypeRef* type,
   }
   if (!type_needs_cascade_drop(ctx->compiler_ctx, ctx->module, type, 0)) return;
   if (type->is_opt) {
-    if (rae_opt_is_struct_rep(ctx, type))
+    if (rae_opt_is_struct_rep(type))
       fprintf(out, "  rae_drop_%s(&%s);\n", rae_opt_type_name(ctx, type), cname);
     else
       fprintf(out, "  rae_any_drop(&%s);\n", cname);
@@ -1647,7 +1643,7 @@ static void emit_local_drop(CFuncContext* ctx, FILE* out, size_t idx,
   }
   Str name = ctx->locals[idx];
   if (type->is_opt) {
-    if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+    if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(type))
       fprintf(out, "  rae_drop_%s(&%.*s);\n",
               rae_opt_type_name(ctx, type), (int)name.len, name.data);
     else
@@ -1846,7 +1842,7 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             synth_opt_tr = *bound;
             synth_opt_tr.is_opt = true; synth_opt_tr.is_view = false;
             synth_opt_tr.is_mod = false; synth_opt_tr.next = NULL;
-            if (rae_opt_is_struct_rep(ctx, &synth_opt_tr)) {
+            if (rae_opt_is_struct_rep(&synth_opt_tr)) {
                 src_opt_struct = true; opt_name_tr = &synth_opt_tr;
             }
         }
@@ -1854,14 +1850,14 @@ static bool emit_if(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
          * held as what it answers: `if let one: Int = kinds.copyAt(index: 0)` of a
          * List(Kind) answers an `opt Kind`, read as the Int it is */
         if (src && src->resolved_type && src->resolved_type->kind == TYPE_OPT
-            && src_tr && src_tr->is_opt && !(src_tr->is_view || src_tr->is_mod) && rae_opt_is_struct_rep(ctx, src_tr)
+            && src_tr && src_tr->is_opt && !(src_tr->is_view || src_tr->is_mod) && rae_opt_is_struct_rep(src_tr)
             && !c_is_any(src_tr)) {
             src_opt_struct = true; opt_name_tr = src_tr;
         }
         bool bind_is_any = c_is_any(&synth_opt_tr);  /* (in this specialization) an Any is its own `none` */
         if (!src_opt_struct && !bind_is_any && src_tr && src_tr->is_opt
             && !(src_tr->is_view || src_tr->is_mod)
-            && rae_opt_is_struct_rep(ctx, src_tr)) {
+            && rae_opt_is_struct_rep(src_tr)) {
             src_opt_struct = true; opt_name_tr = src_tr;
         }
         if (src_opt_struct) {
@@ -2335,8 +2331,8 @@ static bool emit_loop_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         fprintf(out, " %.*s", (int)binding->as.let_stmt.name.len,
                 binding->as.let_stmt.name.data);
         bool binding_is_ref = binding_type->is_view || binding_type->is_mod;
-        const AstTypeRef* row_type = collection_is_array ? NULL : c_list_element_type(ctx, collection_type);
-        bool row_is_opt = row_type && row_type->is_opt && rae_opt_is_struct_rep(ctx, row_type);
+        const AstTypeRef* row_type = collection_is_array || !collection_type ? NULL : collection_type->generic_args;
+        bool row_is_opt = row_type && row_type->is_opt && rae_opt_is_struct_rep(row_type);
         bool copy_string = !binding_is_ref && !row_is_opt
             && str_eq_cstr(get_base_type_name(binding_type), "String");
         AstTypeRef binding_value_type = *binding_type;
@@ -2602,7 +2598,7 @@ static void emit_match_case_test(CFuncContext* ctx, const AstExpr* subject,
         ctx->suppress_opt_unbox = true;
         const AstTypeRef* subj_tr = infer_expr_type_ref(ctx, subject);
         if (subj_tr && subj_tr->is_opt && !(subj_tr->is_view || subj_tr->is_mod)
-            && rae_opt_is_struct_rep(ctx, subj_tr)) {
+            && rae_opt_is_struct_rep(subj_tr)) {
             fprintf(out, "(!(");
             emit_expr(ctx, subject, out, PREC_LOWEST, false, false);
             fprintf(out, ").has)");
@@ -2645,7 +2641,7 @@ static bool emit_stmt_body(CFuncContext* ctx, const AstStmt* stmt, FILE* out);
 // answer errs toward the old unconditional pair. Emitting the pair everywhere
 // cost ~2 billion mark/flush calls per 20 s in the 3D examples (~40-80% of
 // the main thread, most of it the TLS lookup of the thread-local pool).
-static bool type_may_carry_pool_string(const CFuncContext* ctx, const AstTypeRef* tr) {
+static bool type_may_carry_pool_string(const AstTypeRef* tr) {
   if (!tr) return true;
   if (tr->is_view || tr->is_mod) return false;
   // Inside a specialization the abstract `T` is the concrete argument (Float
@@ -2801,7 +2797,7 @@ static bool call_result_may_pool(CFuncContext* ctx, const AstExpr* e, Str name, 
   const AstTypeRef* tr = infer_expr_type_ref(ctx, e);
   if (!tr && name_only_returns_nothing(ctx, name)) return false;
   if (!tr && method_only_returns_nothing(ctx, receiver, name)) return false;
-  return type_may_carry_pool_string(ctx, tr);
+  return type_may_carry_pool_string(tr);
 }
 
 bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
@@ -2840,11 +2836,11 @@ bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
       // arithmetic. Unflagged, such a `+` kept a pool mark/flush pair in a hot
       // loop for nothing.
       if (e->as.binary.op == AST_BIN_ADD
-          && type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) {
+          && type_may_carry_pool_string(infer_expr_type_ref(ctx, e))) {
         const AstTypeRef* lhs = infer_expr_type_ref(ctx, e->as.binary.lhs);
         const AstTypeRef* rhs = infer_expr_type_ref(ctx, e->as.binary.rhs);
-        bool arithmetic = (lhs && !type_may_carry_pool_string(ctx, lhs))
-                       || (rhs && !type_may_carry_pool_string(ctx, rhs));
+        bool arithmetic = (lhs && !type_may_carry_pool_string(lhs))
+                       || (rhs && !type_may_carry_pool_string(rhs));
         if (!arithmetic) return true;
       }
       return expr_may_pool(ctx, e->as.binary.lhs) || expr_may_pool(ctx, e->as.binary.rhs);
@@ -2868,7 +2864,7 @@ bool expr_may_pool(CFuncContext* ctx, const AstExpr* e) {
       return false;
     case AST_EXPR_MATCH:
       // a place as an arm is copied into the pool (emit_match_arm)
-      if (type_may_carry_pool_string(ctx, infer_expr_type_ref(ctx, e))) return true;
+      if (type_may_carry_pool_string(infer_expr_type_ref(ctx, e))) return true;
       if (expr_may_pool(ctx, e->as.match_expr.subject)) return true;
       for (const AstMatchArm* arm = e->as.match_expr.arms; arm; arm = arm->next)
         if (expr_may_pool(ctx, arm->value)) return true;
@@ -3239,7 +3235,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             opt_src ? infer_expr_type_ref(ctx, opt_src) : NULL;
                         if (opt_src_tr && opt_src_tr->is_opt
                             && !(opt_src_tr->is_view || opt_src_tr->is_mod)
-                            && rae_opt_is_struct_rep(ctx, opt_src_tr)) {
+                            && rae_opt_is_struct_rep(opt_src_tr)) {
                             int oid = ctx->temp_counter++;
                             fprintf(out, "{ .ptr = ({ __auto_type __ov%d = &(", oid);
                             emit_expr(ctx, opt_src, out, PREC_LOWEST, true, false);
@@ -3292,7 +3288,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                             emit_expr(ctx, unbox_inner, out, PREC_LOWEST, true, false);
                             fprintf(out, "); rae_any_is_none(*__ov%d) ? NULL : __ov%d; })", oid, oid);
                         } else if (inner_tr && inner_tr->is_opt && !(inner_tr->is_view || inner_tr->is_mod)
-                            && rae_opt_is_struct_rep(ctx, inner_tr)) {
+                            && rae_opt_is_struct_rep(inner_tr)) {
                             // A view/mod binding into a struct-rep opt: point at
                             // the inline `.value` when present, else NULL so the
                             // `if let` presence test fails.
@@ -3330,7 +3326,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                         const AstTypeRef* opt_src_tr = infer_expr_type_ref(ctx, opt_src);
                         if (opt_src_tr && opt_src_tr->is_opt
                             && !(opt_src_tr->is_view || opt_src_tr->is_mod)
-                            && rae_opt_is_struct_rep(ctx, opt_src_tr)) {
+                            && rae_opt_is_struct_rep(opt_src_tr)) {
                             int oid = ctx->temp_counter++;
                             fprintf(out, "(");
                             emit_type_ref_as_c_type(ctx, bind_type, out, false);
@@ -3740,7 +3736,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             /* `mod T` whose T is an optional: the whole optional is stored, and
              * the one that was there released */
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT
-                && c_type_parameter_is_optional(ctx, infer_expr_type_ref(ctx, stmt->as.assign_stmt.target))) {
+                && c_type_parameter_is_optional(infer_expr_type_ref(ctx, stmt->as.assign_stmt.target))) {
                 AstTypeRef optional = *target_tr;
                 optional.is_mod = false; optional.is_view = false; optional.next = NULL;
                 const char* optional_c = rae_opt_type_name(ctx, &optional);
@@ -3978,7 +3974,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 } else if (target_is_opt) {
                     int tmpn = ctx->temp_counter++;
                     bool opt_struct = target_tr && !(target_tr->is_view || target_tr->is_mod)
-                        && rae_opt_is_struct_rep(ctx, target_tr);
+                        && rae_opt_is_struct_rep(target_tr);
                     const char* opt_c = opt_struct ? rae_opt_type_name(ctx, target_tr) : "RaeAny";
                     fprintf(out, "{ %s __asg%d = ", opt_c, tmpn);
                     // `=` copies an optional too: emit_optional_boxed_expr deep-
@@ -4260,13 +4256,13 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             bool returns_local_any = false;
             /* (in an instance for an Any, what it returns is `T`) */
             const AstTypeRef* handed_back = ctx->func_decl && ctx->func_decl->returns ? ctx->func_decl->returns->type : NULL;
-            bool returns_any = handed_back && c_is_any(c_concrete_type_ref(ctx, handed_back))
+            bool returns_any = handed_back && c_is_any(handed_back)
                 && !handed_back->is_view && !handed_back->is_mod;
             if (returns_any && handed) {
                 const AstExpr* given = handed;
                 while (given->kind == AST_EXPR_BOX) given = given->as.unary.operand;
                 int local = given->kind == AST_EXPR_IDENT ? local_index_by_name(ctx, given->as.ident) : -1;
-                const AstTypeRef* local_type = local >= 0 ? c_concrete_type_ref(ctx, ctx->local_type_refs[local]) : NULL;
+                const AstTypeRef* local_type = local >= 0 ? ctx->local_type_refs[local] : NULL;
                 bool parameter = local >= 0 && (size_t)local < ctx->func_first_let_idx;
                 returns_local_any = c_is_any(local_type) && !local_type->is_view && !local_type->is_mod && !defer_uses
                     && !c_local_is_slot_alias(ctx, local)
@@ -4450,7 +4446,7 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                     if (ret_slot_type && (ret_slot_type->is_view || ret_slot_type->is_mod)) ret_slot_type = NULL;
                 }
 
-                if (ret_slot_type && ret_slot_type->is_opt && rae_opt_is_struct_rep(ctx, ret_slot_type)) {
+                if (ret_slot_type && ret_slot_type->is_opt && rae_opt_is_struct_rep(ret_slot_type)) {
                     /* A reference to a slot that is an optional is one to its
                      * payload, or null: `opt view` of the payload */
                     AstTypeRef slot = *ret_slot_type;

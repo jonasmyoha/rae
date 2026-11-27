@@ -105,7 +105,7 @@ bool rae_typeinfo_opt_is_struct_rep(const TypeInfo* base) {
     }
 }
 
-bool rae_opt_is_struct_rep(CFuncContext* ctx, const AstTypeRef* type) {
+bool rae_opt_is_struct_rep(const AstTypeRef* type) {
     if (!type) return false;
     const TypeInfo* base = type->resolved_type;
     if (base && base->kind == TYPE_OPT) base = base->as.opt.base;
@@ -142,7 +142,7 @@ bool emit_type_recursive(CompilerContext* ctx, const AstModule* m, const AstType
     // then `struct rae_opt_<T> { rae_Bool has; T value; }`. Mirrors List(T).
     if (type->is_opt && !type->is_view && !type->is_mod) {
         CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = m;
-        if (rae_opt_is_struct_rep(&octx, type)) {
+        if (rae_opt_is_struct_rep(type)) {
             const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, type);
             if (emitted_list_contains(emitted, optm) || emitted_list_contains(visiting, optm)) return true;
             emitted_list_add(visiting, optm);
@@ -318,7 +318,7 @@ bool c_primitive_ref_has_wrapper(Str base) {
       || str_eq_cstr(base, "String");
 }
 
-bool is_primitive_ref(CFuncContext* ctx, const AstTypeRef* tr) {
+bool is_primitive_ref(const AstTypeRef* tr) {
     if (!tr || !(tr->is_view || tr->is_mod)) return false;
     Str base = get_base_type_name(tr);
     // #758: resolve a generic param (`view T`) to its concrete type before the
@@ -691,7 +691,7 @@ static void register_generic_type_scan(CompilerContext* ctx, const AstTypeRef* t
     // and deep-copy call into them).
     if (type->is_opt && !type->is_view && !type->is_mod) {
         CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = ctx->current_module;
-        if (rae_opt_is_struct_rep(&octx, type)) {
+        if (rae_opt_is_struct_rep(type)) {
             AstTypeRef* payload = (AstTypeRef*)malloc(sizeof(AstTypeRef));
             *payload = *type;
             payload->is_opt = false;
@@ -940,7 +940,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
     bool res_opt = type->resolved_type && type->resolved_type->kind == TYPE_OPT;
     if ((type->is_opt || res_opt) && !type->is_view && !type->is_mod) {
       AstTypeRef ot = *type; ot.is_opt = true;
-      if (rae_opt_is_struct_rep(ctx, &ot)) fprintf(out, "%s", rae_opt_type_name(ctx, &ot));
+      if (rae_opt_is_struct_rep(&ot)) fprintf(out, "%s", rae_opt_type_name(ctx, &ot));
       else fprintf(out, "RaeAny");
       return true;
     }
@@ -950,7 +950,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   if (type->is_optional_box && type->is_opt) {
     AstTypeRef boxed = *type;
     boxed.is_view = false; boxed.is_mod = false; boxed.is_optional_box = false; boxed.resolved_type = NULL;
-    if (rae_opt_is_struct_rep(ctx, &boxed)) {
+    if (rae_opt_is_struct_rep(&boxed)) {
       if (type->is_view && !type->is_mod) fprintf(out, "const ");
       fprintf(out, "%s%s", rae_opt_type_name(ctx, &boxed), skip_ptr ? "" : "*");
       return true;
@@ -1062,7 +1062,7 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   //
   // Only a NON-reference optional needs the box.
   if (type->is_opt && !(type->is_view || type->is_mod)) {
-    if (rae_opt_is_struct_rep(ctx, type)) fprintf(out, "%s", rae_opt_type_name(ctx, type));
+    if (rae_opt_is_struct_rep(type)) fprintf(out, "%s", rae_opt_type_name(ctx, type));
     else fprintf(out, "RaeAny");
     return true;
   }
@@ -1112,17 +1112,17 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
 /* Is `type` a `view T` / `mod T` whose type parameter is bound to an optional
  * here (a `List(opt Int)`'s `contains(value: view T)`)? A reference to the
  * optional, not an `opt view` of its payload. */
-bool c_type_parameter_is_optional(CFuncContext* ctx, const AstTypeRef* type) {
+bool c_type_parameter_is_optional(const AstTypeRef* type) {
     if (type && type->is_optional_box && type->is_opt) {
         AstTypeRef boxed = *type;
         boxed.is_view = false; boxed.is_mod = false; boxed.is_optional_box = false; boxed.resolved_type = NULL;
-        return rae_opt_is_struct_rep(ctx, &boxed);
+        return rae_opt_is_struct_rep(&boxed);
     }
     return false;
 }
 
 void emit_param_c_type(CFuncContext* ctx, const AstParam* p, FILE* out, bool is_extern) {
-        if (!is_extern && p->type->is_optional_box && c_type_parameter_is_optional(ctx, p->type)) {
+        if (!is_extern && p->type->is_optional_box && c_type_parameter_is_optional(p->type)) {
             emit_type_ref_as_c_type(ctx, p->type, out, false);
             return;
         }
@@ -1181,7 +1181,7 @@ const char* c_return_type(CFuncContext* ctx, const AstFuncDecl* func) {
     // only a non-reference optional needs RaeAny.
     AstTypeRef* tr = func->returns->type;
     if (tr->is_opt && !(tr->is_view || tr->is_mod)) {
-      if (rae_opt_is_struct_rep(ctx, tr)) return rae_opt_type_name(ctx, tr);
+      if (rae_opt_is_struct_rep(tr)) return rae_opt_type_name(ctx, tr);
       return "RaeAny";
     }
     bool is_view = tr->is_view, is_mod = tr->is_mod, is_ptr = is_view || is_mod;
@@ -1254,7 +1254,7 @@ const AstTypeRef* get_local_type_ref(CFuncContext* ctx, Str name) { for (int i =
 bool emit_auto_init(CFuncContext* ctx, const AstTypeRef* type, FILE* out) {
     if (!type) { fprintf(out, "{0}"); return true; }
     if (type->is_opt) {
-        if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(ctx, type))
+        if (!(type->is_view || type->is_mod) && rae_opt_is_struct_rep(type))
             fprintf(out, "(%s){0}", rae_opt_type_name(ctx, type));
         else fprintf(out, "rae_any_none()");
         return true;
@@ -1691,7 +1691,7 @@ void rae_value_to_str_expr(CompilerContext* ctx, const AstModule* module, const 
         fprintf(out, "rae_ext_rae_str_concat(rae_ext_rae_str_concat((rae_String){(uint8_t*)\"\\\"\", 1}, (%s)), (rae_String){(uint8_t*)\"\\\"\", 1})", cexpr);
         return;
     }
-    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
+    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(type)) {
         AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
         c_unwrap_array_payload(&payload);
         char inner[512]; snprintf(inner, sizeof inner, "(%s).value", cexpr);
@@ -1764,7 +1764,7 @@ void rae_value_equals_expr(CompilerContext* ctx, const AstModule* module, const 
                            const char* aexpr, const char* bexpr, FILE* out) {
     CFuncContext lctx = {0}; lctx.compiler_ctx = ctx; lctx.module = (AstModule*)module;
     Str base = get_base_type_name(type);
-    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(&lctx, type)) {
+    if (type && type->is_opt && !type->is_view && !type->is_mod && rae_opt_is_struct_rep(type)) {
         AstTypeRef payload = *type; payload.is_opt = false; payload.next = NULL;
         c_unwrap_array_payload(&payload);
         char ai[512], bi[512];
@@ -1827,36 +1827,6 @@ static bool type_ref_mentions_params(const AstTypeRef* tr, const AstIdentifierPa
   for (const AstTypeRef* arg = tr->generic_args; arg; arg = arg->next)
     if (type_ref_mentions_params(arg, params)) return true;
   return false;
-}
-
-/* The result type of a call of a generic function that the call names alone (one
- * of that name takes these arguments): its return type with the type parameters
- * the arguments bind. NULL when that cannot be told. */
-static const AstTypeRef* c_generic_call_type(CFuncContext* ctx, const AstExpr* expr) {
-    size_t arg_count = 0;
-    for (const AstCallArg* a = expr->as.call.args; a; a = a->next) arg_count++;
-    size_t named_count = 0;
-    const size_t* named = decl_index_functions(ctx->compiler_ctx, expr->as.call.callee->as.ident, &named_count);
-    const AstFuncDecl* callee = NULL;
-    for (size_t k = 0; k < named_count; k++) {
-        const AstFuncDecl* fd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
-        if (fd->specialization_args) continue;
-        size_t params = 0;
-        for (const AstParam* p = fd->params; p; p = p->next) params++;
-        if (params != arg_count || !c_call_names_fit(expr, fd)) continue;
-        if (callee) return NULL;
-        callee = fd;
-    }
-    if (!callee || !callee->generic_params || !callee->returns || callee->returns->next || !callee->returns->type) return NULL;
-    const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t count = 0;
-    const AstParam* p = callee->params;
-    for (const AstCallArg* a = expr->as.call.args; a && p && count < 32; a = a->next, p = p->next) {
-        const AstTypeRef* type = infer_expr_type_ref(ctx, c_without_own(a->value));
-        patterns[count] = p->type;
-        concretes[count++] = type;
-    }
-    const AstTypeRef* bound = infer_generic_args_multi(ctx->compiler_ctx, callee, patterns, concretes, count);
-    return bound ? substitute_type_ref(ctx->compiler_ctx, callee->generic_params, bound, callee->returns->type) : NULL;
 }
 
 static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstExpr* expr);
@@ -2021,7 +1991,7 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
         case AST_EXPR_IDENT: {
             const AstTypeRef* lt = get_local_type_ref(ctx, expr->as.ident);
             /* a reference to an optional reads as the optional (the name emits `(*name)`) */
-            if (lt && lt->is_optional_box && c_type_parameter_is_optional(ctx, lt)) {
+            if (lt && lt->is_optional_box && c_type_parameter_is_optional(lt)) {
                 AstTypeRef* value = arena_alloc(ctx->compiler_ctx->ast_arena, sizeof(AstTypeRef));
                 *value = *lt;
                 value->is_view = false; value->is_mod = false; value->is_optional_box = false;
@@ -2086,22 +2056,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
             if (expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC) {
                 const AstTypeRef* crt = expr->decl_link->as.func_decl.returns
                     ? expr->decl_link->as.func_decl.returns->type : NULL;
-                // A generic `ret opt T` template return carries the payload as a
-                // type param; if sema pinned the concrete result, prefer it so
-                // the `opt` survives with a real payload TypeInfo (#651).
-                if (crt && crt->is_opt && expr->resolved_type
-                    && expr->resolved_type->kind == TYPE_OPT)
-                    return infer_tr_from_resolved(ctx, expr->resolved_type);
-                // The same for any template return that names the callee's
-                // type parameters (`ret Box(V)`): the unsubstituted `Box(V)`
-                // made a field read off the call (`keepGeneric(...).value`)
-                // the abstract `V`, so `.value.items.length()` compiled as a
-                // String length. Sema pinned the concrete `Box(Holder)`.
-                if (crt && expr->resolved_type
-                    && type_ref_mentions_params(crt, expr->decl_link->as.func_decl.generic_params)) {
-                    const AstTypeRef* concrete = infer_tr_from_resolved(ctx, expr->resolved_type);
-                    if (concrete) return concrete;
-                }
                 if (crt) return crt;
             }
             // Unresolved generic free-function call (no decl_link): fall back to
@@ -2170,11 +2124,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
                     }
                 }
                 if (!best) best = misnamed;
-                /* (`ret List(T)` too: the template's own T says nothing here) */
-                if (!best || (best->returns && type_ref_mentions_params(best->returns->type, best->generic_params))) {
-                    const AstTypeRef* generic_result = c_generic_call_type(ctx, expr);
-                    if (generic_result) return generic_result;
-                }
                 if (best && best->returns) {
                     const AstTypeRef* rt2 = best->returns->type;
                     // If the return is a generic type param (or `opt <param>`),
@@ -2360,12 +2309,6 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
                         if (str_eq(get_base_type_name(pa), rname)) { found_slot = true; break; }
                     }
                     if (found_slot) {
-                        // Prefer sema's concrete result: it keeps the `opt`
-                        // (and a real payload TypeInfo) that the bare type-param
-                        // substitution below would drop (#651).
-                        if ((rt->is_opt || rt->is_view || rt->is_mod)
-                            && expr->resolved_type)
-                            return infer_tr_from_resolved(ctx, expr->resolved_type);
                         const AstTypeRef* recv = infer_expr_type_ref(ctx, expr->as.method_call.object);
                         if (recv) {
                             const AstTypeRef* ga = recv->generic_args;
@@ -2694,13 +2637,12 @@ static void emit_specialization_prototype(CompilerContext* ctx, const AstModule*
 static int g_instance_errors;
 
 /* Every instance is sema's and registered before the C is written (docs/generic-instances-design.md
- * step 8): one registered from `*prototyped` on, while a body was written, is a compiler fault.
- * Its prototype is still written, so the C stays whole. */
-static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstModule* module, size_t* prototyped, FILE* out) {
-  while (*prototyped < ctx->specialized_func_count) {
-    const AstFuncDecl* f = ctx->specialized_funcs[*prototyped].decl;
-    const AstTypeRef* args = ctx->specialized_funcs[*prototyped].concrete_args;
-    (*prototyped)++;
+ * step 8): one registered from `registered` on, while the C was written, is a compiler fault, and
+ * the build fails. */
+static void report_late_instances(CompilerContext* ctx, size_t registered) {
+  for (size_t i = registered; i < ctx->specialized_func_count; i++) {
+    const AstFuncDecl* f = ctx->specialized_funcs[i].decl;
+    const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
     if (f->is_extern) continue;
     char message[512];
     snprintf(message, sizeof message, "internal: the instance %s was registered while the C was written",
@@ -2708,7 +2650,6 @@ static void emit_new_specialization_prototypes(CompilerContext* ctx, const AstMo
     diag_error(f->generic_template && f->generic_template->origin_file ? f->generic_template->origin_file : "?",
                f->body && f->body->first ? (int)f->body->first->line : 0, 0, message);
     g_instance_errors++;
-    emit_specialization_prototype(ctx, module, f, args, out);
   }
 }
 
@@ -2830,7 +2771,7 @@ bool emit_specialized_function(CompilerContext* ctx, const AstModule* m, const A
         needs_loop = false;
       }
       if (needs_loop) {
-        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(&tctx, elem);
+        bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(elem);
         const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
             ? "RaeAny"
             : rae_mangle_type_specialized(ctx, NULL, NULL, elem);
@@ -3475,7 +3416,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     const AstTypeRef* gt = (_gt); \
     if (gt && gt->is_opt && !gt->is_view && !gt->is_mod) { \
       CFuncContext octx = {0}; octx.compiler_ctx = ctx; octx.module = module; \
-      if (rae_opt_is_struct_rep(&octx, gt)) { \
+      if (rae_opt_is_struct_rep(gt)) { \
         const char* optm = rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)gt); \
         bool dup = !optm; \
         for (size_t k = 0; !dup && k < opt_entry_count; k++) \
@@ -3711,7 +3652,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // that have no scalar spelling stay null (as before).
               CFuncContext _jctx = {0}; _jctx.compiler_ctx = ctx; _jctx.module = module;
               bool opt_struct = !f->type->is_view && !f->type->is_mod
-                  && rae_opt_is_struct_rep(&_jctx, f->type);
+                  && rae_opt_is_struct_rep(f->type);
               int nl = (int)f->name.len; const char* nd = f->name.data;
               if (opt_struct && str_eq_cstr(base, "String")) {
                   fprintf(out, "  if (this->%.*s.has) { rae_jout_text(&__out, \"\\\"%.*s\\\": \"); rae_jscan_put_string(&__out, this->%.*s.value); }\n",
@@ -3846,7 +3787,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
               // stay none.
               CFuncContext _jctx = {0}; _jctx.compiler_ctx = ctx; _jctx.module = module;
               bool opt_struct = !f->type->is_view && !f->type->is_mod
-                  && rae_opt_is_struct_rep(&_jctx, f->type);
+                  && rae_opt_is_struct_rep(f->type);
               const char* reader = NULL;
               if (opt_struct) {
                   if (str_eq_cstr(base, "String")) reader = "rae_jscan_string";
@@ -4378,7 +4319,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
           if (is_alias) continue;
           CFuncContext fctx = {0}; fctx.compiler_ctx = ctx; fctx.module = module;
           if (!concrete->is_view && !concrete->is_mod
-              && rae_opt_is_struct_rep(&fctx, concrete)) {
+              && rae_opt_is_struct_rep(concrete)) {
             fprintf(out, "  rae_drop_%s(&this->%.*s);\n",
                     rae_opt_type_name(&fctx, concrete),
                     (int)f->name.len, f->name.data);
@@ -4620,7 +4561,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
        * `opt String` field gets rae_string_copy(RaeAny) (#138). */ \
       if ((ft) && (ft)->is_opt) { \
         CFuncContext _octx = {0}; _octx.compiler_ctx = ctx; _octx.module = module; \
-        if (!(ft)->is_view && !(ft)->is_mod && rae_opt_is_struct_rep(&_octx, (ft))) { \
+        if (!(ft)->is_view && !(ft)->is_mod && rae_opt_is_struct_rep((ft))) { \
           if (type_needs_deep_copy(ctx, module, (AstTypeRef*)(ft), 0)) \
             fprintf(out, "  rae_deep_copy_%s(&%s, &%s);\n", rae_opt_type_name(&_octx, (ft)), (dst_expr), (src_expr)); \
           else \
@@ -4726,7 +4667,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
     // representation first (#138), mirroring the drop synthesis.
     bool elem_is_opt = elem->is_opt;
     CFuncContext ecctx = {0}; ecctx.compiler_ctx = ctx; ecctx.module = module;
-    bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep(&ecctx, (AstTypeRef*)elem);
+    bool elem_opt_struct = elem_is_opt && rae_opt_is_struct_rep((AstTypeRef*)elem);
     const char* elem_mangled = (elem_is_opt && !elem_opt_struct)
         ? "RaeAny"
         : rae_mangle_type_specialized(ctx, NULL, NULL, (AstTypeRef*)elem);
@@ -5072,19 +5013,9 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   emit_json_scan_wrappers(ctx, out);
   emit_scheduler_hooks(ctx, out);
 
-  {
-      char* drops = NULL;
-      size_t drops_len = 0;
-      size_t drops_prototyped = ctx->specialized_func_count;
-      FILE* drops_out = open_memstream(&drops, &drops_len);
-      if (drops_out) {
-          c_emit_task_drops(ctx, module, drops_out);
-          fclose(drops_out);
-          emit_new_specialization_prototypes(ctx, module, &drops_prototyped, out);
-          if (drops) fwrite(drops, 1, drops_len, out);
-          free(drops);
-      }
-  }
+  /* from here on every instance is registered: one registered later is reported at the end */
+  size_t registered_instances = ctx->specialized_func_count;
+  c_emit_task_drops(ctx, module, out);
 
   // Path-1 spawn thunks: one per threadable function (all params passed by
   // value, so a worker thread safely owns its copies). pthread needs a
@@ -5158,114 +5089,39 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
       fprintf(out, "  RaeTask* __t = __a->__task; free(__a); rae_task_complete(__t);\n  return 1;\n}\n");
   }
 
-  // Bodies for non-generic functions, each buffered like a specialization's body: a body that
-  // registers a specialization first (a generic call inside a fields() loop the discovery pass did
-  // not reach) gets its prototype before it, not after (example 121's inspector called
-  // addDefaultComponent<Children> before its prototype once UiWorld had 127 tables)
-  size_t plain_prototyped = ctx->specialized_func_count;
+  // Bodies for non-generic functions
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
       progress_work(EMIT_STAGE_PLAIN_BODIES_LO, EMIT_STAGE_PLAIN_BODIES_HI, i, ctx->all_decl_count);
-      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main")) {
-          char* body = NULL;
-          size_t body_len = 0;
-          FILE* body_out = open_memstream(&body, &body_len);
-          emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
-          if (body_out) fflush(body_out);
-          if (body_out) {
-              fclose(body_out);
-              emit_new_specialization_prototypes(ctx, module, &plain_prototyped, out);
-              if (body) fwrite(body, 1, body_len, out);
-              free(body);
-          }
-      }
+      if (d->kind == AST_DECL_FUNC && !d->as.func_decl.generic_params && !d->as.func_decl.specialization_args && !d->as.func_decl.is_extern && !str_eq_cstr(d->as.func_decl.name, "main"))
+          emit_function(ctx, module, &d->as.func_decl, out);
   }
 
-  // Bodies for specialized functions (iterative — emitting may discover new specializations)
-  // First: emit ALL prototypes from discovery pass (may include ones found during iterative discovery)
+  // The prototypes of every instance, then their bodies.
   //
   // `register_function_specialization` dedupes by (decl, concrete_args)
-  // tuple, so entries in `specialized_funcs` are unique. The previous
-  // implementation re-mangled every previous entry on every iteration
-  // (O(N²) mangle calls) to dedup on name, which was redundant and
-  // exhausted the arena on large modules (~480 specs × ~480 dedup
-  // mangles × ~70-byte names = many megabytes of arena allocations).
-  // If two different decls ever do produce the same mangled name,
-  // that's a mangler bug worth surfacing as a C link error rather
-  // than papering over here.
-  for (size_t i = 0; i < ctx->specialized_func_count; i++) {
+  // tuple, so entries in `specialized_funcs` are unique. If two different
+  // decls ever do produce the same mangled name, that's a mangler bug worth
+  // surfacing as a C link error rather than papering over here.
+  for (size_t i = 0; i < registered_instances; i++) {
       const AstFuncDecl* pf = ctx->specialized_funcs[i].decl;
       const AstTypeRef* pa = ctx->specialized_funcs[i].concrete_args;
       if (pf->is_extern) continue;
       emit_specialization_prototype(ctx, module, pf, pa, out);
   }
-  {
-      size_t emitted_idx = 0;
-      size_t prototyped_count = ctx->specialized_func_count; // already prototyped above
-      while (emitted_idx < ctx->specialized_func_count) {
-          // Emit prototypes for any newly discovered specializations
-          emit_new_specialization_prototypes(ctx, module, &prototyped_count, out);
-          progress_work(EMIT_STAGE_SPEC_BODIES_LO, EMIT_STAGE_SPEC_BODIES_HI, emitted_idx, ctx->specialized_func_count);
-          // The body goes to a buffer first: what it registers is prototyped
-          // before it (#22812637)
-          char* body = NULL;
-          size_t body_len = 0;
-          FILE* body_out = open_memstream(&body, &body_len);
-          emit_specialized_function(ctx, module, ctx->specialized_funcs[emitted_idx].decl, ctx->specialized_funcs[emitted_idx].concrete_args,
-                                    body_out ? body_out : out);
-          if (body_out) {
-              fclose(body_out);
-              emit_new_specialization_prototypes(ctx, module, &prototyped_count, out);
-              if (body) fwrite(body, 1, body_len, out);
-              free(body);
-          }
-          emitted_idx++;
-      }
+  for (size_t i = 0; i < registered_instances; i++) {
+      progress_work(EMIT_STAGE_SPEC_BODIES_LO, EMIT_STAGE_SPEC_BODIES_HI, i, registered_instances);
+      emit_specialized_function(ctx, module, ctx->specialized_funcs[i].decl, ctx->specialized_funcs[i].concrete_args, out);
   }
   progress_work(EMIT_STAGE_SPEC_BODIES_HI, 1.0, 0, 1);
-  
-  // Finally emit main, buffered like a specialization's body: what it
-  // registers is prototyped before it
-  size_t pre_main_spec_count = ctx->specialized_func_count;
+
+  // Finally main
   for (size_t i = 0; i < ctx->all_decl_count; i++) {
       const AstDecl* d = ctx->all_decls[i];
-      if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main")) {
-          char* body = NULL;
-          size_t body_len = 0;
-          FILE* body_out = open_memstream(&body, &body_len);
-          emit_function(ctx, module, &d->as.func_decl, body_out ? body_out : out);
-          if (body_out) {
-              fclose(body_out);
-              size_t main_prototyped = pre_main_spec_count;
-              emit_new_specialization_prototypes(ctx, module, &main_prototyped, out);
-              if (body) fwrite(body, 1, body_len, out);
-              free(body);
-          }
-      }
+      if (d->kind == AST_DECL_FUNC && str_eq_cstr(d->as.func_decl.name, "main"))
+          emit_function(ctx, module, &d->as.func_decl, out);
   }
-
-  // Emit any specializations discovered during main (e.g. from collection literals)
-  {
-      size_t emitted_idx2 = pre_main_spec_count;
-      size_t prototyped2 = pre_main_spec_count;
-      emit_new_specialization_prototypes(ctx, module, &prototyped2, out);
-      while (emitted_idx2 < ctx->specialized_func_count) {
-          const AstFuncDecl* f = ctx->specialized_funcs[emitted_idx2].decl;
-          const AstTypeRef* args = ctx->specialized_funcs[emitted_idx2].concrete_args;
-          emitted_idx2++;
-          if (f->is_extern) continue;
-          char* body = NULL;
-          size_t body_len = 0;
-          FILE* body_out = open_memstream(&body, &body_len);
-          emit_specialized_function(ctx, module, f, args, body_out ? body_out : out);
-          if (body_out) {
-              fclose(body_out);
-              emit_new_specialization_prototypes(ctx, module, &prototyped2, out);
-              if (body) fwrite(body, 1, body_len, out);
-              free(body);
-          }
-      }
-  }
+  report_late_instances(ctx, registered_instances);
 
   // A WASM module's named exports (docs/wasm-modules.md), when it is one
   bool exported = emit_wasm_module_exports(ctx, out);

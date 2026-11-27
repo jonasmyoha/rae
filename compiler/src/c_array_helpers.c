@@ -143,7 +143,7 @@ void c_emit_array_copies(CompilerContext* ctx, const AstModule* module, const CA
     fprintf(out, "  for (int64_t __i = 0; __i < %lld; __i++) ", (long long)info->as.array.count);
     /* (an Array that holds a Task is never copied: sema) */
     bool task = str_eq_cstr(get_base_type_name(element), "Task");
-    if (element->is_opt && !task && rae_opt_is_struct_rep(&fctx, element))
+    if (element->is_opt && !task && rae_opt_is_struct_rep(element))
       fprintf(out, "rae_deep_copy_%s(&dst->v[__i], &src->v[__i]);\n", rae_opt_type_name(&fctx, element));
     else if (info->as.array.base->kind == TYPE_STRING)
       fprintf(out, "dst->v[__i] = rae_string_copy(src->v[__i]);\n");
