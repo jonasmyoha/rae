@@ -109,6 +109,7 @@ three runs on a loaded machine), against the compiler as it stood before step 4 
 | 0.4.127 (instances from clones, behind the switch) | 8.3 s | 13.2 s | 24.5 s |
 | 0.4.128 (on by default, `edge_by_name` a lookup) | 4.5 s | 6.8 s | 12.3 s |
 | 0.4.130 (the scans of this section lookups) | 4.2 s | 5.7 s | 9.2 s |
+| 0.4.132 (sema's instances alone, discovery collects types) | 3.65 s | 4.9 s | 8.1 s |
 
 The four scans: `edge_by_name` (0.4.128), `type_refs_equal` in `register_function_specialization` (now an index from
 a template to its instances, in their order), `sema_call_returns_reference` (an index of the module's functions by
@@ -359,7 +360,15 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    is the queue line `[generic instances 7c/9: the call emission reads instances]`: a generic call's target from
    sema's `instance`. On the way, the late-specialization report (`RAE_LATE_SPECIALIZATIONS`) no longer counts an
    instance that is the C function of an earlier one written another way (`Char32` / `Char`), nor one the body
-   does not call.
+   does not call. Third part (0.4.132): the stray instance of 1648 was not the call emission's. A list literal
+   (`let bytes: List(UInt8) = {}`) found its `createList` and `add` as the last generic function of that name in
+   the program, which in 1648 is the program's own `add(this: mod Stack(T), ...)`; it now takes the one over a
+   List (`c_list_literal_function`, the emission's and discovery's search alike), so a non-empty literal can no
+   longer call the wrong `add` either. With that the call emission registers nothing sema did not make (the
+   suite builds with `RAE_LATE_SPECIALIZATIONS=error`), and sema's instances alone are the default;
+   `RAE_DISCOVERY_INSTANCES=1` is the way back for one version. 106, 121 and 136 have the same functions with the
+   same bodies as 0.4.130, in the table above. Taking a call's target from its `instance` in `emit_call_expr`
+   was not needed for it, and is left to step 9 (the backend reads what sema found).
 8. **The template way removed**: what section 6 lists, and the switch.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 

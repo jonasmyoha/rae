@@ -2741,6 +2741,25 @@ const AstFuncDecl* find_container_drop(CompilerContext* ctx, Str base) {
   return NULL;
 }
 
+/* The List function a list literal is built with (`createList`, `add`): the generic
+ * one of that name over a List (its result for createList, its first parameter for add),
+ * the last such in list order. Not just any generic function of the name: a program's
+ * own `add(this: mod Stack(T), ...)` beside List's was taken (case 1648). */
+const AstFuncDecl* c_list_literal_function(CompilerContext* ctx, const char* name) {
+  const AstFuncDecl* found = NULL;
+  size_t named_count = 0;
+  const size_t* named = decl_index_functions(ctx, str_from_cstr(name), &named_count);
+  for (size_t k = 0; k < named_count; k++) {
+    const AstFuncDecl* f = &ctx->all_decls[named[k]]->as.func_decl;
+    if (!f->generic_params) continue;
+    const AstTypeRef* over = strcmp(name, "createList") == 0
+        ? (f->returns ? f->returns->type : NULL)
+        : (f->params ? f->params->type : NULL);
+    if (over && str_eq_cstr(get_base_type_name(over), "List")) found = f;
+  }
+  return found;
+}
+
 /* RAE_GENERIC_INSTANCES=1 (docs/generic-instances-design.md step 5): the analyzed
  * clone of the instance of `f` for `args`, whose prototype and body are written as a
  * plain function's, with no type parameters; NULL when off, or when sema has none */

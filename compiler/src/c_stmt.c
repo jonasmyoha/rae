@@ -3475,14 +3475,8 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
                 for (const AstCollectionElement* e = stmt->as.let_stmt.value->as.collection.elements; e; e = e->next) count++;
 
                 // Find createList and add functions
-                const AstFuncDecl* create_fd = NULL;
-                const AstFuncDecl* add_fd = NULL;
-                for (size_t i = 0; i < ctx->compiler_ctx->all_decl_count; i++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[i];
-                    if (d->kind != AST_DECL_FUNC) continue;
-                    if (str_eq_cstr(d->as.func_decl.name, "createList") && d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
-                    if (str_eq_cstr(d->as.func_decl.name, "add") && d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
-                }
+                const AstFuncDecl* create_fd = c_list_literal_function(ctx->compiler_ctx, "createList");
+                const AstFuncDecl* add_fd = c_list_literal_function(ctx->compiler_ctx, "add");
 
                 /* Only a List is built so: `{ }` of a map or of another generic
                  * struct is that struct's default, below. */

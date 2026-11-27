@@ -286,6 +286,7 @@ bool func_has_return_value(const AstFuncDecl* func);
 // these helpers move it into `expr->as.call.generic_args`.
 AstTypeRef* try_as_type_arg(CFuncContext* ctx, const AstExpr* val);
 const AstTypeRef* c_clone_type_parameter(CFuncContext* ctx, Str name);
+const AstFuncDecl* c_list_literal_function(CompilerContext* ctx, const char* name);
 AstExpr* hoist_type_arg_if_present(CFuncContext* ctx, const AstExpr* expr);
 
 // -- Decl lookup --

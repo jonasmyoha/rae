@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.132, 2026-11-27: the C from sema's instances by default; a list literal's own add
+
+- The backend builds the C from the instances the compiler decided, by default; its own search only collects
+  types (`RAE_DISCOVERY_INSTANCES=1` goes back, for one version). Builds take 13 to 16 % less CPU (106 3.65 s,
+  121 4.9 s, 136 8.1 s).
+- A list literal no longer uses a program's own generic `add` (or `createList`) of another type in place of
+  List's (case 1648).
+
 ## 0.4.131, 2026-11-27: instances from sema's registry, behind a switch
 
 - `RAE_DISCOVERY_INSTANCES=0` builds the C from sema's instances alone, with the backend's own search used only

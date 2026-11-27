@@ -568,20 +568,8 @@ static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr*
                  * concrete argument, not the template's `T` */
                 if (ctx->generic_params && ctx->generic_args)
                     elem_type = substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, elem_type);
-                const AstFuncDecl* create_fd = NULL;
-                const AstFuncDecl* add_fd = NULL;
-                // The LAST generic createList / add in list order, as the scan found
-                size_t named_count = 0;
-                const size_t* named = decl_index_functions(ctx->compiler_ctx, str_from_cstr("createList"), &named_count);
-                for (size_t k = 0; k < named_count; k++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
-                    if (d->as.func_decl.generic_params) create_fd = &d->as.func_decl;
-                }
-                named = decl_index_functions(ctx->compiler_ctx, str_from_cstr("add"), &named_count);
-                for (size_t k = 0; k < named_count; k++) {
-                    const AstDecl* d = ctx->compiler_ctx->all_decls[named[k]];
-                    if (d->as.func_decl.generic_params) add_fd = &d->as.func_decl;
-                }
+                const AstFuncDecl* create_fd = c_list_literal_function(ctx->compiler_ctx, "createList");
+                const AstFuncDecl* add_fd = c_list_literal_function(ctx->compiler_ctx, "add");
                 if (create_fd) discovery_register_instance(ctx->compiler_ctx, create_fd, elem_type);
                 if (add_fd) discovery_register_instance(ctx->compiler_ctx, add_fd, elem_type);
                 // A stable copy: the registry keeps the pointer, and
@@ -905,17 +893,15 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
     }
 }
 
-/* RAE_DISCOVERY_INSTANCES=0 (docs/generic-instances-design.md step 7b, not yet the
- * default): the instances the C has are sema's (its registry), registered first, and
- * discovery's walk only collects the types their bodies and the program's functions
- * use. By default discovery still registers the instances it finds, too: the call
- * emission resolves a call itself and can register an instance sema has not, whose
- * types nothing collects (case 1648). */
+/* The instances the C has are sema's (its registry, docs/generic-instances-design.md
+ * step 7), registered first; discovery's walk only collects the types their bodies and
+ * the program's functions use. Since 0.4.132 by default; RAE_DISCOVERY_INSTANCES=1 is
+ * the way back for one version (discovery registers the instances it finds, too). */
 bool c_discovery_registers_instances(void) {
     static int on = -1;
     if (on < 0) {
         const char* value = getenv("RAE_DISCOVERY_INSTANCES");
-        on = !(value && strcmp(value, "0") == 0);
+        on = value && strcmp(value, "1") == 0;
     }
     return on == 1 || !sema_generic_instances_emitted();
 }
