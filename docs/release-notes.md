@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.118, 2026-11-27: drags a game can use for its cards
+
+- A `DragSource` has its own start distance (`startPoints`, 5) and hold time (`holdSeconds`, 0.4; 0: a finger drags
+  at once, as a mouse), and with `follow` the node itself follows the pointer (offset kept, raised into
+  `followLayer`, "hud", put back at the end) instead of a label.
+- `DragEvent` `drop` and `canceled` carry the release velocity, `velocityX` / `velocityY` in points per second over
+  the last 0.1 s. The existing drags are unchanged (cases 1600, 1601). Case 1704; docs/ui-scene-format.md
+  section 56.
+
 ## 0.4.117, 2026-11-27: a node that takes presses and fires nothing
 
 - `PressSink` (`"PressSink": {}` on a node) takes presses where the node is and fires nothing: the hit test returns

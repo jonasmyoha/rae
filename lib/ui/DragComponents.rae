@@ -2,6 +2,7 @@
 # it, and its events.
 open ecs/Entity
 open ui/Components
+open ui/BindingComponents
 
 # On a node: a press on it, held and moved, asks the program for a drag (a DragEvent `begin`).
 # `kind`
@@ -12,6 +13,16 @@ open ui/Components
 type DragSource {
   kind: String = ""
   touch: Bool = false
+  # How far (points) a press moves before it is a drag
+  startPoints: Float = 5.0
+  # How long a finger is held still before it drags (seconds); a finger that moves first scrolls.
+  # 0: a finger drags as soon as it moves `startPoints`, as a mouse does (a source not in a scroll)
+  holdSeconds: Float = 0.4
+  # The node itself follows the pointer while it is dragged (its offset from the pointer kept, its
+  # RuntimeOffset moved) instead of a label, raised into `followLayer` (a LayerTag) and put back
+  # where it was when the drag ends
+  follow: Bool = false
+  followLayer: String = "hud"
 }
 
 # On a node: drags of these kinds (with spaces between) can be let go on it; "files" and "text" are
@@ -74,6 +85,16 @@ type UiDrag {
   label: EntityId = noEntity()
   seconds: Float64 = 0.0
   root: EntityId = noEntity()
+  # The pointer's last places (x, y, seconds since the drag began: three floats each), for the
+  # release velocity over the last 0.1 s
+  samples: List(Float) = {}
+  # A DragSource with `follow`: the node that follows, its RuntimeOffset and LayerTag before (to
+  # put back), and whether it had them
+  follower: EntityId = noEntity()
+  followerOffset: Vec2 = Vec2 { x: 0.0, y: 0.0 }
+  followerHadOffset: Bool = false
+  followerLayer: LayerTag = { id: "" }
+  followerHadLayer: Bool = false
 }
 
 enum DragEventKind { begin, over, drop, canceled }
@@ -92,4 +113,8 @@ type DragEvent {
   moveAsked: Bool = false
   x: Float = 0.0
   y: Float = 0.0
+  # `drop` and `canceled`: how fast the pointer moved, points per second over the last 0.1 s
+  # (a fling's or a sling's speed)
+  velocityX: Float = 0.0
+  velocityY: Float = 0.0
 }

@@ -1912,6 +1912,23 @@ The label is the bundles `dragLabel`, `dragText` and `dragEffect`.
 What the OS drags onto the window is given to `dragSystem` by `Gpu2d.readOsDrop()` and is a drag of the kind
 `files`, or `text` when let go. Its values are known only then. Cases 1600, check `osDrop`.
 
+For cards and other things a game drags, a `DragSource` also has:
+
+- `startPoints` (5): how far a press moves before it is a drag.
+- `holdSeconds` (0.4): how long a finger is held still before it drags; a finger that moves first
+  scrolls. 0: a finger drags as soon as it moves `startPoints`, as a mouse does (for a source that is
+  not in a scroll root).
+- `follow` (false) and `followLayer` ("hud"): the node itself follows the pointer while it is dragged,
+  its offset from the pointer kept (its `RuntimeOffset` is moved), raised into `followLayer` (a
+  `LayerTag`), and put back with its own offset and layer when the drag ends. No label is drawn.
+
+```json
+"Card": { "DragSource": { "kind": "card", "touch": true, "holdSeconds": 0, "startPoints": 8, "follow": true } }
+```
+
+`drop` and `canceled` carry `velocityX` and `velocityY`: how fast the pointer moved, in points per
+second over the last 0.1 s, for a fling or a sling. Case 1704.
+
 `ui/EscapeHold`: `holdEscape` and `releaseEscape` around anything that Escape ends, so that the key does not
 also quit the program.
 

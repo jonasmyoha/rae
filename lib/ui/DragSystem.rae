@@ -95,6 +95,7 @@ func startDrag(
   world.drag.external = false
   # the press is the drag's: its release clicks nothing
   input.pressedEntityId = noEntity()
+  beginFollowing(world: world, uiSystems: uiSystems)
 }
 
 # What letting go at the target does now (the program knows what it takes)
@@ -191,11 +192,22 @@ func stepDragPress(world: mod UiWorld, uiSystems: view UiSystems, input: view Ui
     x: input.pointer.x - world.drag.pressX
     y: input.pointer.y - world.drag.pressY
   )
-  let far: Bool = moved > uiUnitsFromPoints(input: input, points: dragStartPoints)
+  # the source's own start distance and hold time (DragSource; 5 points and 0.4 s by default)
+  var startPoints: Float = dragStartPoints
+  var holdSeconds: Float64 = dragHoldSeconds
+  if componentHas(this: world.dragSources, entityId: world.drag.source) {
+    let dragSource: view DragSource = componentView(
+      this: world.dragSources
+      entityId: world.drag.source
+    )
+    startPoints = dragSource.startPoints
+    holdSeconds = dragSource.holdSeconds as Float64
+  }
+  let far: Bool = moved > uiUnitsFromPoints(input: input, points: startPoints)
   var begins: Bool = far
-  if input.pointer.kind is InputKind.touch {
-    # a finger that moves scrolls; one held still drags
-    begins = input.nowSeconds - world.drag.pressSeconds >= dragHoldSeconds
+  if input.pointer.kind is InputKind.touch and holdSeconds > 0.0 {
+    # a finger that moves scrolls; one held still drags (with no hold time, it drags as a mouse)
+    begins = input.nowSeconds - world.drag.pressSeconds >= holdSeconds
     if far and begins is false {
       world.drag.phase = UiDragPhase.idle
       ret
@@ -261,6 +273,13 @@ func beginDragging(
   world.drag.effect = DragEffect.refused
   world.drag.wanted = DragEffect.refused
   world.drag.root = noEntity()
+  world.drag.samples.clear()
+  addDragSample(
+    world: world
+    x: x
+    y: y
+    nowSeconds: nowSeconds
+  )
   let source: EntityId = world.drag.payload.source
   if isNone(this: source) is false and isAlive(world: world, entityId: source) {
     world.drag.root = hitRootOf(world: world, uiSystems: uiSystems, entityId: source)
@@ -321,6 +340,12 @@ func stepDragging(
     world.drag.y = input.pointer.y
     input.pressedEntityId = noEntity()
   }
+  addDragSample(
+    world: world
+    x: world.drag.x
+    y: world.drag.y
+    nowSeconds: input.nowSeconds
+  )
   world.drag.wanted = wantedEffect(world: world, keys: keys)
   world.drag.moveAsked = keys.move
   let target: EntityId = dropTargetAt(
@@ -356,7 +381,11 @@ func stepDragging(
     seconds: input.nowSeconds - world.drag.seconds
   )
   world.drag.seconds = input.nowSeconds
-  placeDragLabel(world: world, uiSystems: uiSystems)
+  if isNone(this: world.drag.follower) is false {
+    placeFollower(world: world, uiSystems: uiSystems)
+  } else {
+    placeDragLabel(world: world, uiSystems: uiSystems)
+  }
 }
 
 # What the keys say letting go does
@@ -392,7 +421,7 @@ func dropTargetAt(
 }
 
 func sendDragEvent(world: mod UiWorld, kind: copy DragEventKind, target: view EntityId) {
-  let event: DragEvent = {
+  var event: DragEvent = {
     kind: kind
     source: world.drag.payload.source
     target: target
@@ -402,6 +431,11 @@ func sendDragEvent(world: mod UiWorld, kind: copy DragEventKind, target: view En
     moveAsked: world.drag.moveAsked
     x: world.drag.x
     y: world.drag.y
+  }
+  if kind is DragEventKind.drop or kind is DragEventKind.canceled {
+    let velocity: Vec2 = dragVelocity(world: world)
+    event.velocityX = velocity.x
+    event.velocityY = velocity.y
   }
   eventSend(this: world.dragEvents, value: own event)
 }
@@ -414,6 +448,7 @@ func endDrag(world: mod UiWorld, uiSystems: mod UiSystems) {
   if world.drag.phase is UiDragPhase.dragging {
     releaseEscape(world: world)
   }
+  putFollowerBack(world: world, uiSystems: uiSystems)
   let tookKeys: Bool = world.drag.tookKeys
   world.drag = UiDrag { tookKeys: tookKeys }
 }
@@ -588,4 +623,141 @@ func showDragEffect(world: mod UiWorld) {
     icon = "mat:add_circle"
   }
   componentMod(this: world.sprites, entityId: mark).textureKey = own icon
+}
+
+# ----- the release velocity ------------------------------------------------------------------
+
+# How far back the release velocity looks
+const dragVelocitySeconds: Float64 = 0.1
+
+func addDragSample(
+  world: mod UiWorld
+  x: view Float
+  y: view Float
+  nowSeconds: view Float64
+) {
+  let since: Float = (nowSeconds - world.drag.seconds) as Float
+  let samples: mod List(Float) = world.drag.samples
+  # (seconds counted from the drag's begin, a Float: its first sample is 0)
+  var at: Float = 0.0
+  if samples.length >= 3 {
+    at = samples.copyAtDefault(index: samples.length - 1) + since
+  }
+  samples.add(value: x)
+  samples.add(value: y)
+  samples.add(value: at)
+  # what is older than the window, but the one sample just before it
+  loop samples.length > 9 and at - samples.copyAtDefault(index: 5) > dragVelocitySeconds as Float {
+    samples.removeAt(index: 0)
+    samples.removeAt(index: 0)
+    samples.removeAt(index: 0)
+  }
+}
+
+# Points per second over the last 0.1 s: from the oldest sample in the window (or the one just
+# before it) to the newest; 0 for one sample
+func dragVelocity(world: view UiWorld) ret Vec2 {
+  let samples: view List(Float) = world.drag.samples
+  let count: Int = samples.length / 3
+  if count < 2 {
+    ret Vec2 { x: 0.0, y: 0.0 }
+  }
+  let last: Int = (count - 1) * 3
+  let newestAt: Float = samples.copyAtDefault(index: last + 2)
+  var first: Int = 0
+  loop var i: Int = 0, i < count - 1, ++i {
+    if newestAt - samples.copyAtDefault(index: i * 3 + 2) <= dragVelocitySeconds as Float {
+      first = Math.max(a: i - 1, b: 0) * 3
+      break
+    }
+    first = i * 3
+  }
+  let seconds: Float = newestAt - samples.copyAtDefault(index: first + 2)
+  if seconds <= 0.0 {
+    ret Vec2 { x: 0.0, y: 0.0 }
+  }
+  ret Vec2 {
+    x: (samples.copyAtDefault(index: last) - samples.copyAtDefault(index: first)) / seconds
+    y: (samples.copyAtDefault(index: last + 1) - samples.copyAtDefault(index: first + 1)) / seconds
+  }
+}
+
+# ----- the node that follows -----------------------------------------------------------------
+
+# A drag of a DragSource with `follow` moves that node: its RuntimeOffset and LayerTag are kept to
+# put back, and it is raised into its followLayer
+func beginFollowing(world: mod UiWorld, uiSystems: mod UiSystems) {
+  let source: EntityId = world.drag.source
+  if isNone(this: source) or isAlive(world: world, entityId: source) is false or componentHas(
+    this: world.dragSources
+    entityId: source
+  ) is false {
+    ret
+  }
+  let dragSource: view DragSource = componentView(this: world.dragSources, entityId: source)
+  if dragSource.follow is false {
+    ret
+  }
+  let layer: String = "{dragSource.followLayer}"
+  world.drag.follower = source
+  world.drag.followerHadOffset = componentHas(
+    this: uiSystems.transform2d.runtimeOffsets
+    entityId: source
+  )
+  world.drag.followerOffset = Vec2 { x: 0.0, y: 0.0 }
+  if world.drag.followerHadOffset {
+    world.drag.followerOffset = componentView(
+      this: uiSystems.transform2d.runtimeOffsets
+      entityId: source
+    ).delta
+  }
+  world.drag.followerHadLayer = componentHas(this: world.layerTags, entityId: source)
+  if world.drag.followerHadLayer {
+    let held: view LayerTag = componentView(this: world.layerTags, entityId: source)
+    world.drag.followerLayer = held
+  }
+  if layer.length() > 0 {
+    componentSet(this: world.layerTags, entityId: source, data: LayerTag { id: layer, z: 1000 })
+  }
+  placeFollower(world: world, uiSystems: uiSystems)
+}
+
+# The follower moved by the pointer's way from where it was pressed
+func placeFollower(world: mod UiWorld, uiSystems: mod UiSystems) {
+  let follower: EntityId = world.drag.follower
+  if isNone(this: follower) or isAlive(world: world, entityId: follower) is false {
+    ret
+  }
+  componentSet(
+    this: uiSystems.transform2d.runtimeOffsets
+    entityId: follower
+    data: RuntimeOffset {
+      delta: Vec2 {
+        x: world.drag.followerOffset.x + world.drag.x - world.drag.pressX
+        y: world.drag.followerOffset.y + world.drag.y - world.drag.pressY
+      }
+    }
+  )
+}
+
+# The follower back where it was, in its layer as it was
+func putFollowerBack(world: mod UiWorld, uiSystems: mod UiSystems) {
+  let follower: EntityId = world.drag.follower
+  if isNone(this: follower) or isAlive(world: world, entityId: follower) is false {
+    ret
+  }
+  if world.drag.followerHadOffset {
+    componentSet(
+      this: uiSystems.transform2d.runtimeOffsets
+      entityId: follower
+      data: RuntimeOffset { delta: world.drag.followerOffset }
+    )
+  } else {
+    componentRemove(this: uiSystems.transform2d.runtimeOffsets, entityId: follower)
+  }
+  if world.drag.followerHadLayer {
+    componentSet(this: world.layerTags, entityId: follower, data: world.drag.followerLayer)
+  } else {
+    componentRemove(this: world.layerTags, entityId: follower)
+  }
 }
