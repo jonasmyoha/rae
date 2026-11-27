@@ -4,6 +4,11 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.134, 2026-11-27: discovery walks the analyzed instances
+
+- The backend's search for the types an instance uses walks the instance's analyzed copy instead of its template:
+  the same C, a little faster (106 3.6 s, 121 4.9 s, 136 8.0 s).
+
 ## 0.4.133, 2026-11-27: the template way of generic instances removed
 
 - `RAE_GENERIC_INSTANCES` and `RAE_DISCOVERY_INSTANCES` are gone: every instance of a generic function is written

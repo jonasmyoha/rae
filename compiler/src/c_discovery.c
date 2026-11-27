@@ -18,6 +18,12 @@
 #include <stdlib.h>
 
 static void discover_specializations_expr_impl(CFuncContext* ctx, const AstExpr* expr);
+/* Walking an instance's clone: its types are written out, and are registered as they
+ * stand (a template's were substituted) */
+static bool discovery_in_instance(const CFuncContext* ctx) {
+    return ctx->func_decl && ctx->func_decl->specialization_args;
+}
+
 /* An instance discovery found: not registered, the instances are sema's
  * (docs/generic-instances-design.md step 7); discovery collects types */
 static void discovery_register_instance(CompilerContext* ctx, const AstFuncDecl* decl, const AstTypeRef* args) {
@@ -649,6 +655,8 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                     if (type->generic_args && ctx->generic_params && ctx->generic_args)
                         register_generic_type(ctx->compiler_ctx,
                             substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
+                    else if (type->generic_args && discovery_in_instance(ctx))
+                        register_generic_type(ctx->compiler_ctx, type);
                     ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
                     const char* mn = rae_mangle_type_specialized(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type);
                     ctx->local_types[ctx->local_count] = str_from_cstr(mn); ctx->local_count++;
@@ -665,6 +673,9 @@ static void discover_specializations_stmt_impl(CFuncContext* ctx, const AstStmt*
                         && ctx->generic_params && ctx->generic_args)
                         register_generic_type(ctx->compiler_ctx,
                             substitute_type_ref(ctx->compiler_ctx, ctx->generic_params, ctx->generic_args, type));
+                    else if (type && (type->generic_args || (type->is_opt && !type->is_view && !type->is_mod))
+                             && discovery_in_instance(ctx))
+                        register_generic_type(ctx->compiler_ctx, type);
                     discover_specializations_expr_impl(ctx, s->as.let_stmt.value); ctx->has_expected_type = false;
                     if (ctx->local_count < 256) {
                         ctx->locals[ctx->local_count] = s->as.let_stmt.name; ctx->local_type_refs[ctx->local_count] = type;
@@ -852,41 +863,28 @@ void discover_specializations_module(CompilerContext* ctx, const AstModule* modu
             const AstFuncDecl* f = ctx->specialized_funcs[i].decl; const AstTypeRef* args = ctx->specialized_funcs[i].concrete_args;
             discovery_progress(ctx, lo, hi, ctx->all_decl_count + i);
             if (!f) continue;
-            const AstIdentifierPart* disc_gp = f->generic_params;
-            if (!disc_gp && f->generic_template && f->generic_template->kind == AST_DECL_FUNC) disc_gp = f->generic_template->as.func_decl.generic_params;
-            CFuncContext fctx = {.compiler_ctx = ctx, .module = module, .func_decl = f, .generic_params = disc_gp, .generic_args = args};
-            // The specialization's own signature can name a generic struct of
-            // its type parameters (`ret Box(V)`, `value: Box(V)`); register the
-            // concrete struct, as for a generic local above.
-            if (disc_gp && args) {
-                if (f->returns && f->returns->type && f->returns->type->generic_args)
-                    register_generic_type(ctx, substitute_type_ref(ctx, disc_gp, args, f->returns->type));
-                for (const AstParam* p = f->params; p; p = p->next)
-                    if (p->type && p->type->generic_args)
-                        register_generic_type(ctx, substitute_type_ref(ctx, disc_gp, args, p->type));
-            }
-            // Populate locals from params so infer_expr_type_ref works for 'this' etc.
-            for (const AstParam* p = f->params; p; p = p->next) {
-                if (fctx.local_count < 256) {
-                    fctx.locals[fctx.local_count] = p->name;
-                    fctx.local_type_refs[fctx.local_count] = p->type;
-                    const char* tn = rae_mangle_type_specialized(ctx, disc_gp, args, p->type);
-                    fctx.local_types[fctx.local_count] = str_from_cstr(tn);
-                    fctx.local_count++;
+            /* The instance's analyzed clone, walked as a plain function: its types are
+             * written out (docs/generic-instances-design.md step 8) */
+            const AstFuncDecl* generic = f->generic_template && f->generic_template->kind == AST_DECL_FUNC
+                ? &f->generic_template->as.func_decl : f;
+            const AstFuncDecl* clone = f->is_extern ? NULL : sema_find_instance_decl(ctx, generic, args);
+            if (clone) {
+                CFuncContext cctx = {.compiler_ctx = ctx, .module = module, .func_decl = clone};
+                for (const AstParam* p = clone->params; p; p = p->next) {
+                    if (p->type && p->type->generic_args) register_generic_type(ctx, p->type);
+                    if (cctx.local_count < 256) {
+                        cctx.locals[cctx.local_count] = p->name;
+                        cctx.local_type_refs[cctx.local_count] = p->type;
+                        cctx.local_types[cctx.local_count] = str_from_cstr(rae_mangle_type_specialized(ctx, NULL, NULL, p->type));
+                        cctx.local_count++;
+                    }
                 }
+                for (const AstReturnItem* r = clone->returns; r; r = r->next)
+                    if (r->type && r->type->generic_args) register_generic_type(ctx, r->type);
+                if (clone->body) discover_specializations_stmt_impl(&cctx, clone->body->first);
+                continue;
             }
-            // #773: if this specialization is a generic field-reflection helper
-            // (`loop ... in fields(world)`), the concrete per-field calls
-            // (componentRemove(ComponentTable(Int)), ...) only appear AFTER the
-            // loop is expanded for this concrete W. Discover against the
-            // instantiated body so those inner specializations get registered
-            // (and thus forward-declared) — otherwise the emitted body calls
-            // functions that were never prototyped. Inert for every other
-            // function (reflect_instantiate_body returns NULL).
-            const AstBlock* disc_body = f->body;
-            AstBlock* inst = reflect_instantiate_body(ctx, module, f->body, f->params, disc_gp, args);
-            if (inst) disc_body = inst;
-            if (disc_body) discover_specializations_stmt_impl(&fctx, disc_body->first);
+            /* (sema makes a clone for every instance with a body: there is no other way to walk one) */
         }
         discovered = limit;
     }

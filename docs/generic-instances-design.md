@@ -369,7 +369,19 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    `RAE_DISCOVERY_INSTANCES=1` is the way back for one version. 106, 121 and 136 have the same functions with the
    same bodies as 0.4.130, in the table above. Taking a call's target from its `instance` in `emit_call_expr`
    was not needed for it, and is left to step 9 (the backend reads what sema found).
-8. **The template way removed**: what section 6 lists, and the switch.
+8. **The template way removed**: what section 6 lists, and the switch. First part done (0.4.133, 0.4.134): no
+   case and none of 106, 121 or 136 emitted an instance with a body and no clone, nor walked one in discovery,
+   so both template paths went: `RAE_GENERIC_INSTANCES` and `RAE_DISCOVERY_INSTANCES` with their pre-suite
+   stage and lists, the backend's `reflect_instantiate_body`, `sema_check_specialization_flow` and the lifecycle
+   flow's template mode (the recorded moves), the template's spawn error, and discovery's walk of a template with
+   substitution (it walks the analyzed clone as a plain function, registering a `let`'s written-out type itself:
+   the substituted one was registered only under type parameters, so a `let pair: Pair(T)` in a generic body
+   lost its drop, cases 1619, 1676, 1691). The C of 106, 121 and 136 has the same functions and typedefs; CPU 3.6,
+   4.9 and 8.0 s. Left, the queue line `[generic instances 8b/9: the backend's type parameters removed]`:
+   `CFuncContext`'s `generic_params` / `generic_args` (still set for a generic struct's fields, a callee's
+   parameter types at a call and a prototype with no clone) and their guarded substitutions (about 400
+   mentions in `c_*.c`), the late-specialization report and `emit_new_specialization_prototypes`, the helpers
+   that guess, and the wrappers of `sema_spawn_generic_call`.
 9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
