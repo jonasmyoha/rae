@@ -11,7 +11,8 @@
  * loop runs.
  *
  * Generator slots: 0, 1, 2 the light, medium and heavy impact (the
- * UIImpactFeedbackStyle values), 3 selection, 4 notification. Every function
+ * UIImpactFeedbackStyle values), 3 selection, 4 notification, 5 and 6 the
+ * soft and rigid impact (iOS 13's UIImpactFeedbackStyle 3 and 4). Every function
  * answers 1 when the call was made, 0 when the class is missing.
  *
  * Header-only: included (`cheader`) by a program whose Rae imports
@@ -29,20 +30,24 @@
 #include <objc/message.h>
 #include <objc/runtime.h>
 
-static void* rae_haptics_generators[5];
+static void* rae_haptics_generators[7];
+
+/* Slots 0-2 and 5-6 are impacts */
+static int rae_haptics_is_impact(int64_t slot) { return slot < 3 || slot > 4; }
 
 /* The generator of `slot`, made on first use */
 static void* rae_haptics_generator(int64_t slot) {
-  if (slot < 0 || slot > 4) return NULL;
+  if (slot < 0 || slot > 6) return NULL;
   if (rae_haptics_generators[slot]) return rae_haptics_generators[slot];
-  const char* name = slot < 3 ? "UIImpactFeedbackGenerator"
+  const char* name = rae_haptics_is_impact(slot) ? "UIImpactFeedbackGenerator"
                      : slot == 3 ? "UISelectionFeedbackGenerator"
                                  : "UINotificationFeedbackGenerator";
   Class kind = objc_getClass(name);
   if (!kind) return NULL;
   void* made = ((void* (*)(void*, SEL))objc_msgSend)((void*)kind, sel_registerName("alloc"));
-  if (slot < 3) {
-    made = ((void* (*)(void*, SEL, long))objc_msgSend)(made, sel_registerName("initWithStyle:"), (long)slot);
+  if (rae_haptics_is_impact(slot)) {
+    long style = slot < 3 ? (long)slot : (long)(slot - 2);
+    made = ((void* (*)(void*, SEL, long))objc_msgSend)(made, sel_registerName("initWithStyle:"), style);
   } else {
     made = ((void* (*)(void*, SEL))objc_msgSend)(made, sel_registerName("init"));
   }
@@ -58,7 +63,7 @@ int64_t rae_ext_Haptics_prepare(int64_t slot) {
   return 1;
 }
 
-/* An impact: style 0 light, 1 medium, 2 heavy */
+/* An impact of the generator slot `style`: 0 light, 1 medium, 2 heavy, 5 soft, 6 rigid */
 int64_t rae_ext_Haptics_impact(int64_t style) {
   void* generator = rae_haptics_generator(style);
   if (!generator) return 0;

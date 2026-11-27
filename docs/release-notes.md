@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.119, 2026-11-27: the soft and rigid haptic impacts
+
+- `HapticImpact` has `soft` and `rigid` (iOS 13's UIImpactFeedbackStyle styles: a dull thud and a sharp
+  knock) beside `light`, `medium` and `heavy`. On iOS they play through their own generators (slots 5 and 6 of
+  runtime_haptics_apple.h); a headless run logs `[haptics] impact soft` / `[haptics] impact rigid`; the Mac,
+  Android and the web stay silent as before. Case 1316.
+
 ## 0.4.118, 2026-11-27: drags a game can use for its cards
 
 - A `DragSource` has its own start distance (`startPoints`, 5) and hold time (`holdSeconds`, 0.4; 0: a finger drags

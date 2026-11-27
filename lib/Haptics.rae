@@ -20,7 +20,14 @@ cheader "runtime_haptics_apple.h"
 
 const hasHaptics: Bool = Target.os is Os.ios
 
-enum HapticImpact { light, medium, heavy }
+# `soft` and `rigid` are iOS 13's styles: a dull thud and a sharp knock
+enum HapticImpact {
+  light
+  medium
+  heavy
+  soft
+  rigid
+}
 
 enum HapticNotification { success, warning, error }
 
@@ -36,7 +43,8 @@ when hasHaptics {
   func rae_ext_Haptics_notify(kind: Int) mainThread unsafe extern("rae_ext_Haptics_notify") ret Int
 }
 
-# The generator slots of the C side: the three impacts, selection, notification
+# The generator slots of the C side: 0-2 the light, medium and heavy impacts,
+# 3 selection, 4 notification, 5-6 the soft and rigid impacts
 const hapticSelectionSlot: Int = 3
 
 const hapticNotificationSlot: Int = 4
@@ -54,6 +62,12 @@ func hapticImpactSlot(style: view HapticImpact) ret Int {
   }
   if style is HapticImpact.heavy {
     ret 2
+  }
+  if style is HapticImpact.soft {
+    ret 5
+  }
+  if style is HapticImpact.rigid {
+    ret 6
   }
   ret 0
 }
