@@ -116,14 +116,54 @@ static size_t sema_default_literal_instances(CompilerContext* ctx, AstModule* mo
     return s_instance_work_count - before;
 }
 
-static int sema_compare_type_names(const void* a, const void* b) {
-    const TypeInfo* left = *(const TypeInfo* const*)a;
-    const TypeInfo* right = *(const TypeInfo* const*)b;
-    size_t shorter = left->name.len < right->name.len ? left->name.len : right->name.len;
-    int order = memcmp(left->name.data, right->name.data, shorter);
+static int sema_compare_str(Str left, Str right) {
+    size_t shorter = left.len < right.len ? left.len : right.len;
+    int order = shorter ? memcmp(left.data, right.data, shorter) : 0;
     if (order) return order;
-    if (left->name.len != right->name.len) return left->name.len < right->name.len ? -1 : 1;
-    return (int)left->kind - (int)right->kind;
+    if (left.len != right.len) return left.len < right.len ? -1 : 1;
+    return 0;
+}
+
+/* An order of types that holds in every run: by name and kind, then by what they
+ * are made of. Two types can share a name (`List(Any)` and `List(opt Any)` are both
+ * named for their template), and qsort leaves equal ones in any order. */
+static int sema_compare_types(const TypeInfo* left, const TypeInfo* right, int depth) {
+    if (left == right) return 0;
+    if (!left || !right) return left ? 1 : -1;
+    int order = sema_compare_str(left->name, right->name);
+    if (order) return order;
+    if (left->kind != right->kind) return (int)left->kind - (int)right->kind;
+    if (depth > 16) return 0;
+    switch (left->kind) {
+        case TYPE_STRUCT:
+        case TYPE_GENERIC_INST:
+            if (left->as.structure.generic_count != right->as.structure.generic_count)
+                return left->as.structure.generic_count < right->as.structure.generic_count ? -1 : 1;
+            for (size_t i = 0; i < left->as.structure.generic_count; i++) {
+                order = sema_compare_types(left->as.structure.generic_args[i], right->as.structure.generic_args[i],
+                                           depth + 1);
+                if (order) return order;
+            }
+            return 0;
+        case TYPE_REF:
+            if (left->as.ref.is_mod != right->as.ref.is_mod) return left->as.ref.is_mod ? 1 : -1;
+            return sema_compare_types(left->as.ref.base, right->as.ref.base, depth + 1);
+        case TYPE_OPT: return sema_compare_types(left->as.opt.base, right->as.opt.base, depth + 1);
+        case TYPE_BUFFER: return sema_compare_types(left->as.buffer.base, right->as.buffer.base, depth + 1);
+        case TYPE_TASK: return sema_compare_types(left->as.task.base, right->as.task.base, depth + 1);
+        case TYPE_ARRAY:
+            if (left->as.array.count != right->as.array.count) return left->as.array.count < right->as.array.count ? -1 : 1;
+            return sema_compare_types(left->as.array.base, right->as.array.base, depth + 1);
+        case TYPE_INT:
+            if (left->as.integer.bits != right->as.integer.bits) return left->as.integer.bits < right->as.integer.bits ? -1 : 1;
+            if (left->as.integer.is_unsigned != right->as.integer.is_unsigned) return left->as.integer.is_unsigned ? 1 : -1;
+            return 0;
+        default: return 0;
+    }
+}
+
+static int sema_compare_type_names(const void* a, const void* b) {
+    return sema_compare_types(*(const TypeInfo* const*)a, *(const TypeInfo* const*)b, 0);
 }
 
 /* A value of a container type is dropped where its owner ends, a call nobody

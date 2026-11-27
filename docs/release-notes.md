@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.138, 2026-11-28: the same C every run
+
+- Two container types with one name (`List(Any)` and `List(opt Any)`) made their drops in an order that followed
+  memory addresses, so a program's C could differ from one build to the next (case 1679 did, about one build in
+  four). They are now ordered by what their type arguments are. Both drops did the same, so no program ran
+  differently; the C of every case and of 106, 121 and 136 is now the same in every build.
+
 ## 0.4.137, 2026-11-28: the backend's unreached type guesses removed
 
 - The backend's guesses of a generic call's result type that nothing reached, or that changed no C, are removed,
