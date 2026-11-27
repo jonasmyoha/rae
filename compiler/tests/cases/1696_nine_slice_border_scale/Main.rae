@@ -1,0 +1,85 @@
+# A nine-slice's border scale (Gpu2dCanvasImage canvasDrawImageKeyNineSlice `borderScale`, the
+# Sprite's `nineSliceScale`): a border's source pixels are drawn that many design units each,
+# before the shrink to fit a small box. Borders of 30 at 1/3 in a 100 x 40 box are 10 thick (art
+# made at 3 canvas units a point, in a layout in points); at 1 they are 20, as before (60 of the 40
+# high box, both shrunk to fit); the sampled source window stays the 30 pixels. The scene format
+# reads `nineSliceScale`, and a Sprite without it has 1.
+import Math
+open gpu/GpuIds
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ecs/ComponentTable
+open ecs/Entity
+
+func rounded(value: view Float) ret Float {
+  ret Math.round(x: value * 100.0) / 100.0
+}
+
+func draw(scale: view Float) {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  canvas.images.add(
+    value: Gpu2dImage {
+      texture: noTextureId()
+      textureView: noTextureViewId()
+      width: 90
+      height: 90
+    }
+  )
+  canvasRegisterImageKey(canvas: canvas, key: "pill", handle: 1)
+  canvasDrawImageKeyNineSlice(
+    canvas: canvas
+    key: "pill"
+    x: 0.0
+    y: 0.0
+    w: 100.0
+    h: 40.0
+    left: 30.0
+    top: 30.0
+    right: 30.0
+    bottom: 30.0
+    borderScale: scale
+    tint: 0xFFFFFFFF
+  )
+  # the first (top-left) piece: its size is the drawn border, its uv window the source border
+  let pieces: Int = canvas.imageCommands.length / imageUniformFloats
+  let width: Float = canvas.imageCommands.copyAtDefault(index: 2)
+  let height: Float = canvas.imageCommands.copyAtDefault(index: 3)
+  let sourceWidth: Float = canvas.imageCommands.copyAtDefault(index: 14) * 90.0
+  log(
+    "scale {rounded(value: scale)}: {pieces} pieces, corner {rounded(value: width)} x {rounded(
+      value: height
+    )}, sampling {rounded(value: sourceWidth)} source pixels"
+  )
+}
+
+func sceneText() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"pills\",\"root\":\"Shelf\",\"nodes\":\{\"Shelf\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":40\},\"Children\":[\"Tab\",\"Plain\"]\},\"Tab\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":100,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\",\"nineSlice\":\{\"l\":30,\"t\":30,\"r\":30,\"b\":30\},\"nineSliceScale\":0.3333\}\},\"Plain\":\{\"Rect\":\{\"x\":100,\"y\":0,\"w\":100,\"h\":40\},\"Sprite\":\{\"textureKey\":\"pill\",\"nineSlice\":\{\"l\":30,\"t\":30,\"r\":30,\"b\":30\}\}\}\}\}"
+}
+
+func nodeOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func main() {
+  draw(scale: 1.0 / 3.0)
+  draw(scale: 1.0)
+  let scene: Scene = parseScene(source: sceneText())
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  let root: EntityId = loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  loop let nodeId: String in List(String) { "Tab", "Plain" } {
+    let sprite: view Sprite = componentView(
+      this: world.sprites
+      entityId: nodeOf(world: world, nodeId: nodeId)
+    )
+    log("{nodeId}: nine-slice {sprite.hasNineSlice}, scale {rounded(value: sprite.nineSliceScale)}")
+  }
+}

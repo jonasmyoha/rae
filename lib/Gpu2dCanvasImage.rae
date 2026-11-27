@@ -510,9 +510,10 @@ func nineSliceBorders(
   }
 }
 
-# Nine-slice (#1003): the image's `left/top/right/bottom` source pixels stay that many DESIGN units
-# thick at the destination's edges, the middle stretches: nine sub-rect draws of one texture. In a
-# box smaller than two borders they all shrink together (nineSliceBorders).
+# Nine-slice (#1003): the image's `left/top/right/bottom` source pixels are drawn `borderScale`
+# DESIGN units each at the destination's edges (1: as many units as pixels; 1/3 for art made at 3
+# canvas units a point, laid out in points), the middle stretches: nine sub-rect draws of one
+# texture. In a box smaller than two borders they all shrink together (nineSliceBorders).
 func canvasDrawImageKeyNineSlice(
   canvas: mod Gpu2dCanvas
   key: view String
@@ -524,6 +525,7 @@ func canvasDrawImageKeyNineSlice(
   top: copy Float
   right: copy Float
   bottom: copy Float
+  borderScale: copy Float
   tint: copy Int
 ) {
   let handle: Int = canvasImageHandleForKey(canvas: canvas, key: key)
@@ -539,13 +541,15 @@ func canvasDrawImageKeyNineSlice(
   if imageWidth <= 0.0 or imageHeight <= 0.0 {
     ret
   }
+  # the drawn thickness, before the shrink to fit; the source pixels stay what is sampled
+  let scale: Float = Math.max(a: borderScale, b: 0.0)
   let borders: NineSliceBorders = nineSliceBorders(
     w: w
     h: h
-    left: left
-    top: top
-    right: right
-    bottom: bottom
+    left: left * scale
+    top: top * scale
+    right: right * scale
+    bottom: bottom * scale
   )
   let xs: List(Float) = { x, x + borders.left, x + w - borders.right, x + w }
   let ys: List(Float) = { y, y + borders.top, y + h - borders.bottom, y + h }

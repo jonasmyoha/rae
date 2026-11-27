@@ -137,8 +137,9 @@ func clearRotation(canvas: mod Gpu2dCanvas) {
   canvasClearRotation(canvas: canvas)
 }
 
-# Nine-slice (#1003): the image's left/top/right/bottom source pixels keep that
-# thickness (design units) at the destination's edges; the middle stretches.
+# Nine-slice (#1003): the image's left/top/right/bottom source pixels are drawn
+# `borderScale` design units each at the destination's edges (1: as thick as the
+# pixels); the middle stretches.
 func drawImageKeyNineSlice(
   canvas: mod Gpu2dCanvas
   key: view String
@@ -150,6 +151,7 @@ func drawImageKeyNineSlice(
   top: copy Float
   right: copy Float
   bottom: copy Float
+  borderScale: copy Float
   tint: copy Int
 ) {
   canvasDrawImageKeyNineSlice(
@@ -163,6 +165,7 @@ func drawImageKeyNineSlice(
     top: top
     right: right
     bottom: bottom
+    borderScale: borderScale
     tint: tint
   )
 }

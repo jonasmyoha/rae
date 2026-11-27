@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.110, 2026-11-27: a nine-slice's border scale
+
+- `Sprite.nineSliceScale` (1 by default) draws a nine-slice's borders that many design units a source pixel,
+  before the shrink to fit a small box: 1/3 for art made at 3 canvas units a point in a layout in points, whose
+  borders were three times too thick. In the scene format and the UI editor's inspector.
+- `Gpu2d.drawImageKeyNineSlice` and `canvasDrawImageKeyNineSlice` take `borderScale` after `bottom` (a call
+  without it no longer compiles; pass 1.0 for the old thickness).
+- Case 1696: borders of 30 at 1/3 in a 100 x 40 box are 10 thick, at 1 they are 20 as before.
+
 ## 0.4.109, 2026-11-27: a turned or scaled clip keeps its rounded corners
 
 - A node with `Overflow: Clip` and a `CornerRadius` clips its children to its rounded box in its own frame, however
