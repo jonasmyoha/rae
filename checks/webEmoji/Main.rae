@@ -4,6 +4,7 @@
 # page in headless Chrome), on Linux from Noto Color Emoji. Logs "EMOJI OK" or "EMOJI FAIL: ...";
 # exit code 0 only for OK.
 import Gpu2dEmoji
+import text/ColorEmojiFont
 
 # How many of the square's pixels are mostly opaque, and whether they are warm (more red than blue)
 func covered(bytes: view List(UInt8)) ret Int {
@@ -28,10 +29,22 @@ func warm(bytes: view List(UInt8)) ret Bool {
   ret red > blue * 2
 }
 
+# The platform's picture of `cluster`, else (Linux, the BSDs) the font file's, as Gpu2dEmoji draws
+func emoji(font: view ColorEmojiFont.ColorEmojiFont, cluster: view String) ret List(UInt8) {
+  let drawn: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: cluster, pixels: 64)
+  if drawn.length > 0 {
+    ret drawn
+  }
+  ret ColorEmojiFont.colorEmojiPixels(font: font, cluster: cluster, pixels: 64)
+}
+
 func main() ret Int {
-  let fire: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "🔥", pixels: 64)
-  let flag: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "🇫🇮", pixels: 64)
-  let family: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "👨‍👩‍👧", pixels: 64)
+  let font: ColorEmojiFont.ColorEmojiFont = ColorEmojiFont.loadColorEmojiFont(
+    path: ColorEmojiFont.systemColorEmojiFontPath()
+  )
+  let fire: List(UInt8) = emoji(font: font, cluster: "🔥")
+  let flag: List(UInt8) = emoji(font: font, cluster: "🇫🇮")
+  let family: List(UInt8) = emoji(font: font, cluster: "👨‍👩‍👧")
   let fireCovered: Int = covered(bytes: fire)
   let flagCovered: Int = covered(bytes: flag)
   let familyCovered: Int = covered(bytes: family)

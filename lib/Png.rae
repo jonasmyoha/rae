@@ -248,8 +248,9 @@ func paeth(a: view Int, b: view Int, c: view Int) ret Int {
 }
 
 # Decode a PNG byte stream to packed-Int pixels (0xAARRGGBB). Writes dimensions
-# through the mods; on failure width is set to 0. Supports 8-bit RGB (type 2)
-# and RGBA (type 6), all five row filters, no interlacing.
+# through the mods; on failure width is set to 0. Every color type (gray, RGB, palette,
+# gray + alpha, RGBA) at every bit depth (1, 2, 4, 8, 16: a 16-bit sample keeps its high byte),
+# with a tRNS chunk's transparency, all five row filters; no interlacing.
 func decodePng(
   png: view List(Int)
   len: view Int
@@ -266,7 +267,13 @@ func decodePng(
   var w: Int = 0
   var h: Int = 0
   var colorType: Int = 6
+  var depth: Int = 8
+  var interlaced: Bool = false
   var idat: List(Int) = List.create(Int, cap: len)
+  # the palette (0xRRGGBB a color) and its alphas (tRNS), and a gray or RGB key color (tRNS)
+  var palette: List(Int) = {}
+  var paletteAlpha: List(Int) = {}
+  var keyColor: Int = -1
 
   var pos: Int = 8  # skip the 8-byte signature
   loop pos + 8 <= len {
@@ -280,34 +287,66 @@ func decodePng(
       # IHDR
       w = readBE32(data: png, pos: dstart)
       h = readBE32(data: png, pos: dstart + 4)
+      depth = pngIntAt(data: png, index: dstart + 8)
       colorType = pngIntAt(data: png, index: dstart + 9)
-    } else {
-      if t0 is 73 and t1 is 68 and t2 is 65 and t3 is 84 {
-        # IDAT
-        var k: Int = 0
-        loop k < clen {
-          idat.add(value: pngIntAt(data: png, index: dstart + k))
-          k = k + 1
-        }
-      } else {
-        if t0 is 73 and t1 is 69 and t2 is 78 and t3 is 68 {
-          pos = len  # IEND -> stop
-        }
+      interlaced = pngIntAt(data: png, index: dstart + 12) is not 0
+    } else if t0 is 73 and t1 is 68 and t2 is 65 and t3 is 84 {
+      # IDAT
+      loop var k: Int = 0, k < clen, ++k {
+        idat.add(value: pngIntAt(data: png, index: dstart + k))
       }
+    } else if t0 is 80 and t1 is 76 and t2 is 84 and t3 is 69 {
+      # PLTE
+      loop var k: Int = 0, k + 2 < clen, k += 3 {
+        palette.add(
+          value: (pngIntAt(data: png, index: dstart + k) shl 16) bitor (pngIntAt(
+            data: png
+            index: dstart + k + 1
+          ) shl 8) bitor pngIntAt(data: png, index: dstart + k + 2)
+        )
+      }
+    } else if t0 is 116 and t1 is 82 and t2 is 78 and t3 is 83 {
+      # tRNS: an alpha a palette entry, or the one gray / RGB color that is transparent
+      if colorType is 3 {
+        loop var k: Int = 0, k < clen, ++k {
+          paletteAlpha.add(value: pngIntAt(data: png, index: dstart + k))
+        }
+      } else if colorType is 0 and clen >= 2 {
+        keyColor = readBE16(data: png, pos: dstart)
+      } else if colorType is 2 and clen >= 6 {
+        keyColor = (readBE16(data: png, pos: dstart) shl 32) bitor (readBE16(
+          data: png
+          pos: dstart + 2
+        ) shl 16) bitor readBE16(data: png, pos: dstart + 4)
+      }
+    } else if t0 is 73 and t1 is 69 and t2 is 78 and t3 is 68 {
+      pos = len  # IEND -> stop
     }
-    pos = dstart + clen + 4  # skip data + CRC
+    if pos < len {
+      pos = dstart + clen + 4  # skip data + CRC
+    }
   }
-  if w <= 0 or h <= 0 {
+  if w <= 0 or h <= 0 or interlaced {
     ret empty
   }
 
-  var channels: Int = 3
-  if colorType is 6 {
+  var channels: Int = 1
+  if colorType is 2 {
+    channels = 3
+  } else if colorType is 4 {
+    channels = 2
+  } else if colorType is 6 {
     channels = 4
+  }
+  let bitsPerPixel: Int = channels * depth
+  # bytes a row, and the distance a filter looks back (at least one byte)
+  let stride: Int = (w * bitsPerPixel + 7) / 8
+  var filterStep: Int = bitsPerPixel / 8
+  if filterStep < 1 {
+    filterStep = 1
   }
   # Inflate the IDAT zlib stream into filtered scanlines.
   let raw: List(Int) = decompress(data: idat, value: idat.length)
-  let stride: Int = w * channels
 
   # Unfilter into a flat byte buffer `recon` (stride bytes per row, no filter byte).
   var recon: List(Int) = List.create(Int, cap: h * stride)
@@ -320,16 +359,16 @@ func decodePng(
     loop i < stride {
       let cur: Int = pngIntAt(data: raw, index: rp + i)
       var a: Int = 0
-      if i >= channels {
-        a = pngIntAt(data: recon, index: y * stride + i - channels)
+      if i >= filterStep {
+        a = pngIntAt(data: recon, index: y * stride + i - filterStep)
       }
       var b: Int = 0
       if y > 0 {
         b = pngIntAt(data: recon, index: (y - 1) * stride + i)
       }
       var c: Int = 0
-      if y > 0 and i >= channels {
-        c = pngIntAt(data: recon, index: (y - 1) * stride + i - channels)
+      if y > 0 and i >= filterStep {
+        c = pngIntAt(data: recon, index: (y - 1) * stride + i - filterStep)
       }
       var val: Int = cur
       if ftype is 1 {
@@ -353,24 +392,151 @@ func decodePng(
 
   # Pack to 0xAARRGGBB.
   var pixels: List(Int) = List.create(Int, cap: w * h)
-  var py: Int = 0
-  loop py < h {
-    var px: Int = 0
-    loop px < w {
-      let base: Int = py * stride + px * channels
-      let r: Int = pngIntAt(data: recon, index: base)
-      let g: Int = pngIntAt(data: recon, index: base + 1)
-      let bl: Int = pngIntAt(data: recon, index: base + 2)
+  loop var py: Int = 0, py < h, ++py {
+    let row: Int = py * stride
+    loop var px: Int = 0, px < w, ++px {
+      var r: Int = 0
+      var g: Int = 0
+      var bl: Int = 0
       var al: Int = 255
-      if channels is 4 {
-        al = pngIntAt(data: recon, index: base + 3)
+      if colorType is 3 {
+        let index: Int = pngSample(
+          data: recon
+          row: row
+          sample: px
+          depth: depth
+        )
+        let color: Int = palette.copyAtFallback(index: index, fallback: 0)
+        r = (color shr 16) bitand 255
+        g = (color shr 8) bitand 255
+        bl = color bitand 255
+        al = paletteAlpha.copyAtFallback(index: index, fallback: 255)
+      } else if colorType is 0 or colorType is 4 {
+        let gray: Int = pngSample(
+          data: recon
+          row: row
+          sample: px * channels
+          depth: depth
+        )
+        let level: Int = pngLevel(value: gray, depth: depth)
+        r = level
+        g = level
+        bl = level
+        if colorType is 4 {
+          al = pngLevel(
+            value: pngSample(
+              data: recon
+              row: row
+              sample: px * channels + 1
+              depth: depth
+            )
+            depth: depth
+          )
+        } else if gray is keyColor {
+          al = 0
+        }
+      } else {
+        r = pngLevel(
+          value: pngSample(
+            data: recon
+            row: row
+            sample: px * channels
+            depth: depth
+          )
+          depth: depth
+        )
+        g = pngLevel(
+          value: pngSample(
+            data: recon
+            row: row
+            sample: px * channels + 1
+            depth: depth
+          )
+          depth: depth
+        )
+        bl = pngLevel(
+          value: pngSample(
+            data: recon
+            row: row
+            sample: px * channels + 2
+            depth: depth
+          )
+          depth: depth
+        )
+        if colorType is 6 {
+          al = pngLevel(
+            value: pngSample(
+              data: recon
+              row: row
+              sample: px * channels + 3
+              depth: depth
+            )
+            depth: depth
+          )
+        } else if keyColor >= 0 {
+          let raw16: Int = (pngSample(
+            data: recon
+            row: row
+            sample: px * channels
+            depth: depth
+          ) shl 32) bitor (pngSample(
+            data: recon
+            row: row
+            sample: px * channels + 1
+            depth: depth
+          ) shl 16) bitor pngSample(
+            data: recon
+            row: row
+            sample: px * channels + 2
+            depth: depth
+          )
+          if raw16 is keyColor {
+            al = 0
+          }
+        }
       }
       pixels.add(value: (al shl 24) bitor (r shl 16) bitor (g shl 8) bitor bl)
-      px = px + 1
     }
-    py = py + 1
   }
   width = w
   height = h
   ret pixels
+}
+
+# Sample number `sample` of a row (its samples packed at `depth` bits, from the high bit; a
+# 16-bit sample is two bytes)
+func pngSample(
+  data: view List(Int)
+  row: view Int
+  sample: view Int
+  depth: view Int
+) ret Int {
+  if depth is 8 {
+    ret pngIntAt(data: data, index: row + sample)
+  }
+  if depth is 16 {
+    ret (pngIntAt(data: data, index: row + sample * 2) shl 8) bitor pngIntAt(
+      data: data
+      index: row + sample * 2 + 1
+    )
+  }
+  let bit: Int = sample * depth
+  let byte: Int = pngIntAt(data: data, index: row + bit / 8)
+  let shift: Int = 8 - depth - bit % 8
+  ret (byte shr shift) bitand ((1 shl depth) - 1)
+}
+
+# A sample as an 8-bit level: a 16-bit one's high byte, a 1-, 2- or 4-bit one stretched to 0..255
+func pngLevel(value: view Int, depth: view Int) ret Int {
+  if depth is 16 {
+    ret value shr 8
+  }
+  if depth is 8 {
+    ret value
+  }
+  ret value * 255 / ((1 shl depth) - 1)
+}
+
+func readBE16(data: view List(Int), pos: view Int) ret Int {
+  ret (pngIntAt(data: data, index: pos) shl 8) bitor pngIntAt(data: data, index: pos + 1)
 }

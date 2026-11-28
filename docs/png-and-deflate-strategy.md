@@ -118,7 +118,11 @@ throughput while correctness stays pinned), so keep a perf check in the suite.
      `inflate` (RFC 1951: stored/fixed/dynamic Huffman + 32 KB window),
      `deflate` (fixed-Huffman + greedy LZ77 hash-chain), `zlib` (RFC 1950).
    - `lib/png.rae` — container encode/decode, CRC-32 chunks, adaptive row
-     filtering (all five filters), RGB + RGBA.
+     filtering (all five filters), RGB + RGBA. The decoder reads every color
+     type (gray, RGB, palette, gray + alpha, RGBA) at every bit depth (1, 2, 4,
+     8, 16: a 16-bit sample keeps its high byte, as lodepng does) with tRNS,
+     since 0.4.159 (a color emoji font's glyph PNGs are 4-bit palettes; case
+     1716 decodes each kind as lodepng does). No interlaced PNG.
    - Validated against lodepng (the oracle, `lib/compress/oracle.rae`):
      inflate of lodepng's deflate; lodepng inflate of our deflate; zlib both
      ways; PNG both ways — all byte-exact. Our PNG is within ~2% of lodepng's

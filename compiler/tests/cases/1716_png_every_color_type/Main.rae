@@ -1,0 +1,55 @@
+# Png.decodePng reads every color type and bit depth: gray at 1, 2, 4, 8 and 16 bits, gray + alpha,
+# 16-bit RGB, RGB with a tRNS key color, a 2-bit palette with tRNS alphas, and two glyph-sized
+# images like a color emoji font's (a 4-bit palette with alphas and RGBA, every row filter). Each
+# decodes
+# to the same pixels as lodepng (compress/Oracle).
+import Png
+import Sys
+import compress/Oracle
+
+func rae_ext_rae_buf_get(buf: view Buffer(Int), index: view Int) unsafe extern ret Int
+
+const names: String = "gray1 gray2 gray4 gray8 gray16 grayalpha8 rgb16 rgbkey palette2 palette4 rgbaFiltered"
+
+func main() {
+  loop let name: String in names.split(sep: " ") {
+    let bytes: List(Int) = Sys.readFileBytes(
+      path: "tests/cases/1716_png_every_color_type/{name}.png"
+    )
+    var w: Int = 0
+    var h: Int = 0
+    let mine: List(Int) = Png.decodePng(
+      png: bytes
+      len: bytes.length
+      width: w
+      height: h
+    )
+    var ow: Int = 0
+    var oh: Int = 0
+    var differ: Int = 0
+    var transparent: Int = 0
+    unsafe {
+      let oracle: Buffer(Int) = Oracle.decodePng(
+        data: bytes.data
+        len: bytes.length
+        w: ow
+        h: oh
+      )
+      loop var i: Int = 0, i < w * h and ow is w and oh is h, ++i {
+        let pixel: Int = mine.copyAtFallback(index: i, fallback: -1)
+        if pixel is not rae_ext_rae_buf_get(buf: oracle, index: i) {
+          differ = differ + 1
+        }
+        if (pixel shr 24) bitand 255 < 255 {
+          transparent = transparent + 1
+        }
+      }
+      rae_ext_rae_buf_free(buf: oracle)
+    }
+    log(
+      "{name}: {w} x {h}, as lodepng {ow is w and oh is h and differ is 0}, some see-through {transparent > 0}"
+    )
+  }
+}
+
+func rae_ext_rae_buf_free(buf: view Buffer(Int)) unsafe extern

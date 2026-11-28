@@ -1,0 +1,465 @@
+# ColorEmojiFont — color emoji drawn from a CBDT font file (Noto Color Emoji, the emoji font of
+# Linux and the BSDs), in Rae: the font's tables are read where they lie in the file, a cluster's
+# code points become glyphs through its cmap (format 12), a sequence (a skin tone, a flag, a ZWJ
+# family) becomes one glyph through its GSUB ligatures, and that glyph's PNG (CBLC / CBDT) is
+# decoded (lib/Png) and fitted into a square (docs/text-emoji.md).
+#
+#     var font: ColorEmojiFont = loadColorEmojiFont(path: systemColorEmojiFontPath())
+#     let rgba: List(UInt8) = colorEmojiPixels(font: font, cluster: "🔥", pixels: 64)
+#
+# Only what Noto Color Emoji and its kind use is read: the cmap's format 12, the index formats 1
+# and 3, the image formats 17, 18 and 19 (PNG), ligature lookups (type 4, also through a type 7
+# extension). The file is read a table at a time (a few tens of KB) and a glyph's PNG at a time,
+# never whole (it is 5 to 10 MB).
+import Sys
+import String
+import Png
+open ImageScale
+
+# Where Linux and the BSDs keep Noto Color Emoji (its distributions' packages), after
+# RAE_EMOJI_FONT
+const notoPaths: String = "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf /usr/share/fonts/noto/NotoColorEmoji.ttf /usr/share/fonts/google-noto-color-emoji-fonts/NotoColorEmoji.ttf /usr/share/fonts/google-noto-emoji/NotoColorEmoji.ttf /usr/share/fonts/noto-emoji/NotoColorEmoji.ttf /usr/share/fonts/truetype/NotoColorEmoji.ttf /usr/local/share/fonts/noto/NotoColorEmoji.ttf /usr/local/share/fonts/NotoColorEmoji.ttf"
+
+# The tables' tags, their four letters as a big-endian number: "cmap", "CBLC", "CBDT", "GSUB"
+const cmapTag: Int = 1668112752
+
+const cblcTag: Int = 1128418371
+
+const cbdtTag: Int = 1128416340
+
+const gsubTag: Int = 1196643650
+
+# A color emoji font, its tables read (each a String of the table's bytes)
+type ColorEmojiFont {
+  path: String = ""
+  ok: Bool = false
+  # the cmap's format 12 subtable, the CBLC table and the GSUB table (empty: none)
+  characterMap: String = ""
+  bitmapLocations: String = ""
+  substitutions: String = ""
+  # where the CBDT table starts in the file, and the CBLC's bitmap size record used (the largest)
+  bitmapDataOffset: Int = 0
+  strikeOffset: Int = 0
+}
+
+# One glyph's picture: straight-alpha RGBA, rows from the top
+type ColorEmojiGlyph {
+  width: Int = 0
+  height: Int = 0
+  pixels: List(UInt8) = {}
+}
+
+# The color emoji font of this system: RAE_EMOJI_FONT, else the first of the usual places that
+# exists; "" for none
+func systemColorEmojiFontPath() ret String {
+  let chosen: String = Sys.getEnv(name: "RAE_EMOJI_FONT")
+  if chosen.length() > 0 {
+    ret chosen
+  }
+  loop let path: String in notoPaths.split(sep: " ") {
+    if Sys.exists(path: path) {
+      ret path
+    }
+  }
+  ret ""
+}
+
+# ----- reading big-endian numbers from a table's bytes --------------------------------------------
+func byteOf(data: view String, at: view Int) ret Int {
+  let byte: Int = data.byteAt(index: at)
+  if byte < 0 {
+    ret 0
+  }
+  ret byte
+}
+
+func u16(data: view String, at: view Int) ret Int {
+  ret (byteOf(data: data, at: at) shl 8) bitor byteOf(data: data, at: at + 1)
+}
+
+func u32(data: view String, at: view Int) ret Int {
+  ret (u16(data: data, at: at) shl 16) bitor u16(data: data, at: at + 2)
+}
+
+# ----- loading ---------------------------------------------------------------------------------
+
+# The font at `path` with its tables read; `ok` false when it is not a CBDT color font
+func loadColorEmojiFont(path: view String) ret ColorEmojiFont {
+  var font: ColorEmojiFont = { path: "{path}" }
+  if path.length() is 0 {
+    ret font
+  }
+  let header: String = Sys.readFileTextRange(path: path, offset: 0, len: 12)
+  let tableCount: Int = u16(data: header, at: 4)
+  if header.length() < 12 or tableCount <= 0 or tableCount > 64 {
+    ret font
+  }
+  let directory: String = Sys.readFileTextRange(path: path, offset: 12, len: tableCount * 16)
+  var cmapOffset: Int = -1
+  var cmapLength: Int = 0
+  var cblcOffset: Int = -1
+  var cblcLength: Int = 0
+  var gsubOffset: Int = -1
+  var gsubLength: Int = 0
+  loop var i: Int = 0, i < tableCount, ++i {
+    # the tag's four letters as one number (a binary String is read by bytes, never by sub)
+    let tag: Int = u32(data: directory, at: i * 16)
+    let offset: Int = u32(data: directory, at: i * 16 + 8)
+    let length: Int = u32(data: directory, at: i * 16 + 12)
+    if tag is cmapTag {
+      cmapOffset = offset
+      cmapLength = length
+    } else if tag is cblcTag {
+      cblcOffset = offset
+      cblcLength = length
+    } else if tag is cbdtTag {
+      font.bitmapDataOffset = offset
+    } else if tag is gsubTag {
+      gsubOffset = offset
+      gsubLength = length
+    }
+  }
+  if cmapOffset < 0 or cblcOffset < 0 or font.bitmapDataOffset <= 0 {
+    ret font
+  }
+  # the cmap's Unicode format 12 subtable (3, 10 or 0, 4..6)
+  let cmap: String = Sys.readFileTextRange(path: path, offset: cmapOffset, len: cmapLength)
+  let subtables: Int = u16(data: cmap, at: 2)
+  loop var i: Int = 0, i < subtables, ++i {
+    let subtable: Int = u32(data: cmap, at: 4 + i * 8 + 4)
+    if u16(data: cmap, at: subtable) is 12 and font.characterMap.length() is 0 {
+      font.characterMap = Sys.readFileTextRange(
+        path: path
+        offset: cmapOffset + subtable
+        len: u32(data: cmap, at: subtable + 4)
+      )
+    }
+  }
+  font.bitmapLocations = Sys.readFileTextRange(path: path, offset: cblcOffset, len: cblcLength)
+  if gsubOffset >= 0 {
+    font.substitutions = Sys.readFileTextRange(path: path, offset: gsubOffset, len: gsubLength)
+  }
+  # the largest bitmap size
+  let sizes: Int = u32(data: font.bitmapLocations, at: 4)
+  var largest: Int = -1
+  loop var i: Int = 0, i < sizes, ++i {
+    let record: Int = 8 + i * 48
+    let ppem: Int = byteOf(data: font.bitmapLocations, at: record + 45)
+    if ppem > largest {
+      largest = ppem
+      font.strikeOffset = record
+    }
+  }
+  font.ok = font.characterMap.length() > 16 and largest > 0
+  ret font
+}
+
+# ----- code points to glyphs --------------------------------------------------------------------
+
+# The glyph of code point `code` (cmap format 12's groups, a binary search), 0 for none
+func colorEmojiGlyphOf(font: view ColorEmojiFont, code: view Int) ret Int {
+  let groups: Int = u32(data: font.characterMap, at: 12)
+  var low: Int = 0
+  var high: Int = groups
+  loop low < high {
+    let middle: Int = (low + high) / 2
+    let at: Int = 16 + middle * 12
+    let first: Int = u32(data: font.characterMap, at: at)
+    let last: Int = u32(data: font.characterMap, at: at + 4)
+    if code < first {
+      high = middle
+    } else if code > last {
+      low = middle + 1
+    } else {
+      ret u32(data: font.characterMap, at: at + 8) + code - first
+    }
+  }
+  ret 0
+}
+
+# The bytes code point `code` takes in UTF-8
+func utf8Width(code: view Int) ret Int {
+  if code < 128 {
+    ret 1
+  }
+  if code < 2048 {
+    ret 2
+  }
+  if code < 65536 {
+    ret 3
+  }
+  ret 4
+}
+
+# The glyphs of a cluster's code points (those the font has), in order
+func colorEmojiGlyphsOf(font: view ColorEmojiFont, cluster: view String) ret List(Int) {
+  var glyphs: List(Int) = {}
+  var i: Int = 0
+  loop i < cluster.length() {
+    let code: Int = cluster.at(index: i).toInt()
+    let glyph: Int = colorEmojiGlyphOf(font: font, code: code)
+    if glyph > 0 {
+      glyphs.add(value: glyph)
+    }
+    i = i + utf8Width(code: code)
+  }
+  ret glyphs
+}
+
+# ----- GSUB ligatures ---------------------------------------------------------------------------
+
+# The index of `glyph` in a coverage table at `at` of the GSUB, -1 when it is not covered
+func coverageIndex(data: view String, at: view Int, glyph: view Int) ret Int {
+  let format: Int = u16(data: data, at: at)
+  let count: Int = u16(data: data, at: at + 2)
+  if format is 1 {
+    var low: Int = 0
+    var high: Int = count
+    loop low < high {
+      let middle: Int = (low + high) / 2
+      let value: Int = u16(data: data, at: at + 4 + middle * 2)
+      if glyph < value {
+        high = middle
+      } else if glyph > value {
+        low = middle + 1
+      } else {
+        ret middle
+      }
+    }
+    ret -1
+  }
+  if format is 2 {
+    loop var i: Int = 0, i < count, ++i {
+      let range: Int = at + 4 + i * 6
+      let first: Int = u16(data: data, at: range)
+      let last: Int = u16(data: data, at: range + 2)
+      if glyph >= first and glyph <= last {
+        ret u16(data: data, at: range + 4) + glyph - first
+      }
+    }
+  }
+  ret -1
+}
+
+# The ligature subtable at `at` applied once at position `start` of `glyphs`: true (and `glyphs`
+# changed) when a ligature there matched
+func applyLigatureAt(
+  data: view String
+  at: view Int
+  glyphs: mod List(Int)
+  start: view Int
+) ret Bool {
+  if u16(data: data, at: at) is not 1 {
+    ret false
+  }
+  let first: Int = glyphs.copyAtFallback(index: start, fallback: 0)
+  let covered: Int = coverageIndex(data: data, at: at + u16(data: data, at: at + 2), glyph: first)
+  if covered < 0 or covered >= u16(data: data, at: at + 4) {
+    ret false
+  }
+  let set: Int = at + u16(data: data, at: at + 6 + covered * 2)
+  let ligatures: Int = u16(data: data, at: set)
+  loop var l: Int = 0, l < ligatures, ++l {
+    let ligature: Int = set + u16(data: data, at: set + 2 + l * 2)
+    let components: Int = u16(data: data, at: ligature + 2)
+    if start + components > glyphs.length {
+      continue
+    }
+    var matches: Bool = true
+    loop var c: Int = 1, c < components and matches, ++c {
+      if glyphs.copyAtFallback(index: start + c, fallback: -1) is not u16(
+        data: data
+        at: ligature + 4 + (c - 1) * 2
+      ) {
+        matches = false
+      }
+    }
+    if matches {
+      var joined: List(Int) = {}
+      loop var k: Int = 0, k < start, ++k {
+        joined.add(value: glyphs.copyAtFallback(index: k, fallback: 0))
+      }
+      joined.add(value: u16(data: data, at: ligature))
+      loop var k: Int = start + components, k < glyphs.length, ++k {
+        joined.add(value: glyphs.copyAtFallback(index: k, fallback: 0))
+      }
+      glyphs = joined
+      ret true
+    }
+  }
+  ret false
+}
+
+# `glyphs` with every ligature lookup of the GSUB applied, in order, at each position
+func colorEmojiLigatures(font: view ColorEmojiFont, glyphs: view List(Int)) ret List(Int) {
+  var result: List(Int) = glyphs
+  let data: view String = font.substitutions
+  if data.length() < 10 or result.length < 2 {
+    ret result
+  }
+  let lookupList: Int = u16(data: data, at: 8)
+  let lookups: Int = u16(data: data, at: lookupList)
+  loop var l: Int = 0, l < lookups, ++l {
+    let lookup: Int = lookupList + u16(data: data, at: lookupList + 2 + l * 2)
+    let kind: Int = u16(data: data, at: lookup)
+    let subtables: Int = u16(data: data, at: lookup + 4)
+    loop var s: Int = 0, s < subtables, ++s {
+      var subtable: Int = lookup + u16(data: data, at: lookup + 6 + s * 2)
+      var subtableKind: Int = kind
+      # an extension: the real subtable is further on
+      if kind is 7 {
+        subtableKind = u16(data: data, at: subtable + 2)
+        subtable = subtable + u32(data: data, at: subtable + 4)
+      }
+      if subtableKind is 4 {
+        var position: Int = 0
+        loop position < result.length {
+          let unusedJoined: Bool = applyLigatureAt(
+            data: data
+            at: subtable
+            glyphs: result
+            start: position
+          )
+          position = position + 1
+        }
+      }
+    }
+  }
+  ret result
+}
+
+# ----- bitmaps ----------------------------------------------------------------------------------
+
+# The PNG of `glyph` in the font's largest bitmap size, as bytes (an Int a byte, as lib/Png reads
+# them); empty when the glyph has none there
+func colorEmojiPng(font: view ColorEmojiFont, glyph: view Int) ret List(Int) {
+  var png: List(Int) = {}
+  let locations: view String = font.bitmapLocations
+  let arrayOffset: Int = u32(data: locations, at: font.strikeOffset)
+  let subtables: Int = u32(data: locations, at: font.strikeOffset + 8)
+  loop var i: Int = 0, i < subtables, ++i {
+    let entry: Int = arrayOffset + i * 8
+    let first: Int = u16(data: locations, at: entry)
+    let last: Int = u16(data: locations, at: entry + 2)
+    if glyph < first or glyph > last {
+      continue
+    }
+    let header: Int = arrayOffset + u32(data: locations, at: entry + 4)
+    let indexFormat: Int = u16(data: locations, at: header)
+    let imageFormat: Int = u16(data: locations, at: header + 2)
+    let imageData: Int = u32(data: locations, at: header + 4)
+    var start: Int = -1
+    var end: Int = -1
+    if indexFormat is 1 {
+      start = u32(data: locations, at: header + 8 + (glyph - first) * 4)
+      end = u32(data: locations, at: header + 8 + (glyph - first + 1) * 4)
+    } else if indexFormat is 3 {
+      start = u16(data: locations, at: header + 8 + (glyph - first) * 2)
+      end = u16(data: locations, at: header + 8 + (glyph - first + 1) * 2)
+    }
+    if start < 0 or end <= start {
+      ret png
+    }
+    let record: String = Sys.readFileTextRange(
+      path: font.path
+      offset: font.bitmapDataOffset + imageData + start
+      len: end - start
+    )
+    # the PNG's place in the record: after small (17) or big (18) metrics, or none (19)
+    var lengthAt: Int = -1
+    if imageFormat is 17 {
+      lengthAt = 5
+    } else if imageFormat is 18 {
+      lengthAt = 8
+    } else if imageFormat is 19 {
+      lengthAt = 0
+    }
+    if lengthAt < 0 {
+      ret png
+    }
+    let length: Int = u32(data: record, at: lengthAt)
+    loop var k: Int = 0, k < length and lengthAt + 4 + k < record.length(), ++k {
+      png.add(value: byteOf(data: record, at: lengthAt + 4 + k))
+    }
+    ret png
+  }
+  ret png
+}
+
+# The picture of `glyph`: its PNG decoded
+func colorEmojiGlyphImage(font: view ColorEmojiFont, glyph: view Int) ret ColorEmojiGlyph {
+  let png: List(Int) = colorEmojiPng(font: font, glyph: glyph)
+  if png.length is 0 {
+    ret ColorEmojiGlyph {}
+  }
+  var width: Int = 0
+  var height: Int = 0
+  let argb: List(Int) = Png.decodePng(
+    png: png
+    len: png.length
+    width: width
+    height: height
+  )
+  if width <= 0 {
+    ret ColorEmojiGlyph {}
+  }
+  var pixels: List(UInt8) = List.create(UInt8, cap: width * height * 4)
+  loop let pixel: view Int in argb {
+    pixels.add(value: ((pixel shr 16) bitand 255) as UInt8)
+    pixels.add(value: ((pixel shr 8) bitand 255) as UInt8)
+    pixels.add(value: (pixel bitand 255) as UInt8)
+    pixels.add(value: ((pixel shr 24) bitand 255) as UInt8)
+  }
+  ret ColorEmojiGlyph { width: width, height: height, pixels: own pixels }
+}
+
+# `cluster` drawn into a `pixels` square: straight-alpha RGBA, its glyph's picture fitted and
+# centered; empty when the font has no picture for it. A sequence the font has no ligature for
+# shows its first picture.
+func colorEmojiPixels(
+  font: view ColorEmojiFont
+  cluster: view String
+  pixels: view Int
+) ret List(UInt8) {
+  if not font.ok or pixels <= 0 {
+    ret List(UInt8) {}
+  }
+  let glyphs: List(Int) = colorEmojiLigatures(
+    font: font
+    glyphs: colorEmojiGlyphsOf(font: font, cluster: cluster)
+  )
+  var image: ColorEmojiGlyph = {}
+  loop let glyph: view Int in glyphs {
+    if image.width is 0 {
+      image = colorEmojiGlyphImage(font: font, glyph: glyph)
+    }
+  }
+  if image.width is 0 {
+    ret List(UInt8) {}
+  }
+  # fitted: the longer side is the square's
+  var size: PictureSize = { width: pixels, height: image.height * pixels / image.width }
+  if image.height > image.width {
+    size = PictureSize { width: image.width * pixels / image.height, height: pixels }
+  }
+  let scaled: ScaledPixels = scaledPixelsTo(
+    rgba: image.pixels.data
+    width: image.width
+    height: image.height
+    size: size
+  )
+  var square: List(UInt8) = List.create(UInt8, cap: pixels * pixels * 4)
+  square.addDefaults(count: pixels * pixels * 4)
+  let left: Int = (pixels - scaled.width) / 2
+  let top: Int = (pixels - scaled.height) / 2
+  loop var y: Int = 0, y < scaled.height, ++y {
+    loop var x: Int = 0, x < scaled.width, ++x {
+      let from: Int = (y * scaled.width + x) * 4
+      let to: Int = ((top + y) * pixels + left + x) * 4
+      loop var c: Int = 0, c < 4, ++c {
+        square.set(index: to + c, value: scaled.bytes.copyAtFallback(index: from + c, fallback: 0))
+      }
+    }
+  }
+  ret square
+}

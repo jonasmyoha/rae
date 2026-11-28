@@ -44,7 +44,22 @@ func scaledDownPixels(
   height: view Int
   longest: view Int
 ) ret ScaledPixels {
-  let size: PictureSize = fittedSize(width: width, height: height, longest: longest)
+  ret scaledPixelsTo(
+    rgba: rgba
+    width: width
+    height: height
+    size: fittedSize(width: width, height: height, longest: longest)
+  )
+}
+
+# `rgba` (straight alpha, width x height) at `size`: smaller by averaging, larger by taking the
+# nearest pixel (each new pixel then covers less than one)
+func scaledPixelsTo(
+  rgba: view Buffer(UInt8)
+  width: view Int
+  height: view Int
+  size: view PictureSize
+) ret ScaledPixels {
   var bytes: List(UInt8) = List.create(UInt8, cap: size.width * size.height * 4)
   loop var y: Int = 0, y < size.height, ++y {
     let top: Int = y * height / size.height

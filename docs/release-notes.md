@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.159, 2026-11-28: color emoji on Linux, from Noto Color Emoji in Rae
+
+- On Linux and the BSDs an emoji in text is drawn from Noto Color Emoji's file, read by Rae
+  (`lib/text/ColorEmojiFont`: its cmap, GSUB ligatures for sequences, CBLC / CBDT PNGs).
+  `RAE_EMOJI_FONT=<file>` uses a CBDT font file on any platform (docs/text-emoji.md). Case 1717.
+- `Png.decodePng` reads every color type and bit depth with tRNS (palette, gray, gray + alpha,
+  1/2/4/16 bits), as lodepng does. Case 1716.
+- `ImageScale.scaledPixelsTo(rgba:, width:, height:, size:)`: a picture at any size (smaller by
+  averaging, larger by the nearest pixel); `scaledDownPixels` uses it.
+
 ## 0.4.158, 2026-11-28: color emoji in the browser
 
 - In a browser build, an emoji in text is drawn by the page's emoji font through a 2D canvas

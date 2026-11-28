@@ -48,7 +48,11 @@ text, the shadow's color, or 0).
 | macOS, iOS | Apple Color Emoji | CoreText draws the cluster (`compiler/runtime/runtime_emoji.h`; CoreText is loaded at run time, so a program links nothing new) |
 | Android | the system's emoji font (Noto Color Emoji, or the maker's) | Java's text stack draws it (`tools/android/java/org/rae/app/RaeEmoji.java`), reached through JNI |
 | the browser | the page's emoji font (Apple Color Emoji, Segoe UI Emoji or Noto Color Emoji) | a 2D canvas's `fillText` (an OffscreenCanvas where there is one), read back with `getImageData` (an EM_JS shim in `runtime_emoji.h`; its bytes are straight alpha) |
+| Linux, the BSDs | Noto Color Emoji's file (`RAE_EMOJI_FONT`, else the distributions' usual places) | Rae reads the font itself (`lib/text/ColorEmojiFont`): the code points to glyphs through its cmap (format 12), a sequence to one glyph through its GSUB ligatures (type 4, also inside a type 7 extension), the glyph's PNG through CBLC / CBDT (index formats 1 and 3, image formats 17, 18, 19), decoded by `lib/Png` and fitted by `lib/ImageScale`. The font's tables are read once onto the canvas, a few tens of KB, and each glyph's PNG when it is first drawn; the file is never read whole |
 | Windows | none yet | the emoji keeps its place in the line and shows nothing |
+
+`RAE_EMOJI_FONT=<a CBDT font file>` makes every platform draw from that file instead (how the Linux
+path is checked on a Mac). A sequence the font has no ligature for shows its first picture.
 
 The CPU framebuffer text (`SdfText.sdfDrawText`) keeps the emoji's place and draws nothing.
 
@@ -60,5 +64,11 @@ The CPU framebuffer text (`SdfText.sdfDrawText`) keeps the emoji's place and dra
   made once. Run on this Mac (Apple Color Emoji), on an Android 15 emulator (Noto Color Emoji) and
   as a browser build in headless Chrome, with a look at a frame of each. Its page is in its own
   `assets/` and its font is `lib/assets/walker`'s, which a browser build carries.
+- Case 1716: `lib/Png` decodes every color type and bit depth (a color emoji font's PNGs are 4-bit
+  palettes with alphas), as lodepng does.
+- Case 1717: a tiny CBDT font (made by its `makeFont.py`): the cmap, a ligature lookup, one inside
+  an extension, the glyphs' pictures, and a missing or broken file.
+- `checks/uiTextEmoji` with `RAE_EMOJI_FONT` naming a Noto Color Emoji file: the whole page from the
+  font file through Rae, on this Mac (about 1 ms an emoji to decode and fit).
 - `checks/webEmoji`: the platform's rasterizer alone (a fire, a flag, a ZWJ family), natively and
   in headless Chrome (`compiler/tools/wasm_webgpu_smoke.sh`).

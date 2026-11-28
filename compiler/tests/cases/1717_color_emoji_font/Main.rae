@@ -1,0 +1,58 @@
+# ColorEmojiFont reads a CBDT color font in Rae (the Linux path of color emoji, docs/text-emoji.md):
+# tinyEmoji.ttf (made by makeFont.py) maps five code points to glyphs (cmap format 12), joins a
+# thumb and a skin tone through a ligature lookup and a flag's two letters through an extension
+# lookup, and holds a one-color PNG a glyph (CBLC index format 1, CBDT format 17). Each cluster's
+# square is its glyph's color; a cluster with no ligature shows its first picture, one the font
+# does not know nothing.
+import text/ColorEmojiFont
+
+# The color at the middle of a cluster's 16-pixel square, or "none"
+func middleColor(font: view ColorEmojiFont.ColorEmojiFont, cluster: view String) ret String {
+  let pixels: List(UInt8) = ColorEmojiFont.colorEmojiPixels(
+    font: font
+    cluster: cluster
+    pixels: 16
+  )
+  if pixels.length is 0 {
+    ret "none"
+  }
+  let at: Int = (8 * 16 + 8) * 4
+  ret "{pixels.copyAtFallback(index: at, fallback: 0)},{pixels.copyAtFallback(
+    index: at + 1
+    fallback: 0
+  )},{pixels.copyAtFallback(index: at + 2, fallback: 0)},{pixels.copyAtFallback(
+    index: at + 3
+    fallback: 0
+  )}"
+}
+
+func main() {
+  let font: ColorEmojiFont.ColorEmojiFont = ColorEmojiFont.loadColorEmojiFont(
+    path: "tests/cases/1717_color_emoji_font/tinyEmoji.ttf"
+  )
+  log("read: {font.ok}")
+  log(
+    "glyph of the fire {ColorEmojiFont.colorEmojiGlyphOf(font: font, code: 128293)}, of a letter {ColorEmojiFont.colorEmojiGlyphOf(
+      font: font
+      code: 65
+    )}"
+  )
+  let thumb: List(Int) = ColorEmojiFont.colorEmojiGlyphsOf(font: font, cluster: "👍🏽")
+  log("thumb and tone {thumb} -> {ColorEmojiFont.colorEmojiLigatures(font: font, glyphs: thumb)}")
+  let flag: List(Int) = ColorEmojiFont.colorEmojiGlyphsOf(font: font, cluster: "🇫🇮")
+  log("the flag's letters {flag} -> {ColorEmojiFont.colorEmojiLigatures(font: font, glyphs: flag)}")
+  log("fire {middleColor(font: font, cluster: "🔥")}")
+  log("thumb {middleColor(font: font, cluster: "👍")}")
+  log("thumb with a tone {middleColor(font: font, cluster: "👍🏽")}")
+  log("flag {middleColor(font: font, cluster: "🇫🇮")}")
+  log("a lone flag letter {middleColor(font: font, cluster: "🇫")}")
+  log("an emoji the font lacks {middleColor(font: font, cluster: "😀")}")
+  let missing: ColorEmojiFont.ColorEmojiFont = ColorEmojiFont.loadColorEmojiFont(
+    path: "tests/cases/1717_color_emoji_font/none.ttf"
+  )
+  log("no file: read {missing.ok}, fire {middleColor(font: missing, cluster: "🔥")}")
+  let notFont: ColorEmojiFont.ColorEmojiFont = ColorEmojiFont.loadColorEmojiFont(
+    path: "tests/cases/1717_color_emoji_font/makeFont.py"
+  )
+  log("not a font: read {notFont.ok}")
+}

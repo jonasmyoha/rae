@@ -27,6 +27,7 @@
 # Owner: an app (or the deferred renderer for its UI overlay) holds ONE
 # Gpu2dCanvas and hands it to Gpu2d.flush / Gpu2d.endFrame and the image API.
 import String
+import text/ColorEmojiFont
 import Math
 open collections/StringMap
 open webgpu/Webgpu
@@ -245,6 +246,10 @@ type Gpu2dCanvas {
   # emoji clusters (with their raster size) the platform could not draw, not asked again
   # (Gpu2dEmoji)
   emojiUnavailable: StringMap(Int)
+  # the color emoji font file drawn from where the platform draws no emoji (Linux, the BSDs) or
+  # RAE_EMOJI_FONT names one, read once when first needed
+  emojiFont: ColorEmojiFont.ColorEmojiFont = {}
+  emojiFontLooked: Bool = false
   # handles whose image is gone, used again, and handles to let go of once the frame being drawn is
   # submitted (canvasReleaseImage)
   imagesFree: List(Int)

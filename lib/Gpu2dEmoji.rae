@@ -4,10 +4,14 @@
 # shown, the square is uploaded as an image under "emoji:<cluster>@<pixels>", and every later draw
 # of it at that size is that image.
 #
-# The platform's font: Apple Color Emoji through CoreText, and on Android the system's emoji font
-# through Java's text stack (runtime_emoji.h, tools/android/java/org/rae/app/RaeEmoji.java).
-# Elsewhere there is no image yet, so an emoji keeps its place in the line and shows nothing.
+# The platform's font: Apple Color Emoji through CoreText, on Android the system's emoji font
+# through Java's text stack (runtime_emoji.h, tools/android/java/org/rae/app/RaeEmoji.java), in the
+# browser the page's 2D canvas. On Linux and the BSDs Rae draws it from Noto Color Emoji's file
+# (lib/text/ColorEmojiFont), as everywhere when RAE_EMOJI_FONT names a font file. Where there is
+# none, an emoji keeps its place in the line and shows nothing.
 import Math
+import Sys
+import text/ColorEmojiFont
 open collections/StringMap
 open Gpu2dCanvas
 open Gpu2dCanvasImage
@@ -73,6 +77,23 @@ func rasterizeEmoji(cluster: view String, pixels: view Int) ret List(UInt8) {
   ret bytes
 }
 
+# `cluster` drawn from the system's color emoji font file (Noto Color Emoji on Linux and the BSDs,
+# or RAE_EMOJI_FONT; lib/text/ColorEmojiFont), the font read once onto the canvas; empty when there
+# is none or it has no picture for it
+func emojiFromFontFile(
+  canvas: mod Gpu2dCanvas
+  cluster: view String
+  pixels: view Int
+) ret List(UInt8) {
+  if not canvas.emojiFontLooked {
+    canvas.emojiFontLooked = true
+    canvas.emojiFont = ColorEmojiFont.loadColorEmojiFont(
+      path: ColorEmojiFont.systemColorEmojiFontPath()
+    )
+  }
+  ret ColorEmojiFont.colorEmojiPixels(font: canvas.emojiFont, cluster: cluster, pixels: pixels)
+}
+
 # The image key of `cluster` drawn `pixels` square, registered on first use; "" when the platform
 # cannot draw it (remembered, so it is not asked again)
 func emojiImageKey(canvas: mod Gpu2dCanvas, cluster: view String, pixels: view Int) ret String {
@@ -83,7 +104,13 @@ func emojiImageKey(canvas: mod Gpu2dCanvas, cluster: view String, pixels: view I
   if canvas.emojiUnavailable.has(k: key) {
     ret ""
   }
-  let bytes: List(UInt8) = rasterizeEmoji(cluster: cluster, pixels: pixels)
+  var bytes: List(UInt8) = {}
+  if Sys.getEnv(name: "RAE_EMOJI_FONT").length() is 0 {
+    bytes = rasterizeEmoji(cluster: cluster, pixels: pixels)
+  }
+  if bytes.length is 0 {
+    bytes = emojiFromFontFile(canvas: canvas, cluster: cluster, pixels: pixels)
+  }
   var handle: Int = 0
   if bytes.length > 0 {
     handle = canvasRegisterImageBytes(
