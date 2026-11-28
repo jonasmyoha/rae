@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.142, 2026-11-28: a local is not taken for a global of its name
+
+- The backend no longer takes a local for a module-level value of the same name where it looks at a function's
+  body before declaring its locals (a `const source: String` gave a local `source: Int` the const's type there).
+  No program's C changed.
+
 ## 0.4.141, 2026-11-28: the backend reads sema's type where it had none
 
 - A unary expression, a box, an `own` and a `Float64` binary have sema's type in the backend: `log(x++)` prints

@@ -1854,6 +1854,10 @@ static const AstTypeRef* c_sema_type_of(CFuncContext* ctx, const AstExpr* expr) 
     case AST_EXPR_BOX:
     case AST_EXPR_OWN:
     case AST_EXPR_BINARY: break;
+    /* a name or a field the backend asked about before its local was declared (a scan of a whole
+     * body at its start) */
+    case AST_EXPR_IDENT:
+    case AST_EXPR_MEMBER: break;
     default: return NULL;
   }
   const TypeInfo* type = expr->resolved_type;
@@ -1920,6 +1924,15 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
       : !sema ? CHECK_ONLY_BACKEND
       : !backend ? CHECK_ONLY_SEMA
       : strcmp(backend_name, sema_name) == 0 ? CHECK_AGREE : CHECK_DIFFER;
+  /* A reference to an optional (`value: view T` with T an `opt Int`) is read through: its C is
+   * `(*value)`, and the backend answers the optional it reads, `opt Int` */
+  if (verdict == CHECK_DIFFER && (view || mod) && type && type->kind == TYPE_OPT && backend->is_opt
+      && !backend->is_view && !backend->is_mod) {
+    AstTypeRef* read = sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)type);
+    char read_name[300];
+    check_type_name(ctx, read, read_name, sizeof read_name);
+    if (strcmp(backend_name, read_name) == 0) verdict = CHECK_AGREE;
+  }
   s_check_counts[kind][verdict]++;
   if (verdict != CHECK_AGREE && s_check_samples) {
     Str name = expr->kind == AST_EXPR_IDENT ? expr->as.ident
@@ -2106,6 +2119,11 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
             // global receiver (e.g. `g_list.get(i)`, `g_list.length`) dispatch
             // with the right receiver type instead of a bare, type-less mangling.
             if (ctx->compiler_ctx) {
+                /* the one sema linked; a name sema typed without a link is a local not declared
+                 * here yet (a scan of the body before it), not a global of the same name */
+                if (expr->decl_link && expr->decl_link->kind == AST_DECL_GLOBAL_LET)
+                    return expr->decl_link->as.let_decl.type;
+                if (expr->resolved_type && !expr->decl_link) return NULL;
                 const AstDecl* global = decl_index_find_global(ctx->compiler_ctx, expr->as.ident);
                 if (global) return global->as.let_decl.type;
             }

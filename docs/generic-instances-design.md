@@ -437,7 +437,17 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    (it said the narrowed `view T`, the backend `opt view T`). The C of 106 and 121 is unchanged; 44 programs'
    C changed, each by a function or statement losing a string-pool mark it never needed, or `log(x++)` taking
    the typed path instead of an Any; 136's one change is the first kind. check-types.sh: 239.8 million agree,
-   1 730 differ (was 30 221), 118 853 only in sema (was 690 869), 5 535 only in the backend.
+   1 730 differ (was 30 221), 118 853 only in sema (was 690 869), 5 535 only in the backend. Then (0.4.142): a name or a field
+   read the backend asks about before its local is declared (a scan of a whole body at its start) has sema's
+   type, and such a name no longer falls back to a module-level value of the same name (`const source: String`
+   in case 1378 typed a local `source: Int`): the fallback takes the global sema linked, and none for a name sema
+   typed without a link. No program's C changed. check-types.sh counts a reference to an optional read through
+   (`value: view T` with T an `opt Int`, whose C is `(*value)`) as agreeing with the backend's `opt Int`. Left:
+   74 differ, all bindings the backend makes itself (`mainLoop app { }` moves the body into a function where
+   `app` is a `mod App`); 5 535 typed only by the backend, nearly all a generic extern called with a written
+   type argument (`rae_ext_rae_buf_get(V: Int, ...)`, 4 763 in `readFileBytes`), which sema leaves untyped, and
+   the nodes of a `query(...)` loop the backend builds; and the two kinds left untyped on purpose, `view x` /
+   `mod x` and an index of a `Buffer`.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.
