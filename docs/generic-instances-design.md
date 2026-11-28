@@ -478,7 +478,14 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    payload's address. And an `if let` binding is visible in its success branch only: in the else branch the name
    is what it was outside (it was the narrowed binding there, case 1676). With that, `c_type_from_sema` keeps the
    backend's type only for a binding the backend makes itself (the state of a `mainLoop` body); a local's name
-   and a type nesting a reference and an optional are sema's. No program's C changed.
+   and a type nesting a reference and an optional are sema's. No program's C changed. Then (0.4.146): a call that answers nothing has
+   TYPE_VOID in sema (a resolved call, a method call, and an instance's call whose function has no result,
+   `sema_type_from_instance`), so "no value" is told from "no type"; `check-types.sh` counts an expression neither
+   side typed, and that sema did not even say void, as `untyped`: 2.56 million before, 111 904 after. C changes:
+   207 programs lose a string-pool mark around a statement that calls a function answering nothing (none of them
+   builds a String). Left untyped, for the internal error: `T.default()` (33 758), a struct, list or `none`
+   literal typed only by its context (29 614, 8 358, 3 473), calls the backend binds by name (`jbField`,
+   `drawRect`, `skipWhitespace`), type names written as calls (`List(...)`, `StringMapEntry`), and 3 979 names.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

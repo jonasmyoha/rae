@@ -2,7 +2,8 @@
 # check-types.sh — how often the backend's type of an expression (infer_expr_type_ref) is the
 # type sema gave it, over every unit case and 106/121/136 (docs/generic-instances-design.md
 # step 9). Each program's C is emitted with RAE_CHECK_TYPES=1; the counts are summed per
-# expression kind: agree, differ, onlyBackend (sema has no type), onlySema (the backend has none).
+# expression kind: agree, differ, onlyBackend (sema has no type), onlySema (the backend has none),
+# untyped (neither has one, and sema did not even say "nothing", TYPE_VOID).
 #
 # Usage:  bash tools/check-types.sh [--samples <file>]   (about 2.5 minutes on 10 cores)
 # --samples appends every disagreement with its function and place to <file>.
@@ -34,13 +35,13 @@ cat "$WORK"/*.err | grep -h '^@@RAE_CHECK_TYPES' | awk -v kinds="$KINDS" '
   {
     for (i = 2; i <= NF; i++) { split($i, pair, "="); value[pair[1]] = pair[2] }
     k = value["kind"]; agree[k] += value["agree"]; differ[k] += value["differ"]
-    onlyBackend[k] += value["onlyBackend"]; onlySema[k] += value["onlySema"]; seen[k] = 1
+    onlyBackend[k] += value["onlyBackend"]; onlySema[k] += value["onlySema"]; untyped[k] += value["untyped"]; seen[k] = 1
   }
   END {
-    printf "%-20s %12s %9s %12s %9s\n", "kind", "agree", "differ", "onlyBackend", "onlySema"
+    printf "%-20s %12s %9s %12s %9s %9s\n", "kind", "agree", "differ", "onlyBackend", "onlySema", "untyped"
     for (k = 0; k < 64; k++) if (seen[k]) {
-      printf "%-20s %12d %9d %12d %9d\n", (k + 1 <= n ? names[k + 1] : k), agree[k], differ[k], onlyBackend[k], onlySema[k]
-      ta += agree[k]; td += differ[k]; tb += onlyBackend[k]; ts += onlySema[k]
+      printf "%-20s %12d %9d %12d %9d %9d\n", (k + 1 <= n ? names[k + 1] : k), agree[k], differ[k], onlyBackend[k], onlySema[k], untyped[k]
+      ta += agree[k]; td += differ[k]; tb += onlyBackend[k]; ts += onlySema[k]; tu += untyped[k]
     }
-    printf "%-20s %12d %9d %12d %9d\n", "all", ta, td, tb, ts
+    printf "%-20s %12d %9d %12d %9d %9d\n", "all", ta, td, tb, ts, tu
   }'

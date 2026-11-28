@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.146, 2026-11-28: a call that answers nothing is void
+
+- Sema types a call of a function with no result as `Void`, so a statement of such a call no longer marks the
+  string pool. `RAE_CHECK_TYPES=1` and `compiler/tools/check-types.sh` count expressions nobody typed
+  (`untyped`).
+
 ## 0.4.145, 2026-11-28: an optional reference is its own type in sema
 
 - Sema tells an optional reference (`opt view T`) from a reference to an optional (`view T` with T an optional),

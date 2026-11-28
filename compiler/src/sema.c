@@ -9244,7 +9244,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     if (resolved) {
                         expr->decl_link = resolved;
                         sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, expr->as.call.args);
-                        if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
+                        if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                         if (resolved->as.func_decl.returns && resolved->as.func_decl.is_extern
                             && resolved->as.func_decl.generic_params && expr->as.call.generic_args)
                             expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols,
@@ -9917,7 +9917,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     if (str_eq(entry->type_name, t->name) && str_eq(entry->method_name, expr->as.method_call.method_name)) {
                         Symbol* sym = symbol_table_lookup(symbols, entry->actual_function_name);
                         if (sym && sym->decl && sym->decl->kind == AST_DECL_FUNC) {
-                            expr->decl_link = sym->decl; if (sym->decl->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type);
+                            expr->decl_link = sym->decl; if (sym->decl->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.func_decl.returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                             found = true;
                         }
                         break;
@@ -9942,12 +9942,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             if (param_t && param_t->kind == TYPE_REF) param_t = param_t->as.ref.base;
                             if (!recv_t || !param_t || recv_t == param_t) {
                                 expr->decl_link = sym->decl;
-                                if (fd->returns) expr->resolved_type = sema_resolve_decl_type(ctx, module, symbols, sym->decl, fd->returns->type);
+                                if (fd->returns) expr->resolved_type = sema_resolve_decl_type(ctx, module, symbols, sym->decl, fd->returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                                 found = true;
                             }
                         } else if (!fd->generic_params && !fd->params) {
                             expr->decl_link = sym->decl;
-                            if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type);
+                            if (fd->returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, fd->returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                             found = true;
                         }
                     }
@@ -10088,7 +10088,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                                 expr->decl_link = best_decl;
                             }
                         } else expr->decl_link = best_decl;
-                        if (expr->decl_link->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->decl_link->as.func_decl.returns->type);
+                        if (expr->decl_link->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, expr->decl_link->as.func_decl.returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                         // #885: a pending `create(...)` argument meets the substituted parameter type.
                         if (fd->generic_params && rec) {
                             AstTypeRef* ga2 = infer_generic_args(ctx, fd, fd->params->type, &rec_tr);
@@ -10144,7 +10144,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                     } else if (ufcs_match) {
                         expr->decl_link = ufcs_match;
-                        if (ufcs_match->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ufcs_match->as.func_decl.returns->type);
+                        if (ufcs_match->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, ufcs_match->as.func_decl.returns->type); else expr->resolved_type = type_get_void(ctx->type_registry);
                         found = true;
                     }
                 }

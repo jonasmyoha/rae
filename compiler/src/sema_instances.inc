@@ -361,7 +361,9 @@ static void sema_type_from_instance(CompilerContext* ctx, AstModule* module, Sym
     if (!spec || spec->kind != AST_DECL_FUNC || sema_type_is_concrete(call->resolved_type, 0)) return;
     if (spec->as.func_decl.is_extern || !spec->as.func_decl.body) return;
     const AstReturnItem* result = spec->as.func_decl.returns;
-    if (!result || !result->type || result->next) return;  /* none, or several: no value */
+    /* none: the call answers nothing */
+    if (!result) { call->resolved_type = type_get_void(ctx->type_registry); return; }
+    if (!result->type || result->next) return;  /* several: no one value */
     TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, result->type);
     if (sema_type_is_concrete(type, 0)) call->resolved_type = type;
 }

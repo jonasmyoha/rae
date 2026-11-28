@@ -1898,17 +1898,17 @@ static const AstTypeRef* c_sema_type_of(CFuncContext* ctx, const AstExpr* expr) 
  * expression (docs/generic-instances-design.md step 9), counted per expression kind and printed at
  * exit; RAE_CHECK_TYPES_SAMPLES=<file> appends each disagreement with its place.
  * tools/check-types.sh sums the counts over every case and 106/121/136. */
-enum { CHECK_AGREE, CHECK_DIFFER, CHECK_ONLY_BACKEND, CHECK_ONLY_SEMA, CHECK_KINDS = 64 };
-static long s_check_counts[CHECK_KINDS][4];
+enum { CHECK_AGREE, CHECK_DIFFER, CHECK_ONLY_BACKEND, CHECK_ONLY_SEMA, CHECK_UNTYPED, CHECK_KINDS = 64 };
+static long s_check_counts[CHECK_KINDS][5];
 static FILE* s_check_samples;
 static int s_check_state;  /* 0 not read yet, 1 on, 2 off */
 
 static void check_types_report(void) {
   for (int k = 0; k < CHECK_KINDS; k++) {
     long* c = s_check_counts[k];
-    if (c[0] | c[1] | c[2] | c[3])
-      fprintf(stderr, "@@RAE_CHECK_TYPES kind=%d agree=%ld differ=%ld onlyBackend=%ld onlySema=%ld\n", k,
-              c[CHECK_AGREE], c[CHECK_DIFFER], c[CHECK_ONLY_BACKEND], c[CHECK_ONLY_SEMA]);
+    if (c[0] | c[1] | c[2] | c[3] | c[4])
+      fprintf(stderr, "@@RAE_CHECK_TYPES kind=%d agree=%ld differ=%ld onlyBackend=%ld onlySema=%ld untyped=%ld\n", k,
+              c[CHECK_AGREE], c[CHECK_DIFFER], c[CHECK_ONLY_BACKEND], c[CHECK_ONLY_SEMA], c[CHECK_UNTYPED]);
   }
   if (s_check_samples) fclose(s_check_samples);
 }
@@ -1933,7 +1933,7 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
   const TypeInfo* type = expr->resolved_type;
   bool view = false, mod = false;
   if (type && type->kind == TYPE_REF) { mod = type->as.ref.is_mod; view = !mod; type = type->as.ref.base; }
-  AstTypeRef* sema = type && type->kind != TYPE_UNKNOWN && type->kind != TYPE_GENERIC_PARAM
+  AstTypeRef* sema = type && type->kind != TYPE_UNKNOWN && type->kind != TYPE_GENERIC_PARAM && type->kind != TYPE_VOID
       ? sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)type) : NULL;
   const char* file = ctx->module && ctx->module->file_path ? ctx->module->file_path : "?";
   char backend_name[300] = "", sema_name[300] = "";
@@ -1943,7 +1943,13 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
     sema->is_mod = sema->is_mod || mod;
     check_type_name(ctx, sema, sema_name, sizeof sema_name);
   }
-  int verdict = !sema && !backend ? CHECK_AGREE
+  /* a call that answers nothing: sema's TYPE_VOID, the backend's none or `Void` */
+  bool both_void = type && type->kind == TYPE_VOID && (!backend || strcmp(backend_name, "void") == 0);
+  /* no type from either side and none from sema at all: not a call that answers nothing (that is
+   * TYPE_VOID), an expression nobody typed */
+  int verdict = both_void ? CHECK_AGREE
+      : !sema && !backend && !expr->resolved_type ? CHECK_UNTYPED
+      : !sema && !backend ? CHECK_AGREE
       : !sema ? CHECK_ONLY_BACKEND
       : !backend ? CHECK_ONLY_SEMA
       : strcmp(backend_name, sema_name) == 0 ? CHECK_AGREE : CHECK_DIFFER;
@@ -1959,7 +1965,10 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
   s_check_counts[kind][verdict]++;
   if (verdict != CHECK_AGREE && s_check_samples) {
     Str name = expr->kind == AST_EXPR_IDENT ? expr->as.ident
-        : expr->kind == AST_EXPR_MEMBER ? expr->as.member.member : (Str){ "", 0 };
+        : expr->kind == AST_EXPR_MEMBER ? expr->as.member.member
+        : expr->kind == AST_EXPR_METHOD_CALL ? expr->as.method_call.method_name
+        : expr->kind == AST_EXPR_CALL && expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+            ? expr->as.call.callee->as.ident : (Str){ "", 0 };
     fprintf(s_check_samples, "kind=%d verdict=%d backend=%s sema=%s name=%.*s function=%.*s at %s:%zu\n", kind,
             verdict, backend_name, sema_name, (int)name.len, name.data,
             ctx->func_decl ? (int)ctx->func_decl->name.len : 0, ctx->func_decl ? ctx->func_decl->name.data : "",
