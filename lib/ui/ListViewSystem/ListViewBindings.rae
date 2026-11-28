@@ -41,10 +41,11 @@ func listViewApplyBinding(
     componentSet(this: world.texts, entityId: child, data: t)
     ret
   }
-  if binding.componentName is "OnClick" {
-    setOnClickField(
+  if binding.componentName is "OnClick" or binding.componentName is "OnSecondaryClick" {
+    setClickTargetField(
       world: world
       entityId: child
+      componentName: binding.componentName
       fieldName: binding.fieldName
       value: value
       create: true
@@ -93,6 +94,16 @@ func listViewSceneBindingCurrent(
     }
     let cur: view OnClick = componentView(this: world.onClicks, entityId: entityId)
     ret onClickFieldIs(click: cur, fieldName: binding.fieldName, value: value)
+  }
+  if binding.componentName is "OnSecondaryClick" {
+    if componentHas(this: world.onSecondaryClicks, entityId: entityId) is false {
+      ret true
+    }
+    ret secondaryClickFieldIs(
+      click: componentView(this: world.onSecondaryClicks, entityId: entityId)
+      fieldName: binding.fieldName
+      value: value
+    )
   }
   if binding.componentName is activeName {
     if componentHas(this: world.actives, entityId: entityId) is false {

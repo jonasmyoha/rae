@@ -1,0 +1,166 @@
+# A ListView binding names OnSecondaryClick (its actionId and label) as it names OnClick: a chat's
+# message bubble (a row scene whose node declares OnSecondaryClick) gets its menu's action and
+# label from the row's data, and a skeleton row (no row scene) gets the component made (its bare
+# node has no box to press). A secondary press (the right button, a finger held still) on a bubble
+# sends that row's action, and the action follows the row's data when it changes.
+open ecs/ComponentTable
+open ecs/Entity
+open ecs/Event
+open ui/Components
+open ui/Ecs
+open ui/InputComponents
+open ui/InputKind
+open ui/InputSystem
+open ui/LayoutSystem
+open ui/ListViewSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  scenes: SceneRegistry
+}
+
+func frame(app: mod App, pointer: view UiPointerState) {
+  app.input.nowSeconds = app.input.nowSeconds + 0.1
+  updateUiInputWith(
+    input: app.input
+    world: app.world
+    uiSystems: app.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func still(app: mod App) {
+  frame(
+    app: app
+    pointer: uiPointerScriptFrame(
+      previous: app.input.pointer
+      x: 390.0
+      y: 390.0
+      down: false
+      kind: InputKind.mouse
+    )
+  )
+}
+
+# A secondary press at (x, y), then the actions it sent
+func secondaryPress(app: mod App, x: view Float, y: view Float) ret String {
+  eventClear(UiAction, this: app.world.uiActions)
+  var state: UiPointerState = uiPointerScriptFrame(
+    previous: app.input.pointer
+    x: x
+    y: y
+    down: false
+    kind: InputKind.mouse
+  )
+  state.secondary = UiButtonState { down: true, pressed: true, released: false, clicks: 1 }
+  frame(app: app, pointer: state)
+  var sent: String = ""
+  loop var i: Int = 0, i < eventCount(this: app.world.uiActions), ++i {
+    sent = "{sent} {eventAt(this: app.world.uiActions, i: i).actionId}"
+  }
+  ret sent
+}
+
+func listOf(app: view App, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: app.world, index: raw)
+  }
+  ret noEntity()
+}
+
+func message(id: view String, author: view String, text: view String) ret ListViewRow {
+  ret ListViewRow {
+    keys: List(String) { "id", "author", "text" }
+    values: List(String) { "{id}", "{author}", "{text}" }
+  }
+}
+
+func main() {
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    input: createUiInput()
+    scenes: createSceneRegistry()
+  }
+  let row: Scene = parseScene(source: embedText(file: "Message.raescene"))
+  registerScene(reg: app.scenes, key: "Message", scene: own row)
+  app.world.layoutW = 400.0
+  app.world.layoutH = 400.0
+  let unusedRoot: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  let chat: EntityId = listOf(app: app, nodeId: "Chat")
+  let plain: EntityId = listOf(app: app, nodeId: "Plain")
+  let chatData: ListViewData = {
+    rows: List(ListViewRow) {
+      message(id: "m1", author: "Ada", text: "hi")
+      message(id: "m2", author: "Bo", text: "gg")
+    }
+  }
+  componentSet(this: app.world.listViewDatas, entityId: chat, data: own chatData)
+  let plainData: ListViewData = {
+    rows: List(ListViewRow) { message(id: "p1", author: "Cy", text: "plain") }
+  }
+  componentSet(this: app.world.listViewDatas, entityId: plain, data: own plainData)
+  still(app: app)
+  still(app: app)
+  loop let rowRoot: view EntityId in componentView(this: app.world.childrens, entityId: chat).ids {
+    if let raw: Int = findNodeInPage(
+      world: app.world
+      pageId: listViewRowPage(rowRoot: rowRoot)
+      nodeId: "MessageBubble"
+    ) {
+      let bubble: EntityId = nodeEntityId(world: app.world, index: raw)
+      let click: view OnSecondaryClick = componentView(
+        this: app.world.onSecondaryClicks
+        entityId: bubble
+      )
+      log("bubble: actionId {click.actionId}, label {click.label}")
+    }
+  }
+  loop let cellRow: view EntityId in componentView(this: app.world.childrens, entityId: plain).ids {
+    let cell: EntityId = componentView(this: app.world.childrens, entityId: cellRow).ids.copyAtFallback(
+      index: 0
+      fallback: noEntity()
+    )
+    log(
+      "skeleton cell: has OnSecondaryClick {componentHas(
+        this: app.world.onSecondaryClicks
+        entityId: cell
+      )}, actionId {componentView(this: app.world.onSecondaryClicks, entityId: cell).actionId}"
+    )
+  }
+  log("secondary press on the second bubble:{secondaryPress(app: app, x: 100.0, y: 60.0)}")
+  still(app: app)
+  # new data: the same row shows another message, and its bubble's action follows
+  let changed: ListViewData = {
+    rows: List(ListViewRow) {
+      message(id: "m3", author: "Ada", text: "again")
+      message(id: "m2", author: "Bo", text: "gg")
+    }
+  }
+  componentSet(this: app.world.listViewDatas, entityId: chat, data: own changed)
+  still(app: app)
+  log(
+    "after new data, secondary press on the first bubble:{secondaryPress(
+      app: app
+      x: 100.0
+      y: 20.0
+    )}"
+  )
+}

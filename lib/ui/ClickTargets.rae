@@ -11,6 +11,7 @@
 # where the scene is authored, not when someone tries to say it.
 open ui/Ecs
 open ui/Components
+open ui/InputComponents
 open ui/ScenePolicy
 open ui/UiSystems
 open ecs/Entity
@@ -240,4 +241,72 @@ func onClickFieldIs(click: view OnClick, fieldName: view String, value: view Str
     ret click.labelTriple is value
   }
   ret click.actionId is value
+}
+
+# Set one field of the node's OnSecondaryClick (a finger held still, the right button): `label`, or
+# else `actionId`; `create` adds the component when the node has none (a list row's binding)
+func setSecondaryClickField(
+  world: mod UiWorld
+  entityId: view EntityId
+  fieldName: view String
+  value: view String
+  create: view Bool
+) {
+  if componentHas(this: world.onSecondaryClicks, entityId: entityId) is false {
+    if not create {
+      ret
+    }
+    componentSet(
+      this: world.onSecondaryClicks
+      entityId: entityId
+      data: OnSecondaryClick.default()
+    )
+  }
+  let click: mod OnSecondaryClick = componentMod(this: world.onSecondaryClicks, entityId: entityId)
+  if fieldName is "label" {
+    click.label = "{value}"
+  } else {
+    click.actionId = "{value}"
+  }
+}
+
+# Whether the OnSecondaryClick field named `fieldName` already holds `value`
+func secondaryClickFieldIs(
+  click: view OnSecondaryClick
+  fieldName: view String
+  value: view String
+) ret Bool {
+  if fieldName is "label" {
+    ret click.label is value
+  }
+  ret click.actionId is value
+}
+
+# Set a field of the node's OnClick or OnSecondaryClick, as `componentName` says (a scene
+# override, a list binding)
+func setClickTargetField(
+  world: mod UiWorld
+  entityId: view EntityId
+  componentName: view String
+  fieldName: view String
+  value: view String
+  create: view Bool
+) {
+  if componentName is "OnSecondaryClick" {
+    setSecondaryClickField(
+      world: world
+      entityId: entityId
+      fieldName: fieldName
+      value: value
+      create: create
+    )
+  } else {
+    setOnClickField(
+      world: world
+      entityId: entityId
+      fieldName: fieldName
+      value: value
+      create: create
+    )
+  }
 }

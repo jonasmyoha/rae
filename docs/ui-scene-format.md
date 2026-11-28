@@ -1640,8 +1640,15 @@ side panel is a group of them.
   the gesture `secondary`.
 - **The buttons themselves**: `UiInput.pointer.middle` and `.secondary` (held, pressed, released,
   clicks); in a game's world `worldPointer(captures:, pointerId: pointerIdSecondary)`.
+- **Set by data, like `OnClick`.** A `ListView` binding and a scene-instance override name
+  `OnSecondaryClick` with the field `actionId` or `label`, so each row has its own menu:
+  `{"nodeId": "MessageBubble", "component": "OnSecondaryClick", "field": "actionId", "itemField":
+  "id", "prefix": "message.menu."}`. As with `OnClick`, a row scene's node declares the component
+  (`"OnSecondaryClick": {}` is enough) for the binding to fill; a skeleton row (no row scene) gets
+  it made.
 
-Case 1577 checks it with simulated mouse events and scripted fingers.
+Case 1577 checks it with simulated mouse events and scripted fingers, and case 1721 a chat's
+bubbles bound from their messages.
 
 ## 47. Menus
 

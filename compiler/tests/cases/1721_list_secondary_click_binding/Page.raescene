@@ -1,0 +1,15 @@
+{
+  "type": "Scene", "version": 2, "sceneId": "page", "root": "Page",
+  "nodes": {
+    "Page": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 400}, "Layout": {"type": "Vertical"}, "Children": ["Chat", "Plain"]},
+    "Chat": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 200}, "ScrollRoot": {"axis": "y", "floor": "content"},
+      "ListView": {"itemSceneId": "Message", "itemKeyField": "id", "itemHeight": 40, "itemGap": 0, "visibleItemCount": 0, "overscanRows": 1,
+        "bindings": [{"nodeId": "MessageText", "component": "Text", "field": "text", "itemField": "text"},
+                     {"nodeId": "MessageBubble", "component": "OnSecondaryClick", "field": "actionId", "itemField": "id", "prefix": "message.menu."},
+                     {"nodeId": "MessageBubble", "component": "OnSecondaryClick", "field": "label", "itemField": "author", "prefix": "Show the menu of ", "suffix": "'s message"}]}},
+    "Plain": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 200}, "ScrollRoot": {"axis": "y", "floor": "content"},
+      "ListView": {"itemHeight": 40, "itemGap": 0, "visibleItemCount": 0, "overscanRows": 1,
+        "bindings": [{"nodeId": "Cell", "component": "Text", "field": "text", "itemField": "text"},
+                     {"nodeId": "Cell", "component": "OnSecondaryClick", "field": "actionId", "itemField": "id", "prefix": "plain.menu."}]}}
+  }
+}

@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.164, 2026-11-28: ListView bindings for OnSecondaryClick
+
+- A `ListView` binding (and a scene-instance override) names `OnSecondaryClick` with `actionId` or
+  `label`, as it names `OnClick`: a list row's menu comes from its item (docs/ui-scene-format.md
+  §46). Case 1721.
+
 ## 0.4.163, 2026-11-28: a refused WebSocket upgrade's status on Apple too
 
 - On Apple a WebSocket whose upgrade the server refuses now fails with its status, as on Android:
