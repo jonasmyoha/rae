@@ -937,7 +937,10 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   // front so a generic-param payload (`opt T` in a template) can't lose its
   // opt-ness when the payload is substituted to a primitive.
   {
-    bool res_opt = type->resolved_type && type->resolved_type->kind == TYPE_OPT;
+    /* (an optional reference's TypeInfo, OPT over REF, is no value optional: a copy of its ref
+     * without the marks is the payload's type) */
+    bool res_opt = type->resolved_type && type->resolved_type->kind == TYPE_OPT
+        && !(type->resolved_type->as.opt.base && type->resolved_type->as.opt.base->kind == TYPE_REF);
     if ((type->is_opt || res_opt) && !type->is_view && !type->is_mod) {
       AstTypeRef ot = *type; ot.is_opt = true;
       if (rae_opt_is_struct_rep(&ot)) fprintf(out, "%s", rae_opt_type_name(ctx, &ot));
@@ -958,6 +961,27 @@ bool emit_type_ref_as_c_type(CFuncContext* ctx, const AstTypeRef* type, FILE* ou
   }
     if (type->resolved_type) {
       TypeInfo* t = type->resolved_type; bool is_ptr = (type->is_view || type->is_mod) && !skip_ptr;
+      /* an optional reference (`opt view T`) is a pointer to T that may be null */
+      if (t->kind == TYPE_OPT && t->as.opt.base && t->as.opt.base->kind == TYPE_REF && t->as.opt.base->as.ref.base) {
+          t = t->as.opt.base->as.ref.base;
+          /* (a fixed-width integer's `view` is passed by value, but one that may be missing is a
+           * pointer) */
+          if (is_ptr && t->kind == TYPE_INT && !t->as.integer.enum_decl
+              && (t->as.integer.bits != 64 || t->as.integer.is_unsigned)) {
+              if (type->is_view && !type->is_mod) fprintf(out, "const ");
+              fprintf(out, "%s*", rae_int_c_name(t->as.integer.bits, t->as.integer.is_unsigned));
+              return true;
+          }
+          /* an enum's and an Any's: a plain pointer, const for a `view` */
+          bool enum_payload = t->kind == TYPE_INT && (t->as.integer.enum_decl
+              || (ctx && ctx->module && type->parts && !type->parts->next
+                  && find_enum_decl(ctx, ctx->module, type->parts->text)));
+          if (is_ptr && (enum_payload || t->kind == TYPE_ANY)) {
+              if (type->is_view && !type->is_mod) fprintf(out, "const ");
+              fprintf(out, "%s*", t->kind == TYPE_ANY ? "RaeAny" : "int64_t");
+              return true;
+          }
+      }
       /* Ptr's TypeInfo is Buffer(void), but a borrowed Ptr is a reference to
        * the pointer value itself. Preserve that extra level: Ptr -> void*,
        * view/mod Ptr -> void**. */
@@ -1964,18 +1988,15 @@ static const AstTypeRef* c_type_ref_of_sema(CFuncContext* ctx, const TypeInfo* t
   return result;
 }
 
-/* The type of `expr` is sema's (docs/generic-instances-design.md step 9), but where sema's TypeInfo
- * says less than the backend knows. NULL then, and the backend works it out (infer_expr_type_ref_checked). */
+/* The type of `expr` is sema's (docs/generic-instances-design.md step 9), but for a binding the backend
+ * made itself. NULL then, and the backend works it out (infer_expr_type_ref_checked). */
 static const AstTypeRef* c_type_from_sema(CFuncContext* ctx, const AstExpr* expr) {
-  /* a local's name is its declared type (sema's TypeInfo of an `opt view T` local can be `opt T`),
-   * and the bindings the backend makes itself have theirs */
-  if (expr->kind == AST_EXPR_IDENT && get_local_type_ref(ctx, expr->as.ident)) return NULL;
-  /* a reference and an optional nested: sema's TypeInfo is one for `opt view T` and for
-   * `view T` with T an optional, the backend's declared type tells them apart */
-  const TypeInfo* type = expr->resolved_type;
-  if (type && ((type->kind == TYPE_REF && type->as.ref.base && type->as.ref.base->kind == TYPE_OPT)
-               || (type->kind == TYPE_OPT && type->as.opt.base && type->as.opt.base->kind == TYPE_REF)))
-    return NULL;
+  /* a binding the backend makes itself keeps the type it gave it */
+  if (expr->kind == AST_EXPR_IDENT) {
+    const AstTypeRef* local = get_local_type_ref(ctx, expr->as.ident);
+    for (int i = 0; local && i < ctx->backend_binding_type_count; i++)
+      if (ctx->backend_binding_types[i] == local) return NULL;
+  }
   return c_type_ref_of_sema(ctx, expr->resolved_type);
 }
 

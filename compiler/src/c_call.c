@@ -309,11 +309,15 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     if (inner->kind != AST_EXPR_NONE && !arg_is_opt && !wrapped && !task && !scalar
         && (arg_is_ref || param_type->is_mod || c_is_place(ctx, inner))) return false;
 
-    /* The parameter resolves as REF(OPT(T)): the optional and its payload
-     * are the types under the reference */
+    /* The parameter is an optional reference, OPT(REF(T)): its payload is the T under the
+     * reference (the old REF(OPT(T)) spelling too); the optional of T is named from the ref */
     TypeInfo* opt_info = param_type->resolved_type;
     if (opt_info && opt_info->kind == TYPE_REF) opt_info = opt_info->as.ref.base;
     TypeInfo* payload_info = (opt_info && opt_info->kind == TYPE_OPT) ? opt_info->as.opt.base : NULL;
+    if (payload_info && payload_info->kind == TYPE_REF) {
+        payload_info = payload_info->as.ref.base;
+        opt_info = NULL;
+    }
     AstTypeRef value_type = *param_type;
     value_type.is_view = false; value_type.is_mod = false; value_type.is_opt = false;
     value_type.resolved_type = payload_info;

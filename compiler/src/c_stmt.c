@@ -2128,6 +2128,7 @@ static bool emit_main_loop(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
         ctx->locals[slot] = state;
         ctx->local_types[slot] = ctx->local_types[state_index];
         ctx->local_type_refs[slot] = alias_type;
+        if (ctx->backend_binding_type_count < 8) ctx->backend_binding_types[ctx->backend_binding_type_count++] = alias_type;
         ctx->local_is_ptr[slot] = true;
         ctx->local_is_mod[slot] = true;
         ctx->local_moved[slot] = false;

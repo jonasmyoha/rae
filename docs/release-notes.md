@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.145, 2026-11-28: an optional reference is its own type in sema
+
+- Sema tells an optional reference (`opt view T`) from a reference to an optional (`view T` with T an optional),
+  and the backend takes both from sema. No program's C changed.
+- An `if let` binding is visible in its success branch only; in the `else` branch its name is what it was
+  outside (it was the binding before).
+
 ## 0.4.144, 2026-11-28: the backend reads sema's types
 
 - The C backend takes an expression's type from sema; it works one out itself only for a local's name (its

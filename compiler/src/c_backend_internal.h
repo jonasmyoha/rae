@@ -177,6 +177,11 @@ typedef struct {
   bool lend_group_keeps[16];
   int lend_group_count;
   int defer_emitting;  // how deep in the code of deferred blocks
+  /* the types of bindings the backend makes itself, which keep their own type over sema's (the
+   * state of a mainLoop body is a `mod` alias in its body function, docs/generic-instances-design.md
+   * step 9) */
+  const AstTypeRef* backend_binding_types[8];
+  int backend_binding_type_count;
 } CFuncContext;
 
 // The source file of the code being lowered, for a diagnostic or a runtime

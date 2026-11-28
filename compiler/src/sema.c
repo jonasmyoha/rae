@@ -6445,13 +6445,15 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     for (int i = 0; i < scope->lent_count; i++) scope->lent[i]->lent_line = 0;
                 }
             }
+            /* an `if let` binding is in its success branch only: in the else branch the name is
+             * what it was outside (`if let text: view String = text { } else { text is none }`) */
+            if (if_let_scope) symbol_table_pop_scope(symbols);
             if (stmt->as.if_stmt.else_block) {
                 symbol_table_push_scope(symbols);
                 AstStmt* s = stmt->as.if_stmt.else_block->first;
                 while (s) { sema_analyze_stmt(ctx, module, symbols, s, current_return_type); s = s->next; }
                 symbol_table_pop_scope(symbols);
             }
-            if (if_let_scope) symbol_table_pop_scope(symbols);
             break;
         }
         case AST_STMT_LOOP: {
@@ -6488,6 +6490,11 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                          if (binding_value_type && binding_value_type->kind == TYPE_REF) {
                              binding_value_type = binding_value_type->as.ref.base;
                          }
+                         /* `loop let x: opt view T in` a List(opt T): a view of each element, the
+                          * optional it is */
+                         if (binding_value_type && binding_value_type->kind == TYPE_OPT && binding_value_type->as.opt.base
+                             && binding_value_type->as.opt.base->kind == TYPE_REF)
+                             binding_value_type = type_get_opt(ctx->type_registry, binding_value_type->as.opt.base->as.ref.base);
                          /* an enum's values may be read as Ints */
                          bool int_of_enum = binding_value_type && element_type
                              && binding_value_type->kind == TYPE_INT && element_type->kind == TYPE_INT
@@ -7319,6 +7326,15 @@ static bool sema_is_pending_create(const AstExpr* e) {
 AstTypeRef* sema_type_ref_of(CompilerContext* ctx, TypeInfo* t) {
     /* an optional is written as its payload's type with `opt`: it has no name,
      * and a List(opt Int) given to a `view T` became a List of nothing */
+    /* an optional reference (`opt view T`): T with both marks */
+    if (t->kind == TYPE_OPT && t->as.opt.base && t->as.opt.base->kind == TYPE_REF && t->as.opt.base->as.ref.base) {
+        AstTypeRef* payload = sema_type_ref_of(ctx, t->as.opt.base->as.ref.base);
+        payload->is_opt = true;
+        payload->is_mod = t->as.opt.base->as.ref.is_mod;
+        payload->is_view = !t->as.opt.base->as.ref.is_mod;
+        payload->resolved_type = t;
+        return payload;
+    }
     if (t->kind == TYPE_OPT && t->as.opt.base) {
         AstTypeRef* payload = sema_type_ref_of(ctx, t->as.opt.base);
         payload->is_opt = true;
@@ -7872,8 +7888,16 @@ static bool sema_match_arms_agree(const AstExpr* match) {
     return true;
 }
 
+/* An optional reference (`opt view T`, OPT over REF) where a reference `view T` is wanted: the plain
+ * reference binding takes it as it is (`let x: view T = list.viewAt(...)`, #662) */
+static bool sema_optional_reference_to_reference(const TypeInfo* expected, const TypeInfo* got) {
+    return expected && got && expected->kind == TYPE_REF && got->kind == TYPE_OPT && got->as.opt.base
+        && got->as.opt.base->kind == TYPE_REF && got->as.opt.base->as.ref.base == expected->as.ref.base;
+}
+
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
+    if (sema_optional_reference_to_reference(expected, (*expr_ptr)->resolved_type)) return;
     {
         TypeInfo* target = sema_strip_ref(expected);
         if (target && target->kind == TYPE_FLOAT && sema_is_numeric_literal(*expr_ptr))
@@ -7977,7 +8001,11 @@ static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr*
         AstExpr* unbox = arena_alloc(ctx->ast_arena, sizeof(AstExpr));
         *unbox = (AstExpr){.kind = AST_EXPR_UNBOX, .resolved_type = expected, .line = expr->line, .column = expr->column};
         unbox->as.unary.operand = expr; *expr_ptr = unbox;
-    } else if (expected->kind != TYPE_OPT && expr->resolved_type->kind == TYPE_OPT
+    } else if ((expected->kind != TYPE_OPT
+                || (s_in_if_let_binding && expected->as.opt.base && expected->as.opt.base->kind == TYPE_REF
+                    && expr->resolved_type->kind == TYPE_OPT && expr->resolved_type->as.opt.base
+                    && expr->resolved_type->as.opt.base->kind != TYPE_REF))
+               && expr->resolved_type->kind == TYPE_OPT
                && (s_in_if_let_binding
                    || !(expected->kind == TYPE_REF && expected->as.ref.base
                         && expected->as.ref.base->kind == TYPE_OPT))) {
@@ -11669,6 +11697,15 @@ static TypeInfo* sema_resolve_type_internal(CompilerContext* ctx, AstModule* mod
         }
     }
     if (!base) base = type_get_void(ctx->type_registry);
+    /* an optional reference (`opt view T`, a pointer that may be null) is an optional of a
+     * reference; a reference to an optional (`view T` with T an `opt Int`, is_optional_box) is the
+     * other way round */
+    if (type_ref->is_opt && (type_ref->is_view || type_ref->is_mod) && !type_ref->is_optional_box) {
+        base = type_get_ref(ctx->type_registry, base, type_ref->is_mod);
+        base = type_get_opt(ctx->type_registry, base);
+        sema_register_generic_type(ctx, type_ref);
+        type_ref->resolved_type = base; return base;
+    }
     if (type_ref->is_opt) {
         base = type_get_opt(ctx->type_registry, base);
         /* A struct-rep `opt T` (`let maybe: opt Int = 5`, a List(opt Int)

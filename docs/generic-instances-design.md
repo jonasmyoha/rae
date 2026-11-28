@@ -468,7 +468,17 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    it are renumbered), and `Array.set` of an owning element (`List`, `StringMap`, a struct of them) drops the
    value it overwrites, as the `String` instance already did; before, it leaked it. Left: an expression without a
    type as an internal error, and the expected type choosing instances (the queue lines after this step), and
-   sema's TypeInfo telling an optional reference from a reference to an optional.
+   sema's TypeInfo telling an optional reference from a reference to an optional. Then (0.4.145): sema's TypeInfo of an optional reference
+   (`opt view T`, a pointer that may be null) is OPT over REF, and a reference to an optional (`view T` with T an
+   `opt Int`) stays REF over OPT. What had read the old spelling reads the new one: a plain reference binding
+   still takes an optional reference as it is (`let x: view T = list.viewAt(...)`, #662), a `loop let x: opt view T
+   in` a List(opt T) is a view of each element, an `if let` narrowing of one still unboxes, `sema_type_ref_of`
+   spells it `opt view T`, the backend writes it as a pointer to T (`emit_type_ref_as_c_type`, with `const` for a
+   `view` of an enum or an Any, a pointer for a fixed-width integer) and passes an optional to one by its
+   payload's address. And an `if let` binding is visible in its success branch only: in the else branch the name
+   is what it was outside (it was the narrowed binding there, case 1676). With that, `c_type_from_sema` keeps the
+   backend's type only for a binding the backend makes itself (the state of a `mainLoop` body); a local's name
+   and a type nesting a reference and an optional are sema's. No program's C changed.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.
