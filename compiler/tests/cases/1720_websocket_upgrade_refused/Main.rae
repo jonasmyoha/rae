@@ -1,8 +1,9 @@
 # A WebSocket whose upgrade is refused, or never answered, fails (lib/net/NetworkConnection): two
 # local servers on a spawned worker, one answering the upgrade with an HTTP 404 and a JSON body
 # (no 101), one taking the connection and saying nothing. The client sees `failed` both times
-# (the refusal at once; the silence after the handshake time, 2 s here), so an app's reconnect
-# runs. A connection nobody listens to still waits for the network instead.
+# (the refusal at once, with the server's status line; the silence after the handshake time,
+# 2 s here), so an app's reconnect runs. A connection nobody listens to still waits for the network
+# instead.
 open Channel
 open net/Tcp
 open net/NetworkConnection
@@ -87,7 +88,7 @@ func main() {
     handshakeMs: 2000
   )
   let refusedOutcome: String = outcome(connection: refused, seconds: 6)
-  log("a refused upgrade: {refusedOutcome.startsWith(prefix: "failed: upgrade refused")}")
+  log("a refused upgrade: {refusedOutcome}")
   networkClose(connection: refused)
   var unanswered: NetworkConnection = networkConnectWebSocketWithin(
     url: "ws://127.0.0.1:{portOf(socketId: silent)}/ws"
@@ -102,7 +103,8 @@ func main() {
   log("nobody listening: {outcome(connection: nobody, seconds: 4).startsWith(prefix: "waiting")}")
   networkClose(connection: nobody)
   channelSend(this: stop, value: 1)
-  log("the refusing server answered {server.get()} upgrade(s)")
+  # (once, or twice on Apple, which asks the refusing server again for the status)
+  log("the refusing server answered: {server.get() > 0}")
   freeChannel(this: stop)
   socketClose(socketId: refusing)
   socketClose(socketId: silent)

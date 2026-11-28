@@ -77,6 +77,11 @@ typedef struct RaeNwConnection {
   int failedReported;
   int waiting;
   int timerPending;
+  /* a WebSocket's URL, and whether the second asking of a refused upgrade (rae_nw_ask_refusal)
+   * is still out (it keeps the connection too) */
+  char* url;
+  int tls;
+  int askPending;
 } RaeNwConnection;
 
 static void rae_nw_free_event(RaeNwEvent* event) {
@@ -135,8 +140,9 @@ static void rae_nw_push_data(RaeNwConnection* c, int64_t kind, int64_t code, dis
 /* Free the connection once the framework is finished with it and Rae has let
  * go; runs on the connection's queue */
 static void rae_nw_maybe_free(RaeNwConnection* c) {
-  if (!c->finished || !c->released || c->timerPending) return;
+  if (!c->finished || !c->released || c->timerPending || c->askPending) return;
   nw_release(c->connection);
+  free(c->url);
   RaeNwEvent* event = c->head;
   while (event) {
     RaeNwEvent* next = event->next;
@@ -202,6 +208,112 @@ static void rae_nw_receive(RaeNwConnection* c) {
   if (c->webSocket) rae_nw_receive_message(c); else rae_nw_receive_stream(c);
 }
 
+/* The server refused a WebSocket's upgrade, and Network.framework aborted it without its HTTP
+ * status (no WebSocket metadata exists then). The same upgrade request is sent once more over a
+ * plain TCP (or TLS) connection to the URL and the answer's first line read, so the failure says
+ * what the server said: "upgrade refused: 404 (HTTP/1.1 404 Not Found)", as on Android, where the
+ * handshake is the runtime's own. With no answer in 3 s it says only that it was refused. Runs on
+ * the connection's queue; the connection is kept until it is done (askPending). */
+static void rae_nw_ask_refusal(RaeNwConnection* c) {
+  static const char* plain = "upgrade refused: the server did not accept the WebSocket";
+  nw_endpoint_t endpoint = c->url ? nw_endpoint_create_url(c->url) : NULL;
+  if (!endpoint) {
+    rae_nw_push(c, RAE_NW_FAILED, ECONNABORTED, plain, strlen(plain));
+    return;
+  }
+  /* the request line's target and the Host header, from the URL */
+  const char* afterScheme = strstr(c->url, "://");
+  const char* authority = afterScheme ? afterScheme + 3 : c->url;
+  const char* slash = strchr(authority, '/');
+  size_t authorityLength = slash ? (size_t)(slash - authority) : strlen(authority);
+  char request[2048];
+  snprintf(request, sizeof request,
+           "GET %s HTTP/1.1\r\nHost: %.*s\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+           "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+           slash ? slash : "/", (int)authorityLength, authority);
+  nw_parameters_t parameters = nw_parameters_create_secure_tcp(
+      c->tls ? NW_PARAMETERS_DEFAULT_CONFIGURATION : NW_PARAMETERS_DISABLE_PROTOCOL,
+      NW_PARAMETERS_DEFAULT_CONFIGURATION);
+  nw_connection_t ask = nw_connection_create(endpoint, parameters);
+  nw_release(endpoint);
+  nw_release(parameters);
+  c->askPending = 1;
+  /* the request, held until it is sent (a block cannot hold an array) */
+  __block char* requestText = strdup(request);
+  __block int answered = 0;
+  void (^finish)(const char*, size_t) = ^(const char* line, size_t length) {
+    if (answered) return;
+    answered = 1;
+    char text[400];
+    if (line && length > 0) {
+      /* "HTTP/1.1 404 Not Found": the code is its second word */
+      char status[256];
+      size_t statusLength = length < sizeof status - 1 ? length : sizeof status - 1;
+      memcpy(status, line, statusLength);
+      status[statusLength] = 0;
+      const char* space = strchr(status, ' ');
+      char code[16] = "?";
+      if (space) {
+        size_t codeLength = strcspn(space + 1, " ");
+        if (codeLength > sizeof code - 1) codeLength = sizeof code - 1;
+        memcpy(code, space + 1, codeLength);
+        code[codeLength] = 0;
+      }
+      snprintf(text, sizeof text, "upgrade refused: %s (%s)", code, status);
+    } else {
+      snprintf(text, sizeof text, "%s", plain);
+    }
+    rae_nw_push(c, RAE_NW_FAILED, ECONNABORTED, text, strlen(text));
+    nw_connection_cancel(ask);
+  };
+  nw_connection_set_queue(ask, c->queue);
+  nw_connection_set_state_changed_handler(ask, ^(nw_connection_state_t state, nw_error_t error) {
+    (void)error;
+    if (state == nw_connection_state_ready && requestText) {
+      dispatch_data_t body = dispatch_data_create(requestText, strlen(requestText), c->queue,
+                                                  DISPATCH_DATA_DESTRUCTOR_FREE);
+      requestText = NULL;
+      nw_connection_send(ask, body, NW_CONNECTION_DEFAULT_MESSAGE_CONTEXT, true, ^(nw_error_t sendError) {
+        (void)sendError;
+      });
+      dispatch_release(body);
+      nw_connection_receive(ask, 1, 2048, ^(dispatch_data_t content, nw_content_context_t context, bool complete,
+                                            nw_error_t receiveError) {
+        (void)context; (void)complete; (void)receiveError;
+        __block struct { char text[512]; size_t length; int ended; } first;
+        first.length = 0;
+        first.ended = 0;
+        if (content) {
+          dispatch_data_apply(content, ^bool(dispatch_data_t region, size_t offset, const void* buffer, size_t size) {
+            (void)region; (void)offset;
+            for (size_t i = 0; i < size && first.length < sizeof first.text; i++) {
+              char ch = ((const char*)buffer)[i];
+              if (ch == '\r' || ch == '\n') { first.ended = 1; return false; }
+              first.text[first.length++] = ch;
+            }
+            return true;
+          });
+        }
+        /* a 101 now: the server took the second asking, so there is no status to tell */
+        if (first.length > 11 && memcmp(first.text + 9, "101", 3) == 0) first.length = 0;
+        finish(first.text, first.length);
+      });
+    } else if (state == nw_connection_state_failed || state == nw_connection_state_waiting) {
+      finish(NULL, 0);
+    } else if (state == nw_connection_state_cancelled) {
+      free(requestText);
+      requestText = NULL;
+      nw_release(ask);
+      c->askPending = 0;
+      rae_nw_maybe_free(c);
+    }
+  });
+  nw_connection_start(ask);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), c->queue, ^{
+    finish(NULL, 0);
+  });
+}
+
 /* Open a connection: to `hostZ`:`port` (TCP or TLS), or to the ws:// / wss://
  * `urlZ` (a WebSocket client). `insecure` accepts any server certificate
  * (only for a test against a self-signed server). The handle, or 0. */
@@ -216,6 +328,8 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
 
   int tls = mode == RAE_NW_MODE_TLS
             || (mode == RAE_NW_MODE_WEBSOCKET && strncmp((const char*)urlZ, "wss:", 4) == 0);
+  c->tls = tls;
+  if (c->webSocket) c->url = strdup((const char*)urlZ);
   dispatch_queue_t queue = c->queue;
   nw_parameters_configure_protocol_block_t configureTls = NW_PARAMETERS_DISABLE_PROTOCOL;
   if (tls) {
@@ -248,6 +362,7 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
   }
   if (!endpoint) {
     nw_release(parameters);
+    free(c->url);
     pthread_mutex_destroy(&c->lock);
     pthread_cond_destroy(&c->arrived);
     dispatch_release(c->queue);
@@ -270,14 +385,13 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
       case nw_connection_state_waiting:
         /* A WebSocket whose upgrade the server refused (an HTTP answer that is not 101): the
          * framework aborts the connection and waits to try again, for ever. It is a failure,
-         * whose status the framework does not tell. */
+         * whose status the framework does not tell, so the server is asked once more for it. */
         if (c->webSocket && !c->wasReady && !c->failedReported && error
             && nw_error_get_error_domain(error) == nw_error_domain_posix
             && nw_error_get_error_code(error) == ECONNABORTED) {
-          const char* text = "upgrade refused: the server did not accept the WebSocket";
           c->failedReported = 1;
-          rae_nw_push(c, RAE_NW_FAILED, ECONNABORTED, text, strlen(text));
           nw_connection_cancel(c->connection);
+          rae_nw_ask_refusal(c);
           break;
         }
         c->waiting = 1;

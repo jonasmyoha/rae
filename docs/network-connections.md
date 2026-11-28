@@ -32,9 +32,12 @@ Events (`NetworkEvent { kind, code, bytes, text }`):
 - `closed`: the server closed (a WebSocket: `code` its close code).
 - `failed`: over; `text` why. A WebSocket whose server refuses the upgrade (an
   HTTP answer that is not 101, such as `404 {"error":"account_not_found"}`)
-  fails at once: `upgrade refused: 404 (HTTP/1.1 404 Not Found)` on Android,
-  `upgrade refused: the server did not accept the WebSocket` on Apple
-  (Network.framework aborts it without telling the status). One whose server
+  fails at once: `upgrade refused: 404 (HTTP/1.1 404 Not Found)`. On Android the
+  handshake is the runtime's own; on Apple Network.framework aborts it without
+  telling the status, so the runtime sends the same upgrade request once more
+  over a plain TCP (or TLS) connection and reads the answer's first line (the
+  server sees the refused request twice). With no answer to that in 3 s the
+  text is `upgrade refused: the server did not accept the WebSocket`. One whose server
   takes the connection and never answers the upgrade fails after 15 s,
   `no answer to the WebSocket upgrade in 15 s`. Either way an app that
   reconnects on `failed` or `closed` does.
@@ -100,9 +103,9 @@ answers 200.
 
 Case 1720 has two local servers on a worker thread, one answering the upgrade
 with a 404 and one silent: the client fails at once and after its 2 s
-handshake time, and a port nobody listens to still waits. It passes on this
-Mac and on an Android 15 emulator (where the text was `upgrade refused: 404
-(HTTP/1.1 404 Not Found)`).
+handshake time, and a port nobody listens to still waits. The refusal's text,
+`upgrade refused: 404 (HTTP/1.1 404 Not Found)`, is the same on this Mac and on
+an Android 15 emulator.
 
 Case 1290 also runs on an Android emulator, with the same expected output:
 `sh tools/android/gen-android.sh compiler/tests/cases/1290_network_connection`,

@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.163, 2026-11-28: a refused WebSocket upgrade's status on Apple too
+
+- On Apple a WebSocket whose upgrade the server refuses now fails with its status, as on Android:
+  "upgrade refused: 404 (HTTP/1.1 404 Not Found)". Network.framework does not tell it, so the
+  runtime asks the server once more over a plain connection and reads the answer's first line
+  (docs/network-connections.md). Case 1720 prints the same text on both.
+
 ## 0.4.162, 2026-11-28: a refused or unanswered WebSocket upgrade fails
 
 - `networkConnectWebSocket` to a server that answers the upgrade with an HTTP error (no 101)
