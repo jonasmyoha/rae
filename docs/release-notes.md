@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.141, 2026-11-28: the backend reads sema's type where it had none
+
+- A unary expression, a box, an `own` and a `Float64` binary have sema's type in the backend: `log(x++)` prints
+  through the typed path instead of an Any, and a function of numbers no longer marks the string pool.
+- In an `if let x: view T = ...` presence test, `x` is still the optional (it was typed as the narrowed `view T`).
+
 ## 0.4.140, 2026-11-28: integer widths and typed consts
 
 - An integer expression of another width than `Int` (`UInt64` flags, a `UInt64` hash) keeps its width in the C:

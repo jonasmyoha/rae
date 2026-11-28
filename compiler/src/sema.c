@@ -6226,6 +6226,8 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
              * is gone after it and a later `if let` may use it again
              * (sema_check_rebinding) */
             bool if_let_scope = stmt->as.if_stmt.binding != NULL;
+            /* the reference binding's optional type: in the presence test it is still the optional */
+            TypeInfo* if_let_optional_type = NULL;
             if (if_let_scope) symbol_table_push_scope(symbols);
             if (stmt->as.if_stmt.binding) {
                 // The binding is introduced before the condition, and its name
@@ -6256,6 +6258,7 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                     Symbol* narrowed_symbol = symbol_table_lookup(
                         symbols, b->as.let_stmt.name);
                     if (narrowed_symbol) {
+                        if_let_optional_type = narrowed_symbol->type;
                         narrowed_symbol->type = sema_resolve_type_internal(
                             ctx, module, symbols, narrowed);
                     }
@@ -6395,6 +6398,14 @@ static void sema_analyze_stmt(CompilerContext* ctx, AstModule* module, SymbolTab
                 }
             }
             if (stmt->as.if_stmt.condition) sema_analyze_expr(ctx, module, symbols, stmt->as.if_stmt.condition, true);
+            /* `name is not none`, made by the parser: its name is the optional reference, not yet
+             * narrowed */
+            if (if_let_optional_type && stmt->as.if_stmt.condition
+                && stmt->as.if_stmt.condition->kind == AST_EXPR_BINARY
+                && stmt->as.if_stmt.condition->as.binary.lhs
+                && stmt->as.if_stmt.condition->as.binary.lhs->kind == AST_EXPR_IDENT
+                && str_eq(stmt->as.if_stmt.condition->as.binary.lhs->as.ident, stmt->as.if_stmt.binding->as.let_stmt.name))
+                stmt->as.if_stmt.condition->as.binary.lhs->resolved_type = if_let_optional_type;
             // #960: a condition that folded to `<literal> is <literal>` (a
             // `typeName(x) is "Int"` guard in a specialization) is decided
             // here, BEFORE the arms are analyzed: only the taken arm is

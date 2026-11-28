@@ -429,7 +429,15 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    const where it is read. The C of 233 + 61 programs changed, each line by one of those rules (a float literal
    beside `toFloat(<const>)` is f32, an `Int` expression of consts is overflow-checked, a function that holds no
    String loses its string-pool mark). check-types.sh: binaries differ 1 (was 12 135), names with a type only in
-   the backend 127 (was 1.06 million).
+   the backend 127 (was 1.06 million). Then (0.4.141): where the backend worked out no type and sema
+   has one, `infer_expr_type_ref` answers sema's (`c_sema_type_of`) for a unary expression, a box, an `own` and a
+   binary (`Float64`), but not for `view x` / `mod x` (the place itself, passed by address: typed, an argument
+   lost its `&`) nor for an index of a `Buffer` (a write into its slot is raw; typed, it dropped the slot's old
+   value first). And sema types the binding's name in an `if let` presence test as the optional it still is
+   (it said the narrowed `view T`, the backend `opt view T`). The C of 106 and 121 is unchanged; 44 programs'
+   C changed, each by a function or statement losing a string-pool mark it never needed, or `log(x++)` taking
+   the typed path instead of an Any; 136's one change is the first kind. check-types.sh: 239.8 million agree,
+   1 730 differ (was 30 221), 118 853 only in sema (was 690 869), 5 535 only in the backend.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

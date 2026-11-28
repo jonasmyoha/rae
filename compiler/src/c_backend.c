@@ -1841,6 +1841,32 @@ static _Thread_local struct { const AstExpr* expr; const AstTypeRef* type; } s_i
 static _Thread_local int s_infer_call_count = 0;
 static _Thread_local int s_infer_depth = 0;
 
+/* The type sema gave `expr`, for the kinds the backend works out nothing for itself (a unary
+ * expression, a box, an `own`, a Float64 binary): a reference is its base with its `view` / `mod`
+ * mark. NULL for none. Not an index of a Buffer: a write into its slot is a raw write, which a
+ * typed target would drop first. */
+static const AstTypeRef* c_sema_type_of(CFuncContext* ctx, const AstExpr* expr) {
+  switch (expr->kind) {
+    /* `view x` / `mod x` is the place itself, passed by address where it is an argument */
+    case AST_EXPR_UNARY:
+      if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) return NULL;
+      break;
+    case AST_EXPR_BOX:
+    case AST_EXPR_OWN:
+    case AST_EXPR_BINARY: break;
+    default: return NULL;
+  }
+  const TypeInfo* type = expr->resolved_type;
+  bool view = false, mod = false;
+  if (type && type->kind == TYPE_REF) { mod = type->as.ref.is_mod; view = !mod; type = type->as.ref.base; }
+  if (!type || type->kind == TYPE_UNKNOWN || type->kind == TYPE_GENERIC_PARAM || type->kind == TYPE_VOID) return NULL;
+  AstTypeRef* result = sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)type);
+  if (!result) return NULL;
+  result->is_view = result->is_view || view;
+  result->is_mod = result->is_mod || mod;
+  return result;
+}
+
 /* RAE_CHECK_TYPES=1: each answer of infer_expr_type_ref compared with the type sema gave the
  * expression (docs/generic-instances-design.md step 9), counted per expression kind and printed at
  * exit; RAE_CHECK_TYPES_SAMPLES=<file> appends each disagreement with its place.
@@ -1895,14 +1921,19 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
       : !backend ? CHECK_ONLY_SEMA
       : strcmp(backend_name, sema_name) == 0 ? CHECK_AGREE : CHECK_DIFFER;
   s_check_counts[kind][verdict]++;
-  if (verdict != CHECK_AGREE && s_check_samples)
-    fprintf(s_check_samples, "kind=%d verdict=%d backend=%s sema=%s function=%.*s at %s:%zu\n", kind, verdict,
-            backend_name, sema_name, ctx->func_decl ? (int)ctx->func_decl->name.len : 0,
-            ctx->func_decl ? ctx->func_decl->name.data : "", file, (size_t)expr->line);
+  if (verdict != CHECK_AGREE && s_check_samples) {
+    Str name = expr->kind == AST_EXPR_IDENT ? expr->as.ident
+        : expr->kind == AST_EXPR_MEMBER ? expr->as.member.member : (Str){ "", 0 };
+    fprintf(s_check_samples, "kind=%d verdict=%d backend=%s sema=%s name=%.*s function=%.*s at %s:%zu\n", kind,
+            verdict, backend_name, sema_name, (int)name.len, name.data,
+            ctx->func_decl ? (int)ctx->func_decl->name.len : 0, ctx->func_decl ? ctx->func_decl->name.data : "",
+            file, (size_t)expr->line);
+  }
 }
 
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
     const AstTypeRef* type = infer_expr_type_ref_checked(ctx, expr);
+    if (!type && expr) type = c_sema_type_of(ctx, expr);
     if (expr) check_type_answer(ctx, expr, type);
     return type;
 }
