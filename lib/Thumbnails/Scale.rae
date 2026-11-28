@@ -1,33 +1,5 @@
-# A picture made small by averaging: each new pixel is the mean of those it covers, each weighed by
-# its alpha, so that what is clear does not color the edge.
-
-# The size of a picture of `width` x `height` whose longer side is at most `longest` (never larger
-# than it is)
-type PictureSize {
-  width: Int
-  height: Int
-}
-
-func fittedSize(width: view Int, height: view Int, longest: view Int) ret PictureSize {
-  var side: Int = width
-  if height > side {
-    side = height
-  }
-  if side <= longest or side <= 0 {
-    ret PictureSize { width: width, height: height }
-  }
-  var fitted: PictureSize = {
-    width: (width * longest + side / 2) / side
-    height: (height * longest + side / 2) / side
-  }
-  if fitted.width < 1 {
-    fitted.width = 1
-  }
-  if fitted.height < 1 {
-    fitted.height = 1
-  }
-  ret fitted
-}
+# A picture made small for a thumbnail (lib/ImageScale does the averaging)
+open ImageScale
 
 # `rgba` (straight alpha, width x height) made to fit `longest`
 func scaledDown(
@@ -36,51 +8,11 @@ func scaledDown(
   height: view Int
   longest: view Int
 ) ret ThumbnailPixels {
-  let size: PictureSize = fittedSize(width: width, height: height, longest: longest)
-  var bytes: List(UInt8) = List.create(UInt8, cap: size.width * size.height * 4)
-  loop var y: Int = 0, y < size.height, ++y {
-    let top: Int = y * height / size.height
-    var bottom: Int = (y + 1) * height / size.height
-    if bottom <= top {
-      bottom = top + 1
-    }
-    loop var x: Int = 0, x < size.width, ++x {
-      let left: Int = x * width / size.width
-      var right: Int = (x + 1) * width / size.width
-      if right <= left {
-        right = left + 1
-      }
-      var red: Int = 0
-      var green: Int = 0
-      var blue: Int = 0
-      var alpha: Int = 0
-      unsafe {
-        loop var row: Int = top, row < bottom, ++row {
-          var at: Int = (row * width + left) * 4
-          loop var column: Int = left, column < right, ++column {
-            let r: UInt8 = rae_ext_rae_buf_get(UInt8, buf: rgba, index: at)
-            let g: UInt8 = rae_ext_rae_buf_get(UInt8, buf: rgba, index: at + 1)
-            let b: UInt8 = rae_ext_rae_buf_get(UInt8, buf: rgba, index: at + 2)
-            let a: UInt8 = rae_ext_rae_buf_get(UInt8, buf: rgba, index: at + 3)
-            let weight: Int = a as Int
-            red = red + (r as Int) * weight
-            green = green + (g as Int) * weight
-            blue = blue + (b as Int) * weight
-            alpha = alpha + weight
-            at = at + 4
-          }
-        }
-      }
-      var divisor: Int = alpha
-      if divisor is 0 {
-        divisor = 1
-      }
-      let covered: Int = (bottom - top) * (right - left)
-      bytes.add(value: ((red + divisor / 2) / divisor) as UInt8)
-      bytes.add(value: ((green + divisor / 2) / divisor) as UInt8)
-      bytes.add(value: ((blue + divisor / 2) / divisor) as UInt8)
-      bytes.add(value: ((alpha + covered / 2) / covered) as UInt8)
-    }
-  }
-  ret ThumbnailPixels { width: size.width, height: size.height, bytes: own bytes }
+  var scaled: ScaledPixels = scaledDownPixels(
+    rgba: rgba
+    width: width
+    height: height
+    longest: longest
+  )
+  ret ThumbnailPixels { width: scaled.width, height: scaled.height, bytes: own scaled.bytes }
 }

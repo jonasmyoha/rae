@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.152, 2026-11-28: an image size cap and a render scale cap for the 2D canvas
+
+- `Gpu2d.setImageSizeCap(canvas:, threshold:, target:)`: an image file whose longer side is at least
+  `threshold` pixels is uploaded with that side `target` (the aspect kept), for a scene's images and
+  `loadImageKey` alike; draws keep their size. A 2048 px image under a 1024 cap takes a quarter of the GPU
+  memory. `Gpu2d.imageKeyWidth` / `imageKeyHeight` give the uploaded size.
+- `Gpu2d.setRenderScaleCap(cap:)`: the window is drawn at most `cap` pixels a point and shown scaled up
+  (Mac, iOS, desktop; not Android yet); changeable while it runs. docs/gpu2d-quality.md has the costs.
+- `lib/ImageScale` holds the averaging resize the thumbnails used (`fittedSize`, `scaledDownPixels`).
+
 ## 0.4.151, 2026-11-28: ValueSlider steps, a thumb and a finger's press
 
 - `ValueSlider` has `steps` (a drag lands on min + k (max - min) / steps, and the fill shows the snapped value) and

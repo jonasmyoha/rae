@@ -1,0 +1,90 @@
+# The 2D canvas's image size cap without a GPU (lib/Gpu2dCanvasImage, lib/ImageScale): a canvas
+# capped at 1536 -> 1024 takes a 2048 x 1024 image down and leaves a 1000 x 500 or a 1535 px one as
+# it is; a 2048 x 1024 picture, its left half red and its right half blue, made small is 1024 x
+# 512 with the same halves (each pixel the mean of the 2 x 2 it covers). The GPU path (the texture
+# and its draw) is checks/gpu2dQuality.
+import Math
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open ImageScale
+
+func main() {
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  log(
+    "no cap: 2048 x 1024 taken down {canvasImageCapped(canvas: canvas, width: 2048, height: 1024)}"
+  )
+  canvasSetImageSizeCap(canvas: canvas, threshold: 1536, target: 1024)
+  log(
+    "capped 1536 -> 1024: 2048 x 1024 {canvasImageCapped(canvas: canvas, width: 2048, height: 1024)}, 1024 x 2048 {canvasImageCapped(
+      canvas: canvas
+      width: 1024
+      height: 2048
+    )}, 1000 x 500 {canvasImageCapped(canvas: canvas, width: 1000, height: 500)}, 1535 x 1535 {canvasImageCapped(
+      canvas: canvas
+      width: 1535
+      height: 1535
+    )}"
+  )
+  let fitted: PictureSize = fittedSize(width: 2048, height: 1024, longest: 1024)
+  let tall: PictureSize = fittedSize(width: 1536, height: 2048, longest: 1024)
+  log(
+    "sizes: 2048 x 1024 -> {fitted.width} x {fitted.height}, 1536 x 2048 -> {tall.width} x {tall.height}"
+  )
+  let width: Int = 2048
+  let height: Int = 1024
+  unsafe {
+    let raw: Ptr = rae_ext_rae_buf_alloc(size: width * height * 4, elemSize: 1)
+    let rgba: Buffer(UInt8) = raw as Buffer(UInt8)
+    loop var y: Int = 0, y < height, ++y {
+      loop var x: Int = 0, x < width, ++x {
+        let at: Int = (y * width + x) * 4
+        var red: UInt8 = 255
+        var blue: UInt8 = 0
+        if x >= width / 2 {
+          red = 0
+          blue = 255
+        }
+        rae_ext_rae_buf_set(
+          UInt8
+          buf: rgba
+          index: at
+          value: red
+        )
+        rae_ext_rae_buf_set(
+          UInt8
+          buf: rgba
+          index: at + 1
+          value: 0
+        )
+        rae_ext_rae_buf_set(
+          UInt8
+          buf: rgba
+          index: at + 2
+          value: blue
+        )
+        rae_ext_rae_buf_set(
+          UInt8
+          buf: rgba
+          index: at + 3
+          value: 255
+        )
+      }
+    }
+    let small: ScaledPixels = scaledDownPixels(
+      rgba: rgba
+      width: width
+      height: height
+      longest: 1024
+    )
+    let left: Int = small.bytes.copyAtDefault(index: (100 * small.width + 10) * 4) as Int
+    let right: Int = small.bytes.copyAtDefault(
+      index: (100 * small.width + small.width - 10) * 4 + 2
+    ) as Int
+    let lastLeft: Int = small.bytes.copyAtDefault(index: (100 * small.width + 511) * 4) as Int
+    let firstRight: Int = small.bytes.copyAtDefault(index: (100 * small.width + 512) * 4 + 2) as Int
+    log(
+      "made small: {small.width} x {small.height}, {small.bytes.length} bytes (a quarter of {width * height * 4}); left red {left}, right blue {right}, the halves meet at 511 | 512: red {lastLeft}, blue {firstRight}"
+    )
+    rae_ext_rae_buf_free(buf: raw)
+  }
+}

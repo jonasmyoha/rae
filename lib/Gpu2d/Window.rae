@@ -267,7 +267,28 @@ func designHeight() ret Float {
   }
 }
 
-# Device pixel ratio: physical pixels per logical point (2.0 on retina).
+# The render scale cap (docs/gpu2d-quality.md): the window is drawn at most `cap` pixels a point
+# and shown scaled up by the system, the fill-rate lever of a graphics tier (2 on a high tier,
+# 1.5 on a lower one; 0: the display's own ratio). Set it before initWindow; set later, the
+# surface is made again at once and windowResized() says so. dpr() is the capped ratio. Not
+# applied on Android yet (its ratio is the display density).
+func nativeSetRenderScaleCap(cap: Float) mainThread unsafe extern("rae_ext_Gpu2d_setRenderScaleCap")
+
+func setRenderScaleCap(cap: copy Float) {
+  unsafe {
+    nativeSetRenderScaleCap(cap: cap)
+  }
+}
+
+func nativeRenderScaleCap() unsafe extern("rae_ext_Gpu2d_renderScaleCap") ret Float
+
+func renderScaleCap() ret Float {
+  unsafe {
+    ret nativeRenderScaleCap()
+  }
+}
+
+# Device pixel ratio: physical pixels per logical point (2.0 on retina), under the render scale cap.
 func nativeDpr() mainThread unsafe extern("rae_ext_Gpu2d_dpr") ret Float
 
 func dpr() ret Float {

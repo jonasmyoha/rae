@@ -1,0 +1,164 @@
+# Hardware check for the 2D canvas's quality levers (docs/gpu2d-quality.md): the image size cap
+# and the render scale cap. A 2048 x 1024 PNG loaded under a 1536 -> 1024 cap is a 1024 x 512
+# texture, and a 1000 x 500 one keeps its size; both are drawn at the size the draw asks for. The
+# window made under a render scale cap of 1 draws one pixel a point (dpr 1); with the cap lifted
+# while it runs, the surface is made again (windowResized) at the display's own ratio. Exit code
+# 0 = passed.
+import Gpu2d
+import Image
+import Sys
+open Gpu2dCanvas
+
+const bigWidth: Int = 2048
+
+const bigHeight: Int = 1024
+
+const smallWidth: Int = 1000
+
+const smallHeight: Int = 500
+
+# A width x height PNG at `path`, its left half red and its right half blue
+func writeTestPng(path: view String, width: view Int, height: view Int) ret Bool {
+  unsafe {
+    let pixels: Buffer(Int) = rae_ext_rae_buf_alloc(size: width * height, elemSize: sizeof(Int))
+    loop var y: Int = 0, y < height, ++y {
+      loop var x: Int = 0, x < width, ++x {
+        var color: Int = 0xFF0000FF
+        if x >= width / 2 {
+          color = 0xFFFF0000
+        }
+        rae_ext_rae_buf_set(
+          Int
+          buf: pixels
+          index: y * width + x
+          value: color
+        )
+      }
+    }
+    let saved: Bool = Image.savePng(
+      path: path
+      pixels: pixels
+      width: width
+      height: height
+    )
+    rae_ext_rae_buf_free(buf: pixels)
+    ret saved
+  }
+}
+
+func expect(failures: mod Int, label: view String, ok: view Bool) {
+  if ok {
+    log("ok: {label}")
+  } else {
+    log("FAIL: {label}")
+    failures = failures + 1
+  }
+}
+
+func frames(canvas: mod Gpu2dCanvas, count: view Int) {
+  var drawn: Int = 0
+  loop not Gpu2d.pollClose() and drawn < count {
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    Gpu2d.drawImageKey(
+      canvas: canvas
+      key: "big"
+      x: 20.0
+      y: 20.0
+      w: 400.0
+      h: 200.0
+      radius: 0.0
+      tint: 0xFFFFFFFF
+    )
+    Gpu2d.drawImageKey(
+      canvas: canvas
+      key: "small"
+      x: 20.0
+      y: 240.0
+      w: 200.0
+      h: 100.0
+      radius: 0.0
+      tint: 0xFFFFFFFF
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    drawn = drawn + 1
+  }
+}
+
+func main() ret Int {
+  var failures: Int = 0
+  var folder: String = Sys.getEnv(name: "TMPDIR")
+  if folder.length() is 0 {
+    folder = "/tmp"
+  }
+  let bigPath: String = "{folder}/rae-quality-big.png"
+  let smallPath: String = "{folder}/rae-quality-small.png"
+  expect(
+    failures: failures
+    label: "test images written"
+    ok: writeTestPng(path: bigPath, width: bigWidth, height: bigHeight) and writeTestPng(
+      path: smallPath
+      width: smallWidth
+      height: smallHeight
+    )
+  )
+  # the levers a graphics tier sets at boot: drawn at one pixel a point, images capped at 1024
+  Gpu2d.setRenderScaleCap(cap: 1.0)
+  Gpu2d.initWindow(width: 640, height: 400, title: "2D quality levers check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  Gpu2d.setImageSizeCap(canvas: canvas, threshold: 1536, target: 1024)
+  let big: Int = Gpu2d.loadImageKey(canvas: canvas, key: "big", path: bigPath)
+  let small: Int = Gpu2d.loadImageKey(canvas: canvas, key: "small", path: smallPath)
+  expect(failures: failures, label: "both images load", ok: big > 0 and small > 0)
+  let bigW: Int = Gpu2d.imageKeyWidth(canvas: canvas, key: "big")
+  let bigH: Int = Gpu2d.imageKeyHeight(canvas: canvas, key: "big")
+  expect(
+    failures: failures
+    label: "the 2048 x 1024 image is a {bigW} x {bigH} texture (1024 x 512)"
+    ok: bigW is 1024 and bigH is 512
+  )
+  let smallW: Int = Gpu2d.imageKeyWidth(canvas: canvas, key: "small")
+  let smallH: Int = Gpu2d.imageKeyHeight(canvas: canvas, key: "small")
+  expect(
+    failures: failures
+    label: "the 1000 x 500 image keeps its size ({smallW} x {smallH})"
+    ok: smallW is 1000 and smallH is 500
+  )
+  frames(canvas: canvas, count: 3)
+  let capped: Float = Gpu2d.dpr()
+  expect(
+    failures: failures
+    label: "under a render scale cap of 1 the ratio is {capped}"
+    ok: capped <= 1.001
+  )
+  # the cap lifted while it runs: the display's own ratio again
+  let resizedBefore: Bool = Gpu2d.windowResized()
+  Gpu2d.setRenderScaleCap(cap: 0.0)
+  let resized: Bool = Gpu2d.windowResized()
+  frames(canvas: canvas, count: 3)
+  let native: Float = Gpu2d.dpr()
+  if native > 1.001 {
+    expect(
+      failures: failures
+      label: "lifted, the ratio is the display's {native} and the window was resized"
+      ok: resized
+    )
+  } else {
+    log(
+      "ok: the display has one pixel a point, so lifting the cap changes nothing (ratio {native})"
+    )
+  }
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  if failures > 0 {
+    log("{failures} failed")
+    ret 1
+  }
+  log("passed")
+  ret 0
+}

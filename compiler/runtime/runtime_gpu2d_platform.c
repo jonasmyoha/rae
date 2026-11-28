@@ -134,6 +134,24 @@ static float  g_g2d_sim_pointer_ny = 0.0f;
  * runs one frame of it. A frame run from here pumps no events: its
  * waitEvents and pollClose return at once. */
 static void rae_g2d_configure(int pw, int ph);
+/* The render scale cap (rae_ext_Gpu2d_setRenderScaleCap, docs/gpu2d-quality.md): the window is
+ * drawn at most this many pixels a point and shown scaled up by the compositor (0: the display's
+ * own ratio). Platform reason: the drawable's size is the surface configuration, which is C. */
+static float g_g2d_render_scale_cap = 0.0f;
+/* The window's pixels, `*pw` x `*ph`, as the surface draws them under the cap. Android's window
+ * units are pixels (its ratio is the display density), so the cap is not applied there yet. */
+static void rae_g2d_cap_pixels(int* pw, int* ph) {
+#ifndef __ANDROID__
+    if (g_g2d_render_scale_cap <= 0.0f || !g_sdl_win) return;
+    int lw = 0, lh = 0;
+    SDL_GetWindowSize(g_sdl_win, &lw, &lh);
+    if (lw <= 0 || lh <= 0 || (float)*pw <= (float)lw * g_g2d_render_scale_cap) return;
+    *pw = (int)((float)lw * g_g2d_render_scale_cap + 0.5f);
+    *ph = (int)((float)lh * g_g2d_render_scale_cap + 0.5f);
+#else
+    (void)pw; (void)ph;
+#endif
+}
 /* macOS: the surface's own CAMetalLayer inside SDL's view layer
  * (rae_presentation_layer), NULL when it presents into SDL's layer */
 static void* g_g2d_presentation_layer = NULL;
@@ -144,6 +162,7 @@ static bool SDLCALL rae_g2d_live_resize_watch(void* userdata, SDL_Event* e) {
     if (e->type != SDL_EVENT_WINDOW_EXPOSED || e->window.data1 != 1 || !g_sdl_win) return true;
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    rae_g2d_cap_pixels(&pw, &ph);
     if (pw != g_sdl_w || ph != g_sdl_h) {
         rae_g2d_configure(pw, ph);
         g_g2d_win_resized = 1;
@@ -461,6 +480,7 @@ void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
     wgpuSurfaceCapabilitiesFreeMembers(caps);
     int pw = (int)width, ph = (int)height;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    rae_g2d_cap_pixels(&pw, &ph);
     rae_g2d_configure(pw, ph);
 #ifndef __EMSCRIPTEN__
     SDL_AddEventWatch(rae_g2d_live_resize_watch, NULL);
@@ -616,6 +636,7 @@ rae_Bool rae_ext_Gpu2d_pollClose(void) {
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             case SDL_EVENT_WINDOW_RESIZED: {
                 int pw = 0, ph = 0; SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+                rae_g2d_cap_pixels(&pw, &ph);
                 rae_g2d_configure(pw, ph);
                 g_g2d_win_resized = 1;   /* consumed once by gpu2d.windowResized() */
                 break;
@@ -1317,6 +1338,22 @@ void rae_ext_Gpu2d_setDesignResolution(float w, float h, int64_t fit){
 }
 float rae_ext_Gpu2d_designWidth(void){ return (g_g2d_design_w > 0.0) ? g_g2d_design_w : (double)g_sdl_w; }
 float rae_ext_Gpu2d_designHeight(void){ return (g_g2d_design_h > 0.0) ? g_g2d_design_h : (double)g_sdl_h; }
+/* Set the render scale cap (0: none). Before the window, it is the size the surface is first
+ * made; after, the surface is made again at once and the app sees windowResized(). */
+void rae_ext_Gpu2d_setRenderScaleCap(float cap){
+    g_g2d_render_scale_cap = cap > 0.0f ? cap : 0.0f;
+    if (!g_sdl_win || !g_g2d_surface) return;
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    rae_g2d_cap_pixels(&pw, &ph);
+    if (pw != g_sdl_w || ph != g_sdl_h) {
+        rae_g2d_configure(pw, ph);
+        g_g2d_win_resized = 1;
+    }
+}
+
+float rae_ext_Gpu2d_renderScaleCap(void){ return g_g2d_render_scale_cap; }
+
 float rae_ext_Gpu2d_dpr(void){
 #ifdef __ANDROID__
     /* SDL's window units are physical pixels on Android, so the ratio below is

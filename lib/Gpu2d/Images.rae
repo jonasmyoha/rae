@@ -34,6 +34,23 @@ func decodeImageProbe(path: copy String) ret Int {
   }
 }
 
+# The image size cap (docs/gpu2d-quality.md): an image file whose longer side is at least
+# `threshold` pixels is uploaded with that side `target` (the aspect kept); 0 turns it off. Set it
+# once before the first load (a scene mount's images and loadImageKey alike); a sprite is still as
+# large as its node.
+func setImageSizeCap(canvas: mod Gpu2dCanvas, threshold: copy Int, target: copy Int) {
+  canvasSetImageSizeCap(canvas: canvas, threshold: threshold, target: target)
+}
+
+# The size of the texture under `key` as it was uploaded (0 x 0 for no image)
+func imageKeyWidth(canvas: view Gpu2dCanvas, key: view String) ret Int {
+  ret canvasImageKeyWidth(canvas: canvas, key: key)
+}
+
+func imageKeyHeight(canvas: view Gpu2dCanvas, key: view String) ret Int {
+  ret canvasImageKeyHeight(canvas: canvas, key: key)
+}
+
 # Decode+upload `path` and register it under `key` (returns the handle, 0 on
 # failure). Lets a renderer resolve a Sprite.textureKey to an image without a
 # Rae-side map. drawImageKey draws a registered key; hasImageKey tests one.

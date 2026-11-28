@@ -76,6 +76,8 @@ void rae_ext_Gpu2d_setDesignResolution(float w, float h, int64_t fit){ (void)w; 
 float rae_ext_Gpu2d_designWidth(void){ return 0.0; }
 float rae_ext_Gpu2d_designHeight(void){ return 0.0; }
 float rae_ext_Gpu2d_dpr(void){ return 1.0; }
+void rae_ext_Gpu2d_setRenderScaleCap(float cap){ (void)cap; }
+float rae_ext_Gpu2d_renderScaleCap(void){ return 0.0f; }
 /* Frame lifecycle moved to Rae (#504); these back it, no-op without a GPU. */
 void rae_g2d_frame_reset(void) {}
 void rae_g2d_present(void* texture, int64_t width, int64_t height) { (void)texture; (void)width; (void)height; }
