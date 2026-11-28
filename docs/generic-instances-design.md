@@ -458,7 +458,17 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    spelling (`(rae_Mod_String){ .ptr = &((*text.ptr)) }` for `text`, `lib` for `&(*lib)`), the C of the call
    without the mark. check-types.sh: 74 differ (the `mainLoop` body function), 596 only in the backend (the nodes
    of a `query(...)` loop the backend builds; calls of a non-extern generic with a written type argument,
-   `processReverb`'s Float4, `widthOfNames`), 45 only in sema (method calls).
+   `processReverb`'s Float4, `widthOfNames`), 45 only in sema (method calls). Then (0.4.144): `infer_expr_type_ref` answers sema's type
+   first (`c_type_from_sema`), and works one out itself only where sema's says less than it knows: a local's name
+   is its declared type (sema's TypeInfo of an `opt view T` local can be `opt T`; the state of a `mainLoop` body
+   is the backend's own `mod` alias), and a type that nests a reference and an optional is the backend's (sema has
+   one TypeInfo for `opt view T` and for `view T` with T an optional, a reference to an optional). Measured kind
+   by kind first: sema's type for any one kind left the C of 106/121/136 as it was. Over every program 8 C files
+   changed: a statement or function that holds no String loses its string-pool mark (and the temporaries after
+   it are renumbered), and `Array.set` of an owning element (`List`, `StringMap`, a struct of them) drops the
+   value it overwrites, as the `String` instance already did; before, it leaked it. Left: an expression without a
+   type as an internal error, and the expected type choosing instances (the queue lines after this step), and
+   sema's TypeInfo telling an optional reference from a reference to an optional.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

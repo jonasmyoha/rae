@@ -1943,10 +1943,48 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
   }
 }
 
+/* sema's type of an expression in the backend's form: a reference (`view T` / `mod T`) is T with
+ * its mark; a reference to an optional (`value: view T` with T an `opt Int`) is read through, as
+ * the optional it holds (`opt Int`, its C `(*value)`); an optional reference (`opt view T`) is T
+ * with both marks. NULL for none. */
+static const AstTypeRef* c_type_ref_of_sema(CFuncContext* ctx, const TypeInfo* type) {
+  bool view = false, mod = false, opt = false;
+  if (type && type->kind == TYPE_REF) {
+    mod = type->as.ref.is_mod; view = !mod; type = type->as.ref.base;
+    if (type && type->kind == TYPE_OPT) { view = mod = false; }
+  } else if (type && type->kind == TYPE_OPT && type->as.opt.base && type->as.opt.base->kind == TYPE_REF) {
+    mod = type->as.opt.base->as.ref.is_mod; view = !mod; opt = true; type = type->as.opt.base->as.ref.base;
+  }
+  if (!type || type->kind == TYPE_UNKNOWN || type->kind == TYPE_GENERIC_PARAM || type->kind == TYPE_VOID) return NULL;
+  AstTypeRef* result = sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)type);
+  if (!result) return NULL;
+  result->is_view = result->is_view || view;
+  result->is_mod = result->is_mod || mod;
+  result->is_opt = result->is_opt || opt;
+  return result;
+}
+
+/* The type of `expr` is sema's (docs/generic-instances-design.md step 9), but where sema's TypeInfo
+ * says less than the backend knows. NULL then, and the backend works it out (infer_expr_type_ref_checked). */
+static const AstTypeRef* c_type_from_sema(CFuncContext* ctx, const AstExpr* expr) {
+  /* a local's name is its declared type (sema's TypeInfo of an `opt view T` local can be `opt T`),
+   * and the bindings the backend makes itself have theirs */
+  if (expr->kind == AST_EXPR_IDENT && get_local_type_ref(ctx, expr->as.ident)) return NULL;
+  /* a reference and an optional nested: sema's TypeInfo is one for `opt view T` and for
+   * `view T` with T an optional, the backend's declared type tells them apart */
+  const TypeInfo* type = expr->resolved_type;
+  if (type && ((type->kind == TYPE_REF && type->as.ref.base && type->as.ref.base->kind == TYPE_OPT)
+               || (type->kind == TYPE_OPT && type->as.opt.base && type->as.opt.base->kind == TYPE_REF)))
+    return NULL;
+  return c_type_ref_of_sema(ctx, expr->resolved_type);
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
-    const AstTypeRef* type = infer_expr_type_ref_checked(ctx, expr);
-    if (!type && expr) type = c_sema_type_of(ctx, expr);
-    if (expr) check_type_answer(ctx, expr, type);
+    if (!expr) return NULL;
+    const AstTypeRef* type = c_type_from_sema(ctx, expr);
+    if (!type) type = infer_expr_type_ref_checked(ctx, expr);
+    if (!type) type = c_sema_type_of(ctx, expr);
+    check_type_answer(ctx, expr, type);
     return type;
 }
 

@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.144, 2026-11-28: the backend reads sema's types
+
+- The C backend takes an expression's type from sema; it works one out itself only for a local's name (its
+  declared type) and for a type that nests a reference and an optional. The C of 106, 121 and 136 is unchanged.
+- `Array.set` on an `Array` of `List`s, maps or structs that own memory frees the element it overwrites (it leaked
+  it), as it already did for Strings.
+
 ## 0.4.143, 2026-11-28: a generic extern call is typed; view x and Buffer slots too
 
 - A call of a generic extern with its type written first (`rae_ext_rae_buf_get(V: Int, buf:, index:)`) has its
