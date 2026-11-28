@@ -423,7 +423,13 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    - an `if let` alias: the backend says `opt view T` / `opt mod T`, sema `view T` / `mod T` (28 000);
    - then `infer_expr_type_ref` becomes a read of `resolved_type`, a missing type an internal error under
      `RAE_CHECK_TYPES=1` (on in the suite), and the expected type stops choosing instances.
-   The type matrix's known-failures list is already empty (since 0.4.127).
+   The type matrix's known-failures list is already empty (since 0.4.127). Then (0.4.140): the backend's type of an integer binary keeps
+   its width (`UInt64` flags), so a literal beside it is that type and an unsigned multiply wraps instead of going
+   through the `Int` overflow check (`lib/physics/geometry/HullContent.rae`'s hash); and sema types a module-level
+   const where it is read. The C of 233 + 61 programs changed, each line by one of those rules (a float literal
+   beside `toFloat(<const>)` is f32, an `Int` expression of consts is overflow-checked, a function that holds no
+   String loses its string-pool mark). check-types.sh: binaries differ 1 (was 12 135), names with a type only in
+   the backend 127 (was 1.06 million).
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

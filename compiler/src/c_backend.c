@@ -2020,6 +2020,10 @@ static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstEx
             if (rt && rt->kind == TYPE_REF) rt = rt->as.ref.base;
             if (!rt) break;
             if (rt->kind == TYPE_STRING) return &kString_tr;
+            /* an integer of another width (`UInt64` flags `a bitor b`) keeps it, as sema has it */
+            if (rt->kind == TYPE_INT && !rt->as.integer.enum_decl
+                && (rt->as.integer.bits != 64 || rt->as.integer.is_unsigned))
+                return sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)rt);
             if (rt->kind == TYPE_INT) return &kInt_tr;
             if (rt->kind == TYPE_FLOAT) return &kFloat_tr;
             if (rt->kind == TYPE_BOOL) return &kBool_tr;

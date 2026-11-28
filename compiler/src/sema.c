@@ -8710,6 +8710,10 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                     if (module) module->had_error = true;
                 }
+                /* a module-level const or let is registered before the types are, so its type
+                 * is resolved where it is first read */
+                if (!sym->type && sym->decl && sym->decl->kind == AST_DECL_GLOBAL_LET && sym->decl->as.let_decl.type)
+                    sym->type = sema_resolve_type_internal(ctx, module, symbols, sym->decl->as.let_decl.type);
                 expr->resolved_type = sym->type; break;
             }
             // #914: an identifier read as a VALUE (not a call callee, and not the

@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.140, 2026-11-28: integer widths and typed consts
+
+- An integer expression of another width than `Int` (`UInt64` flags, a `UInt64` hash) keeps its width in the C:
+  a literal beside it is of that type, and an unsigned multiply wraps as every unsigned operation does, where it
+  could go through the `Int` overflow check before.
+- A module-level const has its declared type wherever it is read. A float literal beside `toFloat(<const>)` is a
+  32-bit float, as beside any `Float`, and `Int` arithmetic on consts is overflow-checked like any other.
+
 ## 0.4.139, 2026-11-28: an enum case is its enum's type; RAE_CHECK_TYPES
 
 - An enum case read (`Kind.small`) has its enum's type, so an overloaded function is chosen by it:
