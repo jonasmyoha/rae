@@ -7,11 +7,20 @@
 # value there and a drag moves it (also outside the track, until the
 # release); each change sends the UI action `actionId` (when set), with the
 # track as its entity, so the app learns the value was changed by hand.
+#
+# `steps` (0: any value) makes a drag land on min + k (max - min) / steps, and the
+# store holds the snapped value, so the fill shows it. With `thumb`, the track's
+# SECOND child is a thumb: it travels the track less its own width, and the fill
+# ends at its centre at every value. The press is the UI hit test's: a finger's
+# grows to the touch target, and a dialog or a node over the track takes it
+# instead; a scroll root around the slider does not take its drag.
 type ValueSlider {
   key: String
   min: Float = 0.0
   max: Float = 1.0
   actionId: String = ""
+  steps: Int = 0
+  thumb: Bool = false
 }
 
 # A text that shows a value: `prefix`, the value times `scale` with

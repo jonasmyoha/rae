@@ -6,6 +6,7 @@
 # runs again then). Nothing else keeps the widgets in step: an app that
 # writes a value into the store (a button's handler, its own model) sees
 # the widgets follow on the next frame.
+import Math
 open ui/Ecs
 open ui/Components
 open ui/UiSystems
@@ -29,6 +30,41 @@ func valueShare(slider: view ValueSlider, value: view Float) ret Float {
     ret 1.0
   }
   ret share
+}
+
+# `share` of the track on the slider's steps (unchanged for a slider of any value)
+func valueSnap(slider: view ValueSlider, share: view Float) ret Float {
+  if slider.steps <= 0 {
+    ret share
+  }
+  let steps: Float = slider.steps.toFloat()
+  ret (share * steps + 0.5).toInt().toFloat() / steps
+}
+
+# The slider's thumb (its second child) when it has one, else none
+func valueSliderThumb(
+  world: view UiWorld
+  slider: view ValueSlider
+  entityId: view EntityId
+) ret EntityId {
+  if slider.thumb is false or componentHas(this: world.childrens, entityId: entityId) is false {
+    ret noEntity()
+  }
+  ret componentView(this: world.childrens, entityId: entityId).ids.copyAtFallback(
+    index: 1
+    fallback: noEntity()
+  )
+}
+
+# How wide `entityId` is laid out (0 for none)
+func valueNodeWidth(uiSystems: view UiSystems, entityId: view EntityId) ret Float {
+  if isNone(this: entityId) or componentHas(
+    this: uiSystems.layout.computedRects
+    entityId: entityId
+  ) is false {
+    ret 0.0
+  }
+  ret componentView(this: uiSystems.layout.computedRects, entityId: entityId).size.x
 }
 
 # Where the track is on screen and how wide (none when not laid out yet)
@@ -114,14 +150,9 @@ func valueSliderDrag(
   input: view UiInput
   values: mod UiValues
 ) ret Bool {
+  # the press is the hit test's: what covers the track takes it, and a finger's grows
   if input.pointer.pressed {
-    loop var i: Int = 0, i < componentCount(this: world.valueSliders), ++i {
-      let entityId: EntityId = componentEntityAt(this: world.valueSliders, i: i)
-      let box: ValueTrackBox = valueTrackBox(uiSystems: uiSystems, entityId: entityId)
-      if box.placed and input.pointer.x >= box.x and input.pointer.x <= box.x + box.w and input.pointer.y >= box.y and input.pointer.y <= box.y + box.h {
-        values.dragging = entityId
-      }
-    }
+    values.dragging = uiValueSliderAt(world: world, uiSystems: uiSystems, input: input)
   }
   if isNone(this: values.dragging) {
     ret false
@@ -144,13 +175,23 @@ func valueSliderDrag(
   if box.placed is false {
     ret false
   }
-  var share: Float = (input.pointer.x - box.x) / box.w
+  # a thumb travels the track less its own width: the pointer is at its centre
+  let thumbWidth: Float = valueNodeWidth(
+    uiSystems: uiSystems
+    entityId: valueSliderThumb(world: world, slider: slider, entityId: values.dragging)
+  ) * box.w / Math.max(a: 1.0, b: valueNodeWidth(uiSystems: uiSystems, entityId: values.dragging))
+  let travel: Float = box.w - thumbWidth
+  if travel <= 0.0 {
+    ret false
+  }
+  var share: Float = (input.pointer.x - box.x - thumbWidth * 0.5) / travel
   if share < 0.0 {
     share = 0.0
   }
   if share > 1.0 {
     share = 1.0
   }
+  share = valueSnap(slider: slider, share: share)
   let changed: Bool = setUiValue(
     values: values
     key: slider.key
@@ -190,10 +231,34 @@ func valueSliderFills(
     }
     let slider: view ValueSlider = componentView(this: world.valueSliders, entityId: entityId)
     let trackWidth: Float = componentView(this: uiSystems.layout.computedRects, entityId: entityId).size.x
-    let want: Float = trackWidth * valueShare(
+    let share: Float = valueShare(
       slider: slider
       value: uiValue(values: values, key: slider.key, fallback: slider.min)
     )
+    # with a thumb: it travels the track less its width, and the fill ends at its centre
+    let thumb: EntityId = valueSliderThumb(world: world, slider: slider, entityId: entityId)
+    let thumbWidth: Float = valueNodeWidth(uiSystems: uiSystems, entityId: thumb)
+    let thumbX: Float = share * Math.max(a: 0.0, b: trackWidth - thumbWidth)
+    var want: Float = trackWidth * share
+    if isNone(this: thumb) is false and componentHas(this: world.rects, entityId: thumb) {
+      want = thumbX + thumbWidth * 0.5
+      var thumbDelta: Float = thumbX - componentView(this: world.rects, entityId: thumb).position.x
+      if thumbDelta < 0.0 {
+        thumbDelta = -thumbDelta
+      }
+      if thumbDelta > 0.25 {
+        let thumbRect: mod Rect = componentMod(this: world.rects, entityId: thumb)
+        thumbRect.position.x = thumbX
+        if componentHas(this: uiSystems.layout.computedRects, entityId: thumb) {
+          let computed: mod ComputedRect = componentMod(
+            this: uiSystems.layout.computedRects
+            entityId: thumb
+          )
+          computed.position.x = thumbX
+        }
+        changed = true
+      }
+    }
     let rect: view Rect = componentView(this: world.rects, entityId: fill)
     var delta: Float = want - rect.size.x
     if delta < 0.0 {

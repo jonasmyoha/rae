@@ -774,6 +774,18 @@ layout; it returns true when it changed a number or what a widget shows.
   moves it, also past the track's ends, until the release. Each change by
   hand sends the UI action `actionId` (when set) with the track as its
   entity, so the app learns that the number is now set by hand.
+- `steps` (0, the default, for any number) makes a drag land on
+  `min + k (max - min) / steps`; the store holds the snapped number, so the
+  fill shows it while the finger moves.
+- `thumb: true` makes the track's SECOND child a thumb: it travels the track
+  less its own width (its `x` is written), and the fill ends at its centre at
+  every number.
+- The press is the UI hit test's: a finger's grows a thin track to the touch
+  target (where nothing clickable is hit exactly), and a dialog or another
+  node over the track takes the press instead. A scroll root around the
+  slider does not take its drag, also when the finger moves along the root's
+  axis. Case 1710 drags a stepped slider with a thumb inside a vertical scroll
+  root and presses it under a dialog.
 - `ValueText` writes its node's text: `prefix`, the number times `scale`
   with `decimals` decimals, `suffix` (0.7, scale 100, `"%"`: `70%`).
 - The app writes a number with `setUiValue(values:, key:, value:)` and

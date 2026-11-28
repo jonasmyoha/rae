@@ -1,0 +1,271 @@
+# A ValueSlider with steps and a thumb inside a vertical scroll root (ui/ValueComponents,
+# ui/valueSystem), driven by a scripted finger (updateUiInputWith, the device's path). The track
+# is 4 points high: a press 8 points below it, on a gap, lands by the touch target the hit test
+# grows it
+# to. The thumb (20 wide) travels the track less its width, and the fill ends at its centre; with
+# `steps: 10` over 0..10 each change lands on a whole number. A drag that also moves 60 points
+# down does not scroll the root (a press on the slider is the slider's); a drag on a row still
+# does. With a dialog over the page, a press on the slider changes nothing. `\{`/`\}` keep the
+# JSON braces literal.
+open ui/Components
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/UiSystems
+open ui/UiValues
+open ui/InputKind
+open ui/Transform
+open ui/LayoutSystem
+open ui/InputSystem
+open ui/ScrollRootSystem
+open ui/valueSystem/ValueSystem
+open ecs/Entity
+open ecs/Event
+open ecs/ComponentTable
+
+func pageScene() ret String {
+  var s: String = ""
+  s = s.concat(
+    other: "\{\"type\":\"Scene\",\"version\":2,\"sceneId\":\"settings\",\"root\":\"Window\",\"nodes\":\{"
+  )
+  s = s.concat(
+    other: "\"Window\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"Children\":[\"List\"]\},"
+  )
+  s = s.concat(
+    other: "\"List\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":0\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Hug\"\}\},\"Layout\":\{\"type\":\"Vertical\"\},\"ScrollRoot\":\{\"axis\":\"Y\"\},\"Children\":[\"Row0\",\"Volume\",\"Gap\""
+  )
+  loop var i: Int = 1, i < 9, ++i {
+    s = s.concat(other: ",\"Row{i}\"")
+  }
+  s = s.concat(other: "]\},")
+  s = s.concat(
+    other: "\"Volume\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":200,\"h\":4\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"ValueSlider\":\{\"key\":\"sound.volume\",\"min\":0,\"max\":10,\"steps\":10,\"thumb\":true,\"actionId\":\"sound.volume\"\},\"Children\":[\"VolumeFill\",\"VolumeThumb\"]\},"
+  )
+  s = s.concat(
+    other: "\"Gap\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":30\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\}\},"
+  )
+  s = s.concat(other: "\"VolumeFill\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":0,\"h\":4\}\},")
+  s = s.concat(other: "\"VolumeThumb\":\{\"Rect\":\{\"x\":0,\"y\":-8,\"w\":20,\"h\":20\}\}")
+  loop var i: Int = 0, i < 9, ++i {
+    s = s.concat(
+      other: ",\"Row{i}\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":50\},\"Size\":\{\"w\":\{\"mode\":\"Fixed\"\},\"h\":\{\"mode\":\"Fixed\"\}\},\"OnClick\":\{\"actionId\":\"row.{i}\",\"label\":\"Row {i}\"\}\}"
+    )
+  }
+  s = s.concat(other: "\}\}")
+  ret s
+}
+
+func dialogScene() ret String {
+  ret "\{\"type\":\"Scene\",\"version\":2,\"root\":\"Dialog\",\"nodes\":\{\"Dialog\":\{\"Rect\":\{\"x\":0,\"y\":0,\"w\":300,\"h\":200\},\"LayerTag\":\{\"id\":\"dialog\"\}\}\}\}"
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: world, index: raw)
+  }
+  ret noEntity()
+}
+
+type Rig {
+  world: UiWorld
+  uiSystems: UiSystems
+  input: UiInput
+  values: UiValues
+  list: EntityId
+  actions: Int
+}
+
+# One frame: the scripted finger through the input path, the value system, the scroll root, the
+# layout and the transforms (so the next hit test sees what moved)
+func frame(
+  rig: mod Rig
+  x: view Float
+  y: view Float
+  down: view Bool
+) {
+  let pointer: UiPointerState = uiPointerScriptFrame(
+    previous: rig.input.pointer
+    x: x
+    y: y
+    down: down
+    kind: InputKind.touch
+  )
+  updateUiInputWith(
+    input: rig.input
+    world: rig.world
+    uiSystems: rig.uiSystems
+    pointer: pointer
+    wheel: 0.0
+  )
+  let changed: Bool = valueSystem(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    input: rig.input
+    values: rig.values
+  )
+  loop var i: Int = 0, i < eventCount(this: rig.world.uiActions), ++i {
+    if eventAt(this: rig.world.uiActions, i: i).actionId is "sound.volume" {
+      rig.actions = rig.actions + 1
+    }
+  }
+  let moved: Bool = updateScrollRoot(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    entityId: rig.list
+    input: rig.input
+    deltaTime: 1.0 / 60.0
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+}
+
+func report(rig: mod Rig, label: view String) {
+  let fill: view Rect = componentView(
+    this: rig.world.rects
+    entityId: entityOf(world: rig.world, nodeId: "VolumeFill")
+  )
+  let thumb: view Rect = componentView(
+    this: rig.world.rects
+    entityId: entityOf(world: rig.world, nodeId: "VolumeThumb")
+  )
+  let value: Float = uiValue(values: rig.values, key: "sound.volume", fallback: -1.0)
+  log(
+    "{label}: volume {(value * 10.0 + 0.5).toInt()} tenths, thumb at {thumb.position.x.toInt()}, fill {fill.size.x.toInt()} (ends at the thumb's centre {(fill.size.x - thumb.position.x - 10.0).toInt() is 0}), scrolled {componentView(
+      this: rig.world.scrollStates
+      entityId: rig.list
+    ).y.toInt()}, actions {rig.actions}"
+  )
+  rig.actions = 0
+}
+
+func main() {
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  world.layoutW = 300.0
+  world.layoutH = 200.0
+  let rootEntityId: EntityId = loadSceneIntoPage(
+    world: world
+    uiSystems: uiSystems
+    scene: parseScene(source: pageScene())
+    pageId: "p"
+  )
+  layoutSystem(world: world, uiSystems: uiSystems)
+  transformSystem(world: world, uiSystems: uiSystems)
+  var memory: ScrollMemory = createScrollMemory()
+  scrollRootSystem(world: world, uiSystems: uiSystems, memory: memory)
+  let list: EntityId = entityOf(world: world, nodeId: "List")
+  log("mounted = {rootEntityId.index >= 0}")
+  var rig: Rig = {
+    world: own world
+    uiSystems: own uiSystems
+    input: createUiInput()
+    values: createUiValues()
+    list: list
+    actions: 0
+  }
+  let set: Bool = setUiValue(values: rig.values, key: "sound.volume", value: 5.0)
+  frame(
+    rig: rig
+    x: 0.0
+    y: 190.0
+    down: false
+  )
+  report(rig: rig, label: "the app sets 5")
+  # a press 8 points below the 4-point track (y 50..54, a gap under it), at a third of the travel
+  frame(
+    rig: rig
+    x: 70.0
+    y: 62.0
+    down: true
+  )
+  report(rig: rig, label: "a finger's press below the thin track")
+  # a diagonal drag: 60 points down while it moves to the end
+  loop var i: Int = 1, i <= 6, ++i {
+    frame(
+      rig: rig
+      x: 70.0 + 22.0 * i.toFloat()
+      y: 62.0 + 10.0 * i.toFloat()
+      down: true
+    )
+  }
+  report(rig: rig, label: "a diagonal drag to the end")
+  frame(
+    rig: rig
+    x: 202.0
+    y: 122.0
+    down: false
+  )
+  report(rig: rig, label: "released")
+  # a drag on a row still scrolls the root
+  frame(
+    rig: rig
+    x: 150.0
+    y: 180.0
+    down: true
+  )
+  loop var i: Int = 1, i <= 6, ++i {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 180.0 - 10.0 * i.toFloat()
+      down: true
+    )
+  }
+  frame(
+    rig: rig
+    x: 150.0
+    y: 120.0
+    down: false
+  )
+  report(rig: rig, label: "a drag on a row")
+  # back to the top, then a dialog over the page: a press on the slider is the dialog's
+  frame(
+    rig: rig
+    x: 150.0
+    y: 60.0
+    down: true
+  )
+  loop var i: Int = 1, i <= 6, ++i {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 60.0 + 20.0 * i.toFloat()
+      down: true
+    )
+  }
+  frame(
+    rig: rig
+    x: 150.0
+    y: 180.0
+    down: false
+  )
+  loop var i: Int = 0, i < 60, ++i {
+    frame(
+      rig: rig
+      x: 150.0
+      y: 180.0
+      down: false
+    )
+  }
+  report(rig: rig, label: "scrolled back")
+  let dialog: EntityId = loadScene(
+    world: rig.world
+    uiSystems: rig.uiSystems
+    scene: parseScene(source: dialogScene())
+  )
+  layoutSystem(world: rig.world, uiSystems: rig.uiSystems)
+  transformSystem(world: rig.world, uiSystems: rig.uiSystems)
+  frame(
+    rig: rig
+    x: 30.0
+    y: 52.0
+    down: true
+  )
+  frame(
+    rig: rig
+    x: 30.0
+    y: 52.0
+    down: false
+  )
+  report(rig: rig, label: "a press on it under a dialog")
+}

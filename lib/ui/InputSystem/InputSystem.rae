@@ -336,10 +336,14 @@ func uiHitTestEntity(
         i = i - 1
       }
     }
+    # (a ValueSlider's track takes its press, a finger's grown to the touch target: ui/valueSystem)
     if componentHas(this: world.onClicks, entityId: entityId) or customPaintHits(
       world: world
       entityId: entityId
-    ) or pressSinkHits(world: world, entityId: entityId) {
+    ) or pressSinkHits(world: world, entityId: entityId) or componentHas(
+      this: world.valueSliders
+      entityId: entityId
+    ) {
       if uiPointOnEntity(
         world: world
         uiSystems: uiSystems
@@ -553,6 +557,34 @@ func scrollActivationUnits(input: view UiInput) ret Float {
 # along its axis since the press (a flick whose move and lift land in one
 # frame). A claimed press has no pressed entity and its release clicks
 # nothing.
+# The ValueSlider whose track the pointer is on, by the hit test (a finger's grown to the touch
+# target; nothing when a dialog or another node covers it): the slider itself or the one around
+# the node hit. None for no slider.
+func uiValueSliderAt(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  input: view UiInput
+) ret EntityId {
+  var at: EntityId = uiHitTestFor(
+    world: world
+    uiSystems: uiSystems
+    x: input.pointer.x
+    y: input.pointer.y
+    kind: input.pointer.kind
+    touchTargetSize: input.touchTargetSize
+  )
+  loop var depth: Int = 0, depth < 32 and isNone(this: at) is false, ++depth {
+    if componentHas(this: world.valueSliders, entityId: at) {
+      ret at
+    }
+    if componentHas(this: uiSystems.hierarchy.parents, entityId: at) is false {
+      ret noEntity()
+    }
+    at = componentView(this: uiSystems.hierarchy.parents, entityId: at).parent
+  }
+  ret noEntity()
+}
+
 func uiPressClaimed(input: view UiInput, world: view UiWorld) ret Bool {
   # A drag has it (ui/DragSystem)
   if world.drag.phase is UiDragPhase.dragging {

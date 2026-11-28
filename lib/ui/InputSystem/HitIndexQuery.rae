@@ -44,6 +44,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
     componentTableGeneration(this: world.customPaints)
     componentTableGeneration(this: world.layerScopes)
     componentTableGeneration(this: world.pressSinks)
+    componentTableGeneration(this: world.valueSliders)
   }
 }
 
@@ -51,7 +52,7 @@ func hitIndexKey(world: view UiWorld, uiSystems: view UiSystems) ret List(Int) {
 # a hit test asks this every time, so it makes no list)
 func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
   let key: view List(Int) = uiSystems.hitIndex.key
-  ret key.length is 15 and key.copyAtDefault(index: 0) is componentTableGeneration(
+  ret key.length is 16 and key.copyAtDefault(index: 0) is componentTableGeneration(
     this: world.childrens
   ) and key.copyAtDefault(index: 1) is componentTableGeneration(this: world.actives) and key.copyAtDefault(
     index: 2
@@ -73,7 +74,7 @@ func hitIndexCurrent(world: view UiWorld, uiSystems: view UiSystems) ret Bool {
     index: 13
   ) is componentTableGeneration(this: world.layerScopes) and key.copyAtDefault(index: 14) is componentTableGeneration(
     this: world.pressSinks
-  )
+  ) and key.copyAtDefault(index: 15) is componentTableGeneration(this: world.valueSliders)
 }
 
 # A clickable node in hit order, and the root of its space
@@ -144,7 +145,10 @@ func hitCollect(
     if componentHas(this: world.onClicks, entityId: entityId) or customPaintHits(
       world: world
       entityId: entityId
-    ) or pressSinkHits(world: world, entityId: entityId) {
+    ) or pressSinkHits(world: world, entityId: entityId) or componentHas(
+      this: world.valueSliders
+      entityId: entityId
+    ) {
       found.add(value: HitFound { entityId: entityId, spaceRootEntityId: space })
     }
   }

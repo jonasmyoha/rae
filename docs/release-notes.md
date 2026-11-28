@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.151, 2026-11-28: ValueSlider steps, a thumb and a finger's press
+
+- `ValueSlider` has `steps` (a drag lands on min + k (max - min) / steps, and the fill shows the snapped value) and
+  `thumb` (the track's second child travels the track less its width; the fill ends at its centre).
+- A slider's press is the UI hit test's: a finger's grows a thin track to the touch target, and a dialog or a node
+  over it takes the press. A scroll root around a slider does not take its drag (docs/ui-scene-format.md §17).
+
 ## 0.4.150, 2026-11-28: the expected type no longer chooses an instance
 
 - The C backend takes the instance of a generic call and the type of a literal from sema; the type a value lands

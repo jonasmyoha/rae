@@ -309,7 +309,10 @@ func stepScrollRoot(
   # active drag claims the press (`active`, read by updateUiInput), so its
   # release clicks nothing under the finger.
   # (a press on what can be dragged is ui/DragSystem's)
-  if input.pointer.pressed and inside and takesPress and world.drag.phase is UiDragPhase.idle {
+  # (and one on a ValueSlider is the slider's: a drag across the root moves the value, not the root)
+  if input.pointer.pressed and inside and takesPress and world.drag.phase is UiDragPhase.idle and isNone(
+    this: uiValueSliderAt(world: world, uiSystems: uiSystems, input: input)
+  ) {
     drag.dragging = true
     drag.active = false
     drag.pressPointer = pointer
