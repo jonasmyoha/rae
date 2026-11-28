@@ -4,6 +4,19 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.161, 2026-11-28: Android apps run on in the background
+
+- On Android the app's thread is no longer stopped while it is in the background
+  (`SDL_HINT_ANDROID_BLOCK_ON_PAUSE` off): a frame reads `willEnterBackground` as the app leaves and
+  can send its last message (docs/app-lifecycle.md). In the background `Gpu2d.windowVisible()` is
+  false, `pollClose` waits up to a second for an event (about a frame a second, 0% CPU between),
+  and the SDL audio device is paused.
+- Coming back, the surface is made for the window Android shows now, asked from Java (SDL's
+  window property pointed at a freed window in between), also when the app was busy loading while
+  it went away; `Gpu2d.windowResized()` reports the new surface. 106 draws its page again on
+  return (it stayed black until touched).
+- The crash report on Android names the faulting instruction's library and offset.
+
 ## 0.4.160, 2026-11-28: the app's background and foreground as events
 
 - `lib/AppLifecycle`: `appLifecycleNext()` (willEnterBackground, didEnterBackground,

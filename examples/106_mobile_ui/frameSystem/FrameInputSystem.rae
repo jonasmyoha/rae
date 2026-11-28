@@ -1,3 +1,4 @@
+open AppLifecycle
 open HotReload
 open ui/Ecs
 open ui/UiZoom
@@ -63,6 +64,17 @@ func frameInputSystem(
     uiSystems: app.uiSystems
     viewport: app.viewport
   )
+  # Back on the screen (a phone's app back from the background): the window's new surface has
+  # nothing on it, so the frame is drawn even with nothing else to do (lib/AppLifecycle)
+  loop true {
+    if let change: AppLifecycleEvent = appLifecycleNext() {
+      if change is AppLifecycleEvent.didEnterForeground {
+        frame.forceRender = true
+      }
+    } else {
+      break
+    }
+  }
   if debugTookPointer {
     eventClear(UiAction, this: input.uiActions)
     suppressUiPress(input: input.ui, world: world)

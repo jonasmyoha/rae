@@ -35,6 +35,8 @@ static WGPUSurface   g_g2d_surface = NULL;
 static WGPUTextureFormat g_g2d_fmt = WGPUTextureFormat_BGRA8Unorm;
 #ifdef __ANDROID__
 #include <android/native_window.h>
+#include <android/native_window_jni.h>
+#include <jni.h>
 /* Android destroys the window's ANativeWindow when the app goes to the
  * background and makes a new one when it comes back. The surface's window
  * is held here with its own reference, so the pointer stays valid, and a
@@ -62,20 +64,45 @@ static int rae_g2d_android_window_alive(void) {
 
 /* The surface for the window's current ANativeWindow (at start and when the
  * app comes back to the foreground) */
+/* The window Android shows now, with a reference of its own (ANativeWindow_fromSurface), or NULL
+ * when there is none. Asked from Java (SDLActivity.getNativeSurface) and not read from SDL's
+ * window property: SDL releases its window when Android destroys the surface but leaves the
+ * property pointing at it until the next one is created, and a surface made in between (the app
+ * runs on in the background) took a reference on a freed window. */
+static ANativeWindow* rae_g2d_android_current_window(void) {
+    JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
+    jobject activity = (jobject)SDL_GetAndroidActivity();
+    if (!env || !activity) return NULL;
+    ANativeWindow* window = NULL;
+    jclass activityClass = (*env)->GetObjectClass(env, activity);
+    jmethodID getSurface = (*env)->GetStaticMethodID(env, activityClass, "getNativeSurface", "()Landroid/view/Surface;");
+    if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); getSurface = NULL; }
+    if (getSurface) {
+        jobject surface = (*env)->CallStaticObjectMethod(env, activityClass, getSurface);
+        if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); surface = NULL; }
+        if (surface) {
+            window = ANativeWindow_fromSurface(env, surface);
+            (*env)->DeleteLocalRef(env, surface);
+        }
+    }
+    (*env)->DeleteLocalRef(env, activityClass);
+    (*env)->DeleteLocalRef(env, activity);
+    return window;
+}
+
 static WGPUSurface rae_g2d_android_create_surface(void) {
-    void* nativeWindow = SDL_GetPointerProperty(SDL_GetWindowProperties(g_sdl_win),
-                                                SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, NULL);
-    if (!nativeWindow) { fprintf(stderr, "[gpu2d] no Android native window: %s\n", SDL_GetError()); return NULL; }
+    ANativeWindow* nativeWindow = rae_g2d_android_current_window();
+    if (!nativeWindow) return NULL;
+    if (ANativeWindow_getWidth(nativeWindow) <= 0) { ANativeWindow_release(nativeWindow); return NULL; }
     WGPUSurfaceSourceAndroidNativeWindow source; memset(&source, 0, sizeof(source));
     source.chain.sType = WGPUSType_SurfaceSourceAndroidNativeWindow;
     source.window = nativeWindow;
     WGPUSurfaceDescriptor descriptor; memset(&descriptor, 0, sizeof(descriptor));
     descriptor.nextInChain = &source.chain;
     WGPUSurface surface = wgpuInstanceCreateSurface(g_wgpu_inst, &descriptor);
-    if (surface) {
-        g_g2d_android_window = (ANativeWindow*)nativeWindow;
-        ANativeWindow_acquire(g_g2d_android_window);
-    }
+    /* the reference fromSurface took is the one held while the surface lives */
+    if (surface) g_g2d_android_window = nativeWindow;
+    else ANativeWindow_release(nativeWindow);
     return surface;
 }
 #endif
@@ -280,15 +307,21 @@ static void rae_g2d_configure(int pw, int ph) {
 }
 
 #ifdef __ANDROID__
-static void rae_g2d_android_make_surface(void) {
+/* `quiet`: a retry each frame until Android shows the window says nothing while it has none */
+static void rae_g2d_android_make_surface(int quiet) {
     if (g_g2d_surface || !g_sdl_win || !g_wgpu_inst) return;
     g_g2d_surface = rae_g2d_android_create_surface();
-    if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed after resume\n"); return; }
+    if (!g_g2d_surface) {
+        if (!quiet) fprintf(stderr, "[gpu2d] no window to draw into yet: the surface is made when there is one\n");
+        return;
+    }
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
     rae_g2d_cap_pixels(&pw, &ph);
     fprintf(stderr, "[gpu2d] back in the foreground: a new surface, %dx%d\n", pw, ph);
-    if (pw != g_sdl_w || ph != g_sdl_h) g_g2d_win_resized = 1;
+    /* a new surface has nothing on it: say the window changed, so an app that draws only when
+     * something changed (106) draws it again, whatever its size */
+    g_g2d_win_resized = 1;
     rae_g2d_configure(pw, ph);
 }
 #endif
@@ -303,6 +336,7 @@ static void rae_g2d_android_make_surface(void) {
  *   (Android blocks the app in the poll until it comes back) and made again
  *   for the new window when it does. */
 void rae_app_lifecycle_record(int64_t kind);   /* runtime_app_lifecycle.c */
+void rae_audio_set_background(int background);   /* runtime_audio_sdl3.c */
 static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
     (void)userdata;
     /* the program's own record of them (runtime_app_lifecycle.c, lib/AppLifecycle) */
@@ -310,6 +344,11 @@ static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
     else if (e->type == SDL_EVENT_DID_ENTER_BACKGROUND) rae_app_lifecycle_record(1);
     else if (e->type == SDL_EVENT_WILL_ENTER_FOREGROUND) rae_app_lifecycle_record(2);
     else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) rae_app_lifecycle_record(3);
+#ifdef __ANDROID__
+    /* SDL pauses audio only when it blocks the app; the app runs on in the background here */
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) rae_audio_set_background(1);
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) rae_audio_set_background(0);
+#endif
     switch (e->type) {
         case SDL_EVENT_WILL_ENTER_BACKGROUND:
         case SDL_EVENT_DID_ENTER_BACKGROUND:
@@ -320,7 +359,7 @@ static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
             break;
 #ifdef __ANDROID__
         case SDL_EVENT_DID_ENTER_FOREGROUND:
-            rae_g2d_android_make_surface();
+            rae_g2d_android_make_surface(0);
             break;
 #endif
         default: break;
@@ -345,8 +384,13 @@ int64_t rae_g2d_surface_bindable(void) { return (g_g2d_surface_usages & WGPUText
  * IOSurface), and the deferred pipeline's per-frame GPU allocations pile up in
  * the driver. Apps should skip their render + park in waitEvents when this is
  * false; the present path also refuses to acquire a drawable while dark. */
+rae_Bool rae_ext_AppLifecycle_inForeground(void);   /* runtime_app_lifecycle.c */
 int rae_g2d_window_visible(void) {
     if (!g_sdl_win) return 1;
+#ifdef __ANDROID__
+    /* in the background the app runs on, without a window to draw into */
+    if (!g_g2d_surface || !rae_ext_AppLifecycle_inForeground()) return 0;
+#endif
     SDL_WindowFlags flags = SDL_GetWindowFlags(g_sdl_win);
     return (flags & (SDL_WINDOW_HIDDEN | SDL_WINDOW_MINIMIZED | SDL_WINDOW_OCCLUDED)) ? 0 : 1;
 }
@@ -400,6 +444,13 @@ rae_Bool rae_ext_Gpu2d_headlessRequested(void) {
 }
 
 void rae_ext_Gpu2d_initWindow(int64_t width, int64_t height, rae_String title) {
+#ifdef __ANDROID__
+    /* The app's thread keeps running while Android has it paused, so a frame reads
+     * willEnterBackground (lib/AppLifecycle) and can still send its last message. In the
+     * background there is no surface (rae_g2d_window_visible says so), the SDL audio device is
+     * paused (rae_audio_set_background) and pollClose parks (rae_g2d_android_background_park). */
+    SDL_SetHint(SDL_HINT_ANDROID_BLOCK_ON_PAUSE, "0");
+#endif
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fprintf(stderr, "[gpu2d] SDL init failed: %s\n", SDL_GetError());
         return;
@@ -623,8 +674,31 @@ rae_Bool rae_gpu_lost_message(rae_String title, rae_String text) {
     return SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, titleC, textC, g_sdl_win);
 }
 
+#ifdef __ANDROID__
+/* In the background (Android runs the app on, BLOCK_ON_PAUSE off) a frame loop that draws every
+ * frame would spin with nothing to show. The first frames there run at once, so the program reads
+ * willEnterBackground and sends what it must; after them each poll waits up to a second for an
+ * event first (a wake from a socket, the foreground), one frame a second at most otherwise. */
+static int g_g2d_background_polls = 0;
+static void rae_g2d_android_background_park(void) {
+    if (rae_ext_AppLifecycle_inForeground()) {
+        g_g2d_background_polls = 0;
+        /* In front with no surface: the window Android gave back was found dead after the
+         * foreground event had already passed (the app was busy, loading, while it went away and
+         * came back), so the surface is made here for the window Android shows now */
+        if (!g_g2d_surface) rae_g2d_android_make_surface(1);
+        return;
+    }
+    if (g_g2d_background_polls < 3) { g_g2d_background_polls++; return; }
+    SDL_WaitEventTimeout(NULL, 1000);
+}
+#endif
+
 rae_Bool rae_ext_Gpu2d_pollClose(void) {
     if (g_g2d_live_frame_depth > 0) return 0;   /* a live-resize frame pumps nothing */
+#ifdef __ANDROID__
+    rae_g2d_android_background_park();
+#endif
     rae_g2d_test_pointer_advance();
     rae_mem_stats_live_tick();
     rae_loop_trace_tick();

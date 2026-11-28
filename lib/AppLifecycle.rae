@@ -15,6 +15,8 @@
 # it comes back. Each one wakes the frame loop (EventLoop.wake), so a waiting loop runs a frame at
 # once: a backgrounded app can still send its last message (iOS gives it a few seconds before it
 # is suspended; its socket may stay open for minutes, so a server cannot tell from that alone).
+# On Android the app runs on in the background, without a surface and about a frame a second; the
+# system cuts its sockets after some seconds there.
 # The desktop and the browser send none: the app is always in the foreground there.
 #
 # A headless test makes them happen with Gpu2dSimulatedInput.simulateEnterBackground and

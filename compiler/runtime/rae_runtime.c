@@ -30,6 +30,10 @@
 #if defined(__linux__) || defined(__GLIBC__)
 #include <ucontext.h>
 #endif
+#ifdef __ANDROID__
+/* dladdr: the crash handler names the library of a faulting address */
+#include <dlfcn.h>
+#endif
 #endif
 
 #ifdef _WIN32

@@ -109,10 +109,24 @@ int64_t rae_ext_audio_loop(int64_t clip, float volume) {
  * leave the loop playing. While paused the device consumes nothing; audio_tick
  * stops topping loops up once their queue is full, so nothing accumulates
  * unboundedly, and resuming picks the ambient straight back up. */
-void rae_ext_audio_set_muted(int64_t muted) {
+static int g_ra_muted = 0;
+static int g_ra_background = 0;
+static void rae_audio_apply_pause(void) {
     if (!g_ra_ready) return;
-    if (muted) SDL_PauseAudioDevice(g_ra_dev);
-    else       SDL_ResumeAudioDevice(g_ra_dev);
+    if (g_ra_muted || g_ra_background) SDL_PauseAudioDevice(g_ra_dev);
+    else                               SDL_ResumeAudioDevice(g_ra_dev);
+}
+void rae_ext_audio_set_muted(int64_t muted) {
+    g_ra_muted = muted ? 1 : 0;
+    rae_audio_apply_pause();
+}
+
+/* The app in the background (Android, which runs it on there: runtime_gpu2d_platform.c): the
+ * device is paused as SDL pauses it when it blocks the app, and plays again (unless muted) when
+ * the app is back */
+void rae_audio_set_background(int background) {
+    g_ra_background = background ? 1 : 0;
+    rae_audio_apply_pause();
 }
 
 /* Keep every looping channel from draining. Call once per frame. */

@@ -167,6 +167,26 @@ static void rae_crash_write_context(siginfo_t* info, void* uctx) {
     rae_crash_write_named("pc", (uintptr_t)uc->uc_mcontext->__ss.__rip);
     rae_crash_write("\n");
   }
+#elif defined(__ANDROID__) && defined(__aarch64__)
+  /* Android has no backtrace(): the instruction and the return address, each as its library and
+   * the offset in it, for `llvm-addr2line -e <the unstripped library> <offset>` */
+  if (uctx) {
+    ucontext_t* uc = (ucontext_t*)uctx;
+    uintptr_t addresses[2] = {(uintptr_t)uc->uc_mcontext.pc, (uintptr_t)uc->uc_mcontext.regs[30]};
+    const char* labels[2] = {"pc", "lr"};
+    for (int i = 0; i < 2; i++) {
+      Dl_info where;
+      rae_crash_write("[rae crash] ");
+      rae_crash_write_named(labels[i], addresses[i]);
+      if (dladdr((void*)addresses[i], &where) && where.dli_fname) {
+        rae_crash_write(" in ");
+        rae_crash_write(where.dli_fname);
+        rae_crash_write(" +");
+        rae_crash_write_hex(addresses[i] - (uintptr_t)where.dli_fbase);
+      }
+      rae_crash_write("\n");
+    }
+  }
 #endif
 }
 
