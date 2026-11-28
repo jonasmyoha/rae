@@ -1,0 +1,86 @@
+# A game's music that mixes with the player's own (audio/AudioSession mixedMusic,
+# docs/audio-design.md
+# §9.1): on iOS the playback category with mixWithOthers only (heard through the silent switch,
+# under another app's podcast, which is neither stopped nor ducked), on Android no audio focus.
+# config.env sets RAE_AUDIO_FAKE_SESSION=1: the session's calls are logged as `[audio-session] ...`
+# instead of made. The music plays, an alert sounds over it (the alert's own plan while it
+# sounds) and the session returns to mixed music; the other intents' plans beside it.
+open audio/Audio
+open audio/AudioMixer
+open audio/AudioSession
+open audio/Sound
+open audio/sessionSystem/SessionSystem
+open ecs/Event
+
+func describe(kind: view AudioSessionKind) {
+  let plan: AudioSessionPlan = sessionPlan(kind: kind)
+  let focus: List(Int) = androidFocusOf(plan: plan)
+  var options: String = ""
+  if (plan.options bitand 1) is not 0 {
+    options = "{options} mixWithOthers"
+  }
+  if (plan.options bitand 2) is not 0 {
+    options = "{options} duckOthers"
+  }
+  if (plan.options bitand 4) is not 0 {
+    options = "{options} interruptSpokenAudio"
+  }
+  log(
+    "{kind}: {sessionCategoryName(category: plan.category)}, mode {plan.mode}, options{options}; Android focus gain {focus.copyAtFallback(
+      index: 0
+      fallback: -1
+    )}"
+  )
+}
+
+func main() {
+  describe(kind: AudioSessionKind.ambient)
+  describe(kind: AudioSessionKind.music)
+  describe(kind: AudioSessionKind.mixedMusic)
+  describe(kind: AudioSessionKind.alert)
+  describe(kind: AudioSessionKind.spokenText)
+  var settings: AudioSettings = defaultAudioSettings()
+  settings.offline = true
+  settings.session = AudioSessionKind.mixedMusic
+  var audio: AudioEngine = audioStart(settings: settings)
+  var events: EventQueue(AudioSessionEvent) = createEventQueue(AudioSessionEvent)
+  let song: Sound = audio.addSound(data: sineSoundData(
+    frequency: 220.0
+    amplitude: 0.5
+    frameCount: 48000
+    channels: 1
+    sampleRate: 48000
+  ))
+  let chime: Sound = audio.addSound(data: sineSoundData(
+    frequency: 880.0
+    amplitude: 0.5
+    frameCount: 2400
+    channels: 1
+    sampleRate: 48000
+  ))
+  let music: VoiceId = audio.playAt(
+    sound: song
+    bus: AudioBusKind.music
+    gainDecibels: 0.0
+    pan: 0.0
+    looping: true
+    atSample: 0
+  )
+  log("the game's music starts")
+  audioSessionSystem(audio: audio, events: events)
+  let first: List(Float) = audio.renderOffline(frames: 4800)
+  log("an alert over it")
+  let alert: VoiceId = audio.play(sound: chime, bus: AudioBusKind.alerts, gainDecibels: 0.0)
+  audioSessionSystem(audio: audio, events: events)
+  let second: List(Float) = audio.renderOffline(frames: 4800)
+  log("after the alert")
+  audioSessionSystem(audio: audio, events: events)
+  let third: List(Float) = audio.renderOffline(frames: 4800)
+  audio.stopVoice(voiceId: music)
+  loop var i: Int = 0, i < 12, ++i {
+    let quiet: List(Float) = audio.renderOffline(frames: 4800)
+  }
+  audio.update()
+  log("a second after the music stopped the session is active: {audio.sessionActive}")
+  let blocks: Int = audio.stopAudio()
+}
