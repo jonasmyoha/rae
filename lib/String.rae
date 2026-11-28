@@ -537,6 +537,21 @@ func toLower(this: view String) ret String {
   ret out
 }
 
+# ASCII uppercase conversion: `a`-`z` become `A`-`Z`, every other byte stays (a multi-byte
+# UTF-8 character's bytes are all 0x80 or above, so "é" stays "é")
+func toUpper(this: view String) ret String {
+  let n: Int = this.length()
+  var bytes: List(UInt8) = List.create(UInt8, cap: n)
+  loop var i: Int = 0, i < n, ++i {
+    var byte: Int = this.byteAt(index: i)
+    if byte >= 97 and byte <= 122 {
+      byte = byte - 32
+    }
+    bytes.add(value: byte as UInt8)
+  }
+  ret String.fromBytes(bytes: bytes, start: 0, count: n)
+}
+
 func trim(this: view String) ret String {
   let n: Int = this.length()
   if n is 0 {

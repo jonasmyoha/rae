@@ -1,0 +1,17 @@
+# String.toUpper: ASCII a-z to A-Z, every other character as it is (digits, punctuation,
+# multi-byte UTF-8 characters), beside toLower
+import String
+
+func main() {
+  log("friend code: {"ab12-cd34".toUpper()}")
+  log("chest label: {"golden chest".toUpper()}")
+  log("mixed: {"Hello, World! 42".toUpper()}")
+  log("non-ASCII stays: {"é ÅÄÖ å ñ 😀 ok".toUpper()}")
+  log("empty: '{"".toUpper()}'")
+  log("already upper: {"ABC".toUpper()}")
+  log("edges: {"@`az[~".toUpper()}")
+  let word: String = "MiXeD"
+  log("round trip: {word.toUpper().toLower()} {word.toLower().toUpper()}")
+  let upper: String = "length kept".toUpper()
+  log("length kept: {upper.length() is "length kept".length()}")
+}

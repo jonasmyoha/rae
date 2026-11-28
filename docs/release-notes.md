@@ -4,6 +4,11 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.156, 2026-11-28: String.toUpper
+
+- `"ab12-cd34".toUpper()` is `"AB12-CD34"`: ASCII `a`-`z` become `A`-`Z`, every other character
+  stays as it is (digits, punctuation, "é", emoji), beside `toLower`. Case 1714.
+
 ## 0.4.155, 2026-11-28: ListView rows with nested scenes, and the empty, loading and error scenes
 
 - A ListView row scene's `SceneInstance` nodes (a row's avatar) are mounted in the row's page before
