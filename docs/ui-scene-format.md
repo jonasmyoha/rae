@@ -1522,10 +1522,14 @@ code) is a hard line break; `"\r\n"` counts as one break, and so does a lone
   an end-aligned one ends each line at the node's right. A style that centers
   vertically (`vAlign`, or `OpticalAlign.centerY`) centers the block of lines.
 - A text that wraps (`wrapWidthMode: NodeWidth`) breaks at a hard break too and
-  wraps each part on its own.
+  wraps each part on its own. Its `Size.h: Hug` height is its wrapped lines at
+  the node's width (the width layout gave it last; its authored width before the
+  first layout), measured again when its text or its width changes, so a longer
+  text set later grows the node and a parent that hugs it.
 
 Case 1525 measures two- and three-line texts and draws start-aligned and
-centered ones in one frame.
+centered ones in one frame. Case 1722 grows a wrapped prompt in a hugging card
+from one line to four and six, and back.
 
 ## 44. `ZoomBehavior`: how a node acts as its canvas zooms
 

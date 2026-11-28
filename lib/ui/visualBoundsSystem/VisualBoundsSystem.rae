@@ -6,6 +6,7 @@
 # RenderSystem's `visualBoundsAt`. Runs with `mod world` between the transform
 # and render passes (see the callers: app3d/ui_shell, the example frame loops).
 import SdfText
+import Gpu2dText
 import ui/Components
 import ui/RenderSystem
 import ui/TextStyle
@@ -222,6 +223,31 @@ func measureTextForLayout(world: mod UiWorld, uiSystems: mod UiSystems, res: vie
         let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
         measuredW = lines.widest
         measuredH = size + (lines.count - 1).toFloat() * lineHeight
+      }
+      # Wrapped at the node's width (wrapWidthMode NodeWidth): as many lines as the renderer
+      # draws it in (Gpu2dText.wrappedLineCount, the same breaks), at the width layout gave the
+      # node last (its authored width before the first layout). A longer text, or a narrower
+      # node, makes a Hug height taller, and a parent that hugs it grows with it.
+      if t.wrapWidthMode is WrapWidthMode.nodeWidth {
+        var width: Float = 0.0
+        if componentHas(this: uiSystems.layout.computedRects, entityId: entityId) {
+          width = componentView(this: uiSystems.layout.computedRects, entityId: entityId).size.x
+        } else if componentHas(this: world.rects, entityId: entityId) {
+          width = componentView(this: world.rects, entityId: entityId).size.x
+        }
+        if width > 0.0 {
+          let lineCount: Int = Gpu2dText.wrappedLineCount(
+            font: textFont
+            text: t.text
+            sizePx: size
+            maxWidth: width
+          )
+          let lineHeight: Float = size * resolveTextLineHeight(theme: res.theme, styleId: t.styleId)
+          measuredH = size + (lineCount - 1).toFloat() * lineHeight
+          if measuredW > width {
+            measuredW = width
+          }
+        }
       }
       var write: Bool = true
       if componentHas(this: uiSystems.layout.measuredTexts, entityId: entityId) {

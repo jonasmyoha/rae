@@ -4,6 +4,20 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.165, 2026-11-28: a wrapped Text's Hug height follows its text
+
+- A Text with `wrapWidthMode: NodeWidth` and `Size.h: Hug` is as tall as its wrapped lines at the
+  node's width, measured again when its text or width changes (it stayed one line tall, and a
+  longer text spilled over the nodes under it). Case 1722.
+
+This release ends a series of requests from game proto4 (0.4.151 to 0.4.165): ValueSlider steps
+and thumb (0.4.151); the image size cap and render scale cap (0.4.152, Android 0.4.153); DeviceInfo
+(0.4.154); ListView nested scenes and empty, loading and error scenes (0.4.155); String.toUpper
+(0.4.156); color emoji in Text (0.4.157, browser 0.4.158, Linux 0.4.159); AppLifecycle (0.4.160,
+Android frames in the background 0.4.161); audio 0.29.0's mixedMusic intent; a refused WebSocket
+upgrade failing (0.4.162, its status on Apple 0.4.163); ListView OnSecondaryClick bindings
+(0.4.164); and this.
+
 ## 0.4.164, 2026-11-28: ListView bindings for OnSecondaryClick
 
 - A `ListView` binding (and a scene-instance override) names `OnSecondaryClick` with `actionId` or

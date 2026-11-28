@@ -1,0 +1,103 @@
+# A wrapped Text (wrapWidthMode NodeWidth) whose height hugs its text follows its text: in a card
+# that hugs its height, a prompt set to a longer text after the first layout wraps onto four lines
+# (a 20 px line and 30 px a line more), the card grows with it and the button under the text moves
+# down. A narrower card wraps it onto more lines again, and the short text brings it back to one.
+import SdfText
+import Math
+open ui/Ecs
+open ui/Scene
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/Theme
+open ui/UiSystems
+open ui/Components
+open ecs/ComponentTable
+open ecs/Entity
+open app3d/UiShell
+open ui/RenderSystem
+
+const assets: String = "../examples/104_ui_hello/assets/"
+
+func sceneText() ret String {
+  ret r#"{
+    "type": "Scene", "version": 2, "root": "Screen",
+    "text": { "body": { "size": 20, "lineHeight": 1.5 } },
+    "nodes": {
+      "Screen": { "Rect": {"x":0,"y":0,"w":600,"h":800}, "Layout": {"type":"Vertical"}, "Children": ["Card"] },
+      "Card": { "Rect": {"x":0,"y":0,"w":300,"h":10}, "Size": {"w":{"mode":"Fixed"},"h":{"mode":"Hug"}}, "Layout": {"type":"Vertical","gap":10}, "Padding": {"l":10,"t":10,"r":10,"b":10}, "Children": ["Prompt","Button"] },
+      "Prompt": { "Rect": {"x":0,"y":0,"w":280,"h":20}, "Size": {"w":{"mode":"Fill"},"h":{"mode":"Hug"}}, "Text": {"text":"Sign in","styleId":"body","wrapWidthMode":"NodeWidth"} },
+      "Button": { "Rect": {"x":0,"y":0,"w":120,"h":44}, "Shape": {"kind":"Rect"} }
+    }
+  }"#
+}
+
+func entityOf(world: view UiWorld, nodeId: view String) ret EntityId {
+  if let index: Int = world.nodeIds.get(k: nodeId) {
+    ret nodeEntityId(world: world, index: index)
+  }
+  ret noEntity()
+}
+
+func box(world: view UiWorld, uiSystems: view UiSystems, nodeId: view String) ret ComputedRect {
+  let found: view ComputedRect = componentView(
+    this: uiSystems.layout.computedRects
+    entityId: entityOf(world: world, nodeId: nodeId)
+  )
+  ret found
+}
+
+func settle(world: mod UiWorld, uiSystems: mod UiSystems, res: view Gpu2dUi) {
+  loop var i: Int = 0, i < 3, ++i {
+    runUiSystems(world: world, uiSystems: uiSystems, res: res)
+  }
+}
+
+func show(world: view UiWorld, uiSystems: view UiSystems, step: view String) {
+  let prompt: ComputedRect = box(world: world, uiSystems: uiSystems, nodeId: "Prompt")
+  let card: ComputedRect = box(world: world, uiSystems: uiSystems, nodeId: "Card")
+  let button: ComputedRect = box(world: world, uiSystems: uiSystems, nodeId: "Button")
+  log(
+    "{step}: prompt {Math.round(x: prompt.size.x)} x {Math.round(x: prompt.size.y)} ({Math.round(
+      x: (prompt.size.y - 20.0) / 30.0
+    ) + 1} lines), card height {Math.round(x: card.size.y)}, button at y {Math.round(
+      x: button.position.y
+    )}"
+  )
+}
+
+func main() {
+  let scene: Scene = parseScene(source: sceneText())
+  var resources: Gpu2dUi = {
+    textFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    iconFont: SdfText.loadSdfFont(
+      jsonPath: "{assets}Roboto-Regular.mtsdf.json"
+      rawAtlasPath: "{assets}Roboto-Regular.mtsdf.raw"
+    )
+    theme: parseTheme(scene: scene)
+    activeTheme: lightTheme()
+  }
+  var world: UiWorld = createUiWorld()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: resources)
+  world.layoutW = 600.0
+  world.layoutH = 800.0
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  settle(world: world, uiSystems: uiSystems, res: resources)
+  show(world: world, uiSystems: uiSystems, step: "one line")
+  setNodeText(
+    world: world
+    nodeId: "Prompt"
+    value: "Your account was not found on this device. Sign in again with the same account to bring back your progress."
+  )
+  settle(world: world, uiSystems: uiSystems, res: resources)
+  show(world: world, uiSystems: uiSystems, step: "the long text")
+  componentMod(this: world.rects, entityId: entityOf(world: world, nodeId: "Card")).size.x = 200.0
+  settle(world: world, uiSystems: uiSystems, res: resources)
+  show(world: world, uiSystems: uiSystems, step: "a narrower card")
+  setNodeText(world: world, nodeId: "Prompt", value: "Sign in")
+  settle(world: world, uiSystems: uiSystems, res: resources)
+  show(world: world, uiSystems: uiSystems, step: "short again")
+}
