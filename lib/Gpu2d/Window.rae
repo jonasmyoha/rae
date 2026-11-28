@@ -270,8 +270,9 @@ func designHeight() ret Float {
 # The render scale cap (docs/gpu2d-quality.md): the window is drawn at most `cap` pixels a point
 # and shown scaled up by the system, the fill-rate lever of a graphics tier (2 on a high tier,
 # 1.5 on a lower one; 0: the display's own ratio). Set it before initWindow; set later, the
-# surface is made again at once and windowResized() says so. dpr() is the capped ratio. Not
-# applied on Android yet (its ratio is the display density).
+# surface is made again at once and windowResized() says so. dpr() is the capped ratio. On
+# Android the window's size and the pointer are in surface pixels, so they shrink with the cap too
+# and stay the same points.
 func nativeSetRenderScaleCap(cap: Float) mainThread unsafe extern("rae_ext_Gpu2d_setRenderScaleCap")
 
 func setRenderScaleCap(cap: copy Float) {

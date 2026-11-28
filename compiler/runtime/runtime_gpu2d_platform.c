@@ -138,18 +138,23 @@ static void rae_g2d_configure(int pw, int ph);
  * drawn at most this many pixels a point and shown scaled up by the compositor (0: the display's
  * own ratio). Platform reason: the drawable's size is the surface configuration, which is C. */
 static float g_g2d_render_scale_cap = 0.0f;
-/* The window's pixels, `*pw` x `*ph`, as the surface draws them under the cap. Android's window
- * units are pixels (its ratio is the display density), so the cap is not applied there yet. */
+/* The window's pixels, `*pw` x `*ph`, as the surface draws them under the cap. On Android the
+ * window's units are pixels and its ratio is the display density: the surface is the pixels times
+ * cap / density there (and rae_g2d_configure sets the native window's buffers to that size). */
 static void rae_g2d_cap_pixels(int* pw, int* ph) {
-#ifndef __ANDROID__
     if (g_g2d_render_scale_cap <= 0.0f || !g_sdl_win) return;
+#ifdef __ANDROID__
+    float density = SDL_GetWindowDisplayScale(g_sdl_win);
+    if (density <= g_g2d_render_scale_cap) return;
+    float share = g_g2d_render_scale_cap / density;
+    *pw = (int)((float)*pw * share + 0.5f);
+    *ph = (int)((float)*ph * share + 0.5f);
+#else
     int lw = 0, lh = 0;
     SDL_GetWindowSize(g_sdl_win, &lw, &lh);
     if (lw <= 0 || lh <= 0 || (float)*pw <= (float)lw * g_g2d_render_scale_cap) return;
     *pw = (int)((float)lw * g_g2d_render_scale_cap + 0.5f);
     *ph = (int)((float)lh * g_g2d_render_scale_cap + 0.5f);
-#else
-    (void)pw; (void)ph;
 #endif
 }
 /* macOS: the surface's own CAMetalLayer inside SDL's view layer
@@ -228,6 +233,17 @@ static void rae_g2d_configure(int pw, int ph) {
     if (!rae_g2d_android_window_alive()) return;
 #endif
     if (!g_g2d_surface || pw <= 0 || ph <= 0) return;
+#ifdef __ANDROID__
+    /* Under the render scale cap the surface is smaller than the window: the native window's
+     * buffers take that size, so the compositor scales them up to the window and the Vulkan
+     * swapchain's extent (the window's current extent) matches it. 0 x 0 is the window's own. */
+    if (g_g2d_android_window && g_sdl_win) {
+        int windowW = 0, windowH = 0;
+        SDL_GetWindowSizeInPixels(g_sdl_win, &windowW, &windowH);
+        if (pw < windowW || ph < windowH) ANativeWindow_setBuffersGeometry(g_g2d_android_window, pw, ph, 0);
+        else ANativeWindow_setBuffersGeometry(g_g2d_android_window, 0, 0, 0);
+    }
+#endif
     WGPUSurfaceConfiguration cfg; memset(&cfg, 0, sizeof(cfg));
     cfg.device = g_wgpu_dev;
     cfg.format = g_g2d_fmt;
@@ -270,6 +286,7 @@ static void rae_g2d_android_make_surface(void) {
     if (!g_g2d_surface) { fprintf(stderr, "[gpu2d] surface failed after resume\n"); return; }
     int pw = 0, ph = 0;
     SDL_GetWindowSizeInPixels(g_sdl_win, &pw, &ph);
+    rae_g2d_cap_pixels(&pw, &ph);
     fprintf(stderr, "[gpu2d] back in the foreground: a new surface, %dx%d\n", pw, ph);
     if (pw != g_sdl_w || ph != g_sdl_h) g_g2d_win_resized = 1;
     rae_g2d_configure(pw, ph);
@@ -1360,6 +1377,8 @@ float rae_ext_Gpu2d_dpr(void){
      * always 1, and a UI laid out in points came out at a third of its size. The
      * screen's density is the display scale there. */
     float density = g_sdl_win ? SDL_GetWindowDisplayScale(g_sdl_win) : 0.0f;
+    /* (under the render scale cap: the capped ratio, the surface's size over the window's) */
+    if (density > 0.0f && g_g2d_render_scale_cap > 0.0f && density > g_g2d_render_scale_cap) return g_g2d_render_scale_cap;
     if (density > 0.0f) return density;
 #endif
     int lw = 0, lh = 0; if (g_sdl_win) SDL_GetWindowSize(g_sdl_win, &lw, &lh);

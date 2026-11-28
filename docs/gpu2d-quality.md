@@ -53,10 +53,12 @@ the surface is first made; set later (from a settings menu), the surface is made
   frame shrinks with it (the boxes, the images, the text, a backdrop blur).
 - **Look:** text and edges are softer, as the frame is scaled up; at 2 on a 3x phone it is hard to
   see, at 1 it is plain.
-- **Platforms:** the Mac and iOS (Metal) and the desktop. Not on Android yet: its window units are
-  pixels and its ratio the display density, and a smaller drawable there needs the native window's
-  buffers set to that size too (ANativeWindow_setBuffersGeometry); until then the cap is ignored
-  there.
+- **Platforms:** the Mac and iOS (Metal), the desktop, and Android. On Android the window's units
+  are pixels and its ratio is the display density: the surface is the pixel size times cap / density,
+  the native window's buffers are set to that size (ANativeWindow_setBuffersGeometry, so the
+  compositor scales the frame up to the screen), and dpr() is the cap. The window's size and the
+  pointer are in those surface pixels, so they keep the same points (on a 1080 x 2400 phone at
+  2.625: 1080 x 2400 at dpr 2.625 uncapped, 411 x 914 at dpr 1 under a cap of 1).
 
 checks/gpu2dQuality makes the window under a cap of 1 and reads a ratio of 1, then lifts the cap and
 reads the display's (2 on a Retina Mac), with the window resized. A frame under the cap is drawn at

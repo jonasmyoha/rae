@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.153, 2026-11-28: the render scale cap on Android
+
+- `Gpu2d.setRenderScaleCap(cap:)` now works on Android too. The surface is the window's pixels times
+  cap / density, the native window's buffers are that size (the compositor scales the frame up), and
+  `dpr()` is the cap. The window size and the pointer stay in the same points. On a 2.625 emulator
+  under a cap of 1, checks/gpu2dQuality reads a ratio of 1, and the frame fills the screen.
+
 ## 0.4.152, 2026-11-28: an image size cap and a render scale cap for the 2D canvas
 
 - `Gpu2d.setImageSizeCap(canvas:, threshold:, target:)`: an image file whose longer side is at least
