@@ -1,0 +1,101 @@
+# Color emoji in UI text (docs/text-emoji.md): lines that mix words and emoji (a skin tone, a flag,
+# a ZWJ family, the eight emotes of a game's match), an outlined text (the outline pass draws no
+# emoji over the glyphs) and a faded one, drawn through the real pipeline. Exit 0 when every emoji
+# cluster in the page became an image (on Apple, Apple Color Emoji through CoreText).
+#
+#   RAE_HEADLESS_FRAMES=4 RAE_GPU2D_SCREENSHOT=/tmp/emoji.bmp \
+#     compiler/bin/rae run checks/uiTextEmoji/Main.rae
+#
+# The layout (one square an emoji, a wrap between whole emoji) is checked in
+# compiler/tests/cases/1715_text_emoji.
+import Gpu2d
+import ui/Scene
+open app3d/UiShell
+open ecs/Schedule
+open ui/Ecs
+open ui/Pipeline
+open ui/RenderSystem
+open ui/SceneFile
+open ui/SceneLoader
+open ui/ThemeParse
+open ui/UiSystems
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+
+const designW: Int = 800
+
+const designH: Int = 600
+
+# The emoji images of the page: 5 in the first line, the 8 emotes (larger, so the fire is another
+# image), the outlined text's party popper and the faded line's sunglasses (each at another size
+# than the emotes')
+const clusterImages: Int = 15
+
+func main() ret Int {
+  Gpu2d.initWindow(width: designW, height: designH, title: "UI text emoji check")
+  var canvas: Gpu2dCanvas = createGpu2dCanvas()
+  var gpuUi: Gpu2dUi = loadUiAssets(
+    dir: "examples/104_ui_hello/assets/"
+    textFontName: "Roboto-Regular"
+    iconFontName: "MaterialIconsRound-Regular"
+    themeFile: "Theme.raescene"
+  )
+  let scene: Scene = loadSceneFile(path: "checks/uiTextEmoji/page.raescene")
+  if scene.ok is false {
+    log("UI TEXT EMOJI FAILED: {scene.errorMsg}")
+    Gpu2d.closeWindow()
+    ret 1
+  }
+  gpuUi.theme = parseTheme(scene: scene)
+  var world: UiWorld = create()
+  var uiSystems: UiSystems = createUiSystems()
+  seedWorldTheme(world: world, res: gpuUi)
+  Gpu2d.setDesignResolution(width: designW.toFloat(), height: designH.toFloat(), fit: 0)
+  world.layoutW = designW.toFloat()
+  world.layoutH = designH.toFloat()
+  loadScene(world: world, uiSystems: uiSystems, scene: scene)
+  var schedule: Schedule = createUiPipeline(world: world)
+  var frames: Int = 0
+  var imagesAfterFirst: Int = 0
+  loop not Gpu2d.pollClose() and frames < 4 {
+    runScheduledUiSystems(
+      schedule: schedule
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+    )
+    Gpu2d.beginFrame(
+      canvas: canvas
+      r: 0.0
+      g: 0.0
+      b: 0.0
+      a: 1.0
+    )
+    renderSystemGpu2d(
+      world: world
+      uiSystems: uiSystems
+      res: gpuUi
+      canvas: canvas
+    )
+    Gpu2d.endFrame(canvas: canvas)
+    if frames is 0 {
+      imagesAfterFirst = canvasImageCount(canvas: canvas)
+    }
+    frames = frames + 1
+  }
+  let images: Int = canvasImageCount(canvas: canvas)
+  let unavailable: Int = canvas.emojiUnavailable.length
+  canvasShutdown(canvas: canvas)
+  Gpu2d.closeWindow()
+  log(
+    "emoji images {images} (after the first frame {imagesAfterFirst}), not drawable {unavailable}"
+  )
+  if images < clusterImages or images is not imagesAfterFirst or unavailable > 0 {
+    log(
+      "UI TEXT EMOJI FAILED: {images} images, {clusterImages} expected, {unavailable} not drawable"
+    )
+    ret 1
+  }
+  log("UI TEXT EMOJI OK: {images} emoji images, made once")
+  ret 0
+}

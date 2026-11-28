@@ -1,0 +1,140 @@
+# Gpu2dEmoji — color emoji in 2D text (docs/text-emoji.md). Gpu2dText draws an emoji cluster
+# (SdfText sdfEmojiEnd: a picture the font has no glyph for, with its whole grapheme) as an image:
+# the platform's color emoji font draws the cluster once into a square at about the size it is
+# shown, the square is uploaded as an image under "emoji:<cluster>@<pixels>", and every later draw
+# of it at that size is that image.
+#
+# The platform's font: Apple Color Emoji through CoreText, and on Android the system's emoji font
+# through Java's text stack (runtime_emoji.h, tools/android/java/org/rae/app/RaeEmoji.java).
+# Elsewhere there is no image yet, so an emoji keeps its place in the line and shows nothing.
+import Math
+open collections/StringMap
+open Gpu2dCanvas
+open Gpu2dCanvasImage
+open Gpu2dCanvasCache
+cheader "runtime_emoji.h"
+
+func rae_ext_Gpu2dEmoji_rasterize(
+  text: String
+  pixels: Int
+  out: Buffer(UInt8)
+) unsafe extern("rae_ext_Gpu2dEmoji_rasterize") ret Int
+
+# The raster size for an emoji `pixels` tall on screen: the smallest of 24, 32, 48, 64, 96, 128 and
+# 160 that is at least that (160 above it), so a few sizes serve every text size
+func emojiRasterSize(pixels: view Float) ret Int {
+  if pixels <= 24.0 {
+    ret 24
+  }
+  if pixels <= 32.0 {
+    ret 32
+  }
+  if pixels <= 48.0 {
+    ret 48
+  }
+  if pixels <= 64.0 {
+    ret 64
+  }
+  if pixels <= 96.0 {
+    ret 96
+  }
+  if pixels <= 128.0 {
+    ret 128
+  }
+  ret 160
+}
+
+# The emoji drawn into a `pixels` square as straight-alpha RGBA bytes (rows from the top), or no
+# bytes when the platform has no emoji font or draws nothing for it
+func rasterizeEmoji(cluster: view String, pixels: view Int) ret List(UInt8) {
+  var bytes: List(UInt8) = List.create(UInt8, cap: pixels * pixels * 4)
+  bytes.addDefaults(count: pixels * pixels * 4)
+  var drawn: Int = 0
+  unsafe {
+    drawn = rae_ext_Gpu2dEmoji_rasterize(text: cluster, pixels: pixels, out: bytes.data)
+  }
+  if drawn is 0 {
+    ret List(UInt8) {}
+  }
+  # the font draws premultiplied; an image is straight alpha
+  loop var i: Int = 0, i < bytes.length, i += 4 {
+    let alpha: Int = bytes.copyAtFallback(index: i + 3, fallback: 0) as Int
+    if alpha > 0 and alpha < 255 {
+      loop var channel: Int = 0, channel < 3, ++channel {
+        let value: Int = bytes.copyAtFallback(index: i + channel, fallback: 0) as Int
+        bytes.set(index: i + channel, value: Math.min(a: value * 255 / alpha, b: 255) as UInt8)
+      }
+    }
+  }
+  ret bytes
+}
+
+# The image key of `cluster` drawn `pixels` square, registered on first use; "" when the platform
+# cannot draw it (remembered, so it is not asked again)
+func emojiImageKey(canvas: mod Gpu2dCanvas, cluster: view String, pixels: view Int) ret String {
+  let key: String = "emoji:{cluster}@{pixels}"
+  if canvasHasImageKey(canvas: canvas, key: key) {
+    ret key
+  }
+  if canvas.emojiUnavailable.has(k: key) {
+    ret ""
+  }
+  let bytes: List(UInt8) = rasterizeEmoji(cluster: cluster, pixels: pixels)
+  var handle: Int = 0
+  if bytes.length > 0 {
+    handle = canvasRegisterImageBytes(
+      canvas: canvas
+      bytes: bytes
+      width: pixels
+      height: pixels
+    )
+  }
+  if handle <= 0 {
+    canvas.emojiUnavailable.set(k: key, value: 1)
+    ret ""
+  }
+  canvasRegisterImageKey(canvas: canvas, key: key, handle: handle)
+  ret key
+}
+
+# Draw `cluster` as a color emoji in the square at (x, y), `side` canvas units wide, multiplied by
+# `tint` (0xAARRGGBB: white keeps its colors, a shadow's color makes its silhouette). Nothing is
+# drawn where the platform has no emoji font.
+func canvasDrawEmoji(
+  canvas: mod Gpu2dCanvas
+  cluster: view String
+  x: view Float
+  y: view Float
+  side: view Float
+  tint: view Int
+) {
+  if side <= 0.0 {
+    ret
+  }
+  # the frame's scale is known at its first flush; an emoji drawn before that reads it now
+  if xformAt(canvas: canvas, index: 2) <= 0.0 {
+    refreshXform(canvas: canvas)
+  }
+  var pixelsPerUnit: Float = (xformAt(canvas: canvas, index: 2) + xformAt(canvas: canvas, index: 3)) / 2.0
+  if pixelsPerUnit <= 0.0 {
+    pixelsPerUnit = 1.0
+  }
+  let key: String = emojiImageKey(
+    canvas: canvas
+    cluster: cluster
+    pixels: emojiRasterSize(pixels: side * pixelsPerUnit)
+  )
+  if key.length() is 0 {
+    ret
+  }
+  canvasDrawImageKey(
+    canvas: canvas
+    key: key
+    x: x
+    y: y
+    w: side
+    h: side
+    radius: 0.0
+    tint: tint
+  )
+}

@@ -9,11 +9,14 @@
 # Compiled-target only (pulls in gpu2d → wgpu-native + SDL3).
 import SdfText
 import Gpu2d
+import Gpu2dEmoji
 open Gpu2dCanvas
 
 # Lay out one run of `text` at baseline (x, y), emitting a glyph quad per
 # character with an optional outline (outlineWidth px of outlineColor). Returns
-# the pen x advance. drawText / drawTextEx build on this.
+# the pen x advance. drawText / drawTextEx build on this. A color emoji (SdfText sdfEmojiEnd) is
+# drawn as an image multiplied by `emojiTint` (emojiTintOf(color) for the text itself, the shadow's
+# color for a shadow's silhouette); a tint of 0 draws none (an outline pass) but keeps its place.
 func emitRun(
   canvas: mod Gpu2dCanvas
   font: view SdfFont
@@ -25,6 +28,7 @@ func emitRun(
   outlineWidth: copy Float
   outlineColor: copy Int
   softness: copy Float
+  emojiTint: copy Int
 ) ret Float {
   ret emitRange(
     canvas: canvas
@@ -39,7 +43,13 @@ func emitRun(
     outlineWidth: outlineWidth
     outlineColor: outlineColor
     softness: softness
+    emojiTint: emojiTint
   )
+}
+
+# The tint a run's emoji take in the text's own pass: their own colors, at the text's opacity
+func emojiTintOf(color: view Int) ret Int {
+  ret (color bitand 0xFF000000) bitor 0x00FFFFFF
 }
 
 # Allocation-free subset emitter used by word wrapping. `end` is exclusive.
@@ -56,6 +66,7 @@ func emitRange(
   outlineWidth: copy Float
   outlineColor: copy Int
   softness: copy Float
+  emojiTint: copy Int
 ) ret Float {
   unsafe {
     let scale: Float = sizePx / font.emSize
@@ -105,6 +116,25 @@ func emitRange(
           )
         }
         pen = pen + g.advance * scale
+      } else {
+        let emojiEnd: Int = SdfText.sdfEmojiEnd(text: text, at: i, cp: cp)
+        if emojiEnd > i {
+          let advance: Float = SdfText.sdfEmojiAdvance(sizePx: sizePx)
+          if emojiTint is not 0 {
+            let side: Float = sizePx * SdfText.emojiSizeEm
+            Gpu2dEmoji.canvasDrawEmoji(
+              canvas: canvas
+              cluster: text.sub(start: i, len: emojiEnd - i)
+              x: pen + (advance - side) * 0.5
+              y: y - sizePx * SdfText.emojiTopEm
+              side: side
+              tint: emojiTint
+            )
+          }
+          pen = pen + advance
+          i = emojiEnd
+          continue
+        }
       }
       i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
     }
@@ -156,7 +186,16 @@ func nextWrapLine(
       }
       ret WrapLine { end: i, next: i + 1 }
     }
-    let advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
+    var advance: Float = glyphAdvance(font: font, cp: cp, sizePx: sizePx)
+    # an emoji is one piece: its whole grapheme, one emoji's width
+    var step: Int = SdfText.sdfUtf8ByteWidth(cp: cp)
+    if advance is 0.0 and SdfText.sdfGlyphIndex(font: font, cp: cp) is none {
+      let emojiEnd: Int = SdfText.sdfEmojiEnd(text: text, at: i, cp: cp)
+      if emojiEnd > i {
+        advance = SdfText.sdfEmojiAdvance(sizePx: sizePx)
+        step = emojiEnd - i
+      }
+    }
     if cp is 32 {
       lastSpace = i
     }
@@ -167,7 +206,7 @@ func nextWrapLine(
       ret WrapLine { end: i, next: i }
     }
     width = width + advance
-    i = i + SdfText.sdfUtf8ByteWidth(cp: cp)
+    i = i + step
   }
   ret WrapLine { end: n, next: n }
 }
@@ -227,6 +266,7 @@ func drawTextWrappedEx(
       outlineWidth: outlineWidth
       outlineColor: outlineColor
       softness: 1.0
+      emojiTint: emojiTintOf(color: color)
     )
     ret 1
   }
@@ -254,6 +294,7 @@ func drawTextWrappedEx(
       outlineWidth: outlineWidth
       outlineColor: outlineColor
       softness: 1.0
+      emojiTint: emojiTintOf(color: color)
     )
     lines = lines + 1
     baseline = baseline + lineHeight
@@ -285,6 +326,7 @@ func drawText(
     outlineWidth: 0.0
     outlineColor: 0
     softness: 1.0
+    emojiTint: emojiTintOf(color: color)
   )
 }
 
@@ -327,6 +369,7 @@ func drawTextEx(
       outlineWidth: 0.0
       outlineColor: 0
       softness: soft
+      emojiTint: shadowColor
     )
   }
   ret emitRun(
@@ -340,6 +383,7 @@ func drawTextEx(
     outlineWidth: outlineWidth
     outlineColor: outlineColor
     softness: 1.0
+    emojiTint: emojiTintOf(color: color)
   )
 }
 

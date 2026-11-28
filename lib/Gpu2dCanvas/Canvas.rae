@@ -242,6 +242,9 @@ type Gpu2dCanvas {
   imageSampler: SamplerId
   images: List(Gpu2dImage)  # handle = index + 1
   imageKeys: StringMap(Int)  # name -> handle registry
+  # emoji clusters (with their raster size) the platform could not draw, not asked again
+  # (Gpu2dEmoji)
+  emojiUnavailable: StringMap(Int)
   # handles whose image is gone, used again, and handles to let go of once the frame being drawn is
   # submitted (canvasReleaseImage)
   imagesFree: List(Int)
@@ -333,6 +336,7 @@ func createGpu2dCanvas() ret Gpu2dCanvas {
       imageSampler: noSamplerId()
       images: List.create(Gpu2dImage, cap: 32)
       imageKeys: createStringMap(Int, cap: 64)
+      emojiUnavailable: createStringMap(Int, cap: 8)
       imagesFree: {}
       imagesReleasing: {}
       imageCommands: List.create(Float, cap: 32 * imageUniformFloats)

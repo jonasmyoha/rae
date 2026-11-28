@@ -9,6 +9,7 @@
 # Requires sdl3 (the blit lives in its runtime block). Compiled-target only.
 import Json
 import String
+import text/Graphemes
 open Sys
 
 func rae_ext_rae_sys_read_file(path: String) unsafe extern ret String
@@ -339,6 +340,37 @@ func sdfUtf8ByteWidth(cp: view Int) pub ret Int {
   ret 4
 }
 
+# ----- color emoji (docs/text-emoji.md) ----------------------------------------
+# A character the font has no glyph for that is a picture (Unicode's Extended_Pictographic) or a
+# flag's letter starts an emoji: the whole grapheme (a skin tone, a ZWJ family, a flag's two
+# letters, a variation selector) is ONE emoji, drawn as a color image by Gpu2dText and measured
+# here as one square. A font that has a glyph for the character (a heart, a star) keeps drawing it.
+
+# An emoji's advance, its square's side and how far the square reaches above the baseline, in em
+const emojiAdvanceEm: Float = 1.2
+
+const emojiSizeEm: Float = 1.15
+
+const emojiTopEm: Float = 0.93
+
+# Where the emoji that starts at byte `at` (its first code point `cp`, which the font has no glyph
+# for) ends, or -1 when `cp` starts no emoji
+func sdfEmojiEnd(text: view String, at: view Int, cp: view Int) ret Int {
+  if cp < 169 {
+    ret -1
+  }
+  let kind: Graphemes.GraphemeClass = Graphemes.graphemeClass(code: cp)
+  if kind is Graphemes.GraphemeClass.picture or kind is Graphemes.GraphemeClass.region {
+    ret Graphemes.nextGrapheme(text: text, at: at)
+  }
+  ret -1
+}
+
+# An emoji's advance at `sizePx` (the em's size in pixels)
+func sdfEmojiAdvance(sizePx: view Float) ret Float {
+  ret sizePx * emojiAdvanceEm
+}
+
 # Width of `text` in framebuffer pixels at `sizePx`.
 func sdfMeasureText(font: view SdfFont, text: view String, sizePx: view Float) ret Float {
   unsafe {
@@ -351,6 +383,13 @@ func sdfMeasureText(font: view SdfFont, text: view String, sizePx: view Float) r
       if let gi: Int = sdfGlyphIndex(font: font, cp: cp) {
         let g: SdfGlyph = rae_ext_rae_buf_get(buf: font.glyphs.data, index: gi)
         total = total + g.advance * scale
+      } else {
+        let emojiEnd: Int = sdfEmojiEnd(text: text, at: i, cp: cp)
+        if emojiEnd > i {
+          total = total + sdfEmojiAdvance(sizePx: sizePx)
+          i = emojiEnd
+          continue
+        }
       }
       i = i + sdfUtf8ByteWidth(cp: cp)
     }
@@ -407,6 +446,38 @@ func sdfMeasureTextBounds(
           }
         }
         pen = pen + g.advance * scale
+      } else {
+        let emojiEnd: Int = sdfEmojiEnd(text: text, at: i, cp: cp)
+        if emojiEnd > i {
+          # the emoji's square, as Gpu2dText draws it
+          let ex0: Float = pen + (sdfEmojiAdvance(sizePx: sizePx) - sizePx * emojiSizeEm) * 0.5
+          let ex1: Float = ex0 + sizePx * emojiSizeEm
+          let ey0: Float = 0.0 - sizePx * emojiTopEm
+          let ey1: Float = ey0 + sizePx * emojiSizeEm
+          if has is false {
+            left = ex0
+            right = ex1
+            top = ey0
+            bottom = ey1
+            has = true
+          } else {
+            if ex0 < left {
+              left = ex0
+            }
+            if ex1 > right {
+              right = ex1
+            }
+            if ey0 < top {
+              top = ey0
+            }
+            if ey1 > bottom {
+              bottom = ey1
+            }
+          }
+          pen = pen + sdfEmojiAdvance(sizePx: sizePx)
+          i = emojiEnd
+          continue
+        }
       }
       i = i + sdfUtf8ByteWidth(cp: cp)
     }
@@ -486,6 +557,14 @@ func sdfDrawText(
           )
         }
         pen = pen + g.advance * scale
+      } else {
+        # an emoji keeps its place (the CPU framebuffer draws no color emoji)
+        let emojiEnd: Int = sdfEmojiEnd(text: text, at: i, cp: cp)
+        if emojiEnd > i {
+          pen = pen + sdfEmojiAdvance(sizePx: sizePx)
+          i = emojiEnd
+          continue
+        }
       }
       i = i + sdfUtf8ByteWidth(cp: cp)
     }

@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.157, 2026-11-28: color emoji in text
+
+- A `Text` (and every `Gpu2dText` draw) shows color emoji: a picture the font has no glyph for,
+  with its whole grapheme (skin tones, flags, ZWJ sequences), is drawn as an image made by the
+  platform's emoji font: Apple Color Emoji through CoreText on macOS and iOS, the system's emoji
+  font through Java on Android (docs/text-emoji.md). It measures as one 1.2 em square and is never
+  split by a wrap. Elsewhere it keeps its place and shows nothing yet.
+- `Gpu2dText.emitRun` / `emitRange` take `emojiTint:` (`emojiTintOf(color:)`, a shadow's color,
+  or 0 for an outline pass). Case 1715, `checks/uiTextEmoji`.
+
 ## 0.4.156, 2026-11-28: String.toUpper
 
 - `"ab12-cd34".toUpper()` is `"AB12-CD34"`: ASCII `a`-`z` become `A`-`Z`, every other character

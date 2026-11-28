@@ -1,0 +1,79 @@
+# Color emoji in text (docs/text-emoji.md): a character the font has no glyph for that is a picture
+# or a flag's letter starts an emoji, and its whole grapheme (a skin tone, a flag's two letters, a
+# ZWJ family, a variation selector) is one emoji: one square in the measure, one piece in a wrap,
+# one image. On Apple the system's emoji font draws it (Gpu2dEmoji rasterizeEmoji).
+import SdfText
+import Gpu2dText
+import Gpu2dEmoji
+import Math
+
+func main() {
+  let font: SdfFont = SdfText.loadSdfFontJson(
+    jsonPath: "../examples/104_ui_hello/assets/Roboto-Regular.mtsdf.json"
+  )
+  let line: String = "Hi 🔥 GG 👍🏽🇫🇮👨‍👩‍👧 ⚡️!"
+  # the emoji in the line, each with its bytes
+  var emojiCount: Int = 0
+  var i: Int = 0
+  loop i < line.length() {
+    let cp: Int = line.at(index: i).toInt()
+    var step: Int = SdfText.sdfUtf8ByteWidth(cp: cp)
+    if SdfText.sdfGlyphIndex(font: font, cp: cp) is none {
+      let end: Int = SdfText.sdfEmojiEnd(text: line, at: i, cp: cp)
+      if end > i {
+        log("emoji {line.sub(start: i, len: end - i)}: {end - i} bytes")
+        emojiCount = emojiCount + 1
+        step = end - i
+      }
+    }
+    i = i + step
+  }
+  log("emoji in the line: {emojiCount}")
+  log("a letter starts none: {SdfText.sdfEmojiEnd(text: "A", at: 0, cp: 65)}")
+
+  # the measure: the line's text plus one square for each emoji
+  let size: Float = 20.0
+  let text: Float = SdfText.sdfMeasureText(font: font, text: "Hi  GG  !", sizePx: size)
+  let whole: Float = SdfText.sdfMeasureText(font: font, text: line, sizePx: size)
+  let expected: Float = text + 5.0 * SdfText.sdfEmojiAdvance(sizePx: size)
+  log("width is the text's and five emoji: {Math.abs(value: whole - expected) < 0.01}")
+  let plain: SdfTextBounds = SdfText.sdfMeasureTextBounds(font: font, text: "GG", sizePx: size)
+  let mixed: SdfTextBounds = SdfText.sdfMeasureTextBounds(font: font, text: "GG🔥", sizePx: size)
+  log(
+    "the emoji reaches above the letters: {mixed.top < plain.top}, advance {mixed.advance > plain.advance}"
+  )
+
+  # a wrap breaks between whole emoji, never inside one
+  let fires: String = "🔥👍🏽🔥👍🏽"
+  let wrap: Gpu2dText.WrapLine = Gpu2dText.nextWrapLine(
+    font: font
+    text: fires
+    start: 0
+    sizePx: size
+    maxWidth: SdfText.sdfEmojiAdvance(sizePx: size) * 2.5
+  )
+  log("two emoji fit: the line ends at byte {wrap.end} of {fires.length()}")
+
+  # the system's emoji font draws them (Apple)
+  let fire: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "🔥", pixels: 64)
+  var opaque: Int = 0
+  var red: Int = 0
+  var blue: Int = 0
+  loop var p: Int = 0, p < fire.length, p += 4 {
+    if fire.copyAtFallback(index: p + 3, fallback: 0) as Int > 128 {
+      opaque = opaque + 1
+      red = red + (fire.copyAtFallback(index: p, fallback: 0) as Int)
+      blue = blue + (fire.copyAtFallback(index: p + 2, fallback: 0) as Int)
+    }
+  }
+  log(
+    "fire drawn: {fire.length is 64 * 64 * 4}, covers a good part: {opaque > 800}, warm: {red > blue * 2}"
+  )
+  let family: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "👨‍👩‍👧", pixels: 48)
+  log("a ZWJ family drawn: {family.length is 48 * 48 * 4}")
+  log(
+    "raster sizes: {Gpu2dEmoji.emojiRasterSize(pixels: 10.0)} {Gpu2dEmoji.emojiRasterSize(
+      pixels: 40.0
+    )} {Gpu2dEmoji.emojiRasterSize(pixels: 500.0)}"
+  )
+}
