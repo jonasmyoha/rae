@@ -9202,8 +9202,11 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     /* its argument is a type (`sizeof(StringMapEntry(V))`): the type it names */
                     AstExpr* named = expr->as.call.args ? expr->as.call.args->value : NULL;
                     if (named && !named->resolved_type && named->kind == AST_EXPR_CALL
-                        && sema_arg_is_type_name(symbols, named)) {
-                        TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, sema_type_ref_of_expr(ctx, named));
+                        && (named->is_written_out || named->as.call.generic_args || sema_arg_is_type_name(symbols, named))) {
+                        AstTypeRef* written = sema_type_ref_of_expr(ctx, named);
+                        /* (an instance writes `StringMapEntry(V)` with V put in as type arguments) */
+                        if (!written->generic_args && named->as.call.generic_args) written->generic_args = named->as.call.generic_args;
+                        TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, written);
                         if (type && sema_type_is_concrete(type, 0)) named->resolved_type = type;
                     }
                 }
@@ -9230,7 +9233,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         generic_extern = named->decl && named->decl->kind == AST_DECL_FUNC
                             && named->decl->as.func_decl.is_extern && named->decl->as.func_decl.generic_params;
                     if (!resolved && generic_extern && !expr->as.call.generic_args && expr->as.call.args
-                        && expr->as.call.args->next && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
+                        && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
                         AstTypeRef* written = sema_type_ref_of_expr(ctx, expr->as.call.args->value);
                         AstDecl* with_type = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args->next,
                                                                        written, expr->line, expr->column);
@@ -10424,6 +10427,36 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     }
                     diag_error(sema_diag_file(module), (int)expr->line, (int)expr->column, buf);
                     if (module) module->had_error = true;
+                }
+            }
+            /* a method call of a function with no result answers nothing */
+            if (!expr->resolved_type && expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC
+                && !expr->decl_link->as.func_decl.returns)
+                expr->resolved_type = type_get_void(ctx->type_registry);
+            /* the intrinsics the backend writes (docs/compile-time-reflection.md): `value.toString()`
+             * and `value.toJson()` are a String */
+            if (!expr->resolved_type && !expr->as.method_call.args
+                && (str_eq_cstr(expr->as.method_call.method_name, "toString")
+                    || str_eq_cstr(expr->as.method_call.method_name, "toJson")))
+                expr->resolved_type = type_get_string(ctx->type_registry);
+            /* `T.default()` (#959) and `T.fromJson(json:)`: a value of the type T names */
+            bool type_valued = str_eq_cstr(expr->as.method_call.method_name, "default") ? !expr->as.method_call.args
+                : str_eq_cstr(expr->as.method_call.method_name, "fromJson");
+            if (!expr->resolved_type && type_valued && expr->as.method_call.object
+                && expr->as.method_call.object->kind == AST_EXPR_IDENT) {
+                AstTypeRef* named = arena_alloc(ctx->ast_arena, sizeof(AstTypeRef));
+                memset(named, 0, sizeof(*named));
+                named->parts = arena_alloc(ctx->ast_arena, sizeof(AstIdentifierPart));
+                memset(named->parts, 0, sizeof(*named->parts));
+                named->parts->text = expr->as.method_call.object->as.ident;
+                named->line = expr->line;
+                named->column = expr->column;
+                Symbol* type_symbol = symbol_table_lookup(symbols, named->parts->text);
+                bool names_type = sema_arg_is_type_name(symbols, expr->as.method_call.object)
+                    || (type_symbol && !type_symbol->decl && type_symbol->type);
+                if (names_type) {
+                    TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, named);
+                    if (type && type->kind != TYPE_VOID && sema_type_is_concrete(type, 0)) expr->resolved_type = type;
                 }
             }
             break;

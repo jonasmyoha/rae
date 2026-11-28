@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.148, 2026-11-28: T.default(), toString and toJson typed
+
+- `T.default()` and `T.fromJson(json:)` have the type T names in sema, `value.toString()` and `value.toJson()` are
+  a String: `log(value.toJson())` prints the String as it is instead of through an Any. A method call of a
+  function with no result is void.
+
 ## 0.4.147, 2026-11-28: a literal has the type it lands in
 
 - A struct, list or `none` literal without a written type has the type of where it lands in sema, also as the

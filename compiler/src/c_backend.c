@@ -1950,6 +1950,8 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
   if (expr->kind == AST_EXPR_IDENT && !expr->resolved_type && !backend && !get_local_type_ref(ctx, expr->as.ident)
       && ctx->compiler_ctx && !decl_index_find_global(ctx->compiler_ctx, expr->as.ident))
     return;
+  /* and a type written out in an instance (`List(EntityId)` as a type argument) */
+  if (expr->kind == AST_EXPR_CALL && expr->is_written_out && !expr->resolved_type && !backend) return;
   /* a call that answers nothing: sema's TYPE_VOID, the backend's none or `Void` */
   bool both_void = type && type->kind == TYPE_VOID && (!backend || strcmp(backend_name, "void") == 0);
   /* no type from either side and none from sema at all: not a call that answers nothing (that is

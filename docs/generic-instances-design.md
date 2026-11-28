@@ -495,7 +495,15 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    functions that hold no String lose their string-pool mark (410 programs, 106/121/136 among them). Left
    untyped (42 237 of 111 904): `T.default()` (37 980 method calls; typing it changes about 2 000 lines of 106's C, in string-pool marks, temporaries and
    optionals, to be checked on its own), `List(...)` as a value in `decodeField`, and a few single calls; then the
-   internal error.
+   internal error. Then (0.4.148): `T.default()` and `T.fromJson(json:)` are of
+   the type T names, `value.toString()` / `value.toJson()` a String, a method call of a function with no result
+   void, a generic extern called with only its type argument resolves (`rae_ext_rae_require_plain(T)`), and the
+   type an instance writes as `sizeof`'s argument with its type arguments put in (`StringMapEntry(opt Note)`) has
+   its type; `check-types.sh` skips a type written out in an instance (`List(EntityId)`). Untyped: 42 237 -> 128,
+   in about 25 cases. C: 389 programs lose string-pool marks that held no String (with the temporaries after them
+   renumbered), and `log(x.toJson())` / `log(x.toString())` take the typed String path instead of an Any. Left: the
+   128 (a `none` in a few generic cases, a list or pair type written as a call, `Target` constants named in a
+   `when`, the cases that expect an error), then the internal error.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.
