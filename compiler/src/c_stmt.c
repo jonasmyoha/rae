@@ -3732,7 +3732,9 @@ static bool emit_stmt_inner(CFuncContext* ctx, const AstStmt* stmt, FILE* out) {
             // OWN expression is emitted.
             fprintf(out, "  ");
             // Check if assigning to a mod ref variable (e.g. rx = 10 where rx is rae_Mod_Int64)
-            const AstTypeRef* target_tr = infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
+            /* a Buffer's slot is written raw: no type, so nothing is dropped first */
+            const AstTypeRef* target_tr = c_is_buffer_slot(stmt->as.assign_stmt.target)
+                ? NULL : infer_expr_type_ref(ctx, stmt->as.assign_stmt.target);
             /* `mod T` whose T is an optional: the whole optional is stored, and
              * the one that was there released */
             if (stmt->as.assign_stmt.target->kind == AST_EXPR_IDENT

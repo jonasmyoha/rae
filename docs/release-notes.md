@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.143, 2026-11-28: a generic extern call is typed; view x and Buffer slots too
+
+- A call of a generic extern with its type written first (`rae_ext_rae_buf_get(V: Int, buf:, index:)`) has its
+  result type in sema, so a literal stored through `rae_ext_rae_buf_set(Float, ...)` is a Float literal.
+- `view x` / `mod x` arguments and `Buffer` slots have sema's type in the backend; a write into a `Buffer` slot
+  stays a raw write. No program's behavior changed.
+
 ## 0.4.142, 2026-11-28: a local is not taken for a global of its name
 
 - The backend no longer takes a local for a module-level value of the same name where it looks at a function's

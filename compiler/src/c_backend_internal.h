@@ -226,6 +226,18 @@ void emit_deep_copy_value(CFuncContext* ctx, const char* type_name, const AstExp
 static inline const AstExpr* c_without_own(const AstExpr* expr) {
   return expr && expr->kind == AST_EXPR_OWN ? expr->as.unary.operand : expr;
 }
+/* A slot of a Buffer (`buffer[i]`): raw memory, written without dropping what was there */
+static inline bool c_is_buffer_slot(const AstExpr* expr) {
+  if (!expr || expr->kind != AST_EXPR_INDEX || !expr->as.index.target) return false;
+  const TypeInfo* type = expr->as.index.target->resolved_type;
+  while (type && type->kind == TYPE_REF) type = type->as.ref.base;
+  return type && type->kind == TYPE_BUFFER;
+}
+/* The place a `view x` / `mod x` names: in C the place itself, not a pointer to it */
+static inline const AstExpr* c_without_reference_mark(const AstExpr* expr) {
+  return expr && expr->kind == AST_EXPR_UNARY
+      && (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) ? expr->as.unary.operand : expr;
+}
 /* Which functions of one name a call can mean: the best score of the argument
  * names (0: no candidate fits, all stay), and whether the project's own win */
 enum { C_CALL_CHOICE_ARGS = 16 };

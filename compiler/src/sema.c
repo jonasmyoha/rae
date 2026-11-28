@@ -9170,6 +9170,27 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 }
                 else {
                     AstDecl* resolved = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args, expr->as.call.generic_args, expr->line, expr->column);
+                    /* A type written as the first argument of a generic extern
+                     * (`rae_ext_rae_buf_get(V: Int, buf:, index:)`) is the call's type argument, as the
+                     * backend reads it (hoist_type_arg_if_present): moved there when the call then
+                     * resolves, and the call's type is its return type with it put in. Tried for an
+                     * extern only: a resolve with type arguments makes the instance it finds. */
+                    bool generic_extern = false;
+                    for (Symbol* named = symbol_table_first(symbols, name); named && !generic_extern; named = named->sameNext)
+                        generic_extern = named->decl && named->decl->kind == AST_DECL_FUNC
+                            && named->decl->as.func_decl.is_extern && named->decl->as.func_decl.generic_params;
+                    if (!resolved && generic_extern && !expr->as.call.generic_args && expr->as.call.args
+                        && expr->as.call.args->next && sema_arg_is_type_name(symbols, expr->as.call.args->value)) {
+                        AstTypeRef* written = sema_type_ref_of_expr(ctx, expr->as.call.args->value);
+                        AstDecl* with_type = resolve_function_overload(ctx, module, symbols, name, expr->as.call.args->next,
+                                                                       written, expr->line, expr->column);
+                        if (with_type && with_type->as.func_decl.is_extern
+                            && (with_type->as.func_decl.generic_params || with_type->as.func_decl.specialization_args)) {
+                            expr->as.call.generic_args = written;
+                            expr->as.call.args = expr->as.call.args->next;
+                            resolved = with_type;
+                        }
+                    }
                     if (!resolved && expr->as.call.args && sema_arg_is_type_name(symbols, expr->as.call.args->value)
                         && expr->as.call.args->value->kind == AST_EXPR_IDENT) {
                         // #885: `pick(Slot, value: create(id: 6))` — a generic callee
@@ -9196,6 +9217,11 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         expr->decl_link = resolved;
                         sema_check_call_arg_names(module, symbols, &resolved->as.func_decl, expr->as.call.args);
                         if (resolved->as.func_decl.returns) expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
+                        if (resolved->as.func_decl.returns && resolved->as.func_decl.is_extern
+                            && resolved->as.func_decl.generic_params && expr->as.call.generic_args)
+                            expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols,
+                                substitute_type_ref(ctx, resolved->as.func_decl.generic_params, expr->as.call.generic_args,
+                                                    resolved->as.func_decl.returns->type));
                         AstParam* p = resolved->as.func_decl.params; AstCallArg* a = expr->as.call.args;
                         while (p && a) { TypeInfo* pt = sema_resolve_type_internal(ctx, module, symbols, p->type); ensure_type_match(ctx, pt, &a->value); p = p->next; a = a->next; }
                         // #885: a generic callee's `T` parameters bind a pending `create(...)`

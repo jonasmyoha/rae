@@ -1842,15 +1842,14 @@ static _Thread_local int s_infer_call_count = 0;
 static _Thread_local int s_infer_depth = 0;
 
 /* The type sema gave `expr`, for the kinds the backend works out nothing for itself (a unary
- * expression, a box, an `own`, a Float64 binary): a reference is its base with its `view` / `mod`
- * mark. NULL for none. Not an index of a Buffer: a write into its slot is a raw write, which a
- * typed target would drop first. */
+ * expression, `view x` / `mod x` (an argument is written as the place x, c_without_reference_mark),
+ * a box, an `own`, a Float64 binary, a name or field read before its local is declared): a
+ * reference is its base with its `view` / `mod` mark. NULL for none. An index of a Buffer too: an
+ * assignment into its slot asks c_is_buffer_slot and writes raw. */
 static const AstTypeRef* c_sema_type_of(CFuncContext* ctx, const AstExpr* expr) {
   switch (expr->kind) {
-    /* `view x` / `mod x` is the place itself, passed by address where it is an argument */
-    case AST_EXPR_UNARY:
-      if (expr->as.unary.op == AST_UNARY_VIEW || expr->as.unary.op == AST_UNARY_MOD) return NULL;
-      break;
+    case AST_EXPR_UNARY: break;
+    case AST_EXPR_INDEX: break;
     case AST_EXPR_BOX:
     case AST_EXPR_OWN:
     case AST_EXPR_BINARY: break;

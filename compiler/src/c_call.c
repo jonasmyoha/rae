@@ -1586,7 +1586,15 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         fprintf(out, "%s(", call_name);
         const AstCallArg* a = expr->as.call.args; const AstParam* p = fd->params;
         int arg_index = 0;
+        AstCallArg place_arg;
         while (a) {
+            /* `mod x` / `view x` is written as x: every choice below is about the place x (whether
+             * it is already a pointer, whether to take its address) */
+            if (a->value && c_without_reference_mark(a->value) != a->value) {
+                place_arg = *a;
+                place_arg.value = (AstExpr*)c_without_reference_mark(a->value);
+                a = &place_arg;
+            }
             /* Own-argument rule (#363) retired: an `own` parameter now takes a
              * COPY of a borrowed or otherwise non-owned place (own_takes_copy
              * below, docs/binding-modes-design.md §2), so handing a view to

@@ -447,7 +447,18 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    `app` is a `mod App`); 5 535 typed only by the backend, nearly all a generic extern called with a written
    type argument (`rae_ext_rae_buf_get(V: Int, ...)`, 4 763 in `readFileBytes`), which sema leaves untyped, and
    the nodes of a `query(...)` loop the backend builds; and the two kinds left untyped on purpose, `view x` /
-   `mod x` and an index of a `Buffer`.
+   `mod x` and an index of a `Buffer`. Then (0.4.143): sema moves a type written as a generic extern's first argument
+   (`rae_ext_rae_buf_get(V: Int, buf:, index:)`) into the call's type arguments, as the backend's
+   `hoist_type_arg_if_present` reads it, and types the call as its return with them put in (only for an extern:
+   a resolve with type arguments makes the instance it finds, and trying it on every call reordered the instances
+   of 1 118 programs). The argument code writes a `view x` / `mod x` argument as the place `x`
+   (`c_without_reference_mark`), so it no longer reads "no type" as "a place"; and an assignment asks
+   `c_is_buffer_slot` for a raw write. With both, `view x` / `mod x` and a `Buffer` index have sema's type. C
+   changes: 1441's `7.5` into a `Buffer(Float)` slot is `7.5f`; 1096 and 608 pass the same pointer in another
+   spelling (`(rae_Mod_String){ .ptr = &((*text.ptr)) }` for `text`, `lib` for `&(*lib)`), the C of the call
+   without the mark. check-types.sh: 74 differ (the `mainLoop` body function), 596 only in the backend (the nodes
+   of a `query(...)` loop the backend builds; calls of a non-extern generic with a written type argument,
+   `processReverb`'s Float4, `widthOfNames`), 45 only in sema (method calls).
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.
