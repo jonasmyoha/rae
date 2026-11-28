@@ -1,0 +1,217 @@
+# DeviceInfo — what the program runs on: the hardware model, the physical memory, the GPU's name,
+# the OS version and the person's preferred locale (docs/device-info.md). For a graphics tier
+# chosen at the first start, and for analytics.
+#
+#     let model: String = DeviceInfo.deviceModel()          # "iPhone16,1", "Pixel 8", "Mac15,9"
+#     let memoryMb: Int = DeviceInfo.physicalMemoryMb()     # 8192, -1 when not known
+#     let gpu: String = DeviceInfo.gpuName()                # "Adreno (TM) 740" on Android, else ""
+#     let version: String = DeviceInfo.osVersion()          # "18.1", "15", "26.1"
+#     let tag: String = DeviceInfo.locale()                 # "en-FI"
+#
+# Each answer is "" (or -1) where the platform has none. Every one can be read before the first
+# window, and each is one quick system call, except gpuName on Android, which asks Vulkan once
+# (a few milliseconds) and keeps the name. The values do not change while the program runs, so
+# read them once and keep them on the app's state.
+#
+# Where each comes from:
+# - Apple: sysctl hw.machine (iOS; the simulator's SIMULATOR_MODEL_IDENTIFIER) or hw.model
+#   (macOS), hw.memsize, kern.osproductversion, and CoreFoundation's preferred languages.
+# - Android: the system properties ro.product.model and ro.build.version.release, sysconf for
+#   the memory, SDL's preferred locale (Java's Locale.getDefault()), and the first Vulkan
+#   device's name.
+# - Linux and the BSDs: /sys/devices/virtual/dmi/id/product_name, sysconf, /etc/os-release's
+#   VERSION_ID, and LC_ALL / LC_MESSAGES / LANG ("en_US.UTF-8" is "en-US").
+# - The browser and Windows: "" and -1 for now.
+# The C side is runtime_device_info.h, one platform call per function.
+import Sys
+import String
+cheader "runtime_device_info.h"
+
+const hasSysctl: Bool = Target.isApple
+
+const hasSystemProperties: Bool = Target.os is Os.android
+
+const hasSysconf: Bool = Target.isUnix
+
+const hasDmiFiles: Bool = Target.os is Os.linux or Target.isBsd
+
+const bytesPerMb: Int = 1048576
+
+when hasSysctl {
+  func rae_ext_DeviceInfo_sysctlText(
+    name: String
+  ) unsafe extern("rae_ext_DeviceInfo_sysctlText") ret String
+
+  func rae_ext_DeviceInfo_sysctlInt(
+    name: String
+  ) unsafe extern("rae_ext_DeviceInfo_sysctlInt") ret Int
+
+  func rae_ext_DeviceInfo_preferredLanguage() unsafe extern("rae_ext_DeviceInfo_preferredLanguage") ret
+    String
+
+}
+
+when hasSysconf {
+  func rae_ext_DeviceInfo_physicalPages() unsafe extern("rae_ext_DeviceInfo_physicalPages") ret Int
+
+  func rae_ext_DeviceInfo_pageSize() unsafe extern("rae_ext_DeviceInfo_pageSize") ret Int
+}
+
+when hasSystemProperties {
+  func rae_ext_DeviceInfo_systemProperty(
+    name: String
+  ) unsafe extern("rae_ext_DeviceInfo_systemProperty") ret String
+
+  func rae_ext_DeviceInfo_sdlLocale() unsafe extern("rae_ext_DeviceInfo_sdlLocale") ret String
+
+  func rae_ext_DeviceInfo_vulkanDeviceName() unsafe extern("rae_ext_DeviceInfo_vulkanDeviceName") ret
+    String
+
+}
+
+# The hardware model: "iPhone16,1" (iOS), "Mac15,9" (macOS), "Pixel 8" (Android), the DMI
+# product name (Linux); "" where there is none
+func deviceModel() ret String {
+  when hasSysctl {
+    if Target.os is Os.macos {
+      unsafe {
+        ret rae_ext_DeviceInfo_sysctlText(name: "hw.model")
+      }
+    }
+    # the simulator runs on the Mac, whose hw.machine is "arm64"
+    let simulated: String = Sys.getEnv(name: "SIMULATOR_MODEL_IDENTIFIER")
+    if simulated.length() > 0 {
+      ret simulated
+    }
+    unsafe {
+      ret rae_ext_DeviceInfo_sysctlText(name: "hw.machine")
+    }
+  } else when hasSystemProperties {
+    unsafe {
+      ret rae_ext_DeviceInfo_systemProperty(name: "ro.product.model")
+    }
+  } else when hasDmiFiles {
+    ret firstLineOf(path: "/sys/devices/virtual/dmi/id/product_name")
+  } else {
+    ret ""
+  }
+}
+
+# The physical memory in MiB (8 GiB is 8192), -1 when not known
+func physicalMemoryMb() ret Int {
+  when hasSysctl {
+    unsafe {
+      let bytes: Int = rae_ext_DeviceInfo_sysctlInt(name: "hw.memsize")
+      if bytes <= 0 {
+        ret -1
+      }
+      ret bytes / bytesPerMb
+    }
+  } else when hasSysconf {
+    unsafe {
+      let pages: Int = rae_ext_DeviceInfo_physicalPages()
+      let pageSize: Int = rae_ext_DeviceInfo_pageSize()
+      if pages <= 0 or pageSize <= 0 {
+        ret -1
+      }
+      ret pages / (bytesPerMb / pageSize)
+    }
+  } else {
+    ret -1
+  }
+}
+
+# The GPU's name on Android, the first Vulkan device's ("Adreno (TM) 740", "Mali-G57"); "" on
+# other platforms and on an Android without Vulkan. Read once, then kept.
+func gpuName() ret String {
+  when hasSystemProperties {
+    unsafe {
+      ret rae_ext_DeviceInfo_vulkanDeviceName()
+    }
+  } else {
+    ret ""
+  }
+}
+
+# The OS's version: "18.1" (iOS), "26.1" (macOS), "15" (Android), /etc/os-release's VERSION_ID
+# (Linux, "24.04"); "" where there is none
+func osVersion() ret String {
+  when hasSysctl {
+    unsafe {
+      ret rae_ext_DeviceInfo_sysctlText(name: "kern.osproductversion")
+    }
+  } else when hasSystemProperties {
+    unsafe {
+      ret rae_ext_DeviceInfo_systemProperty(name: "ro.build.version.release")
+    }
+  } else when hasDmiFiles {
+    if let text: String = Sys.readFile(path: "/etc/os-release") {
+      ret osReleaseValue(text: text, key: "VERSION_ID")
+    }
+    ret ""
+  } else {
+    ret ""
+  }
+}
+
+# The person's preferred locale as a language tag: "en-FI", or "fi" with no region; "" when
+# none is set
+func locale() ret String {
+  when hasSysctl {
+    unsafe {
+      ret rae_ext_DeviceInfo_preferredLanguage()
+    }
+  } else when hasSystemProperties {
+    unsafe {
+      ret rae_ext_DeviceInfo_sdlLocale()
+    }
+  } else {
+    var value: String = Sys.getEnv(name: "LC_ALL")
+    if value.length() is 0 {
+      value = Sys.getEnv(name: "LC_MESSAGES")
+    }
+    if value.length() is 0 {
+      value = Sys.getEnv(name: "LANG")
+    }
+    ret languageTagFromPosix(value: value)
+  }
+}
+
+# A POSIX locale as a language tag: "en_US.UTF-8" is "en-US", "fi_FI@euro" is "fi-FI", "de" is
+# "de"; "C", "POSIX" and "" are ""
+func languageTagFromPosix(value: view String) ret String {
+  var name: String = value
+  if let dot: Int = name.indexOf(sub: ".") {
+    name = name.sub(start: 0, len: dot)
+  }
+  if let at: Int = name.indexOf(sub: "@") {
+    name = name.sub(start: 0, len: at)
+  }
+  if name is "C" or name is "POSIX" {
+    ret ""
+  }
+  ret name.replace(old: "_", new: "-")
+}
+
+# The value of `key` in an os-release file's text (KEY=value or KEY="value"), "" when absent
+func osReleaseValue(text: view String, key: view String) ret String {
+  let prefix: String = "{key}="
+  loop let line: String in text.split(sep: "\n") {
+    if line.startsWith(prefix: prefix) {
+      let value: String = line.sub(start: prefix.length(), len: line.length() - prefix.length()).trim()
+      ret value.replace(old: "\"", new: "")
+    }
+  }
+  ret ""
+}
+
+# The first line of a small text file, trimmed; "" when it cannot be read
+func firstLineOf(path: view String) ret String {
+  if let text: String = Sys.readFile(path: path) {
+    if let end: Int = text.indexOf(sub: "\n") {
+      ret text.sub(start: 0, len: end).trim()
+    }
+    ret text.trim()
+  }
+  ret ""
+}

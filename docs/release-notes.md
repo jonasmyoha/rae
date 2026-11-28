@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.154, 2026-11-28: DeviceInfo, the model, memory, GPU, OS version and locale
+
+- New module `DeviceInfo` (docs/device-info.md): `deviceModel()` ("iPhone16,1", "Pixel 8",
+  "Mac15,9"), `physicalMemoryMb()`, `gpuName()` (the Vulkan device on Android, "Adreno (TM) 740"),
+  `osVersion()` ("18.1", "15") and `locale()` ("en-FI"). "" or -1 where a platform has none.
+  All can be read before the first window, for a graphics tier and for analytics. Case 1712.
+
 ## 0.4.153, 2026-11-28: the render scale cap on Android
 
 - `Gpu2d.setRenderScaleCap(cap:)` now works on Android too. The surface is the window's pixels times

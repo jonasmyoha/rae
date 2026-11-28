@@ -1,0 +1,35 @@
+# DeviceInfo: the hardware model, the physical memory, the GPU's name, the OS version and the
+# locale, read before any window. The output is what holds on every machine the suite runs on,
+# and the pure parsing.
+import DeviceInfo
+import Sys
+
+func main() {
+  let model: String = DeviceInfo.deviceModel()
+  let memoryMb: Int = DeviceInfo.physicalMemoryMb()
+  let gpu: String = DeviceInfo.gpuName()
+  let version: String = DeviceInfo.osVersion()
+  let tag: String = DeviceInfo.locale()
+  # the values themselves differ from machine to machine: RAE_SHOW_DEVICE_INFO=1 prints them
+  if Sys.getEnv(name: "RAE_SHOW_DEVICE_INFO") is "1" {
+    log(
+      "model \"{model}\", memory {memoryMb} MiB, gpu \"{gpu}\", os \"{version}\", locale \"{tag}\""
+    )
+  }
+  log("model known: {model.length() > 0}")
+  log("memory known: {memoryMb > 0}")
+  log("gpu name where the platform has one: {gpu.length() > 0 is (Target.os is Os.android)}")
+  log("os version known: {version.length() > 0}")
+  # the same answer the second time
+  log(
+    "read again: {DeviceInfo.deviceModel() is model and DeviceInfo.physicalMemoryMb() is memoryMb}"
+  )
+  log("posix en_US.UTF-8: {DeviceInfo.languageTagFromPosix(value: "en_US.UTF-8")}")
+  log("posix fi_FI@euro: {DeviceInfo.languageTagFromPosix(value: "fi_FI@euro")}")
+  log("posix de: {DeviceInfo.languageTagFromPosix(value: "de")}")
+  log("posix C: \"{DeviceInfo.languageTagFromPosix(value: "C")}\"")
+  let release: String = "NAME=\"Ubuntu\"\nVERSION_ID=\"24.04\"\nID=ubuntu\n"
+  log("os-release VERSION_ID: {DeviceInfo.osReleaseValue(text: release, key: "VERSION_ID")}")
+  log("os-release ID: {DeviceInfo.osReleaseValue(text: release, key: "ID")}")
+  log("os-release missing: \"{DeviceInfo.osReleaseValue(text: release, key: "BUILD_ID")}\"")
+}
