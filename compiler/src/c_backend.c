@@ -1830,6 +1830,7 @@ static bool type_ref_mentions_params(const AstTypeRef* tr, const AstIdentifierPa
 }
 
 static const AstTypeRef* infer_expr_type_ref_once(CFuncContext* ctx, const AstExpr* expr);
+static const AstTypeRef* infer_expr_type_ref_checked(CFuncContext* ctx, const AstExpr* expr);
 
 /* The type of a call asks for its arguments' types, more than once each: a
  * chain of calls in calls (`f(value: f(value: ...))`) took twice as long per
@@ -1840,7 +1841,73 @@ static _Thread_local struct { const AstExpr* expr; const AstTypeRef* type; } s_i
 static _Thread_local int s_infer_call_count = 0;
 static _Thread_local int s_infer_depth = 0;
 
+/* RAE_CHECK_TYPES=1: each answer of infer_expr_type_ref compared with the type sema gave the
+ * expression (docs/generic-instances-design.md step 9), counted per expression kind and printed at
+ * exit; RAE_CHECK_TYPES_SAMPLES=<file> appends each disagreement with its place.
+ * tools/check-types.sh sums the counts over every case and 106/121/136. */
+enum { CHECK_AGREE, CHECK_DIFFER, CHECK_ONLY_BACKEND, CHECK_ONLY_SEMA, CHECK_KINDS = 64 };
+static long s_check_counts[CHECK_KINDS][4];
+static FILE* s_check_samples;
+static int s_check_state;  /* 0 not read yet, 1 on, 2 off */
+
+static void check_types_report(void) {
+  for (int k = 0; k < CHECK_KINDS; k++) {
+    long* c = s_check_counts[k];
+    if (c[0] | c[1] | c[2] | c[3])
+      fprintf(stderr, "@@RAE_CHECK_TYPES kind=%d agree=%ld differ=%ld onlyBackend=%ld onlySema=%ld\n", k,
+              c[CHECK_AGREE], c[CHECK_DIFFER], c[CHECK_ONLY_BACKEND], c[CHECK_ONLY_SEMA]);
+  }
+  if (s_check_samples) fclose(s_check_samples);
+}
+
+static void check_type_name(CFuncContext* ctx, const AstTypeRef* type, char* out, size_t size) {
+  snprintf(out, size, "%s%s%s%s", type->is_opt ? "opt " : "", type->is_view ? "view " : "", type->is_mod ? "mod " : "",
+           rae_mangle_type_specialized(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)type));
+}
+
+static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstTypeRef* backend) {
+  if (s_check_state == 0) {
+    const char* value = getenv("RAE_CHECK_TYPES");
+    s_check_state = value && strcmp(value, "1") == 0 ? 1 : 2;
+    if (s_check_state == 1) {
+      atexit(check_types_report);
+      const char* samples = getenv("RAE_CHECK_TYPES_SAMPLES");
+      if (samples) s_check_samples = fopen(samples, "a");
+    }
+  }
+  if (s_check_state != 1) return;
+  int kind = expr->kind < CHECK_KINDS ? (int)expr->kind : CHECK_KINDS - 1;
+  const TypeInfo* type = expr->resolved_type;
+  bool view = false, mod = false;
+  if (type && type->kind == TYPE_REF) { mod = type->as.ref.is_mod; view = !mod; type = type->as.ref.base; }
+  AstTypeRef* sema = type && type->kind != TYPE_UNKNOWN && type->kind != TYPE_GENERIC_PARAM
+      ? sema_type_ref_of(ctx->compiler_ctx, (TypeInfo*)type) : NULL;
+  const char* file = ctx->module && ctx->module->file_path ? ctx->module->file_path : "?";
+  char backend_name[300] = "", sema_name[300] = "";
+  if (backend) check_type_name(ctx, backend, backend_name, sizeof backend_name);
+  if (sema) {
+    sema->is_view = sema->is_view || view;
+    sema->is_mod = sema->is_mod || mod;
+    check_type_name(ctx, sema, sema_name, sizeof sema_name);
+  }
+  int verdict = !sema && !backend ? CHECK_AGREE
+      : !sema ? CHECK_ONLY_BACKEND
+      : !backend ? CHECK_ONLY_SEMA
+      : strcmp(backend_name, sema_name) == 0 ? CHECK_AGREE : CHECK_DIFFER;
+  s_check_counts[kind][verdict]++;
+  if (verdict != CHECK_AGREE && s_check_samples)
+    fprintf(s_check_samples, "kind=%d verdict=%d backend=%s sema=%s function=%.*s at %s:%zu\n", kind, verdict,
+            backend_name, sema_name, ctx->func_decl ? (int)ctx->func_decl->name.len : 0,
+            ctx->func_decl ? ctx->func_decl->name.data : "", file, (size_t)expr->line);
+}
+
 const AstTypeRef* infer_expr_type_ref(CFuncContext* ctx, const AstExpr* expr) {
+    const AstTypeRef* type = infer_expr_type_ref_checked(ctx, expr);
+    if (expr) check_type_answer(ctx, expr, type);
+    return type;
+}
+
+static const AstTypeRef* infer_expr_type_ref_checked(CFuncContext* ctx, const AstExpr* expr) {
     if (!expr) return NULL;
     if (expr->kind != AST_EXPR_CALL && expr->kind != AST_EXPR_METHOD_CALL) return infer_expr_type_ref_once(ctx, expr);
     if (s_infer_depth == 0) s_infer_call_count = 0;

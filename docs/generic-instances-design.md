@@ -407,7 +407,23 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    reaches the backend in the arguments), the other three `infer_tr_from_resolved` branches (503, 93 and 15
    programs change), and the spawn wrappers (a spawn of a generic function runs through one: spawning the
    instance itself needs a thunk per instance).
-9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances.
+9. **`infer_expr_type_ref` reads `resolved_type`**; the expected type no longer chooses instances. First part (0.4.139):
+   `RAE_CHECK_TYPES=1` compares each answer of `infer_expr_type_ref` with the type sema gave the expression and
+   prints the counts per expression kind at exit (`RAE_CHECK_TYPES_SAMPLES=<file>` lists each disagreement);
+   `compiler/tools/check-types.sh` sums them over every case and 106/121/136 in about 2.5 minutes. Of 240 million
+   answers, 238.5 million agree. Sema now types an enum case read (`Kind.small` is a `Kind`), which made
+   `nameOf(value: Kind.small)` call the `Kind` overload instead of the `Other` one (case 1656's expected output had
+   that wrong result). What is left, in the order the queue takes it:
+   - a module-level const has no type in sema (1.06 million name reads). Typing it where it is read changes the C
+     of 62 programs: a float literal beside `toFloat(<const>)` becomes f32 (the rule), and a sum of `UInt64`
+     consts is overflow-checked as `Int` in its outer additions only, because the backend says `Int` where sema
+     says `UInt64` (12 000 binaries differ that way). The backend's integer width goes first;
+   - the backend has no type for a unary expression (0.31 million), a box (0.18 million), an `own` (0.04
+     million), some binaries and index reads (0.03 million), where sema has one;
+   - an `if let` alias: the backend says `opt view T` / `opt mod T`, sema `view T` / `mod T` (28 000);
+   - then `infer_expr_type_ref` becomes a read of `resolved_type`, a missing type an internal error under
+     `RAE_CHECK_TYPES=1` (on in the suite), and the expected type stops choosing instances.
+   The type matrix's known-failures list is already empty (since 0.4.127).
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

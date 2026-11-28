@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.139, 2026-11-28: an enum case is its enum's type; RAE_CHECK_TYPES
+
+- An enum case read (`Kind.small`) has its enum's type, so an overloaded function is chosen by it:
+  `nameOf(value: Kind.small)` called the overload for another enum before.
+- `RAE_CHECK_TYPES=1` prints, at the end of a build, how often the backend's type of an expression agrees with
+  sema's; `compiler/tools/check-types.sh` sums it over the cases and three examples
+  (docs/generic-instances-design.md step 9).
+
 ## 0.4.138, 2026-11-28: the same C every run
 
 - Two container types with one name (`List(Any)` and `List(opt Any)`) made their drops in an order that followed

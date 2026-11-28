@@ -9430,6 +9430,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         module->had_error = true;
                         break;
                     }
+                    /* a case is a value of its enum */
+                    expr->resolved_type = type_get_enum(ctx->type_registry, enum_sym->decl, ed->name);
                 }
             }
             if (expr->as.member.object->resolved_type) {
