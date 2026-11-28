@@ -1,0 +1,47 @@
+# The platform draws color emoji for text (docs/text-emoji.md, lib/Gpu2dEmoji rasterizeEmoji): a
+# fire, a flag and a ZWJ family, each into a square of color. Natively on Apple (CoreText) and
+# Android (Java), in the browser through a 2D canvas (compiler/tools/wasm_webgpu_smoke.sh runs this
+# page in headless Chrome), on Linux from Noto Color Emoji. Logs "EMOJI OK" or "EMOJI FAIL: ...";
+# exit code 0 only for OK.
+import Gpu2dEmoji
+
+# How many of the square's pixels are mostly opaque, and whether they are warm (more red than blue)
+func covered(bytes: view List(UInt8)) ret Int {
+  var opaque: Int = 0
+  loop var i: Int = 0, i + 3 < bytes.length, i += 4 {
+    if bytes.copyAtFallback(index: i + 3, fallback: 0) as Int > 128 {
+      opaque = opaque + 1
+    }
+  }
+  ret opaque
+}
+
+func warm(bytes: view List(UInt8)) ret Bool {
+  var red: Int = 0
+  var blue: Int = 0
+  loop var i: Int = 0, i + 3 < bytes.length, i += 4 {
+    if bytes.copyAtFallback(index: i + 3, fallback: 0) as Int > 128 {
+      red = red + (bytes.copyAtFallback(index: i, fallback: 0) as Int)
+      blue = blue + (bytes.copyAtFallback(index: i + 2, fallback: 0) as Int)
+    }
+  }
+  ret red > blue * 2
+}
+
+func main() ret Int {
+  let fire: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "🔥", pixels: 64)
+  let flag: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "🇫🇮", pixels: 64)
+  let family: List(UInt8) = Gpu2dEmoji.rasterizeEmoji(cluster: "👨‍👩‍👧", pixels: 64)
+  let fireCovered: Int = covered(bytes: fire)
+  let flagCovered: Int = covered(bytes: flag)
+  let familyCovered: Int = covered(bytes: family)
+  log(
+    "fire {fireCovered} px (warm {warm(bytes: fire)}), flag {flagCovered} px, family {familyCovered} px"
+  )
+  if fireCovered < 600 or not warm(bytes: fire) or flagCovered < 600 or familyCovered < 400 {
+    log("EMOJI FAIL: fire {fireCovered}, flag {flagCovered}, family {familyCovered}")
+    ret 1
+  }
+  log("EMOJI OK")
+  ret 0
+}

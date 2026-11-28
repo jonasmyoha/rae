@@ -47,7 +47,8 @@ text, the shadow's color, or 0).
 |---|---|---|
 | macOS, iOS | Apple Color Emoji | CoreText draws the cluster (`compiler/runtime/runtime_emoji.h`; CoreText is loaded at run time, so a program links nothing new) |
 | Android | the system's emoji font (Noto Color Emoji, or the maker's) | Java's text stack draws it (`tools/android/java/org/rae/app/RaeEmoji.java`), reached through JNI |
-| Linux, the browser, Windows | none yet | the emoji keeps its place in the line and shows nothing |
+| the browser | the page's emoji font (Apple Color Emoji, Segoe UI Emoji or Noto Color Emoji) | a 2D canvas's `fillText` (an OffscreenCanvas where there is one), read back with `getImageData` (an EM_JS shim in `runtime_emoji.h`; its bytes are straight alpha) |
+| Windows | none yet | the emoji keeps its place in the line and shows nothing |
 
 The CPU framebuffer text (`SdfText.sdfDrawText`) keeps the emoji's place and draws nothing.
 
@@ -56,5 +57,8 @@ The CPU framebuffer text (`SdfText.sdfDrawText`) keeps the emoji's place and dra
 - Case 1715: the clusters of a mixed line, the measure (the text plus one square an emoji), the
   bounds, a wrap between whole emoji, and the Mac's rasterizer (a warm fire, a ZWJ family).
 - `checks/uiTextEmoji`: a page of mixed lines through the real pipeline, every cluster one image
-  made once. Run on this Mac (Apple Color Emoji) and on an Android 15 emulator (Noto Color Emoji),
-  with a look at a frame of each.
+  made once. Run on this Mac (Apple Color Emoji), on an Android 15 emulator (Noto Color Emoji) and
+  as a browser build in headless Chrome, with a look at a frame of each. Its page is in its own
+  `assets/` and its font is `lib/assets/walker`'s, which a browser build carries.
+- `checks/webEmoji`: the platform's rasterizer alone (a fire, a flag, a ZWJ family), natively and
+  in headless Chrome (`compiler/tools/wasm_webgpu_smoke.sh`).

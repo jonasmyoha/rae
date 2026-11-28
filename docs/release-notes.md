@@ -4,6 +4,13 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.158, 2026-11-28: color emoji in the browser
+
+- In a browser build, an emoji in text is drawn by the page's emoji font through a 2D canvas
+  (`fillText`, read back), as on Apple and Android (docs/text-emoji.md). `checks/webEmoji` runs in
+  headless Chrome in `compiler/tools/wasm_webgpu_smoke.sh`; `checks/uiTextEmoji` also runs as a
+  browser build (its page moved into its `assets/`, its font is `lib/assets/walker`'s).
+
 ## 0.4.157, 2026-11-28: color emoji in text
 
 - A `Text` (and every `Gpu2dText` draw) shows color emoji: a picture the font has no glyph for,

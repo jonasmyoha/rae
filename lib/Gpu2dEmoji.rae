@@ -56,7 +56,11 @@ func rasterizeEmoji(cluster: view String, pixels: view Int) ret List(UInt8) {
   if drawn is 0 {
     ret List(UInt8) {}
   }
-  # the font draws premultiplied; an image is straight alpha
+  # 2: the browser's bytes, already straight alpha
+  if drawn is 2 {
+    ret bytes
+  }
+  # 1: the font drew premultiplied; an image is straight alpha
   loop var i: Int = 0, i < bytes.length, i += 4 {
     let alpha: Int = bytes.copyAtFallback(index: i + 3, fallback: 0) as Int
     if alpha > 0 and alpha < 255 {

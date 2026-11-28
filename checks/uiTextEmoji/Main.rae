@@ -1,7 +1,8 @@
 # Color emoji in UI text (docs/text-emoji.md): lines that mix words and emoji (a skin tone, a flag,
 # a ZWJ family, the eight emotes of a game's match), an outlined text (the outline pass draws no
 # emoji over the glyphs) and a faded one, drawn through the real pipeline. Exit 0 when every emoji
-# cluster in the page became an image (on Apple, Apple Color Emoji through CoreText).
+# cluster in the page became an image: Apple Color Emoji through CoreText on the Mac, the system's
+# font through Java on Android, the page's 2D canvas in a browser build.
 #
 #   RAE_HEADLESS_FRAMES=4 RAE_GPU2D_SCREENSHOT=/tmp/emoji.bmp \
 #     compiler/bin/rae run checks/uiTextEmoji/Main.rae
@@ -18,6 +19,7 @@ open ui/RenderSystem
 open ui/SceneFile
 open ui/SceneLoader
 open ui/ThemeParse
+open ui/Theme
 open ui/UiSystems
 open Gpu2dCanvas
 open Gpu2dCanvasImage
@@ -34,19 +36,21 @@ const clusterImages: Int = 15
 func main() ret Int {
   Gpu2d.initWindow(width: designW, height: designH, title: "UI text emoji check")
   var canvas: Gpu2dCanvas = createGpu2dCanvas()
-  var gpuUi: Gpu2dUi = loadUiAssets(
-    dir: "examples/104_ui_hello/assets/"
+  # the shared text font a browser bundle carries too (lib/assets/walker), and the page from the
+  # check's own assets/ (preloaded in a browser build)
+  var gpuUi: Gpu2dUi = loadUiFonts(
+    directory: "lib/assets/walker/"
     textFontName: "Roboto-Regular"
     iconFontName: "MaterialIconsRound-Regular"
-    themeFile: "Theme.raescene"
   )
-  let scene: Scene = loadSceneFile(path: "checks/uiTextEmoji/page.raescene")
+  let scene: Scene = loadSceneFile(path: "checks/uiTextEmoji/assets/page.raescene")
   if scene.ok is false {
     log("UI TEXT EMOJI FAILED: {scene.errorMsg}")
     Gpu2d.closeWindow()
     ret 1
   }
   gpuUi.theme = parseTheme(scene: scene)
+  gpuUi.activeTheme = overlayPalette(base: lightTheme(), tokens: gpuUi.theme)
   var world: UiWorld = create()
   var uiSystems: UiSystems = createUiSystems()
   seedWorldTheme(world: world, res: gpuUi)

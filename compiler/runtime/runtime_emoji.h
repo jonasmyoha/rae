@@ -3,15 +3,18 @@
  *
  * Platform reason: the emoji font and its drawing are the platform's: on Apple CoreText draws
  * Apple Color Emoji's bitmaps, sequences and ligatures; on Android the Java text stack draws the
- * system's emoji font (tools/android/java/org/rae/app/RaeEmoji.java), reached through JNI. The
- * fonts are not ours to parse. The C draws the cluster centered in the square and returns; the
+ * system's emoji font (tools/android/java/org/rae/app/RaeEmoji.java), reached through JNI; in
+ * the browser the page's 2D canvas. Those fonts are not ours to parse. The C draws the cluster centered in the square and returns; the
  * raster size, the cache, the straight alpha and every fallback are Rae's.
  *
  * CoreText is loaded when first needed (dlopen), so a program links no new framework: its few
  * functions are looked up once.
  *
- * Header-only: included (`cheader`) by programs whose Rae imports lib/Gpu2dEmoji. Apple and
- * Android; elsewhere the function says 0 (nothing drawn). */
+ * In the browser the page's text stack draws it (a 2D canvas's fillText, read back), and the
+ * bytes are straight alpha (the function says 2 instead of 1). On Linux the function says 0 and
+ * Rae draws the emoji from Noto Color Emoji itself (lib/text/ColorEmojiFont).
+ *
+ * Header-only: included (`cheader`) by programs whose Rae imports lib/Gpu2dEmoji. */
 #ifndef RAE_RUNTIME_EMOJI_H
 #define RAE_RUNTIME_EMOJI_H
 
@@ -172,6 +175,51 @@ int64_t rae_ext_Gpu2dEmoji_rasterize(rae_String text, int64_t pixels, uint8_t* o
   }
   (*env)->DeleteLocalRef(env, drawn);
   return result;
+}
+#elif defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+
+/* The browser's text stack draws the cluster with the page's emoji font: a 2D canvas (an
+ * OffscreenCanvas where there is one) and fillText, read back with getImageData. 2 when something
+ * was drawn (getImageData's bytes are straight alpha), 0 when not. */
+EM_JS(int, rae_emoji_draw_canvas, (const char* text, int pixels, unsigned char* out), {
+  try {
+    var canvas = (typeof OffscreenCanvas !== "undefined") ? new OffscreenCanvas(pixels, pixels)
+      : document.createElement("canvas");
+    canvas.width = pixels;
+    canvas.height = pixels;
+    var context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return 0;
+    context.font = (pixels / 1.17) + 'px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    context.textAlign = "center";
+    context.textBaseline = "alphabetic";
+    var cluster = UTF8ToString(text);
+    var box = context.measureText(cluster);
+    var ascent = box.actualBoundingBoxAscent || pixels * 0.8;
+    var descent = box.actualBoundingBoxDescent || pixels * 0.2;
+    context.fillStyle = "#000";
+    context.fillText(cluster, pixels / 2, (pixels + ascent - descent) / 2);
+    var data = context.getImageData(0, 0, pixels, pixels).data;
+    HEAPU8.set(data, out);
+    for (var i = 3; i < data.length; i += 4) {
+      if (data[i] !== 0) return 2;
+    }
+    return 0;
+  } catch (error) {
+    return 0;
+  }
+});
+
+/* As on Apple, but the bytes are straight alpha: 2 when something was drawn */
+int64_t rae_ext_Gpu2dEmoji_rasterize(rae_String text, int64_t pixels, uint8_t* out) {
+  if (pixels <= 0 || !out || text.len <= 0) return 0;
+  char* utf8 = (char*)malloc((size_t)text.len + 1);
+  if (!utf8) return 0;
+  memcpy(utf8, text.data, (size_t)text.len);
+  utf8[text.len] = 0;
+  int drawn = rae_emoji_draw_canvas(utf8, (int)pixels, out);
+  free(utf8);
+  return (int64_t)drawn;
 }
 #else
 int64_t rae_ext_Gpu2dEmoji_rasterize(rae_String text, int64_t pixels, uint8_t* out) {

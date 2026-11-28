@@ -112,6 +112,16 @@ build_quietly 240 \
   checks/webPackageAsset/Main.rae
 test -s "$TMP/packageAsset/index.wasm"
 
+# The page's 2D canvas draws color emoji for text (checks/webEmoji, docs/text-emoji.md): a fire,
+# a flag and a ZWJ family each into a square of color. Built always; run in headless Chrome when
+# Chrome is installed.
+build_quietly 240 \
+  --target wasm --profile dev \
+  --project checks/webEmoji \
+  --out "$TMP/emoji/index.html" \
+  checks/webEmoji/Main.rae
+test -s "$TMP/emoji/index.wasm"
+
 CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 if [ ! -x "$CHROME" ]; then CHROME="$(command -v google-chrome || command -v chromium || true)"; fi
 have_chrome=0
@@ -173,6 +183,18 @@ if [ "$have_chrome" = 1 ]; then
   fi
 fi
 
+emoji_note="emoji page built (no Chrome: not run)"
+if [ "$have_chrome" = 1 ]; then
+  console="$(page_console "$TMP/emoji" 4 'EMOJI (OK|FAIL)')"
+  if printf '%s' "$console" | grep -q 'EMOJI OK'; then
+    emoji_note="color emoji drawn by the page's canvas in headless Chrome"
+  else
+    echo "FAIL wasm_webgpu_smoke: the page drew no color emoji:"
+    printf '%s\n' "$console" | sed 's/.*CONSOLE:[0-9]*\] "//;s/", source.*//' | head -10
+    exit 1
+  fi
+fi
+
 readback_note="readback page built (no Chrome: not run)"
 if [ "$have_chrome" = 1 ]; then
   console="$(page_console "$TMP/readback" 2 'READBACK (OK|FAIL|TIMEOUT)')"
@@ -187,4 +209,4 @@ if [ "$have_chrome" = 1 ]; then
   fi
 fi
 
-echo "PASS wasm_webgpu_smoke: 132 and composed 134 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note; $sleep_note"
+echo "PASS wasm_webgpu_smoke: 132 and composed 134 browser pages plus embeddable module built$box3d_note; $readback_note; $task_note; $sleep_note; $emoji_note"
