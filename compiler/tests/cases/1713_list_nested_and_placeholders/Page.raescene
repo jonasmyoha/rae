@@ -1,0 +1,16 @@
+{
+  "type": "Scene", "version": 2, "sceneId": "page", "root": "Page",
+  "nodes": {
+    "Page": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 600}, "Layout": {"type": "Vertical"}, "Children": ["Replays", "Friends", "Shop"]},
+    "Replays": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 200}, "ScrollRoot": {"axis": "y", "floor": "content"},
+      "ListView": {"itemSceneId": "ReplayItem", "itemHeight": 40, "itemGap": 0, "visibleItemCount": 0, "overscanRows": 1,
+        "bindings": [{"nodeId": "ReplayItemTitle", "component": "Text", "field": "text", "itemField": "title"},
+                     {"nodeId": "ProfileAvatarImage", "component": "Sprite", "field": "textureKey", "itemField": "avatar", "prefix": "avatar:"}]}},
+    "Friends": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 200}, "ScrollRoot": {"axis": "y", "floor": "content"},
+      "ListView": {"itemSceneId": "FriendRow", "emptySceneId": "FriendsEmpty", "itemHeight": 40, "itemGap": 0, "visibleItemCount": 0, "overscanRows": 1,
+        "bindings": [{"nodeId": "FriendRow", "component": "Text", "field": "text", "itemField": "name"}]}},
+    "Shop": {"Rect": {"x": 0, "y": 0, "w": 400, "h": 200}, "Layout": {"type": "Vertical"},
+      "ListView": {"mode": "Flow", "itemSceneId": "ShopTile", "itemKeyField": "name", "itemHeight": 40, "loadingSceneId": "ShopLoading", "errorSceneId": "ShopError", "emptySceneId": "ShopEmpty",
+        "bindings": [{"nodeId": "ShopTile", "component": "Text", "field": "text", "itemField": "name"}]}}
+  }
+}

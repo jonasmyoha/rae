@@ -1999,3 +1999,33 @@ panel over a list of clickable rows should keep the tap instead: give it `"Press
 - A scroll root's drag that begins on it works as over any node that is not clickable: the page
   under it scrolls (the drag is the scroll root's, decided by where the finger is).
 - `"PressSink": { "blocks": false }` lets taps through again. Case 1703.
+
+## 61. ListView: a row's nested scenes, and the empty, loading and error scenes
+
+A `ListView` row scene may hold `SceneInstance` nodes (a row's avatar), nested to any depth. They
+are mounted when the row is built, in the row's own page (`listRow<n>`), before the list's bindings
+apply. So a binding names a node of the nested scene directly
+(`{"nodeId": "ProfileAvatarImage", "component": "Sprite", "field": "textureKey", "itemField":
+"avatar"}`), and the instance's `params.overrides` apply as at a scene's load. A flow list's rows
+and the scenes below are mounted the same way.
+
+```json
+"Replays": { "ListView": { "itemSceneId": "ReplayItem", "emptySceneId": "ReplaysEmpty",
+  "loadingSceneId": "ReplaysLoading", "errorSceneId": "ReplaysError", ... } }
+```
+
+`emptySceneId`, `loadingSceneId` and `errorSceneId` are scenes the list shows in its rows' place,
+virtual and flow lists alike:
+
+- a list with no rows shows its empty scene;
+- a list whose rows come from a request takes its state from the program:
+  `setListLoadState(world:, list:, state: ListLoadState.loading)` (ui/ListViewSystem) shows the
+  loading scene, `ListLoadState.failed` the error scene, `ListLoadState.ready` its rows (or the
+  empty scene). The state is `ListViewData.state`, so new rows written as a fresh `ListViewData`
+  are `ready`. `listLoadState(world:, list:)` reads it.
+
+While a scene shows, the list has no rows: they go, and they are built again when the scene does.
+The scene is one child of the list, mounted with its nested instances under the page
+`listPlaceholder<n>`. Its root's own placement applies, and a root without a `Size` fills the list.
+A list without the scene that applies (none named, or not registered) shows its rows as before.
+Case 1713.

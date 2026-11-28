@@ -4,6 +4,16 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.155, 2026-11-28: ListView rows with nested scenes, and the empty, loading and error scenes
+
+- A ListView row scene's `SceneInstance` nodes (a row's avatar) are mounted in the row's page before
+  the bindings apply, so a binding reaches a node of the nested scene (docs/ui-scene-format.md §61).
+- `emptySceneId`, `loadingSceneId` and `errorSceneId` now show: the empty scene when the list has no
+  rows, the loading or error scene when the program sets `setListLoadState(world:, list:, state:)`
+  to `ListLoadState.loading` or `failed` (`ListViewData.state`). Case 1713.
+- `resolveSceneInstancesUnder(world:, uiSystems:, registry:, rootEntityId:, pageId:)` (ui/SceneLoader)
+  resolves the instances of one subtree only.
+
 ## 0.4.154, 2026-11-28: DeviceInfo, the model, memory, GPU, OS version and locale
 
 - New module `DeviceInfo` (docs/device-info.md): `deviceModel()` ("iPhone16,1", "Pixel 8",

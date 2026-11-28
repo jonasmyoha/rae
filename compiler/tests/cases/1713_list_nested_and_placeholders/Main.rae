@@ -1,0 +1,198 @@
+# A ListView row scene with a nested SceneInstance (a row's avatar): the instance is mounted in the
+# row's page before the bindings, so a binding to a node of the nested scene finds it, and the
+# instance's own overrides apply. A virtual list with no rows shows its empty scene, and its rows
+# when they come; a flow list set to loading or failed shows its loading or error scene (with its
+# own nested instance), its empty scene when ready with no rows, and its rows when they come.
+open ecs/ComponentTable
+open ecs/Entity
+open ui/Components
+open ui/Ecs
+open ui/LayoutSystem
+open ui/ListViewSystem
+open ui/Scene
+open ui/SceneInstance
+open ui/SceneLoader
+open ui/Transform
+open ui/UiSystems
+
+type App {
+  world: UiWorld
+  uiSystems: UiSystems
+  scenes: SceneRegistry
+}
+
+func frame(app: mod App) {
+  listViewSystem(world: app.world, uiSystems: app.uiSystems, scenes: app.scenes)
+  layoutSystem(world: app.world, uiSystems: app.uiSystems)
+  transformSystem(world: app.world, uiSystems: app.uiSystems)
+  releaseDeadEntities(world: app.world, uiSystems: app.uiSystems)
+}
+
+func register(app: mod App, key: view String, source: view String) {
+  let scene: Scene = parseScene(source: source)
+  registerScene(reg: app.scenes, key: key, scene: own scene)
+}
+
+func listEntityId(app: view App, nodeId: view String) ret EntityId {
+  if let raw: Int = findNodeInPage(world: app.world, pageId: "p", nodeId: nodeId) {
+    ret nodeEntityId(world: app.world, index: raw)
+  }
+  ret noEntity()
+}
+
+func textOf(app: view App, entityId: view EntityId) ret String {
+  if componentHas(this: app.world.texts, entityId: entityId) {
+    ret "{componentView(this: app.world.texts, entityId: entityId).text}"
+  }
+  ret "-"
+}
+
+func nodeText(app: view App, page: view String, nodeId: view String) ret String {
+  if let raw: Int = findNodeInPage(world: app.world, pageId: page, nodeId: nodeId) {
+    ret textOf(app: app, entityId: nodeEntityId(world: app.world, index: raw))
+  }
+  ret "(missing)"
+}
+
+# What a list shows: each child, a placeholder in brackets
+func shows(app: view App, list: view EntityId) ret String {
+  var out: String = ""
+  if componentHas(this: app.world.childrens, entityId: list) {
+    loop let child: view EntityId in componentView(this: app.world.childrens, entityId: list).ids {
+      if out.length() > 0 {
+        out = "{out}, "
+      }
+      if componentHas(this: app.uiSystems.listRows.placeholders, entityId: child) {
+        out = "{out}[{textOf(app: app, entityId: child)}]"
+      } else {
+        out = "{out}{textOf(app: app, entityId: child)}"
+      }
+    }
+  }
+  if out.length() is 0 {
+    ret "nothing"
+  }
+  ret out
+}
+
+func row(key: view String, value: view String) ret ListViewRow {
+  ret ListViewRow { keys: List(String) { "{key}" }, values: List(String) { "{value}" } }
+}
+
+func setRows(app: mod App, list: view EntityId, rows: own List(ListViewRow)) {
+  let data: ListViewData = { rows: own rows }
+  componentSet(this: app.world.listViewDatas, entityId: list, data: own data)
+}
+
+func main() {
+  var app: App = {
+    world: createUiWorld()
+    uiSystems: createUiSystems()
+    scenes: createSceneRegistry()
+  }
+  register(app: app, key: "ReplayItem", source: embedText(file: "ReplayItem.raescene"))
+  register(app: app, key: "ProfileAvatar", source: embedText(file: "ProfileAvatar.raescene"))
+  register(app: app, key: "FriendRow", source: embedText(file: "FriendRow.raescene"))
+  register(app: app, key: "FriendsEmpty", source: embedText(file: "FriendsEmpty.raescene"))
+  register(app: app, key: "ShopTile", source: embedText(file: "ShopTile.raescene"))
+  register(app: app, key: "ShopLoading", source: embedText(file: "ShopLoading.raescene"))
+  register(app: app, key: "ShopError", source: embedText(file: "ShopError.raescene"))
+  register(app: app, key: "ShopEmpty", source: embedText(file: "ShopEmpty.raescene"))
+  app.world.layoutW = 400.0
+  app.world.layoutH = 600.0
+  let unusedRoot: EntityId = loadSceneIntoPage(
+    world: app.world
+    uiSystems: app.uiSystems
+    scene: parseScene(source: embedText(file: "Page.raescene"))
+    pageId: "p"
+  )
+  log("diagnostics {app.world.sceneDiagnostics.length}")
+  let replays: EntityId = listEntityId(app: app, nodeId: "Replays")
+  let friends: EntityId = listEntityId(app: app, nodeId: "Friends")
+  let shop: EntityId = listEntityId(app: app, nodeId: "Shop")
+
+  # (1) a row scene with a nested SceneInstance, bound by the list
+  var replayRows: List(ListViewRow) = {}
+  loop var i: Int = 0, i < 3, ++i {
+    replayRows.add(
+      value: ListViewRow {
+        keys: List(String) { "title", "avatar" }
+        values: List(String) { "replay {i}", "player{i}" }
+      }
+    )
+  }
+  setRows(app: app, list: replays, rows: own replayRows)
+  frame(app: app)
+  frame(app: app)
+  loop let rowRoot: view EntityId in componentView(this: app.world.childrens, entityId: replays).ids {
+    let page: String = listViewRowPage(rowRoot: rowRoot)
+    var art: String = "(missing)"
+    if let raw: Int = findNodeInPage(world: app.world, pageId: page, nodeId: "ProfileAvatarImage") {
+      art = "{componentView(
+        this: app.world.sprites
+        entityId: nodeEntityId(world: app.world, index: raw)
+      ).textureKey}"
+    }
+    log(
+      "replay row: title {nodeText(app: app, page: page, nodeId: "ReplayItemTitle")}, avatar art {art}, avatar label {nodeText(
+        app: app
+        page: page
+        nodeId: "ProfileAvatarLabel"
+      )}"
+    )
+  }
+  log("instances left unmounted {componentCount(this: app.world.sceneInstances)}")
+
+  # (2) an empty virtual list shows its empty scene, its rows when they come, and it again
+  frame(app: app)
+  log("friends, no data: {shows(app: app, list: friends)}")
+  setRows(
+    app: app
+    list: friends
+    rows: List(ListViewRow) { row(key: "name", value: "Ada"), row(key: "name", value: "Bo") }
+  )
+  frame(app: app)
+  log("friends, two rows: {shows(app: app, list: friends)}")
+  setRows(app: app, list: friends, rows: List(ListViewRow) {})
+  frame(app: app)
+  log("friends, none again: {shows(app: app, list: friends)}")
+
+  # a flow list whose rows come from a request
+  setListLoadState(world: app.world, list: shop, state: ListLoadState.loading)
+  frame(app: app)
+  log("shop, loading: {shows(app: app, list: shop)}")
+  let loadingPage: String = "listPlaceholder{shop.index}"
+  log(
+    "shop, loading's own avatar label: {nodeText(
+      app: app
+      page: loadingPage
+      nodeId: "ProfileAvatarLabel"
+    )}"
+  )
+  setListLoadState(world: app.world, list: shop, state: ListLoadState.failed)
+  frame(app: app)
+  log("shop, failed: {shows(app: app, list: shop)}")
+  setListLoadState(world: app.world, list: shop, state: ListLoadState.ready)
+  frame(app: app)
+  log("shop, ready with no rows: {shows(app: app, list: shop)}")
+  setRows(
+    app: app
+    list: shop
+    rows: List(ListViewRow) { row(key: "name", value: "sword"), row(key: "name", value: "shield") }
+  )
+  frame(app: app)
+  log("shop, rows: {shows(app: app, list: shop)}")
+  setListLoadState(world: app.world, list: shop, state: ListLoadState.loading)
+  frame(app: app)
+  log(
+    "shop, loading again: {shows(app: app, list: shop)}, state {listLoadState(
+      world: app.world
+      list: shop
+    )}"
+  )
+  setListLoadState(world: app.world, list: shop, state: ListLoadState.ready)
+  frame(app: app)
+  log("shop, ready again: {shows(app: app, list: shop)}")
+  frame(app: app)
+  log("shop, a frame later: {shows(app: app, list: shop)}")
+}

@@ -44,6 +44,7 @@ open ui/Ecs
 import ui/Components
 open ui/ClickTargets
 open ui/SceneInstance
+import ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
@@ -146,6 +147,15 @@ func listViewBuildRow(
       mountEntityId: rowRoot
       scene: scene
       overrides: overrides
+      pageId: listViewRowPage(rowRoot: rowRoot)
+    )
+    # the row scene's own SceneInstance nodes (an avatar in a row), in the row's page, so the
+    # bindings applied next find their nodes
+    SceneLoader.resolveSceneInstancesUnder(
+      world: world
+      uiSystems: uiSystems
+      registry: scenes
+      rootEntityId: rowRoot
       pageId: listViewRowPage(rowRoot: rowRoot)
     )
     ret rowRoot
@@ -529,7 +539,15 @@ func listViewSyncChanged(
   ) {
     ret
   }
-  if componentView(this: world.listViews, entityId: entityId).mode is ListViewMode.flow {
+  # the empty, loading or error scene in the rows' place (ListViewPlaceholder), else the rows
+  if listViewSyncPlaceholder(
+    world: world
+    uiSystems: uiSystems
+    list: entityId
+    scenes: scenes
+  ) {
+    # nothing more: the list shows no rows while it does
+  } else if componentView(this: world.listViews, entityId: entityId).mode is ListViewMode.flow {
     listViewSyncFlow(
       world: world
       uiSystems: uiSystems

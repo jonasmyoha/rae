@@ -333,7 +333,7 @@ func resolveSceneInstances(
   uiSystems: mod UiSystems
   registry: view SceneRegistry
   pageId: view String
-) pub {
+) {
   var safety: Int = 0
   loop safety < 32 {
     var progressed: Bool = false
@@ -341,56 +341,14 @@ func resolveSceneInstances(
     var i: Int = 0
     loop i < n {
       let entityId: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
-      # Read through expression-level views: this loop body mounts (which can
-      # add scene instances) and removes the marker, so no view binding may
-      # span it.
-      let sceneIdLength: Int = componentView(this: world.sceneInstances, entityId: entityId).sceneId.length()
-      if sceneIdLength > 0 {
-        if let idx: Int = sceneRegistryIndex(
-          reg: registry
-          key: componentView(this: world.sceneInstances, entityId: entityId).sceneId
-        ) {
-          let scene: view Scene = sceneRegistryGet(reg: registry, idx: idx)
-          let overrides: List(SceneOverride) = sceneInstanceOverrides(
-            inst: componentView(this: world.sceneInstances, entityId: entityId)
-          )
-          mountSceneInstanceIntoPage(
-            world: world
-            uiSystems: uiSystems
-            mountEntityId: entityId
-            scene: scene
-            overrides: overrides
-            pageId: pageId
-          )
-          # Clear the marker so the next loop pass doesn't re-mount this entity.
-          componentRemove(this: world.sceneInstances, entityId: entityId)
-          progressed = true
-        } else {
-          if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
-            # A sub-scene the registry does not know (#996): under `report`
-            # the instance node becomes a red sentinel block so the gap is
-            # visible, and the marker is cleared so this pass does not spin on
-            # it. Under `fail` (the default) it is left unmounted, as before.
-            var nodeLabel: String = "{entityId.index}"
-            if componentHas(this: world.nodeIdComponents, entityId: entityId) {
-              nodeLabel = "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
-            }
-            reportSceneDiagnostic(
-              diagnostics: world.sceneDiagnostics
-              sceneId: pageId
-              nodeId: nodeLabel
-              kind: SceneDiagnosticKind.missingSubScene
-              name: componentView(this: world.sceneInstances, entityId: entityId).sceneId
-              message: "no sub-scene registered as {componentView(
-                this: world.sceneInstances
-                entityId: entityId
-              ).sceneId}"
-            )
-            paintMissingSubSceneSentinel(world: world, entityId: entityId)
-            componentRemove(this: world.sceneInstances, entityId: entityId)
-            progressed = true
-          }
-        }
+      if resolveOneSceneInstance(
+        world: world
+        uiSystems: uiSystems
+        registry: registry
+        entityId: entityId
+        pageId: pageId
+      ) {
+        progressed = true
       }
       i = i + 1
     }
@@ -399,6 +357,126 @@ func resolveSceneInstances(
     }
     safety = safety + 1
   }
+}
+
+# The same for the instances in one subtree only, `rootEntityId` and below: a ListView row's scene,
+# whose nested instances mount in the row's own page, so the row's bindings find their nodes. The
+# instances elsewhere in the world (another page's, not yet resolved) are left alone.
+func resolveSceneInstancesUnder(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  registry: view SceneRegistry
+  rootEntityId: view EntityId
+  pageId: view String
+) {
+  var safety: Int = 0
+  loop safety < 32 {
+    # The instances under the root, collected first: a mount adds instances and removes markers
+    var under: List(EntityId) = {}
+    let n: Int = componentCount(this: world.sceneInstances)
+    loop var i: Int = 0, i < n, ++i {
+      let entityId: EntityId = componentEntityAt(this: world.sceneInstances, i: i)
+      if entityIsUnder(uiSystems: uiSystems, entityId: entityId, rootEntityId: rootEntityId) {
+        under.add(value: entityId)
+      }
+    }
+    var progressed: Bool = false
+    loop let entityId: view EntityId in under {
+      if componentHas(this: world.sceneInstances, entityId: entityId) and resolveOneSceneInstance(
+        world: world
+        uiSystems: uiSystems
+        registry: registry
+        entityId: entityId
+        pageId: pageId
+      ) {
+        progressed = true
+      }
+    }
+    if progressed is false {
+      ret
+    }
+    safety = safety + 1
+  }
+}
+
+# `entityId` is `rootEntityId` or below it
+func entityIsUnder(
+  uiSystems: view UiSystems
+  entityId: view EntityId
+  rootEntityId: view EntityId
+) ret Bool {
+  var current: EntityId = entityId
+  loop var depth: Int = 0, depth < 256, ++depth {
+    if current is rootEntityId {
+      ret true
+    }
+    if not componentHas(this: uiSystems.hierarchy.parents, entityId: current) {
+      ret false
+    }
+    current = componentView(this: uiSystems.hierarchy.parents, entityId: current).parent
+  }
+  ret false
+}
+
+# Mount the scene one SceneInstance node names onto it and clear its marker. True when the node
+# was dealt with: mounted, or (under the `report` policy) painted as a missing sub-scene.
+func resolveOneSceneInstance(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  registry: view SceneRegistry
+  entityId: view EntityId
+  pageId: view String
+) ret Bool {
+  # Read through expression-level views: this mounts (which can add scene instances) and removes
+  # the marker, so no view binding may span it.
+  let sceneIdLength: Int = componentView(this: world.sceneInstances, entityId: entityId).sceneId.length()
+  if sceneIdLength is 0 {
+    ret false
+  }
+  if let idx: Int = sceneRegistryIndex(
+    reg: registry
+    key: componentView(this: world.sceneInstances, entityId: entityId).sceneId
+  ) {
+    let scene: view Scene = sceneRegistryGet(reg: registry, idx: idx)
+    let overrides: List(SceneOverride) = sceneInstanceOverrides(
+      inst: componentView(this: world.sceneInstances, entityId: entityId)
+    )
+    mountSceneInstanceIntoPage(
+      world: world
+      uiSystems: uiSystems
+      mountEntityId: entityId
+      scene: scene
+      overrides: overrides
+      pageId: pageId
+    )
+    # Clear the marker so the next pass doesn't re-mount this entity.
+    componentRemove(this: world.sceneInstances, entityId: entityId)
+    ret true
+  }
+  if world.scenePolicy.unknownComponents is UnknownComponentPolicy.report {
+    # A sub-scene the registry does not know (#996): under `report` the instance node becomes a
+    # red sentinel block so the gap is visible, and the marker is cleared so the pass does not
+    # spin on it. Under `fail` (the default) it is left unmounted, as before.
+    var nodeLabel: String = "{entityId.index}"
+    if componentHas(this: world.nodeIdComponents, entityId: entityId) {
+      nodeLabel = "{componentView(this: world.nodeIdComponents, entityId: entityId).id}"
+    }
+    reportSceneDiagnostic(
+      diagnostics: world.sceneDiagnostics
+      sceneId: pageId
+      nodeId: nodeLabel
+      kind: SceneDiagnosticKind.missingSubScene
+      name: componentView(this: world.sceneInstances, entityId: entityId).sceneId
+      message: "no sub-scene registered as {componentView(
+        this: world.sceneInstances
+        entityId: entityId
+      ).sceneId}"
+    )
+    paintMissingSubSceneSentinel(world: world, entityId: entityId)
+    componentRemove(this: world.sceneInstances, entityId: entityId)
+    ret true
+  }
+  ret false
 }
 
 # The visible failure for an unresolved SceneInstance under `report`: a red

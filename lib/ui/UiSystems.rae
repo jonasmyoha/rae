@@ -236,10 +236,18 @@ type ListSyncSeen {
   scenes: Int = -1
 }
 
-# listViewSystem's memory: each pooled row's binding, and each list's last reconcile
+# A list's placeholder: the empty, loading or error scene shown in its rows' place (on the
+# placeholder's root, a child of the list)
+type ListPlaceholder {
+  sceneId: String
+}
+
+# listViewSystem's memory: each pooled row's binding, each list's last reconcile and each list's
+# placeholder
 type ListRowSystem {
   rowsBound: ComponentTable(ListRowBound)
   listsSeen: ComponentTable(ListSyncSeen)
+  placeholders: ComponentTable(ListPlaceholder)
 }
 
 # listSelectionSystem's memory of a list: its rows' keys in order and which are selected, and what
@@ -406,6 +414,7 @@ func createUiSystems() ret UiSystems {
     listRows: ListRowSystem {
       rowsBound: ComponentTable.create(ListRowBound)
       listsSeen: ComponentTable.create(ListSyncSeen)
+      placeholders: ComponentTable.create(ListPlaceholder)
     }
     listSelection: ListSelectionSystem {
       seen: ComponentTable.create(ListSelectionSeen)
@@ -463,4 +472,5 @@ func clearUiSystemsEntity(uiSystems: mod UiSystems, entityId: view EntityId) {
   componentRemove(this: uiSystems.listSelection.rowsShown, entityId: entityId)
   componentRemove(this: uiSystems.listSelection.authored, entityId: entityId)
   componentRemove(this: uiSystems.listRows.listsSeen, entityId: entityId)
+  componentRemove(this: uiSystems.listRows.placeholders, entityId: entityId)
 }

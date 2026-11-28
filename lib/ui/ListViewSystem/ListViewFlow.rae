@@ -4,6 +4,7 @@
 open ui/Ecs
 import ui/Components
 open ui/SceneInstance
+import ui/SceneLoader
 open ecs/Entity
 open ecs/ComponentTable
 open ecs/hierarchySystem/HierarchySystem
@@ -95,6 +96,14 @@ func listViewBuildFlowRow(
       pageId: listViewRowPage(rowRoot: rowRoot)
       keepRootPlacement: true
       markSourceRoot: true
+    )
+    # its nested SceneInstance nodes, in the row's page, before the bindings
+    SceneLoader.resolveSceneInstancesUnder(
+      world: world
+      uiSystems: uiSystems
+      registry: scenes
+      rootEntityId: rowRoot
+      pageId: listViewRowPage(rowRoot: rowRoot)
     )
   } else {
     # No sub-scene: one bare child per distinct binding node id (skeleton row).

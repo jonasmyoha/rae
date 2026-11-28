@@ -147,6 +147,12 @@ type ListViewRow {
   values: List(String)
 }
 
+# What a list whose rows come from a request is doing (ui/ListViewSystem setListLoadState): its
+# rows are ready (the empty scene shows when there are none), still loading (the loading scene shows
+# in their place) or the request failed (the error scene). A list without that scene shows its rows.
+enum ListLoadState { ready, loading, failed }
+
 type ListViewData {
   rows: List(ListViewRow)
+  state: ListLoadState = ListLoadState.ready
 }

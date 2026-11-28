@@ -1,0 +1,174 @@
+# A ListView's empty, loading and error scenes (ListView.emptySceneId, loadingSceneId,
+# errorSceneId): the scene the list shows in its rows' place. A list with no rows shows its empty
+# scene; a list the program has set to loading or failed (setListLoadState, for rows that come from
+# a request) shows its loading or error scene, and no rows while it does. The scene is mounted as
+# one child of the list (its root's own placement applies; a root without a Size fills the list),
+# with its nested SceneInstance nodes, and is removed when the rows come back. A list without the
+# scene that applies (or whose scene is not registered) shows its rows, as before.
+open ui/Ecs
+import ui/Components
+open ui/SceneInstance
+import ui/SceneLoader
+open ecs/Entity
+open ecs/ComponentTable
+open ecs/hierarchySystem/HierarchySystem
+open ui/UiSystems
+open ui/ListWindow
+
+# Set what a list's request is doing: ready (its rows, or the empty scene), loading or failed. A
+# list with no ListViewData gets one, with no rows.
+func setListLoadState(world: mod UiWorld, list: view EntityId, state: view ListLoadState) {
+  if componentHas(this: world.listViewDatas, entityId: list) {
+    if componentView(this: world.listViewDatas, entityId: list).state is state {
+      ret
+    }
+    componentMod(this: world.listViewDatas, entityId: list).state = state
+    ret
+  }
+  let data: ListViewData = { rows: {}, state: state }
+  componentSet(this: world.listViewDatas, entityId: list, data: own data)
+}
+
+# What a list's request is doing (ready when the program never said)
+func listLoadState(world: view UiWorld, list: view EntityId) ret ListLoadState {
+  if componentHas(this: world.listViewDatas, entityId: list) {
+    ret componentView(this: world.listViewDatas, entityId: list).state
+  }
+  ret ListLoadState.ready
+}
+
+# The scene a list shows in its rows' place now, "" for its rows
+func listViewPlaceholderSceneId(
+  lv: view ListView
+  state: view ListLoadState
+  count: view Int
+) ret String {
+  if state is ListLoadState.loading {
+    ret "{lv.loadingSceneId}"
+  }
+  if state is ListLoadState.failed {
+    ret "{lv.errorSceneId}"
+  }
+  if count is 0 {
+    ret "{lv.emptySceneId}"
+  }
+  ret ""
+}
+
+# The list's placeholder child, or noEntity()
+func listViewPlaceholderOf(
+  world: view UiWorld
+  uiSystems: view UiSystems
+  list: view EntityId
+) ret EntityId {
+  if componentHas(this: world.childrens, entityId: list) {
+    loop let child: view EntityId in componentView(this: world.childrens, entityId: list).ids {
+      if componentHas(this: uiSystems.listRows.placeholders, entityId: child) {
+        ret child
+      }
+    }
+  }
+  ret noEntity()
+}
+
+# Show the scene that applies in the list's place, or take it away. True when a placeholder shows,
+# and so the list has no rows this frame (the row pass is not run); false for the rows.
+func listViewSyncPlaceholder(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  list: view EntityId
+  scenes: view SceneRegistry
+) ret Bool {
+  var wanted: String = listViewPlaceholderSceneId(
+    lv: componentView(this: world.listViews, entityId: list)
+    state: listLoadState(world: world, list: list)
+    count: listRowCount(world: world, list: list)
+  )
+  if wanted.length() > 0 and not sceneRegistryHas(reg: scenes, key: wanted) {
+    wanted = ""
+  }
+  var current: EntityId = listViewPlaceholderOf(world: world, uiSystems: uiSystems, list: list)
+  if not isNone(this: current) {
+    if componentView(this: uiSystems.listRows.placeholders, entityId: current).sceneId is not wanted {
+      destroyEntitySubtree(world: world, uiSystems: uiSystems, root: current)
+      current = noEntity()
+    }
+  }
+  if wanted.length() is 0 {
+    ret false
+  }
+  # No rows while it shows: the rows (and the ghosts of rows leaving) go, the list's other
+  # children stay
+  var gone: List(EntityId) = {}
+  if componentHas(this: world.childrens, entityId: list) {
+    loop let child: view EntityId in componentView(this: world.childrens, entityId: list).ids {
+      let isRow: Bool = componentHas(this: uiSystems.listRows.rowsBound, entityId: child) or componentHas(
+        this: world.listViewRowKeys
+        entityId: child
+      ) or componentHas(this: world.leavings, entityId: child)
+      if isRow and child is not current {
+        gone.add(value: child)
+      }
+    }
+  }
+  loop let child: view EntityId in gone {
+    destroyEntitySubtree(world: world, uiSystems: uiSystems, root: child)
+  }
+  if isNone(this: current) {
+    listViewBuildPlaceholder(
+      world: world
+      uiSystems: uiSystems
+      list: list
+      sceneId: wanted
+      scenes: scenes
+    )
+  }
+  ret true
+}
+
+# Mount `sceneId` as the list's placeholder child, under its own nodeId page
+func listViewBuildPlaceholder(
+  world: mod UiWorld
+  uiSystems: mod UiSystems
+  list: view EntityId
+  sceneId: view String
+  scenes: view SceneRegistry
+) {
+  if let idx: Int = sceneRegistryIndex(reg: scenes, key: sceneId) {
+    let root: EntityId = createEntity(world: world)
+    let page: String = "listPlaceholder{list.index}"
+    let overrides: List(SceneOverride) = emptyOverrides()
+    mountSceneInstanceImpl(
+      world: world
+      uiSystems: uiSystems
+      mountEntityId: root
+      scene: sceneRegistryGet(reg: scenes, idx: idx)
+      overrides: overrides
+      pageId: page
+      keepRootPlacement: true
+      markSourceRoot: true
+    )
+    SceneLoader.resolveSceneInstancesUnder(
+      world: world
+      uiSystems: uiSystems
+      registry: scenes
+      rootEntityId: root
+      pageId: page
+    )
+    if not componentHas(this: world.sizes, entityId: root) {
+      let size: Size = {
+        w: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+        h: SizeAxis { mode: SizeMode.fill, min: -1, max: -1 }
+      }
+      componentSet(this: world.sizes, entityId: root, data: size)
+    }
+    let marker: ListPlaceholder = { sceneId: "{sceneId}" }
+    componentSet(this: uiSystems.listRows.placeholders, entityId: root, data: marker)
+    setParent(
+      parents: uiSystems.hierarchy.parents
+      childrens: world.childrens
+      child: root
+      parent: list
+    )
+  }
+}
