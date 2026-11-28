@@ -302,8 +302,14 @@ static void rae_g2d_android_make_surface(void) {
  * - Android: the window goes with the background, so its surface is released
  *   (Android blocks the app in the poll until it comes back) and made again
  *   for the new window when it does. */
+void rae_app_lifecycle_record(int64_t kind);   /* runtime_app_lifecycle.c */
 static bool SDLCALL rae_g2d_lifecycle_watch(void* userdata, SDL_Event* e) {
     (void)userdata;
+    /* the program's own record of them (runtime_app_lifecycle.c, lib/AppLifecycle) */
+    if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND) rae_app_lifecycle_record(0);
+    else if (e->type == SDL_EVENT_DID_ENTER_BACKGROUND) rae_app_lifecycle_record(1);
+    else if (e->type == SDL_EVENT_WILL_ENTER_FOREGROUND) rae_app_lifecycle_record(2);
+    else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND) rae_app_lifecycle_record(3);
     switch (e->type) {
         case SDL_EVENT_WILL_ENTER_BACKGROUND:
         case SDL_EVENT_DID_ENTER_BACKGROUND:
@@ -929,7 +935,22 @@ void rae_ext_Gpu2d_simulateMouseButton(int64_t kind, int64_t button, float x, fl
 void rae_ext_Gpu2d_simulateEnterBackground(void){
     SDL_Event ev;
     SDL_zero(ev);
+    ev.type = SDL_EVENT_WILL_ENTER_BACKGROUND;
+    SDL_PushEvent(&ev);
     ev.type = SDL_EVENT_DID_ENTER_BACKGROUND;
+    SDL_PushEvent(&ev);
+}
+/* Whether a wake (EventLoop.wake's user event) waits in the event queue, for a test to see that
+ * something woke the frame loop */
+rae_Bool rae_ext_Gpu2d_wakePending(void){
+    return SDL_HasEvent(SDL_EVENT_USER) ? 1 : 0;
+}
+void rae_ext_Gpu2d_simulateEnterForeground(void){
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = SDL_EVENT_WILL_ENTER_FOREGROUND;
+    SDL_PushEvent(&ev);
+    ev.type = SDL_EVENT_DID_ENTER_FOREGROUND;
     SDL_PushEvent(&ev);
 }
 

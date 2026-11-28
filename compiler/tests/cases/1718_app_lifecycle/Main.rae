@@ -1,0 +1,45 @@
+# The app going to the background and coming back reaches the program (lib/AppLifecycle): a
+# simulated background (Gpu2dSimulatedInput.simulateEnterBackground pushes the SDL events a phone
+# sends) arrives as willEnterBackground then didEnterBackground, the app is no longer in front, and
+# the frame loop is woken (a wake waits in the event queue); the foreground then arrives as
+# willEnterForeground then didEnterForeground. Nothing arrives twice.
+import Gpu2d
+import Gpu2dSimulatedInput
+open AppLifecycle
+
+# Every change waiting, in order
+func changes() ret String {
+  var seen: String = ""
+  loop true {
+    if let change: AppLifecycleEvent = appLifecycleNext() {
+      if seen.length() > 0 {
+        seen = "{seen}, "
+      }
+      seen = "{seen}{change}"
+    } else {
+      break
+    }
+  }
+  if seen.length() is 0 {
+    ret "none"
+  }
+  ret seen
+}
+
+func main() {
+  Gpu2d.initWindow(width: 320, height: 200, title: "lifecycle")
+  let unusedClosed: Bool = Gpu2d.pollClose()
+  log(
+    "at the start: {changes()}, in front {appInForeground()}, a wake waiting {Gpu2dSimulatedInput.wakePending()}"
+  )
+  Gpu2dSimulatedInput.simulateEnterBackground()
+  log("to the background: a wake waiting {Gpu2dSimulatedInput.wakePending()}")
+  let closed1: Bool = Gpu2d.pollClose()
+  log("the frame reads: {changes()}, in front {appInForeground()}")
+  log("read again: {changes()}, a wake waiting {Gpu2dSimulatedInput.wakePending()}")
+  Gpu2dSimulatedInput.simulateEnterForeground()
+  log("back: a wake waiting {Gpu2dSimulatedInput.wakePending()}")
+  let closed2: Bool = Gpu2d.pollClose()
+  log("the frame reads: {changes()}, in front {appInForeground()}")
+  Gpu2d.closeWindow()
+}

@@ -4,6 +4,15 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.160, 2026-11-28: the app's background and foreground as events
+
+- `lib/AppLifecycle`: `appLifecycleNext()` (willEnterBackground, didEnterBackground,
+  willEnterForeground, didEnterForeground, in order) and `appInForeground()`; each change wakes the
+  frame loop (docs/app-lifecycle.md). On iOS the program reads willEnterBackground while it still
+  runs; on Android all four arrive when the app is back (SDL stops the app's thread while paused).
+- `Gpu2dSimulatedInput.simulateEnterBackground` now pushes willEnterBackground and
+  didEnterBackground; new `simulateEnterForeground` and `wakePending`. Case 1718.
+
 ## 0.4.159, 2026-11-28: color emoji on Linux, from Noto Color Emoji in Rae
 
 - On Linux and the BSDs an emoji in text is drawn from Noto Color Emoji's file, read by Rae

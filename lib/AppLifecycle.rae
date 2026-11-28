@@ -1,0 +1,68 @@
+# AppLifecycle — the app going to the background and coming back, as the system says it
+# (docs/app-lifecycle.md). A frame reads what happened since the last one:
+#
+#     loop true {
+#       if let change: AppLifecycleEvent = appLifecycleNext() {
+#         if change is AppLifecycleEvent.willEnterBackground { ...tell the server... }
+#       } else {
+#         break
+#       }
+#     }
+#     if not appInForeground() { ...skip the frame's drawing... }
+#
+# On iOS and Android the system sends the four events in pairs: willEnterBackground then
+# didEnterBackground as the app leaves the screen, willEnterForeground then didEnterForeground as
+# it comes back. Each one wakes the frame loop (EventLoop.wake), so a waiting loop runs a frame at
+# once: a backgrounded app can still send its last message (iOS gives it a few seconds before it
+# is suspended; its socket may stay open for minutes, so a server cannot tell from that alone).
+# The desktop and the browser send none: the app is always in the foreground there.
+#
+# A headless test makes them happen with Gpu2dSimulatedInput.simulateEnterBackground and
+# simulateEnterForeground. The C side is runtime_app_lifecycle.c: a ring of the events as they
+# came, and whether the app is in front.
+
+# What the system said about the app
+enum AppLifecycleEvent {
+  # leaving the screen: the last moment to say so (a socket message, the session's end)
+  willEnterBackground
+  # off the screen; on iOS suspended soon after
+  didEnterBackground
+  # coming back: not drawn yet
+  willEnterForeground
+  # on the screen again
+  didEnterForeground
+}
+
+func rae_ext_AppLifecycle_next() unsafe extern("rae_ext_AppLifecycle_next") ret Int
+
+func rae_ext_AppLifecycle_inForeground() unsafe extern("rae_ext_AppLifecycle_inForeground") ret Bool
+
+# The next change the program has not read, oldest first; none when there is none. Read until
+# none once a frame.
+func appLifecycleNext() ret opt AppLifecycleEvent {
+  var number: Int = -1
+  unsafe {
+    number = rae_ext_AppLifecycle_next()
+  }
+  if number is 0 {
+    ret AppLifecycleEvent.willEnterBackground
+  }
+  if number is 1 {
+    ret AppLifecycleEvent.didEnterBackground
+  }
+  if number is 2 {
+    ret AppLifecycleEvent.willEnterForeground
+  }
+  if number is 3 {
+    ret AppLifecycleEvent.didEnterForeground
+  }
+  ret none
+}
+
+# Whether the app is on the screen: false from its willEnterBackground to its didEnterForeground
+# (always true where the system sends none)
+func appInForeground() ret Bool {
+  unsafe {
+    ret rae_ext_AppLifecycle_inForeground()
+  }
+}
