@@ -389,25 +389,6 @@ static bool emit_opt_ref_arg(CFuncContext* ctx, const AstTypeRef* param_type,
     return true;
 }
 
-/* Do the arguments of a call of the generic function `tmpl` say what each of its
- * type parameters is? Then the type wanted of its result does not: the one an
- * argument outside wants (`check(ok: same(value: box.held) is other)`) is not the
- * one of this call. A literal argument takes the type that is wanted. */
-static bool c_args_bind_type_params(CFuncContext* ctx, const AstFuncDecl* tmpl, const AstCallArg* args) {
-    const AstTypeRef* patterns[32]; const AstTypeRef* concretes[32]; size_t count = 0;
-    const AstParam* p = tmpl->params;
-    for (const AstCallArg* a = args; p && a && count < 32; p = p->next, a = a->next) {
-        const AstExpr* value = c_without_own(a->value);
-        if (value->kind == AST_EXPR_UNARY && value->as.unary.op == AST_UNARY_NEG) value = value->as.unary.operand;
-        if (value->kind == AST_EXPR_INTEGER || value->kind == AST_EXPR_FLOAT || value->kind == AST_EXPR_COLLECTION_LITERAL
-            || value->kind == AST_EXPR_OBJECT || value->kind == AST_EXPR_NONE) continue;
-        const AstTypeRef* type = infer_expr_type_ref(ctx, value);
-        if (!type) continue;
-        patterns[count] = p->type; concretes[count] = type; count++;
-    }
-    return count && infer_generic_args_multi(ctx->compiler_ctx, tmpl, patterns, concretes, count);
-}
-
 /* ---- exclusive access for `mod` arguments: a measuring mode ----------------
  * docs/realtime-language-design.md §4.6 / §9 R8. Rae lets one place be passed
  * to a call as `mod` together with itself, a part of it or a whole containing
@@ -1271,28 +1252,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
         }
 
         const char* call_name = NULL; AstTypeRef* concrete = NULL;
-        // If sema linked the call to a spec clone but the call site has a clear
-        // expected return type, prefer to re-infer from that. This catches cases
-        // like `g.grid = createList(initialCap: 200)` where `grid: List(Int)` should
-        // override any earlier `createList<String>` specialization sema may have
-        // attached.
-        /* An expected `Any` (a `log(...)` argument, an interpolation part)
-         * says nothing about T and must not override what sema bound from
-         * the receiver (`arr.copyAtFallback(...)` inside `log("{...}")`). */
-        bool expected_is_any = ctx->has_expected_type
-            && (str_eq_cstr(get_base_type_name(&ctx->expected_type), "Any")
-                || (ctx->expected_type.resolved_type && ctx->expected_type.resolved_type->kind == TYPE_ANY));
-        if (fd->specialization_args && fd->generic_template && fd->generic_template->kind == AST_DECL_FUNC &&
-            ctx->has_expected_type && !expected_is_any && !expr->as.call.generic_args) {
-            const AstFuncDecl* tmpl = &fd->generic_template->as.func_decl;
-            /* (an optional that is wanted takes the plain result of a T that is none) */
-            bool wraps = ctx->expected_type.is_opt && tmpl->returns && tmpl->returns->type && !tmpl->returns->type->is_opt
-                && !fd->specialization_args->is_opt;
-            if (tmpl->returns && tmpl->returns->type && !wraps && !c_args_bind_type_params(ctx, tmpl, expr->as.call.args)) {
-                AstTypeRef* re_inferred = infer_generic_args(ctx->compiler_ctx, tmpl, tmpl->returns->type, &ctx->expected_type);
-                if (re_inferred) { concrete = re_inferred; fd = tmpl; }
-            }
-        }
         // Sema keys a generic specialization through TypeInfo, where an enum is
         // the shared TYPE_INT and its NAME is gone — so `describe(value: kinds)`
         // with `kinds: List(Kind)` bound T to List(Int) and called the Int
@@ -1347,23 +1306,6 @@ bool emit_call_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out) {
                 p = p->next; a = a->next;
             }
             concrete = infer_generic_args_multi(ctx->compiler_ctx, fd, patterns, concretes, np);
-            // 2. Infer from the EXPECTED return type before the name-mapping
-            //    fallback below. For a return-typed constructor whose args do not
-            //    bind the type params (`create(cap: 8)`, `createList(cap: 8)`),
-            //    the field/binding type is authoritative and may differ from the
-            //    enclosing generic `T` — e.g. `items: List(EntityId)` inside
-            //    `makeBox(T)` must specialize from the FIELD's `EntityId`, not the
-            //    enclosing `T` (#889). The name-mapping fallback (#3) reuses the
-            //    enclosing `T` for every param and so silently mis-binds such a
-            //    field; a structural inference from the expected return type does
-            //    not. Substitute the inferred args through the enclosing context
-            //    so a field literally typed `List(T)` still resolves its `T`.
-            if (!concrete && ctx->has_expected_type && fd->returns && fd->returns->type) {
-                AstTypeRef* from_expected = infer_generic_args(ctx->compiler_ctx, fd, fd->returns->type, &ctx->expected_type);
-                if (from_expected) {
-                    concrete = from_expected;
-                }
-            }
             // 3. Fallback: map the callee's own generic-param NAMES through the
             //    enclosing generic context. Only correct when the names coincide
             //    (the common "everyone calls it T" case) or for type-arg-only
