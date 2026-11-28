@@ -27,6 +27,7 @@
 #include <Network/Network.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <dispatch/dispatch.h>
+#include <errno.h>
 #include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
@@ -70,6 +71,12 @@ typedef struct RaeNwConnection {
   int finished;
   /* Rae has let go of the handle */
   int released;
+  /* the connection has been ready, has been failed, is waiting for a network, and the handshake
+   * timer has yet to run (it keeps the connection from being freed under it) */
+  int wasReady;
+  int failedReported;
+  int waiting;
+  int timerPending;
 } RaeNwConnection;
 
 static void rae_nw_free_event(RaeNwEvent* event) {
@@ -128,7 +135,7 @@ static void rae_nw_push_data(RaeNwConnection* c, int64_t kind, int64_t code, dis
 /* Free the connection once the framework is finished with it and Rae has let
  * go; runs on the connection's queue */
 static void rae_nw_maybe_free(RaeNwConnection* c) {
-  if (!c->finished || !c->released) return;
+  if (!c->finished || !c->released || c->timerPending) return;
   nw_release(c->connection);
   RaeNwEvent* event = c->head;
   while (event) {
@@ -198,7 +205,8 @@ static void rae_nw_receive(RaeNwConnection* c) {
 /* Open a connection: to `hostZ`:`port` (TCP or TLS), or to the ws:// / wss://
  * `urlZ` (a WebSocket client). `insecure` accepts any server certificate
  * (only for a test against a self-signed server). The handle, or 0. */
-int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t mode, int64_t insecure) {
+int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t mode, int64_t insecure,
+                           int64_t handshakeMs) {
   RaeNwConnection* c = (RaeNwConnection*)calloc(1, sizeof *c);
   if (!c) return 0;
   pthread_mutex_init(&c->lock, NULL);
@@ -254,14 +262,35 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
   nw_connection_set_state_changed_handler(c->connection, ^(nw_connection_state_t state, nw_error_t error) {
     switch (state) {
       case nw_connection_state_ready:
+        c->wasReady = 1;
+        c->waiting = 0;
         rae_nw_push(c, RAE_NW_READY, 0, NULL, 0);
         rae_nw_receive(c);
         break;
       case nw_connection_state_waiting:
+        /* A WebSocket whose upgrade the server refused (an HTTP answer that is not 101): the
+         * framework aborts the connection and waits to try again, for ever. It is a failure,
+         * whose status the framework does not tell. */
+        if (c->webSocket && !c->wasReady && !c->failedReported && error
+            && nw_error_get_error_domain(error) == nw_error_domain_posix
+            && nw_error_get_error_code(error) == ECONNABORTED) {
+          const char* text = "upgrade refused: the server did not accept the WebSocket";
+          c->failedReported = 1;
+          rae_nw_push(c, RAE_NW_FAILED, ECONNABORTED, text, strlen(text));
+          nw_connection_cancel(c->connection);
+          break;
+        }
+        c->waiting = 1;
         rae_nw_push_error(c, RAE_NW_WAITING, error);
         break;
+      case nw_connection_state_preparing:
+        c->waiting = 0;
+        break;
       case nw_connection_state_failed:
-        rae_nw_push_error(c, RAE_NW_FAILED, error);
+        if (!c->failedReported) {
+          c->failedReported = 1;
+          rae_nw_push_error(c, RAE_NW_FAILED, error);
+        }
         break;
       case nw_connection_state_cancelled:
         c->finished = 1;
@@ -279,6 +308,23 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
     else if (nw_path_uses_interface_type(path, nw_interface_type_loopback)) interface = "loopback";
     rae_nw_push(c, RAE_NW_PATH, (int64_t)nw_path_get_status(path), interface, strlen(interface));
   });
+  /* A WebSocket upgrade that goes unanswered fails after `handshakeMs` (Rae's choice), unless the
+   * connection is waiting for a network, which is a wait the framework ends by itself */
+  if (c->webSocket && handshakeMs > 0) {
+    c->timerPending = 1;
+    int64_t seconds = handshakeMs / 1000;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, handshakeMs * NSEC_PER_MSEC), c->queue, ^{
+      c->timerPending = 0;
+      if (!c->finished && !c->wasReady && !c->failedReported && !c->waiting) {
+        char text[96];
+        snprintf(text, sizeof text, "no answer to the WebSocket upgrade in %lld s", (long long)seconds);
+        c->failedReported = 1;
+        rae_nw_push(c, RAE_NW_FAILED, ETIMEDOUT, text, strlen(text));
+        nw_connection_cancel(c->connection);
+      }
+      rae_nw_maybe_free(c);
+    });
+  }
   nw_connection_start(c->connection);
   return (int64_t)(intptr_t)c;
 }

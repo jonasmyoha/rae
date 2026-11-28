@@ -86,6 +86,8 @@ public final class RaeNetwork {
   private final String path;
   private final boolean secure;
   private final boolean insecure;
+  // how long the WebSocket upgrade may go unanswered (lib/net/NetworkConnection)
+  private final int handshakeMs;
   private final LinkedBlockingQueue<Outgoing> outgoing = new LinkedBlockingQueue<>();
   private final SecureRandom random = new SecureRandom();
   private volatile boolean closed;
@@ -94,9 +96,9 @@ public final class RaeNetwork {
 
   // The handle is the C side's connection; null when the URL cannot be read
   public static RaeNetwork connect(
-      long handle, String host, int port, String url, int mode, boolean insecure) {
+      long handle, String host, int port, String url, int mode, boolean insecure, int handshakeMs) {
     try {
-      RaeNetwork connection = new RaeNetwork(handle, host, port, url, mode, insecure);
+      RaeNetwork connection = new RaeNetwork(handle, host, port, url, mode, insecure, handshakeMs);
       connection.reader = new Thread(connection::run, "rae-network");
       connection.reader.setDaemon(true);
       connection.reader.start();
@@ -106,9 +108,10 @@ public final class RaeNetwork {
     }
   }
 
-  private RaeNetwork(long handle, String host, int port, String url, int mode, boolean insecure)
-      throws java.net.URISyntaxException {
+  private RaeNetwork(long handle, String host, int port, String url, int mode, boolean insecure,
+      int handshakeMs) throws java.net.URISyntaxException {
     this.handle = handle;
+    this.handshakeMs = handshakeMs;
     this.mode = mode;
     this.insecure = insecure;
     if (mode == MODE_WEBSOCKET) {
@@ -366,11 +369,27 @@ public final class RaeNetwork {
         + "\r\n";
     output.write(request.getBytes(StandardCharsets.US_ASCII));
     output.flush();
-    String response = readHeaders(input);
+    // A server that never answers the upgrade fails it, as one that refuses it does
+    Socket current = socket;
+    if (current != null && handshakeMs > 0) {
+      current.setSoTimeout(handshakeMs);
+    }
+    String response;
+    try {
+      response = readHeaders(input);
+    } catch (java.net.SocketTimeoutException error) {
+      throw new IOException("no answer to the WebSocket upgrade in " + (handshakeMs / 1000) + " s");
+    }
+    if (current != null) {
+      current.setSoTimeout(0);
+    }
     String[] lines = response.split("\r\n");
     if (lines.length == 0 || !lines[0].matches("HTTP/1\\.1 101( .*)?")) {
-      throw new IOException("the server did not accept the WebSocket: "
-          + (lines.length == 0 ? "" : lines[0]));
+      // "upgrade refused: 404 (HTTP/1.1 404 Not Found)"
+      String status = lines.length == 0 ? "" : lines[0];
+      String[] parts = status.split(" ");
+      String code = parts.length > 1 ? parts[1] : "?";
+      throw new IOException("upgrade refused: " + code + " (" + status + ")");
     }
     String expected = acceptOf(key);
     for (String line : lines) {

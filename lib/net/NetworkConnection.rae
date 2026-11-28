@@ -25,6 +25,10 @@ cheader "runtime_network_android.h"
 
 const hasSystemConnection: Bool = Target.isApple or Target.os is Os.android
 
+# How long a WebSocket's opening handshake may go unanswered (the TCP or TLS connection made, no
+# answer to the upgrade) before the connection is failed: "no answer to the WebSocket upgrade"
+const webSocketHandshakeMs: Int = 15000
+
 when hasSystemConnection {
   func rae_ext_Nw_connect(
     hostZ: Buffer(UInt8)
@@ -32,6 +36,7 @@ when hasSystemConnection {
     urlZ: Buffer(UInt8)
     mode: Int
     insecure: Int
+    handshakeMs: Int
   ) unsafe extern("rae_ext_Nw_connect") ret Int
 
   func rae_ext_Nw_send(
@@ -142,6 +147,24 @@ func networkOpen(
   mode: view NetworkMode
   insecure: view Bool
 ) ret NetworkConnection {
+  ret networkOpenWithin(
+    host: host
+    port: port
+    url: url
+    mode: mode
+    insecure: insecure
+    handshakeMs: webSocketHandshakeMs
+  )
+}
+
+func networkOpenWithin(
+  host: view String
+  port: view Int
+  url: view String
+  mode: view NetworkMode
+  insecure: view Bool
+  handshakeMs: view Int
+) ret NetworkConnection {
   var handle: Int = 0
   when hasSystemConnection {
     var hostZ: List(UInt8) = networkBytesZ(text: host)
@@ -157,6 +180,7 @@ func networkOpen(
         urlZ: urlZ.data
         mode: networkModeCode(mode: mode)
         insecure: insecureFlag
+        handshakeMs: handshakeMs
       )
     }
   }
@@ -199,7 +223,11 @@ func networkConnectTlsInsecure(host: view String, port: view Int) ret NetworkCon
 }
 
 # A WebSocket client to a ws:// or wss:// URL (wss: TLS with the system
-# trust store); pings are answered on their own
+# trust store); pings are answered on their own. A server that refuses the upgrade (an HTTP
+# answer that is not 101) fails it at once, "upgrade refused: 404 (HTTP/1.1 404 Not Found)" (on
+# Apple without the status, which Network.framework does not tell), and one that does not answer
+# it fails after 15 s, "no answer to the WebSocket upgrade in 15 s": either way the app sees
+# `failed` and can try again.
 func networkConnectWebSocket(url: view String) ret NetworkConnection {
   ret networkOpen(
     host: ""
@@ -207,6 +235,19 @@ func networkConnectWebSocket(url: view String) ret NetworkConnection {
     url: url
     mode: NetworkMode.webSocket
     insecure: false
+  )
+}
+
+# A WebSocket client whose opening handshake may go unanswered `handshakeMs` (not the 15 s of
+# networkConnectWebSocket) before it fails
+func networkConnectWebSocketWithin(url: view String, handshakeMs: view Int) ret NetworkConnection {
+  ret networkOpenWithin(
+    host: ""
+    port: 0
+    url: url
+    mode: NetworkMode.webSocket
+    insecure: false
+    handshakeMs: handshakeMs
   )
 }
 

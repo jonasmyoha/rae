@@ -79,7 +79,7 @@ static int rae_nw_find_class(JNIEnv* env) {
       if (!rae_nw_failed_call(env) && found) {
         rae_nw_connect_method = (*env)->GetStaticMethodID(
             env, found, "connect",
-            "(JLjava/lang/String;ILjava/lang/String;IZ)Lorg/rae/app/RaeNetwork;");
+            "(JLjava/lang/String;ILjava/lang/String;IZI)Lorg/rae/app/RaeNetwork;");
         rae_nw_send_method = (*env)->GetMethodID(env, found, "send", "([BII)V");
         rae_nw_close_method = (*env)->GetMethodID(env, found, "close", "()V");
         rae_nw_class = (jclass)(*env)->NewGlobalRef(env, found);
@@ -169,7 +169,7 @@ JNIEXPORT void JNICALL Java_org_rae_app_RaeNetwork_nativeFinished(
  * `urlZ` (a WebSocket client). `insecure` accepts any server certificate (only for a
  * test against a self-signed server). The handle, or 0. */
 int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t mode,
-                           int64_t insecure) {
+                           int64_t insecure, int64_t handshakeMs) {
   JNIEnv* env = (JNIEnv*)SDL_GetAndroidJNIEnv();
   if (!env || !rae_nw_find_class(env)) return 0;
   RaeNwConnection* c = (RaeNwConnection*)calloc(1, sizeof *c);
@@ -180,7 +180,7 @@ int64_t rae_ext_Nw_connect(uint8_t* hostZ, int64_t port, uint8_t* urlZ, int64_t 
   jstring url = (*env)->NewStringUTF(env, (const char*)urlZ);
   jobject java = (*env)->CallStaticObjectMethod(
       env, rae_nw_class, rae_nw_connect_method, (jlong)(intptr_t)c, host, (jint)port, url,
-      (jint)mode, insecure ? JNI_TRUE : JNI_FALSE);
+      (jint)mode, insecure ? JNI_TRUE : JNI_FALSE, (jint)handshakeMs);
   int failed = rae_nw_failed_call(env);
   (*env)->DeleteLocalRef(env, host);
   (*env)->DeleteLocalRef(env, url);

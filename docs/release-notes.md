@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.162, 2026-11-28: a refused or unanswered WebSocket upgrade fails
+
+- `networkConnectWebSocket` to a server that answers the upgrade with an HTTP error (no 101)
+  reports `failed`, "upgrade refused: 404 (HTTP/1.1 404 Not Found)" on Android, "upgrade refused"
+  on Apple (Network.framework does not tell the status); it waited forever before. A server that
+  never answers the upgrade fails it after 15 s. `networkConnectWebSocketWithin(url:,
+  handshakeMs:)` chooses that time (docs/network-connections.md). Case 1720.
+
 ## 0.4.161, 2026-11-28: Android apps run on in the background
 
 - On Android the app's thread is no longer stopped while it is in the background

@@ -16,6 +16,7 @@ the server side's BSD sockets.)
 |---|---|
 | `networkConnectTls(host, port)` | TLS, certificate checked against the system trust store |
 | `networkConnectWebSocket(url)` | a WebSocket client to `ws://` or `wss://`; pings answered on their own |
+| `networkConnectWebSocketWithin(url, handshakeMs)` | the same, its upgrade allowed `handshakeMs` unanswered (15 s above) |
 | `networkConnectTcp(host, port)` | plain TCP (a local server, a test) |
 | `networkConnectTlsInsecure(host, port)` | TLS accepting any certificate: tests against a self-signed server only |
 | `networkSend` / `networkSendText` | bytes / text (a WebSocket: one binary / text message) |
@@ -29,7 +30,14 @@ Events (`NetworkEvent { kind, code, bytes, text }`):
 - `message`: bytes; on a WebSocket one whole message, `code` its kind
   (`webSocketText` / `webSocketBinary`), `text` the text.
 - `closed`: the server closed (a WebSocket: `code` its close code).
-- `failed`: over; `text` why.
+- `failed`: over; `text` why. A WebSocket whose server refuses the upgrade (an
+  HTTP answer that is not 101, such as `404 {"error":"account_not_found"}`)
+  fails at once: `upgrade refused: 404 (HTTP/1.1 404 Not Found)` on Android,
+  `upgrade refused: the server did not accept the WebSocket` on Apple
+  (Network.framework aborts it without telling the status). One whose server
+  takes the connection and never answers the upgrade fails after 15 s,
+  `no answer to the WebSocket upgrade in 15 s`. Either way an app that
+  reconnects on `failed` or `closed` does.
 - `waiting`: no usable network (or the server refused); the framework
   connects when it can. A UI shows "offline"; a caller with a deadline gives
   up when it passes.
@@ -89,6 +97,12 @@ echo and close, an HTTP GET, a refused connection waiting, chunked and URL
 parsing; it is on the TSan gate. TLS needs the internet, so it is checked by
 hand: `httpGet(url: "https://www.apple.com/robots.txt", timeoutMs: 15000)`
 answers 200.
+
+Case 1720 has two local servers on a worker thread, one answering the upgrade
+with a 404 and one silent: the client fails at once and after its 2 s
+handshake time, and a port nobody listens to still waits. It passes on this
+Mac and on an Android 15 emulator (where the text was `upgrade refused: 404
+(HTTP/1.1 404 Not Found)`).
 
 Case 1290 also runs on an Android emulator, with the same expected output:
 `sh tools/android/gen-android.sh compiler/tests/cases/1290_network_connection`,

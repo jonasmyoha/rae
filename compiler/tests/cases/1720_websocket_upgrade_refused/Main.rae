@@ -1,0 +1,109 @@
+# A WebSocket whose upgrade is refused, or never answered, fails (lib/net/NetworkConnection): two
+# local servers on a spawned worker, one answering the upgrade with an HTTP 404 and a JSON body
+# (no 101), one taking the connection and saying nothing. The client sees `failed` both times
+# (the refusal at once; the silence after the handshake time, 2 s here), so an app's reconnect
+# runs. A connection nobody listens to still waits for the network instead.
+open Channel
+open net/Tcp
+open net/NetworkConnection
+
+# The servers: the first listener answers 404 to what it reads, the second holds what it accepts
+func serve(refusingHandle: own Int, silentHandle: own Int, stop: own Channel(Int)) ret Int {
+  let refusing: SocketId = { handle: refusingHandle }
+  let silent: SocketId = { handle: silentHandle }
+  var held: List(SocketId) = {}
+  var answered: Int = 0
+  loop pending(this: stop) is 0 {
+    let accepted: SocketId = socketId,
+      let acceptStatus: NetStatus = status = tcpAccept(listenerSocketId: refusing)
+    if acceptStatus is NetStatus.ok {
+      if socketWaitReadable(socketId: accepted, timeoutMs: 2000) {
+        var request: List(UInt8) = {}
+        let read: Int = bytes,
+          let readStatus: NetStatus = status = socketRead(
+            socketId: accepted
+            bytes: request
+            maxBytes: 4096
+          )
+        let body: String = "\{\"error\":\"account_not_found\"\}"
+        let written: Int = bytes,
+          let writeStatus: NetStatus = status = socketWriteText(
+            socketId: accepted
+            text: "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {body.length()}\r\n\r\n{body}"
+          )
+        answered = answered + 1
+      }
+      held.add(value: accepted)
+    }
+    let quiet: SocketId = socketId,
+      let quietStatus: NetStatus = status = tcpAccept(listenerSocketId: silent)
+    if quietStatus is NetStatus.ok {
+      held.add(value: quiet)
+    }
+    let unusedReady: Bool = socketWaitReadable(socketId: refusing, timeoutMs: 20)
+  }
+  loop let socket: view SocketId in held {
+    socketClose(socketId: socket)
+  }
+  ret answered
+}
+
+func listenLocal() ret SocketId {
+  let listening: SocketId = socketId,
+    let status: NetStatus = status = tcpListen(host: "127.0.0.1", port: 0, backlog: 8)
+  ret listening
+}
+
+func portOf(socketId: view SocketId) ret Int {
+  if let port: Int = socketLocalPort(socketId: socketId) {
+    ret port
+  }
+  ret 0
+}
+
+# The first event that is not a path change within `seconds`, as "<kind>: <text>"
+func outcome(connection: view NetworkConnection, seconds: view Int) ret String {
+  let start: Int = nowMs()
+  loop nowMs() - start < seconds * 1000 {
+    let event: NetworkEvent = networkNextEvent(connection: connection, timeoutMs: 100)
+    if event.kind is not NetworkEventKind.none and event.kind is not NetworkEventKind.pathChanged {
+      ret "{event.kind}: {event.text}, after {(nowMs() - start + 500) / 1000} s"
+    }
+  }
+  ret "nothing in {seconds} s"
+}
+
+func main() {
+  let refusing: SocketId = listenLocal()
+  let silent: SocketId = listenLocal()
+  let stop: Channel(Int) = createChannel(Int)
+  let server: Task(Int) = spawn serve(
+    refusingHandle: refusing.handle
+    silentHandle: silent.handle
+    stop: stop
+  )
+  var refused: NetworkConnection = networkConnectWebSocketWithin(
+    url: "ws://127.0.0.1:{portOf(socketId: refusing)}/ws"
+    handshakeMs: 2000
+  )
+  let refusedOutcome: String = outcome(connection: refused, seconds: 6)
+  log("a refused upgrade: {refusedOutcome.startsWith(prefix: "failed: upgrade refused")}")
+  networkClose(connection: refused)
+  var unanswered: NetworkConnection = networkConnectWebSocketWithin(
+    url: "ws://127.0.0.1:{portOf(socketId: silent)}/ws"
+    handshakeMs: 2000
+  )
+  log("an unanswered upgrade: {outcome(connection: unanswered, seconds: 6)}")
+  networkClose(connection: unanswered)
+  var nobody: NetworkConnection = networkConnectWebSocketWithin(
+    url: "ws://127.0.0.1:1/ws"
+    handshakeMs: 2000
+  )
+  log("nobody listening: {outcome(connection: nobody, seconds: 4).startsWith(prefix: "waiting")}")
+  networkClose(connection: nobody)
+  channelSend(this: stop, value: 1)
+  log("the refusing server answered {server.get()} upgrade(s)")
+  freeChannel(this: stop)
+  socketClose(socketId: refusing)
+  socketClose(socketId: silent)
+}
