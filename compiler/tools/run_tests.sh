@@ -214,6 +214,9 @@ for TARGET in "${TARGETS[@]}"; do
     # Sema decided every instance of a generic function the C calls (docs/generic-instances-design.md,
     # step 4): one only the backend found, or only sema, fails the build (src/c_instance_check.c)
     export RAE_CHECK_INSTANCES="${RAE_CHECK_INSTANCES:-error}"
+    # Every expression the C backend asks about has a type, from sema or its own (docs/generic-instances-design.md,
+    # step 9): one with none is an internal error (src/c_backend.c, c_check_types_finish)
+    export RAE_CHECK_TYPES="${RAE_CHECK_TYPES:-1}"
 
     # Apply name filter if provided
     if [ -n "$TEST_NAME_FILTER" ]; then

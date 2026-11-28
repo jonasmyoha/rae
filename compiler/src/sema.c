@@ -7888,6 +7888,27 @@ static bool sema_match_arms_agree(const AstExpr* match) {
     return true;
 }
 
+/* Does `type` name one of `params` (a generic function's `T` in its result)? */
+static bool sema_type_ref_names_params(const AstTypeRef* type, const AstIdentifierPart* params) {
+    if (!type) return false;
+    if (type->parts && !type->parts->next)
+        for (const AstIdentifierPart* p = params; p; p = p->next) if (str_eq(p->text, type->parts->text)) return true;
+    for (const AstTypeRef* a = type->generic_args; a; a = a->next) if (sema_type_ref_names_params(a, params)) return true;
+    return false;
+}
+
+/* A literal with no type of its own (`{ ... }`, `[ ... ]`, `none`) is of the type it lands in; a
+ * struct or list literal where an optional is wanted is its payload */
+static void sema_literal_takes_type(TypeInfo* expected, AstExpr* value) {
+    if (!expected || !value || value->resolved_type) return;
+    if (value->kind != AST_EXPR_OBJECT && value->kind != AST_EXPR_COLLECTION_LITERAL && value->kind != AST_EXPR_NONE) return;
+    TypeInfo* landing = sema_strip_ref(expected);
+    if (landing && landing->kind == TYPE_OPT && value->kind != AST_EXPR_NONE) landing = sema_strip_ref(landing->as.opt.base);
+    if (landing && landing->kind != TYPE_VOID && landing->kind != TYPE_GENERIC_PARAM && sema_type_is_concrete(landing, 0)
+        && (value->kind != AST_EXPR_NONE || landing->kind == TYPE_OPT))
+        value->resolved_type = landing;
+}
+
 /* An optional reference (`opt view T`, OPT over REF) where a reference `view T` is wanted: the plain
  * reference binding takes it as it is (`let x: view T = list.viewAt(...)`, #662) */
 static bool sema_optional_reference_to_reference(const TypeInfo* expected, const TypeInfo* got) {
@@ -7897,18 +7918,7 @@ static bool sema_optional_reference_to_reference(const TypeInfo* expected, const
 
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
-    /* a literal with no type of its own (`{ ... }`, `[ ... ]`, `none`) is of the type it lands in */
-    if (!(*expr_ptr)->resolved_type
-        && ((*expr_ptr)->kind == AST_EXPR_OBJECT || (*expr_ptr)->kind == AST_EXPR_COLLECTION_LITERAL
-            || (*expr_ptr)->kind == AST_EXPR_NONE)) {
-        TypeInfo* landing = sema_strip_ref(expected);
-        /* (a struct or list literal where an optional is wanted is its payload) */
-        if (landing && landing->kind == TYPE_OPT && (*expr_ptr)->kind != AST_EXPR_NONE)
-            landing = sema_strip_ref(landing->as.opt.base);
-        if (landing && landing->kind != TYPE_VOID && landing->kind != TYPE_GENERIC_PARAM
-            && ((*expr_ptr)->kind != AST_EXPR_NONE || landing->kind == TYPE_OPT))
-            (*expr_ptr)->resolved_type = landing;
-    }
+    sema_literal_takes_type(expected, *expr_ptr);
     if (sema_optional_reference_to_reference(expected, (*expr_ptr)->resolved_type)) return;
     {
         TypeInfo* target = sema_strip_ref(expected);
@@ -8551,6 +8561,38 @@ static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbo
     }
 }
 
+/* A method call on a module (`Profile.maybeAutoStart(profiler:)`, `Query.query(table:)`) that analysis left
+ * without a type: when the module's functions of that name and argument count all answer one type, the
+ * same in every instance, the call is of it */
+static void sema_type_module_method_call(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr) {
+    (void)symbols;
+    if (!expr->resolved_type && expr->as.method_call.object && expr->as.method_call.object->kind == AST_EXPR_IDENT
+        && !expr->as.method_call.object->resolved_type && sema_is_module_name(module, expr->as.method_call.object->as.ident)) {
+        size_t call_args = 0;
+        for (AstCallArg* ca = expr->as.method_call.args; ca; ca = ca->next) call_args++;
+        Str method = expr->as.method_call.method_name;
+        size_t named_count = module_index_function_count(module, method);
+        TypeInfo* by_name = NULL; bool one_type = true; bool any = false;
+        for (size_t k = 0; k < named_count && one_type; k++) {
+            const AstDecl* d = module_index_function_at(module, method, named_count, k);
+            if (d->as.func_decl.specialization_args) continue;
+            size_t params = 0;
+            for (const AstParam* p = d->as.func_decl.params; p; p = p->next)
+                if (!(p->type && str_eq_cstr(get_base_type_name(p->type), "type"))) params++;  /* (`T: type` is none) */
+            if (params != call_args) continue;
+            if (d->as.func_decl.returns && d->as.func_decl.returns->next) { one_type = false; break; }
+            /* (resolved where it was declared) */
+            TypeInfo* answer = !d->as.func_decl.returns ? type_get_void(ctx->type_registry)
+                : d->as.func_decl.generic_params && sema_type_ref_names_params(d->as.func_decl.returns->type, d->as.func_decl.generic_params) ? NULL
+                : d->as.func_decl.returns->type ? d->as.func_decl.returns->type->resolved_type : NULL;
+            if (!answer || (any && answer != by_name)) { one_type = false; break; }
+            by_name = answer; any = true;
+        }
+        if (any && one_type && by_name && (by_name->kind == TYPE_VOID || sema_type_is_concrete(by_name, 0)))
+            expr->resolved_type = by_name;
+    }
+}
+
 static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* expr, bool is_value_pos) {
     if (!expr) return;
     sema_analyze_expr_inner(ctx, module, symbols, expr, is_value_pos);
@@ -8558,6 +8600,7 @@ static void sema_analyze_expr(CompilerContext* ctx, AstModule* module, SymbolTab
         sema_decide_instance(ctx, module, symbols, expr);
     else if (expr->kind == AST_EXPR_COLLECTION_LITERAL || expr->kind == AST_EXPR_LIST)
         sema_literal_instances(ctx, module, symbols, expr->resolved_type);
+    if (expr->kind == AST_EXPR_METHOD_CALL && !expr->resolved_type) sema_type_module_method_call(ctx, module, symbols, expr);
     if (expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) {
         const AstDecl* callee = expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC ? expr->decl_link
             : expr->decl_link ? NULL : sema_generic_results_callee(ctx, module, symbols, expr);
@@ -9363,6 +9406,31 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             }
                         }
                     } else {
+                        /* bound by name in the backend: when every function of that name and
+                         * argument count is plain and answers one type, the call is of it */
+                        size_t call_args = 0;
+                        for (AstCallArg* ca = expr->as.call.args; ca; ca = ca->next) call_args++;
+                        TypeInfo* by_name = NULL; bool one_type = true; bool any = false;
+                        size_t named_count = module_index_function_count(module, name);
+                        for (size_t k = 0; k < named_count && one_type; k++) {
+                            const AstDecl* d = module_index_function_at(module, name, named_count, k);
+                            if (!d || d->kind != AST_DECL_FUNC || d->as.func_decl.specialization_args) continue;
+                            size_t params = 0;
+                            for (const AstParam* p = d->as.func_decl.params; p; p = p->next)
+                                if (!(p->type && str_eq_cstr(get_base_type_name(p->type), "type"))) params++;  /* (`T: type` is none) */
+                            if (params != call_args) continue;
+                            if (d->as.func_decl.returns && d->as.func_decl.returns->next) { one_type = false; break; }
+                            /* (a generic one counts when what it answers does not name its type parameters) */
+                            /* (resolved where it was declared: resolving it here would judge it from this
+                             * file's packages) */
+                            TypeInfo* answer = !d->as.func_decl.returns ? type_get_void(ctx->type_registry)
+                                : d->as.func_decl.generic_params && sema_type_ref_names_params(d->as.func_decl.returns->type, d->as.func_decl.generic_params) ? NULL
+                                : d->as.func_decl.returns->type ? d->as.func_decl.returns->type->resolved_type : NULL;
+                            if (!answer) { one_type = false; break; }
+                            if (any && answer != by_name) one_type = false;
+                            by_name = answer; any = true;
+                        }
+                        if (any && one_type && by_name && sema_type_is_concrete(by_name, 0)) expr->resolved_type = by_name;
                         /* A call the backend binds by name (a generic whose
                          * `T` sema could not infer): the view rule by name */
                         sema_reject_view_to_mod_unbound(module, symbols, expr);
@@ -9389,6 +9457,21 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                             }
                         }
                     }
+                }
+            }
+            /* a type written as a call (`List(String)` as a type argument, `Pair(Int).fromJson`): the
+             * type it spells, with an instance's type arguments put in */
+            /* (not one an instance or a fields() loop wrote out: resolved from this file, its type
+             * arguments may come from packages this one does not depend on) */
+            if (!expr->resolved_type && !expr->is_written_out && expr->as.call.callee
+                && expr->as.call.callee->kind == AST_EXPR_IDENT) {
+                Symbol* named = symbol_table_lookup(symbols, expr->as.call.callee->as.ident);
+                if (named && named->decl && named->decl->kind == AST_DECL_TYPE && named->decl->as.type_decl.generic_params
+                    && (expr->as.call.generic_args || sema_arg_is_type_name(symbols, expr))) {
+                    AstTypeRef* written = sema_type_ref_of_expr(ctx, expr);
+                    if (!written->generic_args && expr->as.call.generic_args) written->generic_args = expr->as.call.generic_args;
+                    TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, written);
+                    if (type && sema_type_is_concrete(type, 0)) expr->resolved_type = type;
                 }
             }
             break;
@@ -9698,7 +9781,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         expr->as.call.generic_args = qgen;
                         expr->decl_link = resolved;
                         /* a function with no result: the call answers nothing */
-                        if (resolved && !resolved->as.func_decl.returns) expr->resolved_type = type_get_void(ctx->type_registry);
+                        if (resolved && !resolved->as.func_decl.returns) {
+                            expr->resolved_type = type_get_void(ctx->type_registry);
+                            AstParam* lp = resolved->as.func_decl.params;
+                            for (AstCallArg* la = qargs; lp && la; lp = lp->next, la = la->next)
+                                sema_literal_takes_type(sema_resolve_type_internal(ctx, module, symbols, lp->type), la->value);
+                        }
                         if (resolved->as.func_decl.returns) {
                             expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                             AstParam* p = resolved->as.func_decl.params;
@@ -9792,7 +9880,12 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 expr->as.call.generic_args = qgen;
                 expr->decl_link = resolved;
                 /* a function with no result: the call answers nothing */
-                if (resolved && !resolved->as.func_decl.returns) expr->resolved_type = type_get_void(ctx->type_registry);
+                if (resolved && !resolved->as.func_decl.returns) {
+                    expr->resolved_type = type_get_void(ctx->type_registry);
+                    AstParam* lp = resolved->as.func_decl.params;
+                    for (AstCallArg* la = qargs; lp && la; lp = lp->next, la = la->next)
+                        sema_literal_takes_type(sema_resolve_type_internal(ctx, module, symbols, lp->type), la->value);
+                }
                 if (resolved && resolved->as.func_decl.returns) {
                     expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                     AstParam* p = resolved->as.func_decl.params;
@@ -10433,6 +10526,7 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
             if (!expr->resolved_type && expr->decl_link && expr->decl_link->kind == AST_DECL_FUNC
                 && !expr->decl_link->as.func_decl.returns)
                 expr->resolved_type = type_get_void(ctx->type_registry);
+
             /* the intrinsics the backend writes (docs/compile-time-reflection.md): `value.toString()`
              * and `value.toJson()` are a String */
             if (!expr->resolved_type && !expr->as.method_call.args
@@ -10456,6 +10550,20 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                     || (type_symbol && !type_symbol->decl && type_symbol->type);
                 if (names_type) {
                     TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, named);
+                    if (type && type->kind != TYPE_VOID && sema_type_is_concrete(type, 0)) expr->resolved_type = type;
+                }
+            }
+            /* (and on a type written as a call, `Pair(Int).fromJson(...)`, `Task(String).default()`: the
+             * type it spells) */
+            if (!expr->resolved_type && type_valued && expr->as.method_call.object
+                && expr->as.method_call.object->kind == AST_EXPR_CALL) {
+                AstExpr* written_type = expr->as.method_call.object;
+                if (written_type->is_written_out || written_type->as.call.generic_args
+                    || sema_arg_is_type_name(symbols, written_type)) {
+                    AstTypeRef* written = sema_type_ref_of_expr(ctx, written_type);
+                    if (!written->generic_args && written_type->as.call.generic_args)
+                        written->generic_args = written_type->as.call.generic_args;
+                    TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, written);
                     if (type && type->kind != TYPE_VOID && sema_type_is_concrete(type, 0)) expr->resolved_type = type;
                 }
             }

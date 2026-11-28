@@ -503,7 +503,18 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    in about 25 cases. C: 389 programs lose string-pool marks that held no String (with the temporaries after them
    renumbered), and `log(x.toJson())` / `log(x.toString())` take the typed String path instead of an Any. Left: the
    128 (a `none` in a few generic cases, a list or pair type written as a call, `Target` constants named in a
-   `when`, the cases that expect an error), then the internal error.
+   `when`, the cases that expect an error), then the internal error. Then (0.4.149): the last ones typed: a call sema leaves to
+   the backend's by-name binding is of the type every function of that name and argument count answers (a generic
+   one counts when its result names none of its type parameters; `arch()` beside `Target.arch`, `name(m:)` given
+   an enum, `Query.query(table:)`), from their types resolved where they were declared; a type written as a call
+   (`createEventQueue(List(String))`, `Pair(Int).fromJson`, `Task(String).default()`) has the type it spells; a
+   module function's literal arguments and those after a written type argument (`describe(Int, maybe: none)`)
+   take their parameter's type. `check-types.sh` does not count a type written as a call, a call of a function
+   with several results (taken apart where it is called), or a program the compiler refused, and the backend no
+   longer asks about a query loop's source spelling (`query_iterable`, kept for the formatter). Untyped: 0. Under
+   `RAE_CHECK_TYPES=1`, which the suite's runner sets, an expression the backend asks about with no type is an
+   internal error naming it (`c_check_types_finish`); `RAE_CHECK_TYPES_REPORT=1` prints the counts. Step 9 is
+   done but for the expected type choosing instances (9h) and the backend's own guesses that 9b removes.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

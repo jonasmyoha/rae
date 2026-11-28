@@ -22,7 +22,7 @@ trap 'rm -rf "$WORK"' EXIT
   for example in 106_mobile_ui 121_ui_editor 136_walker_character; do echo "../examples/$example/Main.rae"; done
 } | xargs -P "$JOBS" -I{} sh -c '
   out="$1/$(echo "$2" | tr "/." "__")"
-  RAE_FORMAT=off RAE_CHECK_TYPES=1 RAE_CHECK_TYPES_SAMPLES="$3" perl -e "alarm shift; exec @ARGV" 120 \
+  RAE_FORMAT=off RAE_CHECK_TYPES=1 RAE_CHECK_TYPES_REPORT=1 RAE_CHECK_TYPES_SAMPLES="$3" perl -e "alarm shift; exec @ARGV" 120 \
     ./bin/rae build --emit-c "$2" --out "$out.c" 2> "$out.err" > /dev/null
   rm -f "$out.c"
 ' _ "$WORK" {} "${SAMPLES:-/dev/null}"

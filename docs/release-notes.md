@@ -4,6 +4,14 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.149, 2026-11-28: every expression has a type
+
+- Every expression the C backend asks about has a type from sema. Under `RAE_CHECK_TYPES=1` (the test suite sets
+  it) one without a type is an internal error naming it; `RAE_CHECK_TYPES_REPORT=1` prints how the backend's types
+  compare with sema's (`compiler/tools/check-types.sh`).
+- `log(name(m: m))` of a function that answers a String prints it as a String, where sema could not bind the
+  call (an enum given to an `Int`).
+
 ## 0.4.148, 2026-11-28: T.default(), toString and toJson typed
 
 - `T.default()` and `T.fromJson(json:)` have the type T names in sema, `value.toString()` and `value.toJson()` are

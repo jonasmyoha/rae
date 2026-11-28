@@ -2896,8 +2896,9 @@ static bool stmt_direct_exprs_may_pool(CFuncContext* ctx, const AstStmt* s) {
     case AST_STMT_LOOP:
       return stmt_direct_exprs_may_pool(ctx, s->as.loop_stmt.init)
           || expr_may_pool(ctx, s->as.loop_stmt.condition)
-          || expr_may_pool(ctx, s->as.loop_stmt.increment)
-          || expr_may_pool(ctx, s->as.loop_stmt.query_iterable);
+          || expr_may_pool(ctx, s->as.loop_stmt.increment);
+      /* (not the query loop's `query_iterable`: the source spelling kept for the formatter; the
+       * statements it expands to are what runs, and are asked about themselves) */
     case AST_STMT_MATCH:
       return stmt_direct_exprs_may_pool(ctx, s->as.match_stmt.binding)
           || expr_may_pool(ctx, s->as.match_stmt.subject);

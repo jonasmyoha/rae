@@ -1895,22 +1895,46 @@ static const AstTypeRef* c_sema_type_of(CFuncContext* ctx, const AstExpr* expr) 
 }
 
 /* RAE_CHECK_TYPES=1: each answer of infer_expr_type_ref compared with the type sema gave the
- * expression (docs/generic-instances-design.md step 9), counted per expression kind and printed at
- * exit; RAE_CHECK_TYPES_SAMPLES=<file> appends each disagreement with its place.
+ * expression (docs/generic-instances-design.md step 9); one neither side typed is an internal error
+ * (c_check_types_finish). RAE_CHECK_TYPES_REPORT=1 prints the counts per expression kind at exit, and
+ * RAE_CHECK_TYPES_SAMPLES=<file> appends each disagreement with its place.
  * tools/check-types.sh sums the counts over every case and 106/121/136. */
 enum { CHECK_AGREE, CHECK_DIFFER, CHECK_ONLY_BACKEND, CHECK_ONLY_SEMA, CHECK_UNTYPED, CHECK_KINDS = 64 };
 static long s_check_counts[CHECK_KINDS][5];
+/* the first untyped expressions, for the internal error at the end of the build */
+enum { CHECK_UNTYPED_KEPT = 8 };
+static struct { int kind; Str name; Str function; size_t line; } s_check_untyped[CHECK_UNTYPED_KEPT];
+static int s_check_untyped_count;
 static FILE* s_check_samples;
 static int s_check_state;  /* 0 not read yet, 1 on, 2 off */
 
 static void check_types_report(void) {
+  /* a program the compiler refused: what was still asked about it is not counted as untyped */
+  bool refused = diag_error_count() > 0;
   for (int k = 0; k < CHECK_KINDS; k++) {
+    if (refused) s_check_counts[k][CHECK_UNTYPED] = 0;
     long* c = s_check_counts[k];
     if (c[0] | c[1] | c[2] | c[3] | c[4])
       fprintf(stderr, "@@RAE_CHECK_TYPES kind=%d agree=%ld differ=%ld onlyBackend=%ld onlySema=%ld untyped=%ld\n", k,
               c[CHECK_AGREE], c[CHECK_DIFFER], c[CHECK_ONLY_BACKEND], c[CHECK_ONLY_SEMA], c[CHECK_UNTYPED]);
   }
   if (s_check_samples) fclose(s_check_samples);
+}
+
+
+/* Under RAE_CHECK_TYPES=1 an expression the backend asked about that neither sema nor the backend
+ * typed is an internal error (docs/generic-instances-design.md step 9): false then. A program the
+ * compiler already refused is not judged. */
+static bool c_check_types_finish(void) {
+  if (s_check_state != 1 || s_check_untyped_count == 0 || diag_error_count() > 0) return true;
+  for (int i = 0; i < s_check_untyped_count; i++) {
+    char message[400];
+    snprintf(message, sizeof message, "internal: an expression (kind %d%s%.*s) in '%.*s' has no type from sema or the backend",
+             s_check_untyped[i].kind, s_check_untyped[i].name.len ? ", " : "", (int)s_check_untyped[i].name.len,
+             s_check_untyped[i].name.data, (int)s_check_untyped[i].function.len, s_check_untyped[i].function.data);
+    diag_error("?", (int)s_check_untyped[i].line, 0, message);
+  }
+  return false;
 }
 
 static void check_type_name(CFuncContext* ctx, const AstTypeRef* type, char* out, size_t size) {
@@ -1923,7 +1947,8 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
     const char* value = getenv("RAE_CHECK_TYPES");
     s_check_state = value && strcmp(value, "1") == 0 ? 1 : 2;
     if (s_check_state == 1) {
-      atexit(check_types_report);
+      const char* report = getenv("RAE_CHECK_TYPES_REPORT");
+      if (report && strcmp(report, "1") == 0) atexit(check_types_report);
       const char* samples = getenv("RAE_CHECK_TYPES_SAMPLES");
       if (samples) s_check_samples = fopen(samples, "a");
     }
@@ -1952,6 +1977,23 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
     return;
   /* and a type written out in an instance (`List(EntityId)` as a type argument) */
   if (expr->kind == AST_EXPR_CALL && expr->is_written_out && !expr->resolved_type && !backend) return;
+  /* (a value of a type is made by a literal, never by a call, so a call whose callee names a type,
+   * `sizeof(StringMapEntry(V))`'s, is a type too) */
+  if (expr->kind == AST_EXPR_CALL && !expr->resolved_type && !backend && expr->as.call.callee
+      && expr->as.call.callee->kind == AST_EXPR_IDENT && find_type_decl(ctx, ctx->module, expr->as.call.callee->as.ident))
+    return;
+  /* a call of a function with several results, taken apart where it is called, has no one type */
+  if ((expr->kind == AST_EXPR_CALL || expr->kind == AST_EXPR_METHOD_CALL) && !expr->resolved_type && !backend
+      && ctx->compiler_ctx) {
+    Str called = expr->kind == AST_EXPR_METHOD_CALL ? expr->as.method_call.method_name
+        : expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT ? expr->as.call.callee->as.ident : (Str){ "", 0 };
+    size_t named_count = 0;
+    const size_t* named = called.len ? decl_index_functions(ctx->compiler_ctx, called, &named_count) : NULL;
+    for (size_t k = 0; k < named_count; k++) {
+      const AstFuncDecl* fd = &ctx->compiler_ctx->all_decls[named[k]]->as.func_decl;
+      if (fd->returns && fd->returns->next) return;
+    }
+  }
   /* a call that answers nothing: sema's TYPE_VOID, the backend's none or `Void` */
   bool both_void = type && type->kind == TYPE_VOID && (!backend || strcmp(backend_name, "void") == 0);
   /* no type from either side and none from sema at all: not a call that answers nothing (that is
@@ -1972,6 +2014,18 @@ static void check_type_answer(CFuncContext* ctx, const AstExpr* expr, const AstT
     if (strcmp(backend_name, read_name) == 0) verdict = CHECK_AGREE;
   }
   s_check_counts[kind][verdict]++;
+  if (verdict == CHECK_UNTYPED && s_check_untyped_count < CHECK_UNTYPED_KEPT) {
+    Str name = expr->kind == AST_EXPR_IDENT ? expr->as.ident
+        : expr->kind == AST_EXPR_MEMBER ? expr->as.member.member
+        : expr->kind == AST_EXPR_METHOD_CALL ? expr->as.method_call.method_name
+        : expr->kind == AST_EXPR_CALL && expr->as.call.callee && expr->as.call.callee->kind == AST_EXPR_IDENT
+            ? expr->as.call.callee->as.ident : (Str){ "", 0 };
+    s_check_untyped[s_check_untyped_count].kind = kind;
+    s_check_untyped[s_check_untyped_count].name = name;
+    s_check_untyped[s_check_untyped_count].function = ctx->func_decl ? ctx->func_decl->name : (Str){ "", 0 };
+    s_check_untyped[s_check_untyped_count].line = expr->line;
+    s_check_untyped_count++;
+  }
   if (verdict != CHECK_AGREE && s_check_samples) {
     Str name = expr->kind == AST_EXPR_IDENT ? expr->as.ident
         : expr->kind == AST_EXPR_MEMBER ? expr->as.member.member
@@ -5326,6 +5380,7 @@ bool c_backend_emit_module(CompilerContext* ctx, const AstModule* module, const 
   may_wait_free(ctx->wait_graph);
   ctx->wait_graph = NULL;
   if (g_instance_errors > 0) return false;
+  if (!c_check_types_finish()) return false;
   if (c_instances_wanted() && c_check_instances(ctx, out_path) > 0 && c_instances_strict()) return false;
   return exported;
 }
