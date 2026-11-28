@@ -997,6 +997,8 @@ static bool sema_stmt_mentions_ident(const AstStmt* s, Str name) {
 }
 
 static bool sema_is_pending_create(const AstExpr* e);
+static void sema_literal_takes_type_in(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, TypeInfo* expected, AstExpr* value);
+static void sema_literal_takes_type(TypeInfo* expected, AstExpr* value);
 static bool sema_create_was_attempted(const AstExpr* e);
 
 // ===== #885: the lifecycle post-pass over a function body ===================
@@ -3632,6 +3634,11 @@ static void sema_analyze_decl_inner(CompilerContext* ctx, AstModule* module, Sym
             while (field) {
                 TypeInfo* field_type = field->type ? sema_resolve_type_internal(ctx, module, symbols, field->type) : NULL;
                 if (field->default_value) sema_analyze_expr(ctx, module, symbols, field->default_value, true);
+                /* a default literal without a type of its own is of the field's type (not in a generic
+                 * struct or one of its instances, whose defaults may share one node) */
+                if (field->default_value && field_type && !decl->as.type_decl.generic_params
+                    && !decl->as.type_decl.specialization_args && !decl->as.type_decl.generic_template)
+                    sema_literal_takes_type(field_type, field->default_value);
                 /* `flows: List(PerfFlow) = {}`: built where the struct is */
                 if (field->default_value && field->type && field->default_value->kind == AST_EXPR_COLLECTION_LITERAL
                     && !field->default_value->as.collection.type && !decl->as.type_decl.generic_params)
@@ -7634,6 +7641,8 @@ static void sema_check_object_literal_fields(TypeInfo* structType, AstObjectFiel
  * `{ value: { value: create(...) } }` resolves. */
 static void sema_check_literal_part(TypeInfo* want, AstExpr* value, const char* errFile) {
     if (!want || !value) return;
+    /* a literal field or element without a type of its own is of the type it has there */
+    sema_literal_takes_type(want, value);
     TypeInfo* got = value->resolved_type;
     TypeInfo* type = sema_strip_ref(want);
     if (type && type->kind == TYPE_OPT && (!got || got->kind != TYPE_OPT)) {
@@ -7900,13 +7909,39 @@ static bool sema_type_ref_names_params(const AstTypeRef* type, const AstIdentifi
 /* A literal with no type of its own (`{ ... }`, `[ ... ]`, `none`) is of the type it lands in; a
  * struct or list literal where an optional is wanted is its payload */
 static void sema_literal_takes_type(TypeInfo* expected, AstExpr* value) {
-    if (!expected || !value || value->resolved_type) return;
+    sema_literal_takes_type_in(s_lifecycle_ctx, s_current_module, s_lifecycle_symbols, expected, value);
+}
+
+static void sema_literal_takes_type_in(CompilerContext* ctx, AstModule* module, SymbolTable* symbols,
+                                       TypeInfo* expected, AstExpr* value) {
+    if (!expected || !value) return;
     if (value->kind != AST_EXPR_OBJECT && value->kind != AST_EXPR_COLLECTION_LITERAL && value->kind != AST_EXPR_NONE) return;
-    TypeInfo* landing = sema_strip_ref(expected);
-    if (landing && landing->kind == TYPE_OPT && value->kind != AST_EXPR_NONE) landing = sema_strip_ref(landing->as.opt.base);
-    if (landing && landing->kind != TYPE_VOID && landing->kind != TYPE_GENERIC_PARAM && sema_type_is_concrete(landing, 0)
-        && (value->kind != AST_EXPR_NONE || landing->kind == TYPE_OPT))
+    TypeInfo* landing = value->resolved_type;
+    if (!landing) {
+        landing = sema_strip_ref(expected);
+        /* (a `{ ... }` where an optional is wanted does not say which value it is: sema reports it) */
+        if (landing && landing->kind == TYPE_OPT && value->kind == AST_EXPR_COLLECTION_LITERAL) return;
+        if (landing && landing->kind == TYPE_OPT && value->kind != AST_EXPR_NONE) landing = sema_strip_ref(landing->as.opt.base);
+        if (!landing || landing->kind == TYPE_VOID || landing->kind == TYPE_GENERIC_PARAM || !sema_type_is_concrete(landing, 0)
+            || (value->kind == AST_EXPR_NONE && landing->kind != TYPE_OPT))
+            return;
         value->resolved_type = landing;
+    }
+    /* and the literals in its fields (`data: { items: items, bindings: {} }`, the defaults a const's
+     * folding fills in), of a struct that is no generic one (its fields' types are its own) */
+    if (value->kind == AST_EXPR_OBJECT && landing->kind == TYPE_STRUCT && landing->as.structure.generic_count == 0
+        && landing->as.structure.decl && landing->as.structure.decl->kind == AST_DECL_TYPE
+        && ctx && module && symbols) {
+        for (AstObjectField* of = value->as.object_literal.fields; of; of = of->next) {
+            if (!of->value) continue;
+            for (AstTypeField* f = landing->as.structure.decl->as.type_decl.fields; f; f = f->next) {
+                if (!str_eq(f->name, of->name) || !f->type) continue;
+                sema_literal_takes_type_in(ctx, module, symbols,
+                                           sema_resolve_type_internal(ctx, module, symbols, f->type), of->value);
+                break;
+            }
+        }
+    }
 }
 
 /* An optional reference (`opt view T`, OPT over REF) where a reference `view T` is wanted: the plain

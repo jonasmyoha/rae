@@ -514,7 +514,15 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    longer asks about a query loop's source spelling (`query_iterable`, kept for the formatter). Untyped: 0. Under
    `RAE_CHECK_TYPES=1`, which the suite's runner sets, an expression the backend asks about with no type is an
    internal error naming it (`c_check_types_finish`); `RAE_CHECK_TYPES_REPORT=1` prints the counts. Step 9 is
-   done but for the expected type choosing instances (9h) and the backend's own guesses that 9b removes.
+   done but for the expected type choosing instances (9h) and the backend's own guesses that 9b removes. Then (0.4.150) the expected type no longer chooses: in
+   `emit_call_expr` the re-inference of T from it over sema's instance and its fill-in where the arguments bind
+   nothing are removed (turned off, they changed no program); discovery's inference of a call's type arguments,
+   which fed a no-op since 8b, is removed; and a list literal and a struct literal without a written type take
+   the type sema gave them (`c_expr.c`), where they took the expected one (still only where a type is wanted: a
+   module-level value's literal stays a plain C static initializer). For that sema types a literal in a literal's
+   field (`sema_check_literal_part`), a field default of a non-generic struct, and the literals in the fields of a
+   struct literal it types; a `{ ... }` where an optional is wanted stays untyped, so its error is still reported.
+   No program's C changed.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

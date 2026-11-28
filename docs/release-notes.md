@@ -4,6 +4,11 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.150, 2026-11-28: the expected type no longer chooses an instance
+
+- The C backend takes the instance of a generic call and the type of a literal from sema; the type a value lands
+  in no longer overrides it. No program's C changed.
+
 ## 0.4.149, 2026-11-28: every expression has a type
 
 - Every expression the C backend asks about has a type from sema. Under `RAE_CHECK_TYPES=1` (the test suite sets

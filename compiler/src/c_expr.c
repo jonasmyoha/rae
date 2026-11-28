@@ -2142,8 +2142,12 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // arguments from the previous FIELD's type — in `Pair(Pair(Int))`,
         // `second: { ... }` was typed with Pair(Int)'s argument, Int.
         AstTypeRef obj_expected;
-        if (!obj_tr && ctx->has_expected_type) {
-            obj_expected = ctx->expected_type;
+        /* (sema gave a literal without a written type the type it lands in) */
+        /* (where a type is wanted at all: a module-level value's literal is written plainly, a C
+         * static initializer) */
+        const AstTypeRef* sema_object_type = obj_tr || !ctx->has_expected_type ? NULL : infer_expr_type_ref(ctx, expr);
+        if (!obj_tr && sema_object_type) {
+            obj_expected = *sema_object_type;
             obj_tr = &obj_expected;
         }
         const AstDecl* struct_decl = NULL;
@@ -2161,7 +2165,7 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
             // address-of-temp wrapper (`(T[1]){ ... }` in c_call.c) provides the
             // pointer, so strip view/mod here or we'd emit an invalid
             // `(rae_T*){ .field = ... }`.
-            AstTypeRef exp_val = ctx->expected_type;
+            AstTypeRef exp_val = sema_object_type ? *sema_object_type : ctx->expected_type;
             exp_val.is_view = false;
             exp_val.is_mod = false;
             fprintf(out, "(");
@@ -2525,8 +2529,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // same as `let x: T = { }` — the type is written where the value
         // goes, as Rae wants it. Lowered through the object-literal path, so
         // it builds exactly what `T { }` would.
-        if (!expr->as.collection.type && !expr->as.collection.elements && ctx->has_expected_type) {
-            Str expectedBase = get_base_type_name(&ctx->expected_type);
+        /* (the type sema gave it, where it lands) */
+        const AstTypeRef* landing = !expr->as.collection.type && !expr->as.collection.elements && ctx->has_expected_type
+            ? infer_expr_type_ref(ctx, expr) : NULL;
+        if (landing) {
+            Str expectedBase = get_base_type_name(landing);
             bool containerType = str_eq_cstr(expectedBase, "List") || str_eq_cstr(expectedBase, "Array")
                 || str_eq_cstr(expectedBase, "Buffer");
             const AstDecl* expectedDecl = (expectedBase.len > 0 && !containerType)
@@ -2550,10 +2557,11 @@ bool emit_expr(CFuncContext* ctx, const AstExpr* expr, FILE* out, int parent_pre
         // otherwise the declared type of the place it initializes. Rae never
         // takes it from anywhere else (no inference).
         const AstTypeRef* writtenType = expr->as.collection.type;
+        /* (sema gave a literal without a written type the type it lands in) */
+        const AstTypeRef* semaType = writtenType || !savedHasExpected ? NULL : infer_expr_type_ref(ctx, expr);
         const AstTypeRef* listType = writtenType
             ? substitute_type_ref(ctx->compiler_ctx, NULL, NULL, (AstTypeRef*)writtenType)
-            : savedHasExpected
-            ? substitute_type_ref(ctx->compiler_ctx, NULL, NULL, &savedExpected) : NULL;
+            : semaType && semaType->generic_args ? semaType : NULL;
         const AstTypeRef* elementType = listType ? listType->generic_args : NULL;
         const AstFuncDecl* createFunction = NULL;
         const AstFuncDecl* addFunction = NULL;
