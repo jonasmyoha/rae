@@ -732,6 +732,7 @@ the category and options:
 |---|---|---|---|---|
 | `ambient` (game effects, UI sounds) | `.ambient` | — | silenced | mixes |
 | `music` (a music player) | `.playback` | — | plays | stops it |
+| `mixedMusic` (a game's music) | `.playback` | `.mixWithOthers` | plays | mixes (both heard, neither ducked) |
 | `alert` (SUMU's alarm) | `.playback` | `.mixWithOthers`, `.duckOthers` | plays | ducked while it sounds |
 | `spokenText` (text to speech) | `.playback`, mode `.spokenAudio` | `.duckOthers` or `.interruptSpokenAudioAndMixWithOthers` | plays | ducked (spoken audio paused) |
 | `recording` (DAW, voice memo) | `.playAndRecord` | `.defaultToSpeaker`, `.allowBluetoothA2DP` | plays | stops it |
@@ -756,6 +757,11 @@ Events, each turned into an ECS event (§10) and handled in Rae:
   scratch.
 - **Now Playing / remote commands** for the `music` intent: title, artist,
   artwork, duration, position, rate; play, pause, toggle, next, previous, seek.
+
+`mixedMusic` is a game's music: it must be heard with the ring switch off (an
+`ambient` game once shipped with no sound on such a device) and must not stop
+the player's own podcast or music, as `music` does. On Android it takes no
+audio focus, as `ambient`.
 
 Android maps the same intents to `AudioAttributes` usage (`USAGE_GAME`,
 `USAGE_MEDIA`, `USAGE_ALARM`, `USAGE_ASSISTANT`, `USAGE_VOICE_COMMUNICATION`) and
@@ -1350,7 +1356,7 @@ or now that repository's.
    `audio/AudioSession` turns an intent into the audio focus in Rae: music
    takes it (`GAIN`, media), an alert or spoken text takes it for a while and
    lets others duck (`GAIN_TRANSIENT_MAY_DUCK`, alarm / assistant), ambient
-   asks for none; the engine asks when its session activates and gives it back
+   and mixed music ask for none (another app's sound plays on); the engine asks when its session activates and gives it back
    a second after the last sound, as on iOS. A focus loss is
    `interruptionBegan`, its return `interruptionEnded`, a duck the new
    `ducked` event, "becoming noisy" `routeLost`. `audio/NowPlaying` is a
