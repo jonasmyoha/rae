@@ -485,7 +485,17 @@ In QUEUE.md as `[generic instances n/9]`. Each leaves the suite green and is use
    207 programs lose a string-pool mark around a statement that calls a function answering nothing (none of them
    builds a String). Left untyped, for the internal error: `T.default()` (33 758), a struct, list or `none`
    literal typed only by its context (29 614, 8 358, 3 473), calls the backend binds by name (`jbField`,
-   `drawRect`, `skipWhitespace`), type names written as calls (`List(...)`, `StringMapEntry`), and 3 979 names.
+   `drawRect`, `skipWhitespace`), type names written as calls (`List(...)`, `StringMapEntry`), and 3 979 names. Then
+   (0.4.147): a struct, list or `none` literal with no type of its own takes the type it lands in, in
+   `ensure_type_match` and as an argument of an instance's call (`list.add(value: { ... })`,
+   `sema_type_from_instance`); a module-qualified call of a function with no result is void too; the type
+   written as `sizeof`'s argument (`sizeof(StringMapEntry(V))`) has the type it names; and `check-types.sh` does not
+   count a module or type name as untyped (`Time.now()`'s `Time`; sema reports an unknown name in a value
+   position, so an untyped name that is no local and no module-level value is such a name). C: statements and
+   functions that hold no String lose their string-pool mark (410 programs, 106/121/136 among them). Left
+   untyped (42 237 of 111 904): `T.default()` (37 980 method calls; typing it changes about 2 000 lines of 106's C, in string-pool marks, temporaries and
+   optionals, to be checked on its own), `List(...)` as a value in `decodeField`, and a few single calls; then the
+   internal error.
 
 `a defer block is not checked` is done (0.4.90). `a spawn inside a generic function` (#83491520) is step 6: fixed
 before, it would be work on the template way that step 8 removes.

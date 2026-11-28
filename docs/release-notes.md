@@ -4,6 +4,12 @@ A release is a git tag (docs/versioning-and-toolchain.md §1). Before 1.0 the
 MINOR number is a named milestone; PATCH counts the work in
 between. Each milestone gets a section here, newest first.
 
+## 0.4.147, 2026-11-28: a literal has the type it lands in
+
+- A struct, list or `none` literal without a written type has the type of where it lands in sema, also as the
+  argument of a generic method (`list.add(value: { ... })`); a module-qualified call of a function with no result
+  is void; `sizeof`'s argument has the type it names. Statements that hold no String lose their string-pool mark.
+
 ## 0.4.146, 2026-11-28: a call that answers nothing is void
 
 - Sema types a call of a function with no result as `Void`, so a statement of such a call no longer marks the

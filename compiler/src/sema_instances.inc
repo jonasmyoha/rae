@@ -358,6 +358,24 @@ static AstDecl* sema_call_template(CompilerContext* ctx, AstModule* module, Symb
 /* The call's type is its instance's result, where analysis left it without one */
 static void sema_type_from_instance(CompilerContext* ctx, AstModule* module, SymbolTable* symbols, AstExpr* call,
                                     AstDecl* spec) {
+    /* a literal argument with no type of its own (`list.add(value: { ... })`) is of its parameter's
+     * type in the instance */
+    if (spec && spec->kind == AST_DECL_FUNC) {
+        const AstParam* param = spec->as.func_decl.params;
+        AstCallArg* arg = call->kind == AST_EXPR_METHOD_CALL ? call->as.method_call.args : call->as.call.args;
+        if (call->kind == AST_EXPR_METHOD_CALL && param) param = param->next;  /* `this` is the receiver */
+        for (; param && arg; param = param->next, arg = arg->next) {
+            AstExpr* value = arg->value;
+            if (!value || value->resolved_type || !param->type) continue;
+            if (value->kind != AST_EXPR_OBJECT && value->kind != AST_EXPR_COLLECTION_LITERAL && value->kind != AST_EXPR_NONE)
+                continue;
+            TypeInfo* type = sema_strip_ref(sema_resolve_type_internal(ctx, module, symbols, param->type));
+            /* (a struct or list literal where an optional is wanted is its payload) */
+            if (type && type->kind == TYPE_OPT && value->kind != AST_EXPR_NONE) type = sema_strip_ref(type->as.opt.base);
+            if (type && sema_type_is_concrete(type, 0) && (value->kind != AST_EXPR_NONE || type->kind == TYPE_OPT))
+                value->resolved_type = type;
+        }
+    }
     if (!spec || spec->kind != AST_DECL_FUNC || sema_type_is_concrete(call->resolved_type, 0)) return;
     if (spec->as.func_decl.is_extern || !spec->as.func_decl.body) return;
     const AstReturnItem* result = spec->as.func_decl.returns;

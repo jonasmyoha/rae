@@ -7897,6 +7897,18 @@ static bool sema_optional_reference_to_reference(const TypeInfo* expected, const
 
 static void ensure_type_match(CompilerContext* ctx, TypeInfo* expected, AstExpr** expr_ptr) {
     if (!expected || !expr_ptr || !*expr_ptr) return;
+    /* a literal with no type of its own (`{ ... }`, `[ ... ]`, `none`) is of the type it lands in */
+    if (!(*expr_ptr)->resolved_type
+        && ((*expr_ptr)->kind == AST_EXPR_OBJECT || (*expr_ptr)->kind == AST_EXPR_COLLECTION_LITERAL
+            || (*expr_ptr)->kind == AST_EXPR_NONE)) {
+        TypeInfo* landing = sema_strip_ref(expected);
+        /* (a struct or list literal where an optional is wanted is its payload) */
+        if (landing && landing->kind == TYPE_OPT && (*expr_ptr)->kind != AST_EXPR_NONE)
+            landing = sema_strip_ref(landing->as.opt.base);
+        if (landing && landing->kind != TYPE_VOID && landing->kind != TYPE_GENERIC_PARAM
+            && ((*expr_ptr)->kind != AST_EXPR_NONE || landing->kind == TYPE_OPT))
+            (*expr_ptr)->resolved_type = landing;
+    }
     if (sema_optional_reference_to_reference(expected, (*expr_ptr)->resolved_type)) return;
     {
         TypeInfo* target = sema_strip_ref(expected);
@@ -8529,7 +8541,8 @@ static void sema_check_task_copy_arguments(AstModule* module, SymbolTable* symbo
     const AstParam* param = fd->params;
     if (method && param) param = param->next;
     for (; param && arg; param = param->next, arg = arg->next) {
-        if (!param->type || !param->type->is_copy || !arg->value) continue;
+        /* (a `none` holds nothing to copy) */
+        if (!param->type || !param->type->is_copy || !arg->value || arg->value->kind == AST_EXPR_NONE) continue;
         TypeInfo* type = arg->value->resolved_type;
         while (type && type->kind == TYPE_REF) type = type->as.ref.base;
         if (!sema_typeinfo_holds_task(symbols, type, 0)) continue;
@@ -9184,7 +9197,16 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
              * lost. (#792) */
             if (!expr->decl_link && expr->as.call.callee->kind == AST_EXPR_IDENT) {
                 Str name = expr->as.call.callee->as.ident;
-                if (str_eq_cstr(name, "sizeof")) { expr->is_builtin_sizeof = true; expr->resolved_type = type_get_int(ctx->type_registry); }
+                if (str_eq_cstr(name, "sizeof")) {
+                    expr->is_builtin_sizeof = true; expr->resolved_type = type_get_int(ctx->type_registry);
+                    /* its argument is a type (`sizeof(StringMapEntry(V))`): the type it names */
+                    AstExpr* named = expr->as.call.args ? expr->as.call.args->value : NULL;
+                    if (named && !named->resolved_type && named->kind == AST_EXPR_CALL
+                        && sema_arg_is_type_name(symbols, named)) {
+                        TypeInfo* type = sema_resolve_type_internal(ctx, module, symbols, sema_type_ref_of_expr(ctx, named));
+                        if (type && sema_type_is_concrete(type, 0)) named->resolved_type = type;
+                    }
+                }
                 /* `Array(Float, cap: 16)` doubles as a zero-initializing
                  * constructor, so the type application and the value share
                  * one spelling. That is what makes replacing a
@@ -9672,6 +9694,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                         expr->as.call.args = qargs;
                         expr->as.call.generic_args = qgen;
                         expr->decl_link = resolved;
+                        /* a function with no result: the call answers nothing */
+                        if (resolved && !resolved->as.func_decl.returns) expr->resolved_type = type_get_void(ctx->type_registry);
                         if (resolved->as.func_decl.returns) {
                             expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                             AstParam* p = resolved->as.func_decl.params;
@@ -9764,6 +9788,8 @@ static void sema_analyze_expr_inner(CompilerContext* ctx, AstModule* module, Sym
                 expr->as.call.args = qargs;
                 expr->as.call.generic_args = qgen;
                 expr->decl_link = resolved;
+                /* a function with no result: the call answers nothing */
+                if (resolved && !resolved->as.func_decl.returns) expr->resolved_type = type_get_void(ctx->type_registry);
                 if (resolved && resolved->as.func_decl.returns) {
                     expr->resolved_type = sema_resolve_type_internal(ctx, module, symbols, resolved->as.func_decl.returns->type);
                     AstParam* p = resolved->as.func_decl.params;
